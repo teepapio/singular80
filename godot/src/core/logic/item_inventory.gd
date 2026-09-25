@@ -35,6 +35,14 @@ class ItemStack:
 	func clone() -> ItemStack:
 		return ItemStack.new(id, count, data)
 
+	## Plain, JSON-safe representation. Snapshots must not embed live objects,
+	## otherwise they neither survive `JSON.stringify` nor `_sanitize()`.
+	func to_dict() -> Dictionary:
+		var out := {"id": id, "count": count}
+		if not data.is_empty():
+			out["data"] = data.duplicate()
+		return out
+
 	func _to_string() -> String:
 		return "%s x%d" % [id, count]
 
@@ -547,7 +555,7 @@ func equipment() -> Dictionary:
 	for slot in EQUIP_SLOTS:
 		var stack: ItemStack = _equipped[slot]
 		if stack != null:
-			result[slot] = stack.clone()
+			result[slot] = stack.to_dict()
 	return result
 
 
@@ -664,7 +672,7 @@ func transfer_stack_to(target: ItemInventory, index: int) -> int:
 func to_json() -> Dictionary:
 	var slot_list: Array = []
 	for stack in _slots:
-		slot_list.append(null if stack == null else stack.clone())
+		slot_list.append(null if stack == null else stack.to_dict())
 	return {
 		"version": SNAPSHOT_VERSION,
 		"capacity": _capacity,
@@ -719,6 +727,11 @@ func _valid(index: int) -> bool:
 
 ## Validates one untrusted stack from a save file.
 static func _sanitize(value: Variant) -> ItemStack:
+	# Accept a live stack as well, so a snapshot taken in memory restores
+	# instead of silently emptying the inventory.
+	if value is ItemStack:
+		var stack: ItemStack = value
+		return stack.clone() if stack.count > 0 else null
 	if not (value is Dictionary):
 		return null
 	var dict: Dictionary = value

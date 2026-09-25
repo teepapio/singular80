@@ -9,18 +9,25 @@ var t: TestKit
 
 func run(kit: TestKit) -> void:
 	t = kit
-	_stats()
-	_checkers()
-	_cards_and_holodem()
-	_twenty48()
-	_merge3d()
-	_crystal_tower()
-	_dragon_rpg()
-	_horse_runner()
-	_inventory()
-	_lobby()
-	_asset_registry()
-	_mechanics()
+	_suite(_stats)
+	_suite(_checkers)
+	_suite(_cards_and_holodem)
+	_suite(_twenty48)
+	_suite(_merge3d)
+	_suite(_crystal_tower)
+	_suite(_dragon_rpg)
+	_suite(_horse_runner)
+	_suite(_inventory)
+	_suite(_lobby)
+	_suite(_asset_registry)
+	_suite(_mechanics)
+
+
+## Runs one suite and fails it if it returned before its own `t.suite_done()`,
+## which is what a GDScript runtime error does.
+func _suite(body: Callable) -> void:
+	body.call()
+	t.close_suite()
 
 
 # --- player stats -----------------------------------------------------------
@@ -54,6 +61,7 @@ func _stats() -> void:
 	t.almost(cooldown_stats.effective_cooldown(weapon), 250.0, 0.0001, "Cooldown halbiert sich bei fireRate 1")
 	cooldown_stats.fire_rate = 100.0
 	t.almost(cooldown_stats.effective_cooldown(weapon), 70.0, 0.0001, "Cooldown hat eine Untergrenze von 70 ms")
+	t.suite_done()
 
 
 # --- checkers ---------------------------------------------------------------
@@ -109,6 +117,7 @@ func _checkers() -> void:
 
 	var search := Checkers.search_depth(board)
 	t.check(search == 4 or search == 5, "Suchtiefe liegt zwischen 4 und 5")
+	t.suite_done()
 
 
 # --- cards & poker ----------------------------------------------------------
@@ -186,6 +195,7 @@ func _cards_and_holodem() -> void:
 	t.equal(total, 4000, "Chips bleiben in der Runde erhalten")
 	var strength := Holdem.hole_strength([Cards.Card.new(12, 0), Cards.Card.new(13 - 1, 0)])
 	t.check(strength > 0.6, "Hole-Edelsteine sind stark")
+	t.suite_done()
 
 
 # --- 2048 -------------------------------------------------------------------
@@ -230,6 +240,7 @@ func _twenty48() -> void:
 	var spawn: Variant = Twenty48.add_random_tile(seeded)
 	t.check(spawn != null, "Ein Feld bekommt eine Startkachel")
 	t.check(int((spawn as Dictionary)["value"]) == 2 or int((spawn as Dictionary)["value"]) == 4, "Startkachel ist 2 oder 4")
+	t.suite_done()
 
 
 # --- merge 3D ---------------------------------------------------------------
@@ -276,6 +287,7 @@ func _merge3d() -> void:
 	t.check(Merge3D.is_game_over(full), "Volles Brett ohne Merge ist Endgame")
 	t.almost(Merge3D.spawn_interval_seconds(0.0), 2.2, 0.001, "Spawn-Intervall startet bei 2.2 s")
 	t.almost(Merge3D.spawn_interval_seconds(1000.0), 0.75, 0.001, "Spawn-Intervall hat eine Untergrenze")
+	t.suite_done()
 
 
 # --- crystal tower ----------------------------------------------------------
@@ -310,6 +322,7 @@ func _crystal_tower() -> void:
 	var bonus := CrystalTower.equip_bonus(3)
 	t.almost(float(bonus["speedMult"]), 1.15, 0.001, "Tempo-Bonus Stufe 3")
 	t.equal(int(bonus["extraJumps"]), 1, "Stufe 3 schenkt einen Extrasprung")
+	t.suite_done()
 
 
 # --- dragon RPG -------------------------------------------------------------
@@ -356,6 +369,7 @@ func _dragon_rpg() -> void:
 	var rolled := DragonRpg.roll_loot()
 	t.check(not str(rolled["id"]).is_empty(), "Loot-Wurf liefert eine ID")
 	t.equal(DragonRpg.WEAPONS.size(), 6, "Sechs Waffen")
+	t.suite_done()
 
 
 # --- horse runner -----------------------------------------------------------
@@ -381,6 +395,7 @@ func _horse_runner() -> void:
 	t.check(not HorseRunner.collides(6.0, 0.0, 0.0, 0.0, 0.0, log), "Neben dem Baumstimm trifft nichts")
 	t.almost(HorseRunner.jump_apex(), HorseRunner.JUMP_SPEED * HorseRunner.JUMP_SPEED / (2.0 * HorseRunner.GRAVITY), 0.0001, "Sprunghöhe")
 	t.check(HorseRunner.spawn_gap(start) > 0.0, "Spawn-Abstand ist positiv")
+	t.suite_done()
 
 
 # --- inventory --------------------------------------------------------------
@@ -444,6 +459,14 @@ func _inventory() -> void:
 	t.equal(restored.count("sword"), gear.count("sword"), "Snapshot erhält den Bestand")
 	t.equal(restored.equipped_in("weapon").id, "sword", "Snapshot erhält die Ausrüstung")
 
+	# Der Snapshot muss echtes JSON überstehen — er landet als Text auf der Platte.
+	var on_disk: Variant = JSON.parse_string(JSON.stringify(snapshot))
+	t.check(on_disk is Dictionary, "Snapshot ist JSON-serialisierbar")
+	var reloaded := ItemInventory.from_json({"capacity": 4, "catalog": catalog}, on_disk)
+	t.equal(reloaded.count("sword"), gear.count("sword"), "Aus JSON gelesen bleibt der Bestand")
+	t.equal(reloaded.equipped_in("weapon").id, "sword", "Aus JSON gelesen bleibt die Ausrüstung")
+	t.equal(reloaded.currency(), gear.currency(), "Aus JSON gelesen bleibt die Währung")
+
 	restored.load_json({"capacity": 2, "currency": 7, "slots": [{"id": "potion", "count": 3}, null, {"id": "junk", "count": 0}], "equipment": {"weapon": {"id": "sword", "count": 1}}})
 	t.equal(restored.capacity(), 2, "Kapazität wird angepasst")
 	t.equal(restored.count("potion"), 3, "Gültige Slots werden geladen")
@@ -455,20 +478,24 @@ func _inventory() -> void:
 	messy.set_slot(3, ItemInventory.ItemStack.new("potion", 2))
 	messy.set_slot(1, ItemInventory.ItemStack.new("sword", 1))
 	messy.compact()
-	t.equal(messy.get_slot(0).id, "potion", "Kompaktieren rückt nach vorne")
-	t.equal(messy.get_slot(1).id, "sword", "Kompaktieren behält die Reihenfolge")
+	t.equal(messy.get_slot(0).id, "sword", "Kompaktieren rückt nach vorne")
+	t.equal(messy.get_slot(1).id, "potion", "Kompaktieren behält die Reihenfolge")
+	t.check(messy.get_slot(2) == null, "Kompaktieren schließt die Lücke")
 	messy.sort()
 	t.equal(messy.get_slot(0).id, "sword", "Sortieren legt Seltenes zuerst")
 
 	var purse := ItemInventory.new({"capacity": 2, "catalog": catalog, "currency": 100})
 	t.equal(purse.add_currency(-1000), 0, "Währung bleibt nie negativ")
 	t.check(not purse.spend(99999), "Ausgeben ohne Deckung scheitert")
-	t.check(purse.spend(100), "Ausgeben mit Deckung klappt")
-	t.equal(purse.currency(), 0, "Währung ist aufgebraucht")
+	# `purse` ist durch den clamp oben leer — zum Ausgeben ein frisches Portemonnaie.
+	var payer := ItemInventory.new({"capacity": 2, "catalog": catalog, "currency": 100})
+	t.check(payer.spend(100), "Ausgeben mit Deckung klappt")
+	t.equal(payer.currency(), 0, "Währung ist aufgebraucht")
 	t.check(not gear.equip(999), "Ungültiger Index wirft nicht")
 	t.equal(gear.move(999, 0), false, "Ungültiges Verschieben scheitert")
 	t.equal(gear.split(0, 999), -1, "Ungültiges Splitten scheitert")
 	t.equal(gear.split(0, 1), -1, "Ein einzelnes Item lässt sich nicht splitten")
+	t.suite_done()
 
 
 # --- lobby geometry ---------------------------------------------------------
@@ -510,6 +537,7 @@ func _lobby() -> void:
 		t.check(Router.SCREEN_SCRIPTS.has(screen), "Screen '%s' ist registriert" % screen)
 		t.check(Router.SCREEN_SCRIPTS[screen].ends_with(".gd"), "Screen '%s' zeigt auf ein Skript" % screen)
 	t.equal(GameRegistry.games_in_category(GameRegistry.CATEGORY_ACTION).size(), 2, "Zwei Action-Spiele")
+	t.suite_done()
 
 
 # --- asset registry ---------------------------------------------------------
@@ -560,6 +588,7 @@ func _asset_registry() -> void:
 
 	t.check(not AssetRegistry.display_name("rpg/dragon_lord").is_empty(), "Anzeigename wird gebildet")
 	t.check(not AssetRegistry.color_of("rpg/knight").is_equal_approx(Color.BLACK), "Jeder Key bekommt eine Farbe")
+	t.suite_done()
 
 
 # --- mechanics --------------------------------------------------------------
@@ -573,3 +602,4 @@ func _mechanics() -> void:
 		t.check(dash.hud(null) == "Dash bereit", "Dash ist anfangs bereit")
 		t.check(dash.movement_override(null, 0.016) == null, "Ohne Dash keine Bewegungsänderung")
 	t.check(MechanicsIndex.by_id("nope") == null, "Unbekannte Mechanik liefert null")
+	t.suite_done()

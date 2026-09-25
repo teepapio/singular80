@@ -10,11 +10,37 @@ var passed: int = 0
 var failed: int = 0
 var failures: Array[String] = []
 var _current: String = ""
+## True while a suite is running. A GDScript runtime error unwinds the whole
+## function without raising, so a suite that dies half-way would otherwise be
+## reported as a pass — `suite_done()`/`close_suite()` turn that into a failure.
+var _suite_open: bool = false
 
 
 func suite(name: String) -> void:
 	_current = name
+	_suite_open = true
 	print("\n── %s" % name)
+
+
+## Last line of every suite body.
+func suite_done() -> void:
+	_suite_open = false
+
+
+## Called by a runner after a suite function returned. If the body never
+## reached `suite_done()` it was aborted by a runtime error.
+func close_suite() -> void:
+	if not _suite_open:
+		return
+	_suite_open = false
+	fail("Suite '%s' brach ab (Laufzeitfehler)" % _current)
+
+
+## Records a failure without an assertion.
+func fail(description: String) -> void:
+	failed += 1
+	failures.append("%s → %s" % [_current, description])
+	print("  ✗ %s" % description)
 
 
 func check(condition: bool, description: String) -> void:

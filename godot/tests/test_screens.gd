@@ -25,14 +25,23 @@ func run(kit: TestKit, scene_tree: SceneTree) -> void:
 	router = _autoload("Router")
 	game = _autoload("Game")
 	_boot_content()
+	t.close_suite()
 	await _every_screen_opens()
+	t.close_suite()
 	await _arena_actually_plays()
+	t.close_suite()
 	await _card_games_accept_input()
+	t.close_suite()
 	await _tetris_accepts_moves()
+	t.close_suite()
 	await _suggest_dialog_posts()
+	t.close_suite()
 	await _suggest_dialog_closes()
+	t.close_suite()
 	_content_values()
+	t.close_suite()
 	_content_is_in_sync()
+	t.close_suite()
 
 
 func _autoload(name: String) -> Node:
@@ -55,6 +64,7 @@ func _boot_content() -> void:
 		if int(w.get("unlockWave", 0)) <= 0:
 			startable += 1
 	t.check(startable >= 3, "Mindestens drei Startwaffen")
+	t.suite_done()
 
 
 func _every_screen_opens() -> void:
@@ -71,6 +81,7 @@ func _every_screen_opens() -> void:
 		t.check(router.current_screen != null, "Spiel '%s' startet" % str(game["id"]))
 	router.go_to("lobby")
 	await tree.create_timer(0.3).timeout
+	t.suite_done()
 
 
 func _arena_actually_plays() -> void:
@@ -128,6 +139,7 @@ func _arena_actually_plays() -> void:
 		screen._spawn_split(split_def, Vector2(300, 300))
 	router.go_to("lobby")
 	await tree.create_timer(0.3).timeout
+	t.suite_done()
 
 
 func _card_games_accept_input() -> void:
@@ -157,6 +169,7 @@ func _card_games_accept_input() -> void:
 		t.check(true, "Menschlicher Zug läuft durch")
 	router.go_to("lobby")
 	await tree.create_timer(0.3).timeout
+	t.suite_done()
 
 
 func _tetris_accepts_moves() -> void:
@@ -180,6 +193,7 @@ func _tetris_accepts_moves() -> void:
 	t.check(screen.lines >= 1, "Volle Zeile wird geräumt")
 	router.go_to("lobby")
 	await tree.create_timer(0.3).timeout
+	t.suite_done()
 
 
 ## The dialog is a stateless helper class, so it is loaded by path — that also
@@ -214,6 +228,7 @@ func _suggest_dialog_posts() -> void:
 	t.check(view.is_empty(), "Ohne Server wird nichts gesendet")
 	t.check(api._queue.size() == 1, "Der Vorschlag landet in der Offline-Warteschlange")
 	api._queue.clear()
+	t.suite_done()
 
 
 func _suggest_dialog_closes() -> void:
@@ -229,6 +244,7 @@ func _suggest_dialog_closes() -> void:
 	_suggest_script().close()
 	router.go_to("lobby")
 	await tree.create_timer(0.3).timeout
+	t.suite_done()
 
 
 func _content_values() -> void:
@@ -253,6 +269,7 @@ func _content_values() -> void:
 		t.check(float(def.get("duration", 0.0)) >= 0.0, "Modus '%s' hat eine gültige Dauer (0 = endlos)" % str(def.get("id", "?")))
 		for key in ["enemyHpMult", "enemySpeedMult", "spawnRateMult"]:
 			t.check(float(def.get(key, 0.0)) > 0.0, "Modus '%s' hat %s" % [str(def.get("id", "?")), key])
+	t.suite_done()
 
 
 ## The app ships its own copy of the content pack (Godot cannot read files from
@@ -264,3 +281,4 @@ func _content_is_in_sync() -> void:
 		t.check(not shipped.is_empty(), "App liefert %s.json mit" % name)
 		var parsed: Variant = JSON.parse_string(shipped)
 		t.check(parsed is Array, "%s.json ist ein Array" % name)
+	t.suite_done()
