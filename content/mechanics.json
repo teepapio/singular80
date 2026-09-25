@@ -1,0 +1,8 @@
+[
+  {
+    "id": "dash",
+    "name": "Dash",
+    "description": "Leertaste: kurzer Dash mit Unverwundbarkeit (1,5s Abklingzeit).",
+    "enabled": true
+  }
+]

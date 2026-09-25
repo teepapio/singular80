@@ -1,0 +1,72 @@
+[
+  {
+    "id": "pistol",
+    "name": "Pistole",
+    "description": "Ausgewogen, ein Schuss nach dem anderen.",
+    "damage": 7,
+    "cooldown": 420,
+    "projectileSpeed": 540,
+    "projectileCount": 1,
+    "spread": 0,
+    "pierce": 0,
+    "size": 4,
+    "color": "#fef08a",
+    "unlockWave": 0
+  },
+  {
+    "id": "smg",
+    "name": "Maschinenpistole",
+    "description": "Schnelle, schwache Schüsse.",
+    "damage": 3.5,
+    "cooldown": 150,
+    "projectileSpeed": 640,
+    "projectileCount": 1,
+    "spread": 0.09,
+    "pierce": 0,
+    "size": 3,
+    "color": "#93c5fd",
+    "unlockWave": 0
+  },
+  {
+    "id": "shotgun",
+    "name": "Schrotflinte",
+    "description": "Vier Projektile mit Streuung, kurze Reichweite.",
+    "damage": 5,
+    "cooldown": 820,
+    "projectileSpeed": 470,
+    "projectileCount": 4,
+    "spread": 0.42,
+    "pierce": 0,
+    "size": 4,
+    "color": "#fdba74",
+    "unlockWave": 0
+  },
+  {
+    "id": "railgun",
+    "name": "Railgun",
+    "description": "Langsam, aber durchschlägt ganze Reihen.",
+    "damage": 28,
+    "cooldown": 1350,
+    "projectileSpeed": 950,
+    "projectileCount": 1,
+    "spread": 0,
+    "pierce": 6,
+    "size": 5,
+    "color": "#c4b5fd",
+    "unlockWave": 2
+  },
+  {
+    "id": "burst",
+    "name": "Burst-Kanone",
+    "description": "Drei Schüsse gleichzeitig in engem Fächer.",
+    "damage": 4.5,
+    "cooldown": 600,
+    "projectileSpeed": 580,
+    "projectileCount": 3,
+    "spread": 0.16,
+    "pierce": 0,
+    "size": 3.5,
+    "color": "#fda4af",
+    "unlockWave": 1
+  }
+]

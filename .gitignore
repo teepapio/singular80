@@ -1,0 +1,13 @@
+node_modules/
+dist/
+data/
+log/
+build/
+godot/.godot/
+godot/android/
+.env
+*.log
+.DS_Store
+__pycache__/
+*.pyc
+*.apk
