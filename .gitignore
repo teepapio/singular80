@@ -2,8 +2,8 @@ node_modules/
 dist/
 data/
 log/
-build/
 godot/.godot/
+# Wird von `npm run godot:android-template` erzeugt, nicht eingecheckt.
 godot/android/
 .env
 *.log
@@ -11,3 +11,7 @@ godot/android/
 __pycache__/
 *.pyc
 *.apk
+godot/build/
+godot/shot.gd
+godot/shot.tscn
+godot/probe.gd

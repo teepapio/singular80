@@ -10,13 +10,16 @@
     "build": "vite build",
     "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "node scripts/sync-content.mjs --check && vitest run",
     "test:game": "godot --headless --path godot --script res://tests/run_tests.gd",
     "smoke": "tsx scripts/smoke.ts",
-    "godot:import": "godot --headless --path godot --import",
+    "godot:import": "node scripts/sync-content.mjs && godot --headless --path godot --import",
     "godot:check": "godot --headless --path godot --quit-after 240",
-    "godot:apk": "godot --headless --path godot --export-debug \"Android\" build/singular80.apk",
-    "godot:apk:release": "godot --headless --path godot --export-release \"Android\" build/singular80-release.apk"
+    "godot:apk": "node scripts/install-android-template.mjs && godot --headless --path godot --export-debug \"Android\"",
+    "godot:apk:release": "node scripts/install-android-template.mjs && godot --headless --path godot --export-release \"Android\"",
+    "content:sync": "node scripts/sync-content.mjs",
+    "content:check": "node scripts/sync-content.mjs --check",
+    "godot:android-template": "node scripts/install-android-template.mjs"
   },
   "dependencies": {
     "@fastify/static": "^8.0.0",

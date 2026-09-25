@@ -1,0 +1,242 @@
+class_name WorldScreen
+extends Node3D
+## Base class of every 3D subgame.
+##
+## Owns the environment, the follow camera and the 2D HUD layer, so the four
+## 3D games (lobby, crystal jumper, merge board, horse run, dragon RPG) only
+## have to describe their own world. Touch controls are provided by
+## `touch_controls()`.
+
+const HUD_HEIGHT := 56
+
+var screen_id: String = ""
+var data: Dictionary = {}
+
+var camera: Camera3D
+var hud: CanvasLayer
+var hud_root: Control
+var environment_node: WorldEnvironment
+var sun: DirectionalLight3D
+var fill: DirectionalLight3D
+var elapsed: float = 0.0
+
+var _loading_label: Label
+
+
+func _ready() -> void:
+	_build_environment()
+	_build_hud_layer()
+	_ready_world()
+	if not data.is_empty():
+		_on_data(data)
+
+
+## Override point.
+func _ready_world() -> void:
+	pass
+
+
+func _on_data(_payload: Dictionary) -> void:
+	pass
+
+
+func _process(delta: float) -> void:
+	elapsed += delta
+	_update_world(delta)
+
+
+## Override point for per-frame logic.
+func _update_world(_delta: float) -> void:
+	pass
+
+
+# --- world helpers ----------------------------------------------------------
+
+func _build_environment() -> void:
+	environment_node = WorldEnvironment.new()
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.02, 0.027, 0.05)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.58, 0.77, 1.0)
+	env.ambient_light_energy = 0.55
+	env.fog_enabled = true
+	env.fog_light_color = Color(0.02, 0.027, 0.05)
+	env.fog_density = 0.008
+	environment_node.environment = env
+	add_child(environment_node)
+
+	sun = DirectionalLight3D.new()
+	sun.light_energy = 1.1
+	sun.light_color = Color(1.0, 0.95, 0.86)
+	sun.rotation_degrees = Vector3(-52, 38, 0)
+	sun.shadow_enabled = false
+	add_child(sun)
+
+	fill = DirectionalLight3D.new()
+	fill.light_energy = 0.35
+	fill.light_color = Color(0.55, 0.62, 1.0)
+	fill.rotation_degrees = Vector3(-18, -140, 0)
+	add_child(fill)
+
+	camera = Camera3D.new()
+	camera.fov = 58.0
+	camera.near = 0.1
+	camera.far = 400.0
+	camera.position = Vector3(0, 12, 14)
+	camera.current = true
+	add_child(camera)
+
+
+## Builds the shared 2D overlay (top bar + loading label). Subclasses add to `hud_root`.
+func _build_hud_layer() -> void:
+	hud = CanvasLayer.new()
+	add_child(hud)
+	hud_root = Control.new()
+	hud_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hud_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_root.theme = UiTheme.shared()
+	hud.add_child(hud_root)
+
+	var bar := HBoxContainer.new()
+	bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	bar.offset_bottom = HUD_HEIGHT
+	bar.offset_left = 10
+	bar.offset_right = -10
+	bar.add_theme_constant_override("separation", 8)
+	hud_root.add_child(bar)
+
+	var brand := Ui.label("SINGULAR 80", 20, UiTheme.ACCENT, true)
+	brand.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	brand.custom_minimum_size = Vector2(190, 0)
+	bar.add_child(brand)
+
+	var spacer := Ui.spacer()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.add_child(spacer)
+
+	bar.add_child(Ui.button("◀ Lobby", Vector2(120, 42), UiTheme.PANEL_LIGHT, func() -> void:
+		Sfx.select()
+		Router.to_lobby()
+	))
+	bar.add_child(Ui.button("Vorschlag", Vector2(150, 42), UiTheme.PANEL_LIGHT, func() -> void:
+		SuggestDialog.open_world(self)
+	))
+	var mute: Button
+	mute = Ui.button("♪ Ton an" if not Game.muted else "♪ stumm", Vector2(110, 42), UiTheme.PANEL_LIGHT, func() -> void:
+		Game.toggle_muted()
+		mute.text = "♪ Ton an" if not Game.muted else "♪ stumm"
+	)
+	bar.add_child(mute)
+
+	_loading_label = Ui.title("Singular 80 lädt …", 26, UiTheme.TEXT_DIM)
+	_loading_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_loading_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hud_root.add_child(_loading_label)
+
+
+func hide_loading() -> void:
+	if _loading_label != null:
+		_loading_label.visible = false
+
+
+## Camera that trails a target from a fixed offset — the pattern every 3D game
+## uses, with the height/distance in world units.
+func follow_camera(target: Vector3, height: float, distance: float, lerp_speed: float = 6.0, delta: float = 0.016) -> void:
+	var goal := Vector3(target.x, target.y + height, target.z + distance)
+	camera.position = camera.position.lerp(goal, clampf(lerp_speed * delta, 0.0, 1.0))
+	camera.look_at(target, Vector3.UP)
+
+
+# --- touch ------------------------------------------------------------------
+
+## Adds a thumb stick anchored to a screen corner. Returns it so the game can
+## read `value` every frame.
+func add_stick(corner: String = "bottom_left", label_text: String = "") -> VirtualStick:
+	var stick := VirtualStick.new()
+	stick.label_text = label_text
+	stick.size = VirtualStick.SIZE
+	hud_root.add_child(stick)
+	if corner == "bottom_right":
+		stick.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+		stick.position = -stick.size - Vector2(24, 24)
+	else:
+		stick.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+		stick.position = Vector2(24, -stick.size.y - 24)
+	return stick
+
+
+## Adds a round action button to the bottom-right cluster.
+func add_action_button(text: String, radius: float = 62.0, action: StringName = &"", on_press: Callable = Callable(), offset: Vector2 = Vector2.ZERO) -> Button:
+	var node := Button.new()
+	node.text = text
+	node.custom_minimum_size = Vector2(radius, radius)
+	node.size = Vector2(radius, radius)
+	node.focus_mode = Control.FOCUS_NONE
+	node.add_theme_font_size_override("font_size", int(radius * 0.34))
+	node.add_theme_stylebox_override("normal", UiTheme.flat(Color(0.098, 0.141, 0.239, 0.75), UiTheme.ACCENT, int(radius * 0.5)))
+	node.add_theme_stylebox_override("hover", UiTheme.flat(Color(0.153, 0.212, 0.345, 0.85), UiTheme.ACCENT, int(radius * 0.5)))
+	node.add_theme_stylebox_override("pressed", UiTheme.flat(UiTheme.ACCENT.darkened(0.25), Color.WHITE, int(radius * 0.5)))
+	if not action.is_empty():
+		# Holding the on-screen button feeds the same InputMap action as the
+		# keyboard/gamepad, so game code only ever reads one source.
+		node.button_down.connect(func() -> void: Input.action_press(action))
+		node.button_up.connect(func() -> void: Input.action_release(action))
+	if on_press.is_valid():
+		node.pressed.connect(on_press)
+	hud_root.add_child(node)
+	node.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	node.position = -node.size - Vector2(28, 28) + offset
+	return node
+
+
+func set_fog(color: Color, density: float) -> void:
+	var env := environment_node.environment
+	env.fog_light_color = color
+	env.background_color = color
+	env.fog_density = density
+
+
+func set_ambient(sky: Color, energy: float) -> void:
+	var env := environment_node.environment
+	env.ambient_light_color = sky
+	env.ambient_light_energy = energy
+
+
+# --- mesh helpers -----------------------------------------------------------
+
+## Applies a colour to every `StandardMaterial3D` in a freshly imported scene.
+static func tint(root: Node, color: Color, emission: float = 0.0) -> void:
+	for child in root.get_children():
+		if child is GeometryInstance3D:
+			var geometry := child as GeometryInstance3D
+			geometry.material_override = standard_material(color, emission)
+		tint(child, color, emission)
+
+
+static func standard_material(color: Color, emission: float = 0.0) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.roughness = 0.82
+	material.metallic = 0.05
+	if emission > 0.0:
+		material.emission_enabled = true
+		material.emission = color
+		material.emission_energy_multiplier = emission
+	return material
+
+
+## Loads one of the bundled Blender meshes, scaled and tinted. Returns `null`
+## when the import failed so callers can fall back to a primitive.
+static func mesh(key: String, color: Color = Color.WHITE, scale: float = 1.0, emission: float = 0.0) -> Node3D:
+	var path := "res://assets/meshes/%s.glb" % key
+	if not ResourceLoader.exists(path):
+		return null
+	var packed: PackedScene = load(path)
+	if packed == null:
+		return null
+	var instance := packed.instantiate()
+	instance.scale = Vector3.ONE * scale
+	if color != Color.WHITE or emission > 0.0:
+		tint(instance, color, emission)
+	return instance

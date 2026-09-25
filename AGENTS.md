@@ -1,72 +1,99 @@
 # AGENTS.md — Singular 80
 
-Phaser 3 + TypeScript + Vite (Spiel) mit Fastify-Backend (API, SQLite, Discord, OpenCode-Runner).
+Godot-4-Spiel (Android) + Fastify-Backend + Web-Dashboard. Die App läuft offline
+komplett; mit konfigurierter Server-Adresse holt sie Content und Vorschläge vom
+Backend.
 
-## Commands
+## Befehle
 
-- Node **22+** ist Pflicht (`node:sqlite`); nvm-Standard ist v22, `start.sh` nutzt `~/.local/node`. Bei falscher Version zuerst `export PATH="$HOME/.local/node/bin:$PATH"`.
-- `npm run dev` — Backend (`127.0.0.1:8787`) + Vite (`:5173`, proxyt `/api` → Backend). Läuft meist schon, NICHT erneut starten, keine Watcher starten.
-- `npm run typecheck` — muss fehlerfrei sein (`tsc --noEmit`, strict).
-- `npm test` — `vitest run`; Einzelfall: `npx vitest run tests/<name>.test.ts`.
-- `npm run build` — `vite build` (Einstiege `index.html` + `dashboard.html`), muss durchlaufen.
-- `npm run smoke` — API-Smoke-Test gegen Ephemeral-App mit Temp-`dataDir` (`scripts/smoke.ts`).
-- Reihenfolge: `typecheck` → `test` → `build`.
-- Manuell testen: Desktop-Starter `~/Desktop/Singular 80.desktop` bzw. `./start.sh` (startet Backend + Vite und öffnet Spiel & Dashboard im Browser).
+- `npm run typecheck` — `tsc --noEmit`, muss fehlerfrei sein.
+- `npm test` — prüft zuerst den Content-Sync, dann `vitest run` (Server/Dashboard).
+- `npm run test:game` — **742 GDScript-Tests** (headless, Regeln + echte Screens).
+- `npm run build` — Vite-Build des Dashboards.
+- `npm run content:sync` — `content/*.json` nach `godot/assets/content/` spiegeln
+  (Pflicht vor jedem Godot-Build; `npm test` schlägt bei Abweichung fehl).
+- `npm run godot:import` — Content spiegeln + Godot-Import der Assets.
+- `npm run godot:apk` — Debug-APK, `npm run godot:apk:release` — signiertes Release.
+- `npm run smoke` — API-Smoke-Test.
+- Reihenfolge für Änderungen: `typecheck` → `test` → `test:game` → `build` → `godot:apk`.
 
-## Structure
+## Struktur
 
-- `content/*.json` — datengetriebener Content (`enemies`, `weapons`, `upgrades`, `modes`, `mechanics`). Backend (`server/content.ts`) liest pro Request neu (mtime-Cache) → wirkt ohne Rebuild. Client lädt via `GET /api/content`, Fallback sind gebündelte Imports in `src/game/content.ts`.
-- `src/game/` — `main.ts` (Phaser-Setup + `scene`-Array), `games.ts` (Lobby-Registry mit Kategorien), `lobby.ts` (Geometrie der 3D-Lobby), `scenes/` (`Boot`, `Lobby3DScene` als Key `Lobby`, `LobbyListScene` als Key `LobbyList`, `MainMenu`, `Game`, `GameOver`, `Tetris`), `mechanics/` (Code-Erweiterungspunkt), `stats.ts`, `textures.ts`, `content.ts`.
-- `server/` — `app.ts` (alle Routen), `db.ts` (SQLite in `dataDir`), `content.ts`, `discord.ts`, `runner.ts`. Nicht ändern, außer ausdrücklich verlangt.
-- `src/shared/` — `types.ts` + `sorting.ts` (Scoring/Clustering). Nicht ändern.
-- `src/dashboard/` — Dashboard-UI. Env: `PORT`, `DATA_DIR`, `CONTENT_DIR`, `DISCORD_WEBHOOK_URL`, `DASHBOARD_URL` (siehe `.env.example`); `data/`, `dist/`, `.env`, `log/` sind gitignoriert.
-- `log/` — pro KI-Run eine komplette JSONL-Datei (`suggestion-<id>_<YYYY-MM-DD>_<HH-MM-SS>.jsonl`): Meta-Header (Prompt/Modell), alle Roh-Events, Result-Footer mit `resultSummary`. Wird vom Runner in `server/runner.ts` geschrieben, nicht committen.
-- `public/assets/` — von Blender erzeugte 3D-Meshes (`.glb`). Vite serviert `public/` unter `/`; im Build landen sie in `dist/assets/`.
-- `scripts/blender/make_mesh.py` — headless Blender-Generator für 3D-Meshes (siehe unten).
+- `godot/` — das gesamte Spiel (GDScript). Siehe unten.
+- `server/` — Fastify-API, SQLite, Discord, OpenCode-Runner. **Nicht ändern**,
+  außer der Vorschlag verlangt es ausdrücklich.
+- `src/dashboard/`, `dashboard.html` — Web-Dashboard, möglichst unverändert.
+- `src/shared/` — geteilte Typen/Sortierung. Nicht ändern.
+- `content/*.json` — **einzige** Quelle für Spieldaten.
+- `godot/assets/content/` — Spiegel davon für die App (nie direkt editieren).
+- `scripts/blender/` — headless Blender-Generator für die 3D-Meshes.
+- `log/` — JSONL-Log pro KI-Run (nicht committen).
 
-## Content (bevorzugter Weg, kein Rebuild nötig)
+## Godot-Spiel
 
-- Enemy: `shape: circle | square | triangle | diamond | hexagon`, `behavior: chase | zigzag | orbit`. `weight: 0` = nie zufällig (Bosse, Split-Kinder). `boss: true` für Bosse. Split: `splitInto: "<enemy-id>"` + `splitCount` (Default 2).
-- Weapon: `unlockWave: 0` = im Startmenü wählbar. `cooldown` in ms, effektives Minimum 70 (`stats.ts`: `effectiveCooldown`).
-- Upgrade: `stat` muss numerisches Feld von `PlayerStats` in `src/game/stats.ts` sein (`maxHp`, `hp`, `moveSpeed`, `moveSpeedMult`, `damage`, `damageMult`, `fireRate`, `projectileSpeed`, `projectileCount`, `spread`, `pierce`, `pickupRadius`, `hpRegen`, `critChance`, `critMult`, `armor`, `xpMult` — kein `lifesteal`). `rarity: common | uncommon | rare | epic`. Sonderlogik in `applyUpgrade` beachten (`maxHp` heilt mit, `projectileCount` setzt `spread >= 0.12`, Caps: `critChance <= 0.9`, `fireRate <= 8`).
-- Mode: `enemyHpMult`, `enemySpeedMult`, `spawnRateMult` (~0.5–2.0) + `duration`.
-- Mechanic-Aktivierung: `{ "id": "<registry-id>", "name": "...", "description": "...", "enabled": true }` in `content/mechanics.json`.
+```
+godot/
+├── main.tscn                 Einstieg → src/main.gd → Router.go_to("lobby")
+├── project.godot             Autoloads, Eingaben, Renderer (gl_compatibility)
+├── export_presets.cfg        Android-APK (arm64, minSdk 24, targetSdk 35)
+├── assets/
+│   ├── meshes/               78 Blender-GLBs (+ rpg/-Unterordner)
+│   ├── content/              gespiegelte content/*.json
+│   └── fonts/                DejaVu Sans (normal + fett)
+├── src/
+│   ├── main.gd               Boot, Backend-Probe im Hintergrund
+│   ├── core/
+│   │   ├── autoload/         InputSetup, Game, Content, Sfx, Api, Router
+│   │   ├── logic/            reine Spiellogik (Renderer-frei, testbar)
+│   │   │   ├── asset_registry.gd   zentrale Mesh-Liste (Key → Pfad)
+│   │   │   ├── game_registry.gd    Kategorien + alle 13 Spiele
+│   │   │   ├── lobby.gd            Geometrie der 3D-Lobby
+│   │   │   ├── inventory.gd        generisches Inventarsystem
+│   │   │   ├── checkers/cards/holdem/twenty48/merge3d/
+│   │   │   ├── crystal_tower/dragon_rpg/horse_runner
+│   │   │   └── mechanics/          Mechanik-Registry + Dash
+│   │   └── ui/                Screen/WorldScreen-Basis, Theme, Widgets,
+│   │                          VirtualStick, Kartenrenderer, Dialoge
+│   └── game/<spiel>/          ein Verzeichnis je Spiel (s. u.)
+└── tests/                    TestKit + Regel- und Screentests
+```
 
-## Mechanic (Code-Weg)
+### Ein Spiel hinzufügen
 
-1. `src/game/mechanics/<id>.ts` mit `Mechanic`-Interface aus `mechanics/types.ts` anlegen.
-2. In `src/game/mechanics/index.ts` in `MECHANICS` registrieren.
-3. In `content/mechanics.json` aktivieren.
-- Hooks: `init`, `update(host, dt)`, `movementOverride`, `onFire(host, shot)`, `onEnemyKilled(host, enemy)`, `onLevelUp`, `hud`. Host (`MechanicHost`): `stats`, `content`, `elapsed`, `keys`, `inputDirection()`, `aimDirection()`, `isInvulnerable()`, `grantInvulnerability(ms)`, `addHint(text)`.
+1. `godot/src/game/<name>/<name>_screen.gd` anlegen.
+2. **2D:** `extends Screen`. **3D:** `extends WorldScreen`. Nichts anderes erben.
+3. `Ui.*`-Helfer für Widgets benutzen, **keine** `.tscn` schreiben — jeder Screen
+   baut seinen Baum in `_ready_game()` bzw. `_ready_world()`.
+4. Eingabe ausschließlich über `Input`-Actions (siehe `InputSetup`) und
+   `VirtualStick.combined(...)`; für 3D `add_stick()` / `add_action_button()`.
+5. In `game_registry.gd` eintragen (id, name, icon, screen, accent, category,
+   highscore_key) und in `router.gd` den Screen-Pfad mappen.
+6. Logo-Icon: **DejaVuschrift** kann ♠♥♦♣♞☄✦◆▣▦◼ u. a. — keine Emojis.
+7. Hochscore über `Game.submit_score(<key>, wert)`, niemals selbst speichern.
 
-## 3D-Assets mit Blender (headless)
+### Performance-Regeln
 
-- Blender 4.5 LTS liegt unter `~/.local/blender`; `blender` ist über `~/.local/bin` im PATH (sonst `export PATH="$HOME/.local/bin:$PATH"`).
-- Mesh erzeugen und als binäres glTF exportieren:
-  `blender --background --python scripts/blender/make_mesh.py -- --out public/assets/<name>.glb --name <builder>`
-  Verfügbare Builder: `crystal`, `ship`; weitere Funktionen in `BUILDERS` (`scripts/blender/make_mesh.py`) registrieren.
-- Mesh-Pack für ein ganzes Spiel: `scripts/blender/generate_rpg_meshes.py` erzeugt den kompletten Drachen-RPG-Pack (Drachen, Props, Loot, Ritter, ~50 `.glb`) in einem Blender-Lauf nach `public/assets/rpg/`; neue Builder dort in `BUILDERS` registrieren. `--only name1,name2` baut einzelne Meshes.
-- Die `.glb`-Dateien liegen in `public/assets/`; three.js lädt sie per `GLTFLoader` (Beispiel: `src/game/scenes/CrystalJumperScene.ts`). URLs der Meshes zentral in `src/game/assets.ts` registrieren — so lassen sich Assets in mehreren Spielen wiederverwenden.
-- three.js nur **dynamisch** importieren (`await import('three')`), damit der Lobby-Bundle klein bleibt.
-- Meshes low-poly halten (wenige hundert Tris) — schont Build-Größe. `.glb`-Binärdateien mitcommitten, aber nicht zusätzlich extern herunterladen.
+- Keine Allokationen im `_process`/`_update_world`: Pools vorallozieren
+  (Arena: 220 Gegner, 400 Geschosse, 160 Kristalle).
+- `_draw()` nur bei Änderung (`queue_redraw()`), nie im Takt neu aufbauen.
+- 3D-Materialien entstehen einmalig über `WorldScreen.tint()` /
+  `WorldScreen.standard_material()`; `StandardMaterial3D` nicht pro Frame anlegen.
+- Meshes kommen **ausschließlich** über `AssetRegistry`/`WorldScreen.mesh()`.
 
-## Subgame (Lobby-Weg)
+### Meshes
 
-1. Szene `src/game/scenes/<Name>.ts` mit eigenem Key (`super('<Key>')`).
-2. In `src/game/main.ts` importieren + ins `scene`-Array.
-3. `GameEntry` in `src/game/games.ts` ergänzen (`{ id, name, description, icon, scene, accent, category, highscoreKey? }`). `category` ist eine `GameCategoryId` (`action | adventure | board | cards | puzzle`) — die 3D-Lobby baut daraus automatisch eine Plaza (`src/game/lobby.ts`), die Listen-Lobby gruppiert danach. Zurück: `this.scene.start('Lobby')` (3D) bzw. `'LobbyList'`.
-- Nur Arena-Gameplay ändern? Dann Content-/Mechanic-Weg statt neuem Subgame.
+- Format: binäres glTF 2.0 (`.glb`), Godot importiert nativ.
+- Erzeugen: `blender --background --python scripts/blender/make_mesh.py -- --out … --name <builder>`
+  bzw. `scripts/blender/generate_rpg_meshes.py` für den Drachen-Pack.
+- Jedes neue Mesh braucht einen Key in `AssetRegistry.KEYS` — der Test
+  `Asset-Registry` schlägt fehl, wenn Liste und Ordner auseinanderlaufen.
+- Fehlt ein Mesh, benutzt `WorldScreen.mesh()` ein prozedurales Primitiv;
+  3D-Spiele starten dadurch nie mit leerer Szene.
 
-## Arbeitsweise
+### Android
 
-- Findest du beim Arbeiten einen Fehler/Bug, behebe ihn direkt im selben Durchgang statt ihn nur zu melden — sofern er zum Auftrag passt und kein unverhältnismäßiges Risiko entsteht.
-
-## Constraints
-
-- Strict TS, kein `any`. Spieltexte Deutsch, Code/Kommentare Englisch.
-- Perf: keine Allokationen im `update`-Loop; Pools/Gruppen in `src/game/scenes/GameScene.ts` nutzen; Limits einhalten (`MAX_ENEMIES 220`, `MAX_BULLETS 400`, `MAX_GEMS 160`).
-- Keine externen Assets herunterladen — Texturen prozedural in `textures.ts`, 3D-Meshes headless mit Blender erzeugen (`scripts/blender`). Keine neuen npm-Deps ohne Zwang (three.js ist für 3D-Spiele gesetzt). Ports/Konfig nicht ändern.
-
-## Done
-
-`npm run typecheck` → `npm test` → `npm run build`, dann `git add -A && git commit -m "feat(suggestion-<id>): <kurz>"` (Format verlangt der Runner-Prompt in `server/runner.ts`).
+- `project.godot`: `renderer/rendering_method = gl_compatibility` (breite
+  Geräteabdeckung), `stretch/mode = canvas_items`, `aspect = expand`.
+- 2D-Spiele mit festem Layout bauen in `stage()` (1280×720, zentriert);
+  Menüs in `content_layer()` (füllt das Fenster) mit Containern.
+- Keine Godot-Editor-Komponenten zur Laufzeit; keine externen Dateien zur Laufzeit.

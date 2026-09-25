@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -20,8 +21,34 @@ function makeTempDir(): string {
   return dir;
 }
 
+/**
+ * A throwaway git repository with one commit per suggestion id. Using a real
+ * temp repo keeps the tests hermetic — they no longer depend on whatever commit
+ * history happens to exist in the checked-out project.
+ */
+function makeTempGitRepo(commits: { message: string; files?: Record<string, string> }[]): string {
+  const dir = makeTempDir();
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+  };
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.name', 'Test');
+  git('config', 'user.email', 'test@example.invalid');
+  for (const commit of commits) {
+    for (const [name, content] of Object.entries(commit.files ?? { 'README.md': commit.message })) {
+      writeFileSync(join(dir, name), content);
+    }
+    git('add', '-A');
+    git('commit', '-q', '-m', commit.message);
+  }
+  return dir;
+}
+
 /** Builds a runner over a temp store plus a run that looks like it was interrupted. */
-function setupInterruptedRun(startedAt: number): { store: Store; run: RunRecord; suggestionId: number } {
+function setupInterruptedRun(
+  startedAt: number,
+  projectRoot: string,
+): { store: Store; run: RunRecord; suggestionId: number } {
   const dir = makeTempDir();
   const store = new Store(join(dir, 'data'));
   const suggestion = store.createSuggestion({
@@ -58,7 +85,7 @@ function setupInterruptedRun(startedAt: number): { store: Store; run: RunRecord;
   store.createRun(run);
   store.setSuggestionRun(suggestion.id, run.id);
   new Runner(store, {
-    projectRoot: root,
+    projectRoot,
     dataDir: join(dir, 'data'),
     contentDir: join(root, 'content'),
     callbacks: {},
@@ -78,21 +105,25 @@ describe('isProcessAlive', () => {
 
 describe('commitSince', () => {
   it('findet den passenden Commit für einen alten Startzeitpunkt', () => {
-    expect(commitSince(0, root, 1)).toMatch(/^[0-9a-f]+$/);
+    const repo = makeTempGitRepo([{ message: 'feat(suggestion-1): Arena' }]);
+    expect(commitSince(0, repo, 1)).toMatch(/^[0-9a-f]+$/);
   });
 
   it('liefert null, wenn noch kein Commit nach dem Start existiert', () => {
-    expect(commitSince(Date.now() + 1_000_000_000, root, 1)).toBeNull();
+    const repo = makeTempGitRepo([{ message: 'feat(suggestion-1): Arena' }]);
+    expect(commitSince(Date.now() + 1_000_000_000, repo, 1)).toBeNull();
   });
 
   it('ordnet einen Commit einer anderen Suggestion nicht zu', () => {
-    expect(commitSince(0, root, 999999)).toBeNull();
+    const repo = makeTempGitRepo([{ message: 'feat(suggestion-1): Arena' }]);
+    expect(commitSince(0, repo, 999999)).toBeNull();
   });
 });
 
 describe('Runner-Neustart-Wiederherstellung', () => {
   it('rekonstruiert einen abgebrochenen Run als erfolgreich, wenn ein Commit existiert', () => {
-    const { store, run, suggestionId } = setupInterruptedRun(0);
+    const repo = makeTempGitRepo([{ message: 'feat(suggestion-1): Arena' }]);
+    const { store, run, suggestionId } = setupInterruptedRun(0, repo);
     const recovered = store.getRun(run.id)!;
     expect(recovered.status).toBe('succeeded');
     expect(recovered.commitHash).not.toBeNull();
@@ -100,7 +131,8 @@ describe('Runner-Neustart-Wiederherstellung', () => {
   });
 
   it('markiert einen abgebrochenen Run ohne Commit als fehlgeschlagen', () => {
-    const { store, run } = setupInterruptedRun(Date.now() + 1_000_000_000);
+    const repo = makeTempGitRepo([{ message: 'feat(suggestion-1): Arena' }]);
+    const { store, run } = setupInterruptedRun(Date.now() + 1_000_000_000, repo);
     expect(store.getRun(run.id)!.status).toBe('failed');
   });
 });
