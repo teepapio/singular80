@@ -26,6 +26,8 @@ var dragon_nodes: Array[Dictionary] = []
 var _label_title: Label
 var _label_slots: Label
 var _label_info: Label
+var _label_pedigree: Label
+var _forecast_box: VBoxContainer
 var _pair_button: Button
 var _lay_button: Button
 var _breed_box: VBoxContainer
@@ -184,8 +186,17 @@ func _build_ui() -> void:
 	_label_info = Ui.label("", 14, UiTheme.TEXT_DIM)
 	_label_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.add_child(_label_info)
+	_label_pedigree = Ui.label("", 13, UiTheme.TEXT_MUTED)
+	_label_pedigree.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.add_child(_label_pedigree)
 	_pair_button = Ui.button("Paaren", Vector2(400, 48), UiTheme.ACCENT, _on_pair)
 	body.add_child(_pair_button)
+
+	# Zuchtziel: which trait this pairing is most likely to produce.
+	body.add_child(Ui.label("Zuchtziel — Wahrscheinlichkeiten", 16, UiTheme.TEXT, true))
+	_forecast_box = Ui.vbox(2)
+	body.add_child(_forecast_box)
+
 	body.add_child(Ui.label("Eier im Nest", 17, UiTheme.TEXT, true))
 	_list = Ui.vbox(4)
 	body.add_child(_list)
@@ -334,8 +345,7 @@ func _refresh_panel() -> void:
 	var cost := 0
 	if not a.is_empty() and not b.is_empty() and parent_a != parent_b:
 		cost = DragonFlight.pairing_cost(a, b)
-		var expected := _predict(a, b)
-		_label_info.text = "Kosten %d ◈  ·  erwartete Merkmale: %s" % [cost, expected]
+		_label_info.text = "Kosten %d ◈" % cost
 		_pair_button.disabled = int(profile.get("gold", 0)) < cost
 		_pair_button.text = "Paaren (%d ◈)" % cost
 	else:
@@ -345,8 +355,73 @@ func _refresh_panel() -> void:
 	for spot in pedestals:
 		var ring: MeshInstance3D = spot["ring"]
 		ring.visible = int(spot["uid"]) != 0 and (int(spot["uid"]) == parent_a or int(spot["uid"]) == parent_b)
+	_refresh_pedigree()
+	_refresh_forecast(a, b)
 	_refresh_egg_button()
 	_refresh_breeds()
+
+
+## Ancestry of the first selected parent, so a bred dragon can be traced back.
+func _refresh_pedigree() -> void:
+	var dragon := DragonFlight.dragon_by_uid(profile, parent_a)
+	if dragon.is_empty():
+		_label_pedigree.text = ""
+		return
+	var line := "A · %s" % _dragon_label(dragon)
+	var parents := DragonFlight.parent_uids(dragon)
+	if parents.is_empty():
+		line += "  ·  Stammlinie"
+	else:
+		var names: Array[String] = []
+		for uid in parents:
+			var parent := DragonFlight.dragon_by_uid(profile, int(uid))
+			names.append(_dragon_label(parent) if not parent.is_empty() else "?")
+		line += "  ·  Eltern: %s" % ", ".join(names)
+	var ancestors := DragonFlight.ancestors(profile, int(dragon["uid"]), 2)
+	if not ancestors.is_empty():
+		var older: Array[String] = []
+		for entry in ancestors:
+			older.append(_dragon_label(entry))
+		line += "  ·  Vorfahren: %s" % ", ".join(older)
+	_label_pedigree.text = line
+
+
+## The breeding forecast: every trait with the chance this exact pair produces
+## it. The top entries are the traits worth pairing for.
+func _refresh_forecast(a: Dictionary, b: Dictionary) -> void:
+	for child in _forecast_box.get_children():
+		child.queue_free()
+	if a.is_empty() or b.is_empty() or parent_a == parent_b:
+		_forecast_box.add_child(Ui.label("Noch kein Paar gewählt.", 14, UiTheme.TEXT_MUTED))
+		return
+	var forecast := DragonFlight.breeding_forecast(a, b)
+	# Only the interesting tail: things likely, and things worth chasing.
+	var shown := 0
+	for entry in forecast:
+		var chance := float(entry["chance"])
+		if chance < 0.05:
+			continue
+		shown += 1
+		if shown > 7:
+			break
+		var row := Ui.vbox(0)
+		_forecast_box.add_child(row)
+		var head := Ui.hbox(6)
+		row.add_child(head)
+		head.add_child(Ui.rect(Color(str(entry["hue"])), 10, Color(0, 0, 0, 0), 0))
+		head.add_child(Ui.label(str(entry["name"]), 14, Color(str(entry["hue"])), true))
+		head.add_child(Ui.spacer())
+		head.add_child(Ui.label("%d %%" % roundi(chance * 100.0), 14, Color.WHITE, true))
+		var bar := Ui.bar(Color(str(entry["hue"])), 8.0)
+		Ui.set_bar(bar, chance, Color(str(entry["hue"])))
+		row.add_child(bar)
+		var parents: Array[String] = []
+		if bool(entry["a"]):
+			parents.append("A")
+		if bool(entry["b"]):
+			parents.append("B")
+		if not parents.is_empty():
+			row.add_child(Ui.label("trägt %s" % ", ".join(parents), 11, UiTheme.TEXT_MUTED))
 
 
 ## The egg currency is spent here: every egg lands in a nest and hatches on its
@@ -405,28 +480,6 @@ func _refresh_breeds() -> void:
 		row.add_child(Ui.spacer())
 		row.add_child(Ui.button("%d ◈" % price, Vector2(88, 32),
 			UiTheme.PANEL_LIGHT if affordable else UiTheme.PANEL, _on_buy_breed.bind(id)))
-
-
-## The gene names a pairing would most likely produce — the whole point of
-## showing the player why a certain match is interesting.
-func _predict(a: Dictionary, b: Dictionary) -> String:
-	var found: Array[String] = []
-	var genes_a: Dictionary = a.get("alleles", {})
-	var genes_b: Dictionary = b.get("alleles", {})
-	for gene in DragonFlight.TRAITS:
-		var id := str(gene["id"])
-		if _carries(genes_a, gene, id) or _carries(genes_b, gene, id):
-			found.append(str(gene["name"]))
-	return ", ".join(found) if not found.is_empty() else "keine bekannten"
-
-
-## A parent carries a recessive gene when both its alleles are recessive.
-func _carries(genes: Dictionary, gene: Dictionary, id: String) -> bool:
-	var pair := str(genes.get(id, ""))
-	if pair.length() < 2:
-		return false
-	var dominant := str(gene["dom"]).to_lower()
-	return pair[0] == dominant and pair[1] == dominant
 
 
 func _dragon_label(dragon: Dictionary) -> String:

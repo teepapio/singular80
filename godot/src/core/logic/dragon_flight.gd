@@ -225,46 +225,55 @@ const ENEMIES: Array[Dictionary] = [
 		"id": "imp", "name": "Wicht", "asset": "flight/imp", "flying": true, "behavior": "weave",
 		"hp": 16.0, "speed": 13.0, "damage": 7.0, "score": 40, "gold": 1, "radius": 0.85, "size": 1.35,
 		"color": "f472b6", "drop": 0.14,
+		"resist": {"fire": 0.0, "ice": 0.0, "poison": 0.2},
 	},
 	{
 		"id": "wyvern", "name": "Wyvern", "asset": "flight/wyvern", "flying": true, "behavior": "dive",
 		"hp": 34.0, "speed": 15.0, "damage": 11.0, "score": 90, "gold": 2, "radius": 0.95, "size": 1.0,
 		"color": "a78bfa", "drop": 0.2,
+		"resist": {"fire": 0.15, "ice": 0.0, "poison": 0.0},
 	},
 	{
 		"id": "harpy", "name": "Harpye", "asset": "flight/harpy", "flying": true, "behavior": "strafe",
 		"hp": 26.0, "speed": 18.0, "damage": 9.0, "score": 70, "gold": 1, "radius": 0.8, "size": 1.0,
 		"color": "fcd34d", "drop": 0.16,
+		"resist": {"fire": 0.0, "ice": 0.25, "poison": 0.0},
 	},
 	{
 		"id": "ballista", "name": "Ballista", "asset": "flight/ballista", "flying": false, "behavior": "turret",
 		"hp": 52.0, "speed": 0.0, "damage": 12.0, "score": 120, "gold": 3, "radius": 1.1, "size": 1.0,
 		"color": "d6a24a", "drop": 0.3, "ground": true,
+		"resist": {"fire": -0.35, "ice": 0.3, "poison": 0.1},
 	},
 	{
 		"id": "golem", "name": "Steingolem", "asset": "flight/golem", "flying": false, "behavior": "hover",
 		"hp": 120.0, "speed": 6.0, "damage": 16.0, "score": 220, "gold": 5, "radius": 1.35, "size": 1.0,
 		"color": "a8a29e", "drop": 0.42, "ground": true,
+		"resist": {"fire": 0.4, "ice": 0.1, "poison": 0.35},
 	},
 	{
 		"id": "storm_rider", "name": "Sturmreiter", "asset": "rpg/dragon_storm", "flying": true, "behavior": "dive",
 		"hp": 90.0, "speed": 17.0, "damage": 14.0, "score": 260, "gold": 6, "radius": 1.2, "size": 0.85,
 		"color": "c084fc", "drop": 0.38,
+		"resist": {"fire": -0.2, "ice": 0.2, "poison": 0.0},
 	},
 	{
 		"id": "bone_warden", "name": "Knochenhüter", "asset": "rpg/dragon_bone", "flying": true, "behavior": "strafe",
 		"hp": 150.0, "speed": 12.0, "damage": 18.0, "score": 320, "gold": 7, "radius": 1.25, "size": 0.9,
 		"color": "e7e5d8", "drop": 0.44, "armor": 0.25,
+		"resist": {"fire": 0.35, "ice": 0.35, "poison": -0.15},
 	},
 	{
 		"id": "sky_tyrant", "name": "Himmelswüter", "asset": "rpg/dragon_elder", "flying": true, "behavior": "boss",
 		"hp": 900.0, "speed": 11.0, "damage": 22.0, "score": 2200, "gold": 40, "radius": 2.0, "size": 1.25,
 		"color": "ef4444", "drop": 1.0, "boss": true, "armor": 0.2,
+		"resist": {"fire": 0.3, "ice": 0.3, "poison": 0.2},
 	},
 	{
 		"id": "storm_sovereign", "name": "Sturmherrscher", "asset": "rpg/dragon_lord", "flying": true, "behavior": "boss",
 		"hp": 1600.0, "speed": 12.5, "damage": 28.0, "score": 4200, "gold": 80, "radius": 2.4, "size": 1.45,
 		"color": "a855f7", "drop": 1.0, "boss": true, "armor": 0.3,
+		"resist": {"fire": -0.25, "ice": 0.25, "poison": 0.25},
 	},
 ]
 
@@ -485,6 +494,96 @@ static func expressed_traits(alleles: Dictionary) -> Array[String]:
 	return out
 
 
+## How likely a parent passes each of its two alleles on. This is what makes a
+## pedigree useful: the player can see *why* a pairing is worth the gold.
+## Returns `{"passes_dominant": p, "passes_recessive": p}` (they add up to 1).
+static func allele_pass_probabilities(alleles: Dictionary, trait_id: String) -> Dictionary:
+	var gene := trait_by_id(trait_id)
+	if gene.is_empty():
+		return {"passes_dominant": 0.5, "passes_recessive": 0.5}
+	var dominant := str(gene["dom"])
+	var recessive := _recessive_letter(dominant)
+	var pair := str(alleles.get(trait_id, ""))
+	if pair.length() < 2:
+		return {"passes_dominant": 0.5, "passes_recessive": 0.5}
+	var dominant_count := 0
+	for i in 2:
+		if pair[i] == dominant:
+			dominant_count += 1
+	# Exactly one of the two alleles is drawn at random.
+	return {
+		"passes_dominant": float(dominant_count) * 0.5,
+		"passes_recessive": float(2 - dominant_count) * 0.5,
+	}
+
+
+## Probability that a child of these two parents shows the trait, ignoring
+## mutation. A dominant trait needs one dominant allele, a recessive one two
+## recessive alleles — so the same two numbers mean opposite things.
+static func trait_probability(parent_a: Dictionary, parent_b: Dictionary, trait_id: String) -> float:
+	var gene := trait_by_id(trait_id)
+	if gene.is_empty():
+		return 0.0
+	var from_a := allele_pass_probabilities(parent_a.get("alleles", {}), trait_id)
+	var from_b := allele_pass_probabilities(parent_b.get("alleles", {}), trait_id)
+	var recessive_chance: float = float(from_a["passes_recessive"]) * float(from_b["passes_recessive"])
+	if bool(gene.get("recessive", false)):
+		return recessive_chance
+	return 1.0 - recessive_chance
+
+
+## Every trait with its chance, most likely first — the "which pair do I want"
+## list the hatchery shows instead of a blind roll.
+static func breeding_forecast(parent_a: Dictionary, parent_b: Dictionary) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for gene in TRAITS:
+		var id := str(gene["id"])
+		out.append({
+			"id": id,
+			"name": str(gene["name"]),
+			"hue": str(gene["hue"]),
+			"chance": trait_probability(parent_a, parent_b, id),
+			"a": expressed(parent_a.get("alleles", {}), id),
+			"b": expressed(parent_b.get("alleles", {}), id),
+		})
+	out.sort_custom(func(x: Dictionary, y: Dictionary) -> bool:
+		return float(x["chance"]) > float(y["chance"])
+	)
+	return out
+
+
+## Uids of a dragon's parents, in breeding order.
+static func parent_uids(dragon: Dictionary) -> Array:
+	var out: Array = []
+	for uid in dragon.get("parents", []):
+		out.append(int(uid))
+	return out
+
+
+## Ancestors of `uid`, breadth first and without repeats. Roots have no parents,
+## so a pedigree can never walk off the end.
+static func ancestors(profile: Dictionary, uid: int, depth: int = 3) -> Array:
+	var out: Array = []
+	var seen := {uid: true}
+	var queue: Array = parent_uids(dragon_by_uid(profile, uid))
+	var levels: int = maxi(0, depth)
+	while not queue.is_empty() and levels > 0:
+		var next: Array = []
+		for entry in queue:
+			var parent_uid := int(entry)
+			if seen.has(parent_uid):
+				continue
+			seen[parent_uid] = true
+			var dragon := dragon_by_uid(profile, parent_uid)
+			if dragon.is_empty():
+				continue
+			out.append(dragon)
+			next.append_array(parent_uids(dragon))
+		queue = next
+		levels -= 1
+	return out
+
+
 ## One allele from each parent, plus a small mutation chance. This is the whole
 ## breeding rule: a child can only show a recessive gene if both parents carry
 ## it, which is what makes pairing two carriers worth the gold.
@@ -549,6 +648,7 @@ static func breed_parents(parent_a: Dictionary, parent_b: Dictionary, uid: int) 
 		"wins": 0,
 		"runs": 0,
 		"vitality": bloodline,
+		"parents": [int(parent_a.get("uid", 0)), int(parent_b.get("uid", 0))],
 		"egg": null,
 		"hatched_at": 0,
 	}
@@ -571,6 +671,7 @@ static func random_dragon(uid: int, breed_ids: Array = []) -> Dictionary:
 		"wins": 0,
 		"runs": 0,
 		"vitality": 1.0,
+		"parents": [],
 		"egg": null,
 		"hatched_at": 0,
 	}
@@ -623,6 +724,7 @@ static func resolve_stats(dragon: Dictionary, upgrades: Dictionary = {}) -> Dict
 		"wings": float(breed["wings"]),
 		"poison": 0.0,
 		"chain": 0.0,
+		"element": str(breed.get("element", "fire")),
 	}
 	var vitality: float = clampf(float(dragon.get("vitality", 1.0)), 0.7, 1.0)
 
@@ -679,6 +781,55 @@ static func roll_shot(stats: Dictionary, damage_mult: float) -> Dictionary:
 	var crit: bool = randf() < float(stats["crit"])
 	var raw: float = float(stats["damage"]) * (1.9 if crit else 1.0) * damage_mult
 	return {"damage": maxf(1.0, raw), "crit": crit}
+
+
+## Damage multiplier of a dragon's element against a target's resistances.
+## Positive resistance soaks the element, negative resistance doubles it — this
+## is what makes Feueratem against a Steindrache a bad idea.
+static func element_multiplier(element: String, resist: Dictionary) -> float:
+	var value := float(resist.get(element, 0.0))
+	return clampf(1.0 - value, 0.25, 2.0)
+
+
+## The elements a level's enemies are weak or strong against, for the briefing.
+static func level_resist_summary(level_def: Dictionary) -> String:
+	var totals: Dictionary = {}
+	for entry in level_def.get("pool", []):
+		var kind := enemy_by_id(str((entry as Array)[0]))
+		for element in kind.get("resist", {}):
+			var key := str(element)
+			totals[key] = float(totals.get(key, 0.0)) + float(kind["resist"][element]) * float((entry as Array)[1])
+	if totals.is_empty():
+		return ""
+	var parts: Array[String] = []
+	for element in ["fire", "ice", "poison"]:
+		if not totals.has(element):
+			continue
+		var value := float(totals[element])
+		parts.append("%s %+.0f %%" % [element_name(str(element)), value * 100.0])
+	return ", ".join(parts)
+
+
+static func element_name(element: String) -> String:
+	match element:
+		"fire":
+			return "Feuer"
+		"ice":
+			return "Frost"
+		"poison":
+			return "Gift"
+		"storm":
+			return "Sturm"
+		"earth":
+			return "Erde"
+		"void":
+			return "Leere"
+		"air":
+			return "Luft"
+		"light":
+			return "Licht"
+		_:
+			return element.capitalize()
 
 
 ## Incoming damage after armor, never below one.
@@ -1044,11 +1195,14 @@ static func next_unlocked(from_n: int, profile: Dictionary) -> int:
 static func load_profile() -> Dictionary:
 	if not FileAccess.file_exists(save_path):
 		var fresh := default_profile()
-		# Every player starts with the starter dragon so the hangar is never empty.
+		# Two starters, so the hatchery is usable from the first minute: breeding
+		# needs a pair, and the whole game hangs on breeding.
 		var starter := random_dragon(1, ["ember"])
-		fresh["dragons"] = [starter]
-		fresh["next_uid"] = 2
+		var second := random_dragon(2, ["frost"])
+		fresh["dragons"] = [starter, second]
+		fresh["next_uid"] = 3
 		fresh["active"] = starter["uid"]
+		fresh["breeds"] = unlocked_breeds(fresh)
 		save_profile(fresh)
 		return fresh
 	var text := FileAccess.get_file_as_string(save_path)

@@ -54,6 +54,7 @@ var trail: Array[Dictionary] = []
 var dragon_node: Node3D
 var dragon_scale := 1.0
 var dragon_color := Color.WHITE
+var dragon_element := "fire"
 var wing_l: Node3D
 var wing_r: Node3D
 var tail_nodes: Array[Node3D] = []
@@ -67,6 +68,7 @@ var _label_score: Label
 var _label_gold: Label
 var _label_level: Label
 var _label_trait: Label
+var _label_element: Label
 var _label_buff: Label
 var _over: Control
 var _banner: Label
@@ -190,6 +192,7 @@ func _build_dragon() -> void:
 
 	dragon_scale = DragonFlight.visual_scale(dragon)
 	dragon_color = Color(str(breed["body"]))
+	dragon_element = str(stats["element"])
 	pos = Vector3(0.0, 11.0, DragonFlight.PLAYER_Z)
 	dragon_node.position = pos
 
@@ -234,8 +237,12 @@ func _part(root: Node, node_name: String) -> Node3D:
 
 func _build_pools() -> void:
 	for i in ENEMY_POOL:
-		enemies.append({"node": null, "active": false, "kind": "", "hp": 1.0, "max_hp": 1.0,
-			"x": 0.0, "y": 0.0, "z": 0.0, "phase": 0.0, "poison": 0.0, "boss": false})
+		# `spec` caches the resolved enemy table so the per-frame loop never has to
+		# search the registry again — that lookup allocates a string per enemy
+		# per frame, which the performance rules forbid.
+		enemies.append({"node": null, "active": false, "kind": "", "spec": DragonFlight.ENEMIES[0],
+			"hp": 1.0, "max_hp": 1.0, "x": 0.0, "y": 0.0, "z": 0.0, "phase": 0.0,
+			"poison": 0.0, "boss": false, "flash": 0.0})
 	for i in SHOT_POOL:
 		shots.append({"node": null, "active": false, "x": 0.0, "y": 0.0, "z": 0.0, "vx": 0.0, "vy": 0.0,
 			"damage": 1.0, "crit": false, "poison": false, "radius": 0.4, "life": 0.0})
@@ -286,6 +293,7 @@ func _build_ui() -> void:
 	_label_score = _value(_hud, "Punkte", "0", Color("facc15"))
 	_label_gold = _value(_hud, "Gold", "0", Color("fbbf24"))
 	_label_trait = _value(_hud, "Merkmale", "—", Color("c084fc"))
+	_label_element = _value(_hud, "Element", "—", Color("38bdf8"))
 	_label_buff = _value(_hud, "Effekt", "—", Color("38bdf8"))
 
 	_banner = Ui.label("", 30, Color.WHITE, true)
@@ -483,6 +491,7 @@ func _activate_enemy(enemy: Dictionary, kind: Dictionary) -> void:
 	var node := _mesh_for(enemy, str(kind["asset"]), Color(str(kind["color"])), float(kind["size"]), 1.0)
 	enemy["active"] = true
 	enemy["kind"] = str(kind["id"])
+	enemy["spec"] = kind
 	enemy["boss"] = bool(kind.get("boss", false))
 	enemy["max_hp"] = float(kind["hp"]) * hp_mult
 	enemy["hp"] = enemy["max_hp"]
@@ -491,6 +500,7 @@ func _activate_enemy(enemy: Dictionary, kind: Dictionary) -> void:
 	enemy["z"] = DragonFlight.SPAWN_Z
 	enemy["phase"] = randf() * TAU
 	enemy["poison"] = 0.0
+	enemy["flash"] = 0.0
 	enemy["node"] = node
 	node.scale = Vector3.ONE * float(kind["size"]) * (1.35 if enemy["boss"] else 1.0)
 
@@ -503,7 +513,7 @@ func _update_enemies(dt: float, scroll: float) -> void:
 	for enemy in enemies:
 		if not bool(enemy["active"]):
 			continue
-		var kind := DragonFlight.enemy_by_id(str(enemy["kind"]))
+		var kind: Dictionary = enemy["spec"]
 		var behavior := str(kind["behavior"])
 		var x := float(enemy["x"])
 		var y := float(enemy["y"])
@@ -553,6 +563,11 @@ func _update_enemies(dt: float, scroll: float) -> void:
 		node.position = Vector3(float(enemy["x"]), float(enemy["y"]), z)
 		var heading: float = atan2(pos.x - float(enemy["x"]), maxf(0.001, pos.z - z))
 		node.rotation = node.rotation.lerp(Vector3(0.0, heading, 0.0), clampf(dt * 4.0, 0.0, 1.0))
+		# A short white flash marks every hit, so a resisted shot still reads.
+		var flash := float(enemy["flash"])
+		if flash > 0.0:
+			enemy["flash"] = maxf(0.0, flash - dt)
+			node.scale = Vector3.ONE * float(kind["size"]) * (1.35 if bool(enemy["boss"]) else 1.0) * (1.0 + flash * 1.6)
 		_flap_part(node, phase, 0.5)
 
 		# Ramming the player costs hull, unless the shield buff is up.
@@ -563,10 +578,18 @@ func _update_enemies(dt: float, scroll: float) -> void:
 			_release(enemy)
 
 
+## Applies damage, scaled by the target's resistance to the dragon's element.
+## `amount` is already the raw roll; a resistant target takes less and a weak one
+## more, which is what makes the breed choice matter in a fight.
 func _damage_enemy(enemy: Dictionary, amount: float, poison: bool, silent: bool = false) -> void:
 	if not bool(enemy["active"]):
 		return
-	enemy["hp"] = float(enemy["hp"]) - amount
+	var dealt := amount
+	if not silent:
+		var kind: Dictionary = enemy["spec"]
+		dealt = amount * DragonFlight.element_multiplier(dragon_element, kind.get("resist", {}))
+		enemy["flash"] = 0.12
+	enemy["hp"] = float(enemy["hp"]) - dealt
 	if poison and not silent:
 		enemy["poison"] = maxf(float(enemy["poison"]), 2.4)
 	if not silent:
@@ -576,7 +599,7 @@ func _damage_enemy(enemy: Dictionary, amount: float, poison: bool, silent: bool 
 
 
 func _kill_enemy(enemy: Dictionary) -> void:
-	var kind := DragonFlight.enemy_by_id(str(enemy["kind"]))
+	var kind: Dictionary = enemy["spec"]
 	kills += 1
 	combo += 1
 	combo_timer = 3.0
@@ -768,6 +791,8 @@ func _update_hud() -> void:
 	_label_gold.text = "%d" % gold
 	var traits: Array = stats.get("traits", [])
 	_label_trait.text = ", ".join(_short(traits)) if not traits.is_empty() else "—"
+	var summary := DragonFlight.level_resist_summary(level_def)
+	_label_element.text = DragonFlight.element_name(dragon_element) if summary.is_empty() else "%s · Gegner %s" % [DragonFlight.element_name(dragon_element), summary]
 	var effects: Array[String] = []
 	if buff_shield > 0.0:
 		effects.append("Schild %.0fs" % buff_shield)
@@ -799,7 +824,7 @@ func _tick_banner(dt: float) -> void:
 
 ## Circle overlap between a moving sphere and an enemy.
 func _hits(x: float, y: float, z: float, radius: float, enemy: Dictionary) -> bool:
-	var kind := DragonFlight.enemy_by_id(str(enemy["kind"]))
+	var kind: Dictionary = enemy["spec"]
 	var reach: float = float(kind["radius"]) + radius + (2.0 if bool(enemy["boss"]) else 0.0)
 	var dx := x - float(enemy["x"])
 	var dy := y - float(enemy["y"])

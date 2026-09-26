@@ -23,6 +23,12 @@ func run(kit: TestKit) -> void:
 	_suite(_mechanics)
 	_suite(_dragon_flight)
 	_suite(_flight_genetics)
+	_suite(_flight_forecast)
+	_suite(_flight_elements)
+	_suite(_flight_stats)
+	_suite(_flight_profile)
+	_suite(_dragon_flight)
+	_suite(_flight_genetics)
 	_suite(_flight_stats)
 	_suite(_flight_profile)
 	_suite(_siedler_map)
@@ -1300,4 +1306,339 @@ func _siedler_economy() -> void:
 		break
 	for good in Siedler.GOODS:
 		t.check(int(stable.store.get(good, 0)) >= 0, "'%s' wird nicht negativ" % good)
+	t.suite_done()
+
+
+func _dragon_flight() -> void:
+	t.suite("Drachenflug — Stammdaten")
+	t.check(DragonFlight.BREEDS.size() >= 8, "Mindestens acht Rassen")
+	t.equal(DragonFlight.TRAITS.size(), 12, "Zwölf vererbbare Merkmale")
+	t.check(DragonFlight.ENEMIES.size() >= 8, "Mindestens acht Gegner")
+	t.equal(DragonFlight.level_count(), 30, "Dreißig Level")
+	t.equal(DragonFlight.BIOMES.size(), 10, "Zehn Biome")
+	var unique_breeds := {}
+	for breed in DragonFlight.BREEDS:
+		unique_breeds[str(breed["id"])] = true
+		t.check(AssetRegistry.exists(str(breed["asset"])), "Rasse '%s' hat ein Mesh" % str(breed["id"]))
+	t.equal(unique_breeds.size(), DragonFlight.BREEDS.size(), "Rassen-IDs sind eindeutig")
+	for enemy in DragonFlight.ENEMIES:
+		t.check(AssetRegistry.exists(str(enemy["asset"])), "Gegner '%s' hat ein Mesh" % str(enemy["id"]))
+	for entry in DragonFlight.POWERUPS:
+		t.check(AssetRegistry.exists(str(entry["asset"])), "Power-up '%s' hat ein Mesh" % str(entry["id"]))
+
+	# Die Level müssen durchgehend schwerer werden.
+	var previous := 0.0
+	for n in range(1, DragonFlight.level_count() + 1):
+		var level_def := DragonFlight.level(n)
+		t.equal(int(level_def["n"]), n, "Level %d ist durchnummeriert" % n)
+		t.equal(DragonFlight.biome_by_id(str(level_def["biome"]))["id"], level_def["biome"], "Level %d hat ein bekanntes Biom" % n)
+		t.check(float(level_def["hpMult"]) >= previous, "Level %d ist nicht leichter als der Vorgänger" % n)
+		previous = float(level_def["hpMult"])
+		t.check(DragonFlight.enemy_by_id(DragonFlight.pick_enemy(level_def)["id"]) != null, "Level %d spawnt einen bekannten Gegner" % n)
+	t.check(DragonFlight.level(0)["n"] == 1, "Level 0 klemmt auf Level 1")
+	t.check(DragonFlight.level(999)["n"] == 30, "Level 999 klemmt auf das letzte Level")
+	t.check(DragonFlight.concurrent_for(1) < DragonFlight.concurrent_for(30), "Späte Level haben mehr Gegner")
+	t.check(DragonFlight.spawn_gap(DragonFlight.level(1)) > 0.0, "Spawn-Abstand ist positiv")
+
+	# Sterne und Freischaltung.
+	t.equal(DragonFlight.stars_for_run(false, 1.0), 0, "Nicht beendet heißt keine Sterne")
+	t.equal(DragonFlight.stars_for_run(true, 1.0), 3, "Unversehrt sind drei Sterne")
+	t.equal(DragonFlight.stars_for_run(true, 0.6), 2, "Halbe Hülle sind zwei Sterne")
+	t.equal(DragonFlight.stars_for_run(true, 0.1), 1, "Knapp überstanden ist ein Stern")
+	var fresh := DragonFlight.default_profile()
+	t.check(DragonFlight.is_unlocked(1, fresh), "Level 1 ist immer offen")
+	t.check(not DragonFlight.is_unlocked(2, fresh), "Level 2 ist am Anfang zu")
+	DragonFlight.apply_run(fresh, 1, {"score": 100, "stars": 3, "gold": 50, "eggs": 0, "new_best": 1})
+	t.check(DragonFlight.is_unlocked(2, fresh), "Nach Level 1 öffnet Level 2")
+	t.check(DragonFlight.stars_of(1, fresh) == 3, "Sterne werden gespeichert")
+	t.equal(DragonFlight.total_stars(fresh), 3, "Sterne werden gezählt")
+	t.check(not DragonFlight.is_unlocked(7, fresh), "Weit entfernte Level bleiben zu")
+	DragonFlight.apply_run(fresh, 7, {"score": 1, "stars": 3, "gold": 0, "eggs": 0, "new_best": 0})
+	t.equal(DragonFlight.stars_of(1, fresh), 3, "Ein später Versuch überschreibt Level 1 nicht")
+	t.check(DragonFlight.star_requirement(7) > 0, "Späte Level verlangen Sterne")
+	for n in range(1, 7):
+		DragonFlight.apply_run(fresh, n, {"score": 10, "stars": 3, "gold": 0, "eggs": 0, "new_best": 0})
+	t.check(DragonFlight.is_unlocked(7, fresh), "Genug Sterne öffnen Level 7")
+	t.suite_done()
+
+
+func _flight_genetics() -> void:
+	t.suite("Drachenflug — Vererbung")
+	t.equal(DragonFlight.expressed_traits({}).size(), 0, "Ohne Allele gibt es keine Merkmale")
+	# Ein dominantes Merkmal braucht ein einziges Allel, ein rezessives zwei.
+	var dominant := {"feueratem": "Fa"}
+	t.check(DragonFlight.expressed(dominant, "feueratem"), "Dominantes Merkmal zeigt mit einem Allel")
+	t.check(not DragonFlight.expressed(dominant, "eisenhaut"), "Fremdes Merkmal zeigt nicht")
+	t.check(DragonFlight.expressed({"riesenwuchs": "rr"}, "riesenwuchs"), "Rezessiv zeigt mit zwei Allelen")
+	t.check(not DragonFlight.expressed({"riesenwuchs": "Rr"}, "riesenwuchs"), "Ein rezessives Allel bleibt verborgen")
+	t.check(not DragonFlight.expressed({"riesenwuchs": "RR"}, "riesenwuchs"), "Zwei dominante Allele zeigen ein rezessives Merkmal nicht")
+	# Alle Merkmale eines Zufallsgenoms müssen genau den ausgewiesenen entsprechen.
+	var genome := DragonFlight.random_genome()
+	t.equal(genome.size(), DragonFlight.TRAITS.size(), "Jedes Merkmal hat ein Allelpaar")
+	var expressed := DragonFlight.expressed_traits(genome)
+	var again := DragonFlight.expressed_traits(genome)
+	t.equal(expressed, again, "Die Merkmalsliste ist reproduzierbar")
+	for id in expressed:
+		t.check(DragonFlight.trait_by_id(id) != {}, "Merkmal '%s' ist bekannt" % id)
+
+	# Kreuzung: ein Kind kann nur Allele tragen, die die Eltern hatten.
+	var carrier_a := {}
+	var carrier_b := {}
+	for gene in DragonFlight.TRAITS:
+		var dom := str(gene["dom"])
+		var rec := dom.to_lower()
+		carrier_a[str(gene["id"])] = dom + rec
+		carrier_b[str(gene["id"])] = rec + rec
+	var child := DragonFlight.cross_alleles(carrier_a, carrier_b, 0.0)
+	t.equal(child.size(), DragonFlight.TRAITS.size(), "Das Kind hat ein Allelpaar je Merkmal")
+	for gene in DragonFlight.TRAITS:
+		var id := str(gene["id"])
+		var pair := str(child[id])
+		t.equal(pair.length(), 2, "Allelpaar '%s' hat zwei Zeichen" % id)
+		for i in 2:
+			t.check(pair[i] == str(gene["dom"]) or pair[i] == str(gene["dom"]).to_lower(),
+				"Allel '%s' ist dominant oder rezessiv" % id)
+
+	# Zwei Träger eines rezessiven Merkmals bekommen es mit hoher Wahrscheinlichkeit.
+	var hits := 0
+	for i in 400:
+		var kid := DragonFlight.cross_alleles({"riesenwuchs": "rr"}, {"riesenwuchs": "rr"}, 0.0)
+		if DragonFlight.expressed(kid, "riesenwuchs"):
+			hits += 1
+	t.equal(hits, 400, "Zwei rezessive Träger vererben es immer")
+
+	# Nur ein Träger: das Kind darf es nie zeigen.
+	var leaked := 0
+	for i in 400:
+		var kid2 := DragonFlight.cross_alleles({"riesenwuchs": "rr"}, {"riesenwuchs": "RR"}, 0.0)
+		if DragonFlight.expressed(kid2, "riesenwuchs"):
+			leaked += 1
+	t.equal(leaked, 0, "Ein Träger allein vererbt das rezessive Merkmal nicht")
+
+	# Inzucht kostet Lebenskraft, Kreuzung mit fremden Linien nicht.
+	var parent_a := DragonFlight.random_dragon(1, ["ember"])
+	var parent_b := DragonFlight.random_dragon(2, ["ember"])
+	parent_b["alleles"] = DragonFlight.random_genome()
+	t.check(DragonFlight.inbreeding_penalty(parent_a, parent_a) <= 1.0, "Inzuchtpenalty ist höchstens 1")
+	t.check(DragonFlight.inbreeding_penalty(parent_a, parent_b) >= 0.7, "Inzuchtpenalty hat eine Untergrenze")
+
+	var child_dragon := DragonFlight.breed_parents(parent_a, parent_b, 7)
+	t.equal(int(child_dragon["uid"]), 7, "Das Kind bekommt die UID")
+	t.equal(int(child_dragon["gen"]), maxi(int(parent_a["gen"]), int(parent_b["gen"])) + 1, "Generation steigt")
+	t.check(DragonFlight.breed_by_id(str(child_dragon["breed"])) != null, "Das Kind hat eine gültige Rasse")
+	t.suite_done()
+
+
+func _flight_forecast() -> void:
+	t.suite("Drachenflug — Zuchtvorhersage")
+	# Allele-Weitergabe: die beiden Wahrscheinlichkeiten ergaenzen sich zu 1.
+	var both := DragonFlight.allele_pass_probabilities({"feueratem": "FF"}, "feueratem")
+	t.almost(float(both["passes_dominant"]) + float(both["passes_recessive"]), 1.0, 0.0001, "FF gibt immer dominant weiter")
+	t.almost(float(both["passes_dominant"]), 1.0, 0.0001, "FF reicht Fehleratem sicher weiter")
+	var mixed := DragonFlight.allele_pass_probabilities({"feueratem": "Fa"}, "feueratem")
+	t.almost(float(mixed["passes_dominant"]), 0.5, 0.0001, "Fa ist zur Hälfte dominant")
+	var none := DragonFlight.allele_pass_probabilities({"feueratem": "aa"}, "feueratem")
+	t.almost(float(none["passes_dominant"]), 0.0, 0.0001, "aa gibt nie dominant weiter")
+	t.equal(DragonFlight.allele_pass_probabilities({}, "feueratem")["passes_dominant"], 0.5, "Ohne Allele gilt 50/50")
+	t.almost(DragonFlight.allele_pass_probabilities({"feueratem": "FF"}, "gibtsnicht")["passes_dominant"], 0.5, 0.0001, "Unbekanntes Merkmal ist neutral")
+
+	# Ein dominantes Merkmal braucht ein dominantes Allel — ein Träger reicht.
+	var carrier := {"alleles": {"feueratem": "Fa"}}
+	var homozygous := {"alleles": {"feueratem": "FF"}}
+	var clean := {"alleles": {"feueratem": "aa"}}
+	t.almost(DragonFlight.trait_probability(carrier, carrier, "feueratem"), 0.75, 0.0001, "Zwei Träger: 75 %")
+	t.almost(DragonFlight.trait_probability(homozygous, clean, "feueratem"), 1.0, 0.0001, "FF x aa ist sicher")
+	t.almost(DragonFlight.trait_probability(clean, clean, "feueratem"), 0.0, 0.0001, "aa x aa ist nie dominant")
+
+	# Ein rezessives Merkmal dreht sich um: genau dann, wenn beide weitergeben.
+	# Wichtig: beide Elternteile müssen das Merkmal auch tragen, sonst greift der
+	# Neutralwert von 50 % — "nicht vorhanden" heisst "unbekannt", nicht "nicht".
+	var rec_a := {"alleles": {"riesenwuchs": "rr"}}
+	var rec_b := {"alleles": {"riesenwuchs": "rr"}}
+	var rec_dom := {"alleles": {"riesenwuchs": "RR"}}
+	t.almost(DragonFlight.trait_probability(rec_a, rec_b, "riesenwuchs"), 1.0, 0.0001, "Zwei rezessive Träger sind sicher")
+	t.almost(DragonFlight.trait_probability(rec_a, rec_dom, "riesenwuchs"), 0.0, 0.0001, "Ein Träger allein reicht nicht")
+	t.almost(DragonFlight.trait_probability(clean, clean, "riesenwuchs"), 0.25, 0.0001, "Ohne Allele gilt der Neutralwert 25 %")
+	var half := {"alleles": {"riesenwuchs": "Rr"}}
+	t.almost(DragonFlight.trait_probability(half, half, "riesenwuchs"), 0.25, 0.0001, "Rr x Rr ergibt 25 %")
+
+	# Die Vorhersage deckt alle Merkmale ab und ist absteigend sortiert.
+	var forecast := DragonFlight.breeding_forecast(carrier, clean)
+	t.equal(forecast.size(), DragonFlight.TRAITS.size(), "Die Vorhersage nennt jedes Merkmal")
+	var previous := 2.0
+	for entry in forecast:
+		var chance := float(entry["chance"])
+		t.check(chance >= 0.0 and chance <= 1.0, "Wahrscheinlichkeit liegt zwischen 0 und 1")
+		t.check(chance <= previous + 0.0001, "Die Vorhersage ist absteigend sortiert")
+		previous = chance
+	# Die Merkmale der Eltern tauchen mit 100 % auf.
+	var names: Array[String] = []
+	for entry in forecast:
+		names.append(str(entry["name"]))
+	t.check("Feueratem" in names, "Feueratem steht in der Vorhersage")
+	t.equal(DragonFlight.breeding_forecast({}, {})[0].size(), 6, "Auch leere Eltern ergeben einen Eintrag")
+
+	# Ahnenlinie: Wurzeln haben keine Eltern, ein Kind schon.
+	var root := DragonFlight.random_dragon(1, ["ember"])
+	t.equal(DragonFlight.parent_uids(root).size(), 0, "Ein Stammlinien-Drache hat keine Eltern")
+	t.equal(DragonFlight.ancestors({}, int(root["uid"])).size(), 0, "Ohne Profil gibt es keine Ahnen")
+	var profile := DragonFlight.default_profile()
+	var parent_a := DragonFlight.random_dragon(1, ["ember"])
+	var parent_b := DragonFlight.random_dragon(2, ["frost"])
+	profile["dragons"] = [parent_a, parent_b]
+	var child := DragonFlight.breed_parents(parent_a, parent_b, 3)
+	t.equal(DragonFlight.parent_uids(child), [1, 2], "Das Kind kennt beide Eltern")
+	var grandchild := DragonFlight.breed_parents(child, parent_a, 4)
+	profile["dragons"].append(child)
+	profile["dragons"].append(grandchild)
+	t.equal(DragonFlight.parent_uids(grandchild), [3, 1], "Das Enkelkind kennt seine Eltern")
+	var tree := DragonFlight.ancestors(profile, 4, 2)
+	t.check(tree.size() >= 2, "Die Ahnenliste ist nicht leer")
+	var uids: Array[int] = []
+	for entry in tree:
+		uids.append(int(entry["uid"]))
+	t.check(4 not in uids, "Ein Drache erscheint nicht selbst in seiner Ahnenliste")
+	t.check(1 in uids, "Der Großelternteil taucht auf")
+	t.suite_done()
+
+
+func _flight_elements() -> void:
+	t.suite("Drachenflug — Elemente")
+	t.check(not DragonFlight.element_name("fire").is_empty(), "Feuer hat einen Namen")
+	t.check(DragonFlight.element_name("fire") != DragonFlight.element_name("ice"), "Feuer und Frost heißen verschieden")
+	# Widerstand mindert, Anfälligkeit verstaerkt, beides mit Grenzen.
+	t.almost(DragonFlight.element_multiplier("fire", {}), 1.0, 0.0001, "Ohne Widerstand gilt 1,0")
+	t.almost(DragonFlight.element_multiplier("fire", {"fire": 0.5}), 0.5, 0.0001, "Feuerfest halbiert den Schaden")
+	t.almost(DragonFlight.element_multiplier("fire", {"fire": -0.5}), 1.5, 0.0001, "Feueranfällig verstärkt ihn")
+	t.check(DragonFlight.element_multiplier("fire", {"fire": 5.0}) >= 0.25, "Der Multiplikator hat eine Untergrenze")
+	t.check(DragonFlight.element_multiplier("fire", {"fire": -5.0}) <= 2.0, "Der Multiplikator hat eine Obergrenze")
+	t.almost(DragonFlight.element_multiplier("ice", {"fire": 0.5}), 1.0, 0.0001, "Frost zahlt nicht für Feuerwiderstand")
+
+	# Jeder Gegner hat Widerstaende, und die Level-Briefing fasst sie zusammen.
+	for enemy in DragonFlight.ENEMIES:
+		t.check(enemy.has("resist"), "Gegner '%s' nennt seinen Widerstand" % str(enemy["id"]))
+		t.check((enemy["resist"] as Dictionary).size() > 0, "Gegner '%s' hat mindestens einen Widerstand" % str(enemy["id"]))
+	for breed in DragonFlight.BREEDS:
+		t.check(not str(breed.get("element", "")).is_empty(), "Rasse '%s' hat ein Element" % str(breed["id"]))
+	# Der Steindrache ist feuerfest, der Giftdrache nicht.
+	t.check(float(DragonFlight.enemy_by_id("golem")["resist"]["fire"]) > 0.0, "Der Golem ist feuerfest")
+	t.check(float(DragonFlight.enemy_by_id("ballista")["resist"]["fire"]) < 0.0, "Die Ballista ist feueranfällig")
+
+	var summary := DragonFlight.level_resist_summary(DragonFlight.level(1))
+	t.check(not summary.is_empty(), "Das Briefing nennt die Widerstände")
+	t.check(summary.contains("Feuer"), "Das Briefing nennt Feuer")
+	# Das Element steckt in den aufgelösten Werten.
+	var stats := DragonFlight.resolve_stats({"breed": "stone", "alleles": {}, "gen": 1})
+	t.equal(str(stats["element"]), "earth", "Die aufgelösten Werte kennen das Element")
+	t.suite_done()
+
+
+func _flight_stats() -> void:
+	t.suite("Drachenflug — Werte")
+	var plain := {"breed": "ember", "alleles": {}, "gen": 1, "vitality": 1.0}
+	var base := DragonFlight.resolve_stats(plain)
+	var breed := DragonFlight.breed_by_id("ember")
+	t.almost(float(base["max_hp"]), float(breed["hp"]), 0.01, "Ohne Merkmale gilt der Rassenwert")
+	t.check(DragonFlight.visual_scale(plain) > 0.0, "Ein Drache hat eine Größe")
+
+	# Feueratem muss den Schaden heben, Schnellfeuer die Feuerrate senken.
+	var fire := DragonFlight.resolve_stats({"breed": "ember", "alleles": {"feueratem": "FF"}, "gen": 1})
+	t.check(float(fire["damage"]) > float(base["damage"]), "Feueratem erhöht den Schaden")
+	var haste := DragonFlight.resolve_stats(plain, {"haste": 4})
+	t.check(float(haste["fire_rate"]) < float(base["fire_rate"]), "Schnellfeuer senkt die Feuerrate")
+	t.check(float(haste["damage"]) == float(base["damage"]), "Schnellfeuer ändert nichts anderes")
+	var tank := DragonFlight.resolve_stats(plain, {"vitality": 5, "armor": 8})
+	t.check(float(tank["max_hp"]) > float(base["max_hp"]), "Zähigkeit erhöht die TP")
+	t.check(float(tank["armor"]) >= 0.0 and float(tank["armor"]) <= 0.72, "Rüstung bleibt im Rahmen")
+
+	# Riesenwuchs macht sichtbar größer.
+	var big := DragonFlight.resolve_stats({"breed": "ember", "alleles": {"riesenwuchs": "rr"}, "gen": 1})
+	t.check(DragonFlight.visual_scale({"breed": "ember", "alleles": {"riesenwuchs": "rr"}, "gen": 1}) > DragonFlight.visual_scale(plain),
+		"Riesenwuchs macht den Drachen größer")
+	t.check(float(big["max_hp"]) > float(base["max_hp"]), "Riesenwuchs gibt mehr TP")
+	t.check(float(big["speed"]) < float(base["speed"]), "Riesenwuchs kostet Tempo")
+
+	# Die Generation schrumpft nie unter die Rassengröße.
+	t.check(DragonFlight.visual_scale({"breed": "ember", "alleles": {}, "gen": 40}) >= float(breed["size"]) * 0.99,
+		"Generation macht höchstens größer")
+	t.check(DragonFlight.visual_scale({"breed": "ember", "alleles": {}, "gen": 1, "vitality": 0.7}) > 0.5,
+		"Eine geschwächte Linie bleibt sichtbar")
+
+	# Schaden und Rüstung.
+	var shot := DragonFlight.roll_shot(base, 1.0)
+	t.check(float(shot["damage"]) >= 1.0, "Ein Schuss richtet mindestens 1 Schaden an")
+	t.check(DragonFlight.roll_shot(base, 2.0)["damage"] >= shot["damage"] * 0.5, "Der Level multipliziert den Schaden")
+	t.almost(DragonFlight.mitigate(100.0, 0.0), 100.0, 0.01, "Ohne Rüstung kommt voller Schaden an")
+	t.check(DragonFlight.mitigate(100.0, 0.5) < 100.0, "Rüstung mindert Schaden")
+	t.check(DragonFlight.mitigate(100.0, 5.0) >= 1.0, "Auch übermäßige Rüstung lässt Schaden durch")
+	t.suite_done()
+
+
+func _flight_profile() -> void:
+	t.suite("Drachenflug — Profil & Zucht")
+	# Eigene Datei, damit der Testlauf den Spielerstand nicht überschreibt.
+	var real_path := DragonFlight.save_path
+	DragonFlight.save_path = "user://dragonflight_test.json"
+	DragonFlight.reset_profile()
+	var profile := DragonFlight.default_profile()
+	t.equal(int(profile["gold"]), 0, "Neues Profil startet ohne Gold")
+	var first_cost := DragonFlight.upgrade_cost("firepower", profile)
+	t.check(first_cost > 0, "Ein Upgrade kostet Gold")
+	profile["gold"] = 100000
+	var level_before := DragonFlight.upgrade_level("firepower", profile)
+	t.equal(DragonFlight.buy_upgrade("firepower", profile), level_before + 1, "Ein Upgrade wird gekauft")
+	t.check(int(profile["gold"]) < 100000, "Der Kauf kostet Gold")
+	t.check(DragonFlight.upgrade_cost("firepower", profile) > first_cost, "Jede Stufe kostet mehr")
+	profile["upgrades"] = {"firepower": 99}
+	t.equal(DragonFlight.upgrade_cost("firepower", profile), -1, "Eine maxe Stufe kostet nichts mehr")
+	t.equal(DragonFlight.buy_upgrade("firepower", profile), -1, "Über maxe Stufen kann man nicht kaufen")
+	profile["upgrades"] = {}
+
+	# Rassen kaufen.
+	profile["gold"] = 50000
+	var starter := DragonFlight.buy_breed(profile, "ember")
+	t.check(not starter.is_empty(), "Der Starter ist kaufbar")
+	t.equal(DragonFlight.buy_breed(profile, "ember").size(), 0, "Dieselbe Rasse wird nicht doppelt gekauft")
+	var frost := DragonFlight.buy_breed(profile, "frost")
+	t.check(not frost.is_empty(), "Eine weitere Rasse ist kaufbar")
+	t.check(DragonFlight.has_breed(profile, "frost"), "Die Rasse gilt als freigeschaltet")
+	profile["gold"] = 0
+	t.equal(DragonFlight.buy_breed(profile, "void").size(), 0, "Ohne Gold kein Kauf")
+	profile["gold"] = 100000
+	var owned_before := DragonFlight.dragons_of(profile).size()
+
+	# Eier legen und ausbrüten.
+	var egg := DragonFlight.lay_egg(profile, "ember", 60.0)
+	t.check(egg.get("egg", null) != null, "Das gelegte Ei ist ein Ei")
+	t.equal(DragonFlight.eggs_of(profile).size(), 1, "Das Ei liegt im Nest")
+	t.equal(DragonFlight.dragons_of(profile).size(), owned_before, "Ein Ei zählt nicht als Drache")
+	t.check(DragonFlight.egg_remaining(egg, Time.get_unix_time_from_system()) > 50.0, "Das Ei braucht Zeit")
+	t.check(DragonFlight.egg_progress(egg, Time.get_unix_time_from_system()) < 0.2, "Die Brut ist noch am Anfang")
+	t.equal(DragonFlight.hatch(egg).size(), 0, "Ein unreifes Ei schlüpft nicht")
+	var ready := DragonFlight.lay_egg(profile, "ember", 1.0)
+	t.check(DragonFlight.egg_remaining(ready, Time.get_unix_time_from_system() + 10.0) <= 0.0, "Nach der Zeit ist es reif")
+	t.almost(DragonFlight.egg_progress(ready, Time.get_unix_time_from_system() + 10.0), 1.0, 0.001, "Ein reifes Ei ist bei 100 %")
+	t.check(DragonFlight.hatch_cost(egg) > 0, "Beschleunigen kostet Gold")
+	var hatched := DragonFlight.hatch(egg, true)
+	t.check(hatched.get("egg", null) == null, "Nach dem Schlüpfen ist es kein Ei mehr")
+	t.equal(DragonFlight.hatch(hatched).size(), 0, "Ein schon geschlüpfter Drache schlüpft nicht erneut")
+	t.check(DragonFlight.incubation_seconds("void") > DragonFlight.incubation_seconds("ember"), "Seltene Rassen brauchen länger")
+
+	# Zucht: zwei Drachen paaren.
+	var parent_a := DragonFlight.dragon_by_uid(profile, int(starter["uid"]))
+	var parent_b := DragonFlight.dragon_by_uid(profile, int(frost["uid"]))
+	var cost := DragonFlight.pairing_cost(parent_a, parent_b)
+	t.check(cost > 0, "Paaren kostet Gold")
+	profile["gold"] = cost
+	var list: Array = profile["dragons"]
+	list.append(DragonFlight.breed_parents(parent_a, parent_b, DragonFlight.next_uid(profile)))
+	profile["dragons"] = list
+	t.equal(DragonFlight.eggs_of(profile).size(), 2, "Die Zucht legt ein zweites Ei")
+	DragonFlight.save_profile(profile)
+	var reloaded := DragonFlight.load_profile()
+	t.equal(DragonFlight.dragons_of(reloaded).size(), DragonFlight.dragons_of(profile).size(), "Das Profil überlebt das Speichern")
+	t.equal(DragonFlight.eggs_of(reloaded).size(), 2, "Eier überleben das Speichern")
+	t.equal(int(reloaded["gold"]), cost, "Gold überlebt das Speichern")
+	DragonFlight.reset_profile()
+	DragonFlight.save_path = real_path
 	t.suite_done()
