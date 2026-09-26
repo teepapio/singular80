@@ -124,7 +124,7 @@ export function createApp(options: AppOptions): FastifyInstance {
   });
 
   app.post('/api/suggestions', async (req, reply) => {
-    const body = (req.body ?? {}) as { text?: string; author?: string; source?: string };
+    const body = (req.body ?? {}) as { text?: string; author?: string; source?: string; clientKey?: unknown };
     const text = (body.text ?? '').trim();
     if (text.length < 3 || text.length > 2000) {
       return reply.code(400).send({ error: 'Der Vorschlag muss zwischen 3 und 2000 Zeichen lang sein.' });
@@ -136,14 +136,25 @@ export function createApp(options: AppOptions): FastifyInstance {
     const canon = findCanonical(text, candidates);
     const category = classify(text);
     const settings = store.getSettings();
-    const suggestion = store.createSuggestion({
+    // The store decides whether this is a new row or a replay: a lost response
+    // makes the client send the same `clientKey` again, and only the unique
+    // index can tell a retry from a genuine second suggestion.
+    const { suggestion, created } = store.createSuggestionOnce({
       text,
       author,
       source,
       category,
       canonicalId: canon?.canonicalId ?? null,
       status: 'new',
+      clientKey: body.clientKey,
     });
+    if (!created) {
+      // Replay: no row, no Discord post, no event. The client gets the current
+      // state of its suggestion in the same shape as the first answer, and the
+      // header makes the replay visible to the dashboard and to tests without
+      // adding a field the client would have to know.
+      return reply.header('X-Suggestion-Replay', '1').send(viewOf(suggestion.id)!);
+    }
     if (settings.autoApprove) {
       const clusterSize = canon ? canon.clusterIds.length + 1 : 1;
       const { score } = scoreSuggestion(suggestion, Date.now(), clusterSize);

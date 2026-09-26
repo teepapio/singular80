@@ -39,6 +39,7 @@ interface SuggestionRow {
   discord_message_id: string | null;
   run_id: string | null;
   parent_id: number | null;
+  client_key: string | null;
 }
 
 interface RunRow {
@@ -82,6 +83,7 @@ function rowToSuggestion(row: SuggestionRow): Suggestion {
     discordMessageId: row.discord_message_id,
     runId: row.run_id,
     parentId: row.parent_id ?? null,
+    clientKey: row.client_key ?? null,
   };
 }
 
@@ -116,6 +118,49 @@ function rowToRun(row: RunRow): RunRecord {
     note: row.note ?? null,
     scopeIssues: row.scope_issues ?? null,
   };
+}
+
+export interface CreateSuggestionInput {
+  text: string;
+  author: string;
+  source: string;
+  category: string;
+  canonicalId: number | null;
+  status?: SuggestionStatus;
+  parentId?: number | null;
+  /** Idempotency key of the client, see `normalizeClientKey`. */
+  clientKey?: unknown;
+}
+
+export interface CreateSuggestionResult {
+  suggestion: Suggestion;
+  /** false = a suggestion with this `clientKey` already existed (an offline retry). */
+  created: boolean;
+}
+
+/** Obergrenze für `clientKey` — Teil des Vertrags mit der Warteschlange im Spiel. */
+export const CLIENT_KEY_MAX = 64;
+
+/**
+ * Macht den `clientKey` eines Vorschlag-Requests benutzbar — oder `null` für
+ * „kein Schlüssel".
+ *
+ * Der Schlüssel bleibt dabei opak; der Server speichert ihn nur und erkennt
+ * daran einen Retry. Alles, was keine brauchbare Zeichenkette ist, zählt als
+ * *kein* Schlüssel: ein kaputter Request verhält sich damit exakt wie ein
+ * älterer Client, der das Feld gar nicht kennt — kein 500, kein 400, einfach
+ * ein normaler neuer Vorschlag.
+ *
+ * Ein zu langer Schlüssel wird bewusst verworfen und nicht gekürzt. Zwei
+ * verschiedene Schlüssel mit denselben ersten 64 Zeichen landeten sonst in
+ * derselben Zeile, und ein Retry bekäme den Vorschlag eines Fremden zu sehen —
+ * eine doppelte Zeile ist das alte Verhalten und das kleinere Problem.
+ */
+export function normalizeClientKey(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || trimmed.length > CLIENT_KEY_MAX) return null;
+  return trimmed;
 }
 
 export class Store {
@@ -199,6 +244,24 @@ export class Store {
     } catch {
       /* column already exists */
     }
+    // Offline queue of the game: the client retries a suggestion with the same
+    // `clientKey` when the first response got lost, and the retry must not
+    // become a second row. Additive and nullable, so old rows keep reading as
+    // "no key" and stay valid.
+    try {
+      this.db.exec('ALTER TABLE suggestions ADD COLUMN client_key TEXT');
+    } catch (err) {
+      if (!/duplicate column name/i.test((err as Error).message)) throw err;
+    }
+    // The index is the actual idempotency enforcement: it also holds when two
+    // retries arrive at the same moment, or when a second process writes to the
+    // same file — a read-then-write in the route cannot promise that. Partial on
+    // purpose: a plain UNIQUE would allow only *one* suggestion without a key
+    // ever (SQLite counts NULLs as equal), and almost every suggestion — the
+    // dashboard, older client builds, split sub-tasks — still has none.
+    this.db.exec(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_suggestions_client_key ON suggestions(client_key) WHERE client_key IS NOT NULL',
+    );
     // Runner policy: retry attempts, hard timeout, scope bookkeeping. Every
     // column is additive and nullable/defaulted, so an old database keeps
     // working and old runs simply read back as "first attempt, no timeout".
@@ -222,38 +285,67 @@ export class Store {
     }
   }
 
-  createSuggestion(input: {
-    text: string;
-    author: string;
-    source: string;
-    category: string;
-    canonicalId: number | null;
-    status?: SuggestionStatus;
-    parentId?: number | null;
-  }): Suggestion {
+  createSuggestion(input: CreateSuggestionInput): Suggestion {
+    return this.createSuggestionOnce(input).suggestion;
+  }
+
+  /**
+   * Legt einen Vorschlag an — oder liefert den, den es zu `clientKey` schon
+   * gibt.
+   *
+   * Die Idempotenz sitzt hier und nicht in der Route: ein „erst lesen, dann
+   * schreiben" im Request erkennt zwei *gleichzeitig* eingetroffene Retrys
+   * nicht, weil beide noch nichts sehen. Der partielle UNIQUE-Index entscheidet
+   * stattdessen, welcher Versuch gewinnt; der Verlierer fängt die Verletzung und
+   * liest die Gewinnerzeile zurück. Damit ist auch der Fall abgedeckt, in dem
+   * ein zweiter Prozess auf derselben Datei schneller war.
+   *
+   * `created` ist die Antwort auf die einzige Frage, die die Route stellen muss:
+   * darf ich Discord informieren und ein `suggestion:new` senden?
+   */
+  createSuggestionOnce(input: CreateSuggestionInput): CreateSuggestionResult {
+    const clientKey = normalizeClientKey(input.clientKey);
     const now = Date.now();
     const stmt = this.db.prepare(
-      `INSERT INTO suggestions (text, author, source, category, status, votes, canonical_id, created_at, updated_at, parent_id)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+      `INSERT INTO suggestions (text, author, source, category, status, votes, canonical_id, created_at, updated_at, parent_id, client_key)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
     );
-    const result = stmt.run(
-      input.text,
-      input.author,
-      input.source,
-      input.category,
-      input.status ?? 'new',
-      input.canonicalId,
-      now,
-      now,
-      input.parentId ?? null,
-    );
-    return this.getSuggestion(Number(result.lastInsertRowid))!;
+    try {
+      const result = stmt.run(
+        input.text,
+        input.author,
+        input.source,
+        input.category,
+        input.status ?? 'new',
+        input.canonicalId,
+        now,
+        now,
+        input.parentId ?? null,
+        clientKey,
+      );
+      return { suggestion: this.getSuggestion(Number(result.lastInsertRowid))!, created: true };
+    } catch (err) {
+      // Nur eine Eindeutigkeitsverletzung auf dem Schlüssel ist ein Retry.
+      // Alles andere — eine kaputte Datenbank, eine fehlende Spalte — muss
+      // unverändert nach außen durch.
+      if (!clientKey || !isUniqueViolation(err)) throw err;
+      const existing = this.getSuggestionByClientKey(clientKey);
+      if (!existing) throw err;
+      return { suggestion: existing, created: false };
+    }
   }
 
   getSuggestion(id: number): Suggestion | null {
     const row = this.db.prepare('SELECT * FROM suggestions WHERE id = ?').get(id) as
       | SuggestionRow
       | undefined;
+    return row ? rowToSuggestion(row) : null;
+  }
+
+  getSuggestionByClientKey(clientKey: string): Suggestion | null {
+    const row = this.db
+      .prepare('SELECT * FROM suggestions WHERE client_key = ?')
+      .get(clientKey) as SuggestionRow | undefined;
     return row ? rowToSuggestion(row) : null;
   }
 
@@ -438,6 +530,12 @@ export class Store {
     }
     return this.getSettings();
   }
+}
+
+/** SQLite meldet einen verletzten UNIQUE-Index als SQLITE_CONSTRAINT_UNIQUE (2067). */
+function isUniqueViolation(err: unknown): boolean {
+  const sqlite = err as { errcode?: number; message?: string } | null;
+  return sqlite?.errcode === 2067 || /UNIQUE constraint failed/i.test(sqlite?.message ?? '');
 }
 
 function clamp(value: number, min: number, max: number): number {

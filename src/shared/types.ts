@@ -41,6 +41,12 @@ export interface Suggestion {
   runId: string | null;
   /** Id of the parent suggestion when this one was created by splitting another order. */
   parentId?: number | null;
+  /**
+   * Stable per-suggestion key the game sends with every attempt. A repeated key
+   * is a retry after a lost response and creates nothing new; `null` for
+   * suggestions without one (dashboard, older client builds).
+   */
+  clientKey?: string | null;
 }
 
 export interface SuggestionView extends Suggestion {
