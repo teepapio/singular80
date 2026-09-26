@@ -7,8 +7,12 @@ extends RefCounted
 ## player never loses an idea.
 
 const MAX_LENGTH := 2000
+const QueueClass := preload("res://src/core/logic/suggestion_queue.gd")
 
 static var _layer: CanvasLayer = null
+## Hängt am Autoload, solange der Dialog offen ist, und wird in `close()` wieder
+## gelöst — sonst riefe ein späterer Vorschlag in ein zerstörtes Label.
+static var _warning_hook: Callable = Callable()
 
 
 ## `context` overrides the automatic label. Leave it empty to use the game the
@@ -31,9 +35,21 @@ static func is_open() -> bool:
 
 
 static func close() -> void:
+	if _warning_hook.is_valid():
+		if is_instance_valid(Api) and Api.suggestion_failed.is_connected(_warning_hook):
+			Api.suggestion_failed.disconnect(_warning_hook)
+		_warning_hook = Callable()
 	if _layer != null and is_instance_valid(_layer):
 		_layer.queue_free()
 	_layer = null
+
+
+## Schreibt den Wartestand in die Zeile. Ohne Warteschlange verschwindet sie
+## ganz, statt „0 Vorschläge warten auf Netz“ zu behaupten.
+static func _show_waiting(label: Label) -> void:
+	var text := QueueClass.pending_hint(Api.pending_count())
+	label.text = text
+	label.visible = text != ""
 
 
 static func _build(tree: SceneTree, context: String = "") -> void:
@@ -77,6 +93,14 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 	hint.custom_minimum_size = Vector2(640, 0)
 	column.add_child(hint)
 
+	# Was noch auf Netz wartet, gehört sichtbar in den Dialog: ein Spieler, der
+	# drei Ideen schon gesendet hat, soll sie nicht für verloren halten.
+	var waiting := Ui.label("", 16, UiTheme.ACCENT)
+	waiting.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	waiting.custom_minimum_size = Vector2(640, 0)
+	column.add_child(waiting)
+	_show_waiting(waiting)
+
 	column.add_child(Ui.label("Dein Vorschlag *", 17, UiTheme.TEXT_DIM, true))
 	var text_area := TextEdit.new()
 	text_area.placeholder_text = "z. B. Füge einen Gegner hinzu, der beim Sterben in zwei kleinere Slimes zerfällt …"
@@ -94,6 +118,20 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status.custom_minimum_size = Vector2(640, 48)
 	column.add_child(status)
+
+	# Die Warteschlange nennt hier ihre Gründe — offline gespeichert, oder
+	# ältester Vorschlag wegen der Obergrenze verworfen. Ohne diesen Kanal
+	# verschwände der Verlust still, und genau das wollte die Warteschlange
+	# vermeiden. `last_warning` hält den Grund für den Absender fest, der ihn
+	# sonst mit seinem eigenen Text überschreiben würde.
+	var last_warning := {"text": ""}
+	_warning_hook = func(reason: String) -> void:
+		last_warning["text"] = reason
+		if not is_instance_valid(status):
+			return
+		status.add_theme_color_override("font_color", UiTheme.WARNING)
+		status.text = reason
+	Api.suggestion_failed.connect(_warning_hook)
 
 	var actions := Ui.hbox(10)
 	actions.alignment = BoxContainer.ALIGNMENT_END
@@ -118,12 +156,17 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 			return
 		send.disabled = true
 		send.text = "Sende …"
+		last_warning["text"] = ""
 		var author := name_edit.text.strip_edges().substr(0, 60)
 		var view := await Api.submit_suggestion(text, author if author != "" else "Anonym", source)
 		if view.is_empty():
 			status.add_theme_color_override("font_color", UiTheme.WARNING)
-			status.text = "Gespeichert, aber noch nicht an den Server geschickt. Die Idee wird gesendet, sobald du wieder online bist."
+			# Ein konkreter Grund aus der Warteschlange schlägt den allgemeinen
+			# Satz: „ältester Vorschlag verworfen“ ist wichtiger als „gespeichert“.
+			var reason := str(last_warning.get("text", ""))
+			status.text = reason if reason != "" else "Gespeichert, aber noch nicht an den Server geschickt. Die Idee wird gesendet, sobald du wieder online bist."
 			send.text = "Gespeichert ✓"
+			_show_waiting(waiting)
 			Sfx.level_up()
 			return
 		Sfx.level_up()
@@ -134,6 +177,7 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 			extra = " Ähnliche Vorschläge gibt es schon (Cluster mit %d Einträgen) — deine Stimme zählt dort mit." % cluster
 		status.text = "Danke! Dein Vorschlag läuft als #%d.%s" % [int(view.get("id", 0)), extra]
 		send.text = "Gesendet ✓"
+		_show_waiting(waiting)
 	)
 
 	backdrop.gui_input.connect(func(event: InputEvent) -> void:
