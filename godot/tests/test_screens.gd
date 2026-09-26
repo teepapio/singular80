@@ -7,6 +7,9 @@ extends RefCounted
 
 var t: TestKit
 var tree: SceneTree
+## Screen ids a scoped run should open; empty means "all of them".
+var _screen_filter := ""
+var _wanted_screens: Dictionary = {}
 
 ## Autoloads are not registered in `--script` mode, so they are fetched by path.
 var content: Node
@@ -17,9 +20,14 @@ var router: Node
 var game: Node
 
 
-func run(kit: TestKit, scene_tree: SceneTree) -> void:
+func run(kit: TestKit, scene_tree: SceneTree, screens: String = "") -> void:
 	t = kit
 	tree = scene_tree
+	_screen_filter = screens
+	for entry in screens.split(",", false):
+		var id := entry.strip_edges()
+		if not id.is_empty():
+			_wanted_screens[id] = true
 	content = _autoload("Content")
 	api = _autoload("Api")
 	router = _autoload("Router")
@@ -33,6 +41,8 @@ func run(kit: TestKit, scene_tree: SceneTree) -> void:
 	await _card_games_accept_input()
 	t.close_suite()
 	await _tetris_accepts_moves()
+	t.close_suite()
+	await _candy_match3_plays()
 	t.close_suite()
 	await _mesh_gallery_flow()
 	t.close_suite()
@@ -71,19 +81,67 @@ func _boot_content() -> void:
 
 func _every_screen_opens() -> void:
 	t.suite("Screens")
+	var checked := 0
+	# A scoped run opens only the screens it owns: this loop is what dominates
+	# the wall-clock time, so narrowing it is the difference between a game agent
+	# waiting seconds and waiting minutes.
 	for screen_id in router.SCREEN_SCRIPTS.keys():
-		router.go_to(str(screen_id))
-		await tree.create_timer(0.45).timeout
-		t.check(router.current_id == str(screen_id), "Screen '%s' wird geöffnet" % screen_id)
+		if not _wants(str(screen_id)):
+			continue
+		checked += 1
+		var arrived := await _goto(str(screen_id))
+		t.check(arrived and router.current_id == str(screen_id), "Screen '%s' wird geöffnet" % screen_id)
 		t.check(router.current_screen != null and is_instance_valid(router.current_screen), "Screen '%s' existiert" % screen_id)
 	# Every registry entry must lead to a working screen.
 	for game in GameRegistry.GAMES:
-		router.play(str(game["id"]))
-		await tree.create_timer(0.35).timeout
-		t.check(router.current_screen != null, "Spiel '%s' startet" % str(game["id"]))
-	router.go_to("lobby")
-	await tree.create_timer(0.3).timeout
+		if not _wants(str(game["screen"])):
+			continue
+		checked += 1
+		var game_id := str(game["id"])
+		await _goto(str(game["screen"]))
+		t.check(router.current_screen != null, "Spiel '%s' startet" % game_id)
+	if checked == 0:
+		# Never report success for a sweep that opened nothing — that is how a
+		# mis-typed scope would look green.
+		t.check(false, "Screen-Filter '%s' passt zu keinem bekannten Screen" % _screen_filter)
+	else:
+		await _goto("lobby")
 	t.suite_done()
+
+
+## True when a screen should be opened: everything without a filter, otherwise
+## only the ids the scope owns.
+func _wants(screen_id: String) -> bool:
+	if _wanted_screens.is_empty():
+		return true
+	return _wanted_screens.has(screen_id)
+
+
+## Switches to a screen and waits only as long as the switch actually takes.
+##
+## The sweep used to sleep a fixed 0.45 s per screen — roughly 11 s of the
+## suite's wall clock spent doing nothing. The router publishes `current_id` as
+## soon as the screen is in the tree, so polling ends the wait after the fade
+## (0.12 s) instead of guessing: faster, and it cannot under-wait a screen that
+## is slow to build. The cap keeps a broken screen from hanging the run.
+func _goto(screen_id: String, cap := 2.0) -> bool:
+	# Drain a transition that is still running, otherwise `go_to` ignores the
+	# request outright and the wait below would burn its whole budget.
+	var waited := 0.0
+	while router.transitioning and waited < cap:
+		await tree.process_frame
+		waited += 1.0 / 60.0
+	router.go_to(screen_id)
+	waited = 0.0
+	while waited < cap:
+		await tree.process_frame
+		waited += 1.0 / 60.0
+		# Both conditions matter: `current_id` flips when the screen is in the
+		# tree, but the router only accepts the next request once the fade ended.
+		if router.current_id == screen_id and not router.transitioning:
+			await tree.process_frame
+			return true
+	return false
 
 
 func _arena_actually_plays() -> void:
@@ -139,15 +197,13 @@ func _arena_actually_plays() -> void:
 	if child != null:
 		screen._spawn_enemy(child, content.enemy_by_id("slime"), Vector2(300, 300), 1.0, 1.0, 1.0)
 		screen._spawn_split(split_def, Vector2(300, 300))
-	router.go_to("lobby")
-	await tree.create_timer(0.3).timeout
+	await _goto("lobby")
 	t.suite_done()
 
 
 func _card_games_accept_input() -> void:
 	t.suite("Kartenspiele — Eingabe")
-	router.go_to("freecell")
-	await tree.create_timer(0.35).timeout
+	await _goto("freecell")
 	var free_cell = router.current_screen
 	t.check(free_cell.columns.size() == 8, "Acht Stapel")
 	var total := 0
@@ -159,8 +215,7 @@ func _card_games_accept_input() -> void:
 	free_cell.auto_move()
 	t.check(free_cell.moves >= moves_before, "Auto-Zug ist sicher")
 	free_cell.undo()
-	router.go_to("poker")
-	await tree.create_timer(0.6).timeout
+	await _goto("poker")
 	var poker = router.current_screen
 	t.check(poker.table.players.size() == 4, "Vier Poker-Spieler")
 	t.check(poker.table.pot > 0, "Blinds gesetzt")
@@ -169,15 +224,13 @@ func _card_games_accept_input() -> void:
 		poker._human_action()
 		await tree.create_timer(0.3).timeout
 		t.check(true, "Menschlicher Zug läuft durch")
-	router.go_to("lobby")
-	await tree.create_timer(0.3).timeout
+	await _goto("lobby")
 	t.suite_done()
 
 
 func _tetris_accepts_moves() -> void:
 	t.suite("Tetris — Eingabe")
-	router.go_to("tetris")
-	await tree.create_timer(0.35).timeout
+	await _goto("tetris")
 	var screen = router.current_screen
 	t.check(screen.board.size() == 20, "20 Reihen")
 	var start_y: int = screen.piece["y"]
@@ -193,8 +246,67 @@ func _tetris_accepts_moves() -> void:
 		screen.board[19][x] = 1
 	screen._clear_lines()
 	t.check(screen.lines >= 1, "Volle Zeile wird geräumt")
-	router.go_to("lobby")
-	await tree.create_timer(0.3).timeout
+	await _goto("lobby")
+	t.suite_done()
+
+
+## Walks the match-3 the way a player does: the level select opens, a real swap
+## costs a move, the cascade plays out, undo takes it back and the palette
+## switch repaints the board.
+func _candy_match3_plays() -> void:
+	t.suite("Candy Crush — Spielablauf")
+	await _goto("candy3d")
+	var screen = router.current_screen
+	t.check(screen != null, "Der Bildschirm öffnet")
+	if screen == null:
+		return
+	t.check(not screen.state.is_empty(), "Ein Level ist geladen")
+	t.check(screen.pieces.size() > 0, "Bonbons liegen auf dem Brett")
+	t.check(screen._select_root.visible, "Die Levelauswahl startet offen")
+	screen._select_root.visible = false
+
+	# Screen-space picking: the board centre maps to the middle cell.
+	# `TestScreens` is a RefCounted, so the viewport comes from the tree.
+	var centre: Vector2 = tree.root.get_visible_rect().size * 0.5
+	t.check(screen._cell_at(centre) >= 0, "Die Bildschirmmitte trifft ein Feld")
+
+	var swaps := CandyMatch3.find_valid_swaps(screen.state["board"], 1)
+	t.check(not swaps.is_empty(), "Es gibt einen spielbaren Zug")
+	var moves_before: int = screen.state["movesLeft"]
+	screen._try_swap(int((swaps[0] as Dictionary)["a"]), int((swaps[0] as Dictionary)["b"]))
+	t.equal(int(screen.state["movesLeft"]), moves_before - 1, "Der Zug kostet einen Zug")
+	t.check(int(screen.state["score"]) > 0, "Der Zug bringt Punkte")
+	t.check(screen.undo_stack.size() == 1, "Der Zug liegt im Undo-Stapel")
+
+	# The cascade runs itself out, then the board is interactive again.
+	for i in 40:
+		screen._update_world(0.35)
+		if screen.mode == 0:
+			break
+	t.equal(screen.mode, 0, "Die Kettenreaktion endet im Auswahlmodus")
+	t.check(not CandyMatch3.has_any_match(screen.state["board"]), "Das Brett ist danach ruhig")
+
+	screen._undo()
+	t.equal(int(screen.state["movesLeft"]), moves_before, "Undo gibt den Zug zurück")
+	t.equal(int(screen.state["score"]), 0, "Undo nimmt die Punkte zurück")
+
+	# A dead swap must not cost anything.
+	var illegal := CandyMatch3.cell_index(0, 0)
+	if CandyMatch3.has_candy(screen.state["board"], illegal):
+		screen._try_swap(illegal, CandyMatch3.cell_index(7, 8))
+		t.equal(int(screen.state["movesLeft"]), moves_before, "Ein unmöglicher Zug kostet nichts")
+
+	screen._toggle_palette()
+	t.check(screen.palette_mode == CandyMatch3.PALETTE_CLASSIC, "Die Palette wechselt")
+	screen._toggle_palette()
+	t.check(screen.palette_mode == CandyMatch3.PALETTE_CONTRAST, "und wieder zurück")
+
+	screen._show_hint()
+	t.check(screen.hint_cells.size() == 2, "Der Hinweis markiert zwei Felder")
+	screen._show_level_select()
+	t.check(screen._select_root.visible, "Die Levelauswahl lässt sich öffnen")
+	await tree.create_timer(0.2).timeout
+	await _goto("lobby")
 	t.suite_done()
 
 
@@ -202,7 +314,6 @@ func _tetris_accepts_moves() -> void:
 ## keeps the test independent of the autoload registration order.
 func _suggest_script() -> GDScript:
 	return load("res://src/core/ui/suggest_dialog.gd")
-
 
 ## The dialog adds a CanvasLayer to the window root; find it by that marker.
 func _suggest_layer() -> Node:
@@ -214,8 +325,7 @@ func _suggest_layer() -> Node:
 
 func _suggest_dialog_posts() -> void:
 	t.suite("Vorschlagsdialog")
-	router.go_to("lobby_list")
-	await tree.create_timer(0.3).timeout
+	await _goto("lobby_list")
 	var host = router.current_screen
 	t.check(_suggest_script().is_open() == false, "Dialog startet geschlossen")
 	_suggest_script().open(host)
@@ -244,8 +354,7 @@ func _suggest_dialog_closes() -> void:
 	await tree.create_timer(0.2).timeout
 	t.check(_suggest_script().is_open(), "Dialog lässt sich erneut öffnen")
 	_suggest_script().close()
-	router.go_to("lobby")
-	await tree.create_timer(0.3).timeout
+	await _goto("lobby")
 	t.suite_done()
 
 
@@ -280,8 +389,7 @@ func _mesh_gallery_flow() -> void:
 	t.suite("Mesh-Galerie")
 	MeshGallery.set_marks(MeshGallery.clear_marks())
 
-	router.go_to("mesh_gallery")
-	await tree.create_timer(0.4).timeout
+	await _goto("mesh_gallery")
 	var gallery = router.current_screen
 	t.check(gallery != null, "Die Galerie öffnet")
 	if gallery == null:
@@ -325,8 +433,7 @@ func _mesh_gallery_flow() -> void:
 	t.check(not str(gallery._info_meta.text).is_empty(), "Die Infokarte nennt Stufe und Dreieckzahl")
 
 	# … und der Review-Screen macht daraus einen fertigen Text.
-	router.go_to("mesh_review")
-	await tree.create_timer(0.4).timeout
+	await _goto("mesh_review")
 	var review = router.current_screen
 	t.check(review != null, "Die Review-Seite öffnet")
 	if review == null:
@@ -360,8 +467,7 @@ func _mesh_gallery_flow() -> void:
 
 	await tree.create_timer(0.6).timeout
 	MeshGallery.set_marks(MeshGallery.clear_marks())
-	router.go_to("lobby")
-	await tree.create_timer(0.3).timeout
+	await _goto("lobby")
 	t.suite_done()
 
 

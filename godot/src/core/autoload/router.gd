@@ -41,12 +41,15 @@ const SCREEN_SCRIPTS := {
 ## Set for one frame after a switch so games can react to the change.
 var current_id: String = ""
 var current_screen: Node = null
+## True while a fade or screen swap is in flight. `go_to` ignores requests during
+## a transition, so anything that sequences screen switches — the test sweep, a
+## scripted intro — waits for this to clear instead of guessing a delay.
+var transitioning: bool = false
 
 var world_host: Node3D
 var screen_host: Control
 var fade: ColorRect
 
-var _transitioning := false
 
 
 func _ready() -> void:
@@ -72,14 +75,14 @@ func _ready() -> void:
 
 ## Switches to another screen. Unknown ids fall back to the 3D lobby.
 func go_to(screen_id: String, data: Dictionary = {}) -> void:
-	if _transitioning:
+	if transitioning:
 		return
 	var path := str(SCREEN_SCRIPTS.get(screen_id, SCREEN_SCRIPTS["lobby"]))
 	var script: GDScript = load(path)
 	if script == null:
 		push_error("Screen-Skript nicht gefunden: %s" % path)
 		return
-	_transitioning = true
+	transitioning = true
 	await _fade(1.0)
 
 	if current_screen != null and is_instance_valid(current_screen):
@@ -98,7 +101,7 @@ func go_to(screen_id: String, data: Dictionary = {}) -> void:
 	current_id = screen_id
 	screen_changed.emit(screen_id)
 	await _fade(0.0)
-	_transitioning = false
+	transitioning = false
 
 
 ## Convenience: start the game with the given registry id.

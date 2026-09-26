@@ -14,9 +14,50 @@ var _current: String = ""
 ## function without raising, so a suite that dies half-way would otherwise be
 ## reported as a pass — `suite_done()`/`close_suite()` turn that into a failure.
 var _suite_open: bool = false
+## Suite names to run, `|`-separated. Empty means "all". This is what lets a
+## game agent verify only its own game instead of the whole catalogue.
+var _only: PackedStringArray = PackedStringArray()
+## False while a suite that was filtered out is executing, so its assertions
+## are counted nowhere.
+var _active: bool = true
+
+
+## Restricts the run to the named suites. `list` is `|`-separated; an empty
+## string keeps every suite.
+func set_only(list: String) -> void:
+	var text := list.strip_edges()
+	if text.is_empty():
+		return
+	_only = PackedStringArray()
+	for entry in text.split("|", false):
+		var name := entry.strip_edges()
+		if not name.is_empty():
+			_only.append(name)
+
+
+func is_selected(name: String) -> bool:
+	if _only.is_empty():
+		return true
+	return _only.has(name)
+
+
+## Adds a suite to the selection. The screen sweep is requested through
+## `--screens` rather than by name, so the runner allows it explicitly —
+## otherwise a scoped run would silently skip every screen.
+func allow(name: String) -> void:
+	if not _only.is_empty() and not _only.has(name):
+		_only.append(name)
 
 
 func suite(name: String) -> void:
+	if not is_selected(name):
+		# The body still runs — it is pure logic and cheap — but nothing it
+		# asserts is counted. Integration suites that actually cost time gate
+		# themselves on `is_selected()` instead.
+		_active = false
+		_suite_open = false
+		return
+	_active = true
 	_current = name
 	_suite_open = true
 	print("\n── %s" % name)
@@ -25,6 +66,7 @@ func suite(name: String) -> void:
 ## Last line of every suite body.
 func suite_done() -> void:
 	_suite_open = false
+	_active = true
 
 
 ## Called by a runner after a suite function returned. If the body never
@@ -38,12 +80,16 @@ func close_suite() -> void:
 
 ## Records a failure without an assertion.
 func fail(description: String) -> void:
+	if not _active:
+		return
 	failed += 1
 	failures.append("%s → %s" % [_current, description])
 	print("  ✗ %s" % description)
 
 
 func check(condition: bool, description: String) -> void:
+	if not _active:
+		return
 	if condition:
 		passed += 1
 	else:
@@ -53,6 +99,8 @@ func check(condition: bool, description: String) -> void:
 
 
 func equal(actual: Variant, expected: Variant, description: String) -> void:
+	if not _active:
+		return
 	var ok := _same(actual, expected)
 	if ok:
 		passed += 1
@@ -63,6 +111,8 @@ func equal(actual: Variant, expected: Variant, description: String) -> void:
 
 
 func almost(actual: float, expected: float, tolerance: float, description: String) -> void:
+	if not _active:
+		return
 	var ok: bool = absf(actual - expected) <= tolerance
 	if ok:
 		passed += 1
