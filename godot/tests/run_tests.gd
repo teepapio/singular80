@@ -164,6 +164,14 @@ func _run() -> void:
 			siedler_suite.new().run(kit)
 	if _wants_class("res://tests/test_improvements.gd", only):
 		TestImprovements.new().run(kit)
+	if _wants_class("res://tests/test_core.gd", only):
+		# By path, like the suites above: `--script` mode does not refresh the
+		# global class cache, so a class added today is unknown.
+		var core_suite: GDScript = load("res://tests/test_core.gd")
+		if core_suite != null:
+			# Needs the scene tree: the retry talks to a local socket, and the
+			# autoloads only exist in a running tree.
+			await core_suite.new().run(kit, self)
 	if _wants_class("res://tests/test_metro_screens.gd", only):
 		await TestMetroScreens.new().run(kit, self)
 
