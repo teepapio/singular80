@@ -58,6 +58,8 @@ class Gem:
 	var pos := Vector2.ZERO
 	var xp := 1
 	var active := false
+	## Chain payouts drop in gold so the player sees what the streak is worth.
+	var tint := Color(0.220, 0.741, 0.973)
 
 
 class Spark:
@@ -96,11 +98,20 @@ var game_ended := false
 var shake_time := 0.0
 var shake_power := 0.0
 
+# --- anticipation: forecast, boss telegraph, kill chain ---
+var chain_state: Dictionary = {"chain": 0, "last_kill": -999.0}
+var chain_milestone := 0.0
+var boss_banner_time := 0.0
+var boss_banner_name := ""
+
 var _board: ArenaBoard
 var _hp_bar: ProgressBar
 var _xp_bar: ProgressBar
 var _hud_label: Label
 var _hint_label: Label
+var _preview_label: Label
+var _chain_label: Label
+var _boss_banner: Label
 var _stick: VirtualStick
 var _pointer := Vector2(ARENA_W * 0.5 + 140.0, ARENA_H * 0.5)
 var _board_base := Vector2.ZERO
@@ -133,7 +144,11 @@ func _reset_state() -> void:
 	invuln_until = 0.0
 	fire_accumulator = 0.0
 	spawn_accumulator = 0.0
-	next_boss_at = BOSS_INTERVAL
+	next_boss_at = ArenaRuns.BOSS_INTERVAL
+	chain_state = {"chain": 0, "last_kill": -999.0}
+	chain_milestone = 0.0
+	boss_banner_time = 0.0
+	boss_banner_name = ""
 	paused = false
 	choosing_upgrade = false
 	pending_level_ups = 0
@@ -178,6 +193,30 @@ func _build_hud() -> void:
 	_hud_label.position = Vector2(16, 88)
 	_hud_label.size = Vector2(780, 48)
 	layer.add_child(_hud_label)
+
+	_preview_label = Ui.label("", 14, Color(0.580, 0.667, 0.827))
+	_preview_label.position = Vector2(16, 132)
+	_preview_label.size = Vector2(560, 20)
+	layer.add_child(_preview_label)
+
+	_chain_label = Ui.label("", 22, Color("facc15"), true)
+	_chain_label.position = Vector2(880, 130)
+	_chain_label.size = Vector2(384, 30)
+	_chain_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_chain_label.add_theme_constant_override("outline_size", 6)
+	_chain_label.add_theme_color_override("font_outline_color", Color("020617"))
+	layer.add_child(_chain_label)
+
+	# The boss telegraph is the single most useful piece of information in a
+	# survival run, so it gets the top of the screen to itself.
+	_boss_banner = Ui.label("", 30, Color("f87171"), true)
+	_boss_banner.position = Vector2(0, 246)
+	_boss_banner.size = Vector2(1280, 44)
+	_boss_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_boss_banner.add_theme_constant_override("outline_size", 8)
+	_boss_banner.add_theme_color_override("font_outline_color", Color("020617"))
+	_boss_banner.modulate.a = 0.0
+	layer.add_child(_boss_banner)
 
 	_hint_label = Ui.label("", 14, UiTheme.TEXT_MUTED)
 	_hint_label.position = Vector2(0, 690)
@@ -247,6 +286,7 @@ func shake_camera(ms: float, intensity: float) -> void:
 
 func _process(delta: float) -> void:
 	super(delta)
+	_update_telegraph(delta)
 	if game_ended:
 		return
 	if Input.is_action_just_pressed("pause"):
@@ -288,6 +328,18 @@ func _process(delta: float) -> void:
 
 	if stats.hp <= 0.0:
 		_end_game()
+
+
+## Fades the boss banner out and lets a stalled kill chain expire.
+func _update_telegraph(delta: float) -> void:
+	if chain_milestone > 0.0:
+		chain_milestone = maxf(0.0, chain_milestone - delta * 1.6)
+	if boss_banner_time > 0.0:
+		boss_banner_time = maxf(0.0, boss_banner_time - delta)
+		if _boss_banner != null:
+			# Hold the last half second, then fade.
+			_boss_banner.modulate.a = clampf(boss_banner_time * 2.0, 0.0, 1.0)
+	chain_state = ArenaRuns.decay(chain_state, elapsed)
 
 
 func _update_shake(delta: float) -> void:
@@ -421,6 +473,15 @@ func _kill_enemy(enemy: Enemy) -> void:
 	var def := enemy.def
 	var pos := enemy.pos
 	_emit_sparks(pos, 40 if enemy.is_boss else 8)
+	var chain := ArenaRuns.register_kill(chain_state, elapsed, enemy.xp_value)
+	chain_state = {"chain": int(chain["chain"]), "last_kill": float(chain["last_kill"])}
+	var extra_xp := int(chain["bonus"])
+	if extra_xp > 0:
+		# The chain pays out as extra gems, so the reward is visible in the world.
+		_drop_gem(pos, extra_xp, Color("facc15"))
+	if bool(chain["milestone"]):
+		chain_milestone = 1.0
+		show_toast("Kette ×%d!" % mini(int(chain["chain"]), ArenaRuns.CHAIN_CAP), 1.1)
 	_drop_gem(pos, enemy.xp_value)
 	for mechanic in mechanics:
 		mechanic.on_enemy_killed(self, enemy)
@@ -475,9 +536,9 @@ func _spawn_enemy(enemy: Enemy, def: Dictionary, pos: Vector2, hp_mult: float, s
 
 
 func _update_spawning(delta: float) -> void:
-	var wave := 1 + int(floor(elapsed / WAVE_DURATION))
+	var wave := ArenaRuns.wave_at(elapsed)
 	if elapsed >= next_boss_at:
-		next_boss_at += BOSS_INTERVAL
+		next_boss_at += ArenaRuns.BOSS_INTERVAL
 		_spawn_boss(wave)
 	var interval: float = maxf(280.0, 1000.0 - float(wave) * 40.0) / maxf(0.1, float(mode.get("spawnRateMult", 1.0)))
 	spawn_accumulator += delta * 1000.0
@@ -532,22 +593,26 @@ func _pick_enemy(wave: int) -> Dictionary:
 
 
 func _spawn_boss(wave: int) -> void:
-	var bosses: Array[Dictionary] = []
-	for def in Content.enemies:
-		if bool(def.get("boss", false)) and int(def.get("minWave", 1)) <= wave:
-			bosses.append(def)
-	if bosses.is_empty():
+	# The telegraph named this boss, so the same picker has to honour it.
+	var def := ArenaRuns.boss_preview(Content.enemies, wave)
+	if def.is_empty():
 		return
 	var enemy := _free_enemy()
 	if enemy == null:
 		return
-	var def: Dictionary = bosses[randi() % bosses.size()]
 	_spawn_enemy(
 		enemy, def, Vector2(ARENA_W * 0.5 + (randf() - 0.5) * 200.0, -80.0),
 		(1.0 + float(wave) * 0.55) * float(mode.get("enemyHpMult", 1.0)),
 		float(mode.get("enemySpeedMult", 1.0)),
 		1.0 + float(wave) * 0.05
 	)
+	boss_banner_name = str(def.get("name", ""))
+	boss_banner_time = 3.4
+	if _boss_banner != null:
+		_boss_banner.text = "☠  %s erscheint  ☠" % boss_banner_name
+		_boss_banner.add_theme_color_override("font_color", Color("f87171"))
+		_boss_banner.modulate.a = 1.0
+	show_toast("%s ist aufgetaucht" % boss_banner_name, 2.0)
 	shake_camera(220.0, 0.005)
 
 
@@ -579,12 +644,13 @@ func _update_sparks(delta: float) -> void:
 
 # --- gems & levelling -------------------------------------------------------
 
-func _drop_gem(pos: Vector2, xp: int) -> void:
+func _drop_gem(pos: Vector2, xp: int, tint: Color = Color(0.220, 0.741, 0.973)) -> void:
 	for gem in gems:
 		if gem.active:
 			continue
 		gem.pos = pos
 		gem.xp = xp
+		gem.tint = tint
 		gem.active = true
 		return
 
@@ -737,8 +803,32 @@ func refresh_hud() -> void:
 	Ui.set_bar(_xp_bar, clampf(stats.xp / maxf(1.0, stats.xp_next), 0.0, 1.0), Color(0.220, 0.741, 0.973))
 
 	var seconds := int(elapsed)
-	var wave := 1 + int(floor(elapsed / WAVE_DURATION))
+	var wave := ArenaRuns.wave_at(elapsed)
 	score = kills * 10 + seconds * 2 + stats.level * 100
+
+	# What is coming, and how long there is until it arrives.
+	var countdown := ArenaRuns.boss_countdown(elapsed, next_boss_at)
+	var upcoming := ArenaRuns.boss_preview(Content.enemies, wave + 1)
+	var forecast := ArenaRuns.preview_text(Content.enemies, wave, elapsed)
+	var to_wave := int(ceil(ArenaRuns.time_to_next_wave(elapsed)))
+	if _preview_label != null:
+		_preview_label.text = "%s  ·  nächste Welle in %ds" % [forecast, maxi(0, to_wave)]
+	# While the boss itself is on screen its name owns the banner; only a
+	# standing countdown may overwrite it.
+	if _boss_banner != null and boss_banner_time <= 0.0:
+		if countdown <= 20.0 and countdown > 0.0:
+			_boss_banner.text = "⚠  %s in %ds  ⚠" % [
+				str(upcoming.get("name", "Boss")), maxi(0, int(ceil(countdown))),
+			]
+			_boss_banner.add_theme_color_override("font_color",
+				Color("fbbf24") if ArenaRuns.boss_threat(countdown) == 2 else Color("f87171"))
+			_boss_banner.modulate.a = 1.0
+		else:
+			_boss_banner.text = ""
+	if _chain_label != null:
+		_chain_label.text = ArenaRuns.chain_text(chain_state)
+		_chain_label.modulate.a = 1.0 if chain_milestone > 0.0 else 0.92
+
 	var status: Array = []
 	for mechanic in mechanics:
 		var text := mechanic.hud(self)
@@ -850,7 +940,7 @@ class ArenaBoard:
 		for gem in screen.gems:
 			if not gem.active:
 				continue
-			_draw_gem(gem.pos)
+			_draw_gem(gem.pos, gem.tint)
 
 		for bullet in screen.bullets:
 			if bullet.life <= 0.0:
@@ -906,12 +996,18 @@ class ArenaBoard:
 		if enemy.is_boss:
 			draw_arc(enemy.pos, r + 5.0, 0.0, TAU, 32, Color(0.937, 0.267, 0.267, 0.8), 2.0, true)
 
-	func _draw_gem(pos: Vector2) -> void:
+	## A chain payout arrives in gold and is drawn a little larger, so the bonus
+	## is readable at a glance while dodging.
+	func _draw_gem(pos: Vector2, tint: Color) -> void:
+		var chain := not tint.is_equal_approx(Color(0.220, 0.741, 0.973))
+		var size := 9.0 if chain else 7.0
 		var diamond := PackedVector2Array([
-			pos + Vector2(0, -7), pos + Vector2(7, 0), pos + Vector2(0, 7), pos + Vector2(-7, 0)
+			pos + Vector2(0, -size), pos + Vector2(size, 0), pos + Vector2(0, size), pos + Vector2(-size, 0)
 		])
-		draw_colored_polygon(diamond, Color(0.133, 0.827, 0.933))
-		draw_circle(pos, 3.0, Color(0.647, 0.953, 0.988))
+		if chain:
+			draw_circle(pos, size + 4.0, Color(tint.r, tint.g, tint.b, 0.22))
+		draw_colored_polygon(diamond, tint)
+		draw_circle(pos, size * 0.45, tint.lightened(0.55))
 
 	func _draw_player(pos: Vector2, invulnerable: bool, aim: Vector2, time: float) -> void:
 		if invulnerable and int(time * 11.0) % 2 == 0:

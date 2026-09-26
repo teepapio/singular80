@@ -1,0 +1,398 @@
+class_name TestImprovements
+extends RefCounted
+## Rule tests for the five gameplay improvements added on top of the original
+## port: T-Spin scoring, queue preview and board danger, wave forecasting and
+## kill chains, and loot rarity.
+##
+## Kept in its own file so the feature work can be validated independently of
+## the rest of the suite.
+
+var t: TestKit
+
+
+func run(kit: TestKit) -> void:
+	t = kit
+	_suite(_tetris_scoring)
+	_suite(_tetris_spin)
+	_suite(_tetris_preview)
+	_suite(_tetris_danger)
+	_suite(_arena_waves)
+	_suite(_arena_chains)
+	_suite(_loot_rarity)
+
+
+## Runs one suite and fails it if it returned before its own `t.suite_done()`,
+## which is what a swallowed runtime error looks like.
+func _suite(fn: Callable) -> void:
+	fn.call()
+
+
+# --- Tetris: scoring --------------------------------------------------------
+
+func _empty_well(rows: int = 20, cols: int = 10) -> Array:
+	var board: Array = []
+	for _y in rows:
+		var row: Array = []
+		for _x in cols:
+			row.append(0)
+		board.append(row)
+	return board
+
+
+func _tetris_scoring() -> void:
+	t.suite("Tetris — Punktewertung")
+
+	var none := TetrisRules.score_clear(0, 1, 0, 0, "none")
+	t.equal(none["points"], 0, "Ohne geräumte Zeile gibt es keine Punkte")
+	t.equal(none["combo"], 0, "Die Kette wird ohne Zeile zurückgesetzt")
+	t.equal(none["message"], "", "Ohne Zeile gibt es keinen Text")
+
+	t.equal(TetrisRules.score_clear(1, 1, 0, 0, "none")["points"], 100, "Single: 100")
+	t.equal(TetrisRules.score_clear(2, 1, 0, 0, "none")["points"], 300, "Double: 300")
+	t.equal(TetrisRules.score_clear(3, 1, 0, 0, "none")["points"], 500, "Triple: 500")
+	t.equal(TetrisRules.score_clear(4, 1, 0, 0, "none")["points"], 800, "Quad: 800")
+	t.equal(TetrisRules.score_clear(4, 1, 0, 0, "none")["message"], "QUAD!", "Quad meldet sich")
+	t.check(str(TetrisRules.score_clear(3, 1, 0, 0, "none")["message"]).contains("TETRIS"), "Triple meldet TETRIS")
+	t.equal(TetrisRules.score_clear(1, 1, 0, 0, "none")["message"], "", "Eine einzelne Zeile meldet nichts")
+
+	# Level multiplier applies to everything.
+	t.equal(TetrisRules.score_clear(2, 3, 0, 0, "none")["points"], 900, "Level 3 verdreifacht die 300")
+
+	# T-Spins are worth more than the plain clear of the same size.
+	# Guideline values: a T-Spin pays 400 without a line, then 800/1200/1600.
+	t.equal(TetrisRules.score_clear(0, 1, 0, 0, "full")["points"], 400, "T-Spin ohne Zeile: 400")
+	t.equal(TetrisRules.score_clear(1, 1, 0, 0, "full")["points"], 800, "T-Spin Single: 800")
+	t.equal(TetrisRules.score_clear(2, 1, 0, 0, "full")["points"], 1200, "T-Spin Double: 1200")
+	t.equal(TetrisRules.score_clear(3, 1, 0, 0, "full")["points"], 1600, "T-Spin Triple: 1600")
+	t.check(str(TetrisRules.score_clear(2, 1, 0, 0, "full")["message"]).contains("T-SPIN FULL"), "T-Spin meldet sich")
+	t.check(str(TetrisRules.score_clear(1, 1, 0, 0, "mini")["message"]).contains("T-SPIN MINI"), "T-Spin Mini meldet sich")
+	t.equal(TetrisRules.score_clear(1, 1, 0, 0, "mini")["points"], 400, "T-Spin Mini halbiert die 800")
+	t.equal(TetrisRules.score_clear(0, 1, 0, 0, "mini")["points"], 200, "T-Spin Mini ohne Zeile halbiert die 400")
+
+	# A line-less T-Spin opens a chain but must not break an existing combo.
+	var no_lines := TetrisRules.score_clear(0, 1, 3, 1, "full")
+	t.equal(no_lines["combo"], 3, "Ein T-Spin ohne Zeile unterbricht die Combo nicht")
+	t.equal(no_lines["back_to_back"], 2, "Ein T-Spin ohne Zeile verlängert B2B")
+	t.equal(no_lines["b2bBonus"], 50, "Der T-Spin ohne Zeile zahlt den B2B-Schritt")
+	t.check(bool(no_lines["difficult"]), "Ein T-Spin ohne Zeile gilt als schwierig")
+
+	# Back-to-Back only grows on difficult clears and pays out from the second.
+	var first := TetrisRules.score_clear(4, 1, 0, 0, "none")
+	t.equal(first["back_to_back"], 1, "Ein Quad startet die B2B-Kette")
+	t.equal(first["b2bBonus"], 0, "Die erste schwierige Zeile zahlt noch keinen B2B-Bonus")
+	var second := TetrisRules.score_clear(4, 1, 0, 1, "none")
+	t.equal(second["back_to_back"], 2, "Das zweite Quad verlängert die Kette")
+	t.equal(second["b2bBonus"], 50, "Der zweite B2B-Schritt zahlt 50")
+	t.equal(second["points"], 850, "Quad plus B2B: 800 + 50")
+	t.equal(first["message"], "QUAD!", "Die erste schwierige Zeile nennt noch keine Kette")
+	var third := TetrisRules.score_clear(4, 1, 0, 2, "none")
+	t.equal(third["b2bBonus"], 100, "Der dritte B2B-Schritt zahlt 100")
+	t.check(str(third["message"]).contains("B2B ×3"), "Die Meldung nennt die Kettenlänge")
+
+	var easy := TetrisRules.score_clear(1, 1, 0, 3, "none")
+	t.equal(easy["back_to_back"], 0, "Ein Single bricht die B2B-Kette")
+	t.equal(easy["b2bBonus"], 0, "Ein Single zahlt keinen B2B-Bonus")
+
+	var b2b_tspin := TetrisRules.score_clear(2, 1, 0, 1, "full")
+	t.equal(b2b_tspin["b2bBonus"], 50, "Ein T-Spin Double gilt als schwierig und zahlt B2B")
+
+	# Combo counts consecutive clears and pays from the second onwards.
+	var c1 := TetrisRules.score_clear(1, 1, 0, 0, "none")
+	t.equal(c1["combo"], 1, "Die erste Zeile startet die Combo")
+	t.equal(c1["comboBonus"], 0, "Die erste Zeile zahlt keinen Combo-Bonus")
+	var c2 := TetrisRules.score_clear(1, 1, 1, 0, "none")
+	t.equal(c2["combo"], 2, "Die zweite Zeile erhöht die Combo")
+	t.equal(c2["comboBonus"], 50, "Die zweite Zeile zahlt 50 Combo-Punkte")
+	t.equal(c2["points"], 150, "Single plus Combo: 100 + 50")
+	t.check(str(c2["message"]).contains("COMBO ×2"), "Die Meldung nennt die Combo")
+
+	# A cleared line is always awarded the level multiplier.
+	t.check(TetrisRules.score_clear(1, 5, 3, 2, "full")["points"] > TetrisRules.score_clear(1, 5, 0, 0, "full")["points"],
+		"Hohe Kette und hohes Level zahlen mehr")
+	t.check(float(TetrisRules.score_clear(3, 1, 0, 0, "full")["flash"]) > 0.0, "Eine Dreierreihe blitzt auf")
+	t.check(float(TetrisRules.score_clear(1, 1, 0, 0, "none")["flash"]) < 0.2, "Eine einzelne Zeile blitzt nur kurz")
+	t.suite_done()
+
+
+# --- Tetris: T-Spin detection ----------------------------------------------
+
+func _tetris_spin() -> void:
+	t.suite("Tetris — T-Spin-Erkennung")
+
+	var all_four := [[true, true], [true, true]]
+	var three := [[true, true], [true, false]]
+	var two := [[true, true], [false, false]]
+	var none := [[false, false], [false, false]]
+
+	t.check(TetrisRules.is_t_spin(TetrisRules.T_PIECE_TYPE, true, three), "Drei belegte Ecken zählen als T-Spin")
+	t.check(TetrisRules.is_t_spin(TetrisRules.T_PIECE_TYPE, true, all_four), "Vier belegte Ecken zählen als T-Spin")
+	t.check(not TetrisRules.is_t_spin(TetrisRules.T_PIECE_TYPE, true, two), "Zwei Ecken reichen für einen vollen T-Spin nicht")
+	t.check(not TetrisRules.is_t_spin(TetrisRules.T_PIECE_TYPE, true, none), "Ohne Ecken gibt es keinen T-Spin")
+	t.check(not TetrisRules.is_t_spin(TetrisRules.T_PIECE_TYPE, false, all_four),
+		"Nur nach einer Drehung zählt es als T-Spin")
+	t.check(not TetrisRules.is_t_spin(3, true, all_four), "Nur das T zählt als T-Spin")
+
+	t.check(TetrisRules.is_t_spin_mini(two), "Zwei Ecken ergeben einen T-Spin Mini")
+	t.check(not TetrisRules.is_t_spin_mini(three), "Drei Ecken sind kein Mini mehr")
+	t.check(not TetrisRules.is_t_spin_mini(all_four), "Vier Ecken sind kein Mini")
+	t.equal(TetrisRules.corner_count(none), 0, "Leere Ecken werden gezählt")
+	t.equal(TetrisRules.corner_count([[true]]), -1, "Kaputte Ecken werden abgewiesen")
+	t.check(not TetrisRules.is_t_spin(TetrisRules.T_PIECE_TYPE, true, [[true]]), "Kaputte Ecken sind kein T-Spin")
+
+	# The corner sampler mirrors the screen's `_filled_at`: walls, the floor and
+	# the ceiling all count as filled, which is what lets a wall kick register.
+	var board := _empty_well(4, 6)
+	var wall_and_floor := func(x: int, y: int) -> bool:
+		return x < 0 or y >= board.size() or int((board[y] as Array)[x]) != 0
+	t.equal(TetrisRules.corner_count(TetrisRules.t_corners(0, 1, wall_and_floor)), 0,
+		"Eine leere Senke in der Mitte zählt keine Ecke")
+	t.equal(TetrisRules.corner_count(TetrisRules.t_corners(-1, 1, wall_and_floor)), 2,
+		"Die linke Wand gilt als belegt")
+	t.equal(TetrisRules.corner_count(TetrisRules.t_corners(-1, 2, wall_and_floor)), 3,
+		"Wand plus Boden ergeben drei belegte Ecken")
+	t.check(TetrisRules.is_t_spin(TetrisRules.T_PIECE_TYPE, true, TetrisRules.t_corners(-1, 2, wall_and_floor)),
+		"Ein T an der Wand über dem Boden ist ein T-Spin")
+
+	var nothing := func(_x: int, _y: int) -> bool:
+		return false
+	t.equal(TetrisRules.corner_count(TetrisRules.t_corners(2, 0, nothing)), 0, "Nichts ist belegt")
+	t.suite_done()
+
+
+# --- Tetris: queue preview --------------------------------------------------
+
+func _tetris_preview() -> void:
+	t.suite("Tetris — Vorschaukette")
+
+	t.equal(TetrisRules.preview_chain([1, 2, 3, 4, 5], 3), [1, 2, 3] as Array[int],
+		"Die Vorschau zeigt die ersten drei Steine der Warteschlange")
+	t.equal(TetrisRules.preview_chain([1, 2], 4), [1, 2, -1, -1] as Array[int],
+		"Eine kurze Warteschlange wird aufgefüllt")
+	t.equal(TetrisRules.preview_chain([], 3), [-1, -1, -1] as Array[int],
+		"Eine leere Warteschlange liefert nur Platzhalter")
+	t.equal(TetrisRules.preview_chain([1, 2, 3], 1).size(), 1, "Ein Vorschau von einem Stein funktioniert")
+	t.check(TetrisRules.preview_chain([1, 2, 3], 0).size() >= 1, "Null Vorschau wird auf mindestens einen gehoben")
+
+	t.equal(TetrisRules.preview_count(4), 4, "4 ist eine erlaubte Vorschaulänge")
+	t.equal(TetrisRules.preview_count(3), 3, "3 ist eine erlaubte Vorschaulänge")
+	t.equal(TetrisRules.preview_count(6), 6, "6 ist eine erlaubte Vorschaulänge")
+	t.equal(TetrisRules.preview_count(99), 6, "Eine zu große Vorschaulänge wird auf das Maximum begrenzt")
+	t.equal(TetrisRules.preview_count(-5), 3, "Eine negative Vorschaulänge wird auf das Minimum begrenzt")
+	t.equal(TetrisRules.preview_count(4), TetrisRules.preview_count(4), "Die Vorschaulänge ist stabil")
+	for option in TetrisRules.PREVIEW_OPTIONS:
+		t.equal(TetrisRules.preview_count(option), option, "Option %d bleibt erhalten" % option)
+	t.suite_done()
+
+
+# --- Tetris: board danger ---------------------------------------------------
+
+func _tetris_danger() -> void:
+	t.suite("Tetris — Brettgefahr")
+
+	var empty := _empty_well(4, 5)
+	t.almost(TetrisRules.fill_ratio(empty), 0.0, 0.0001, "Ein leeres Brett ist zu 0 % gefüllt")
+	t.equal(TetrisRules.danger_level(empty), 0, "Ein leeres Brett ist unbedenklich")
+	t.equal(TetrisRules.danger_text(empty), "", "Ohne Gefahr gibt es keine Warnung")
+
+	# 20×10 well: 140 of 200 cells is 70 %, i.e. past the first threshold.
+	var busy := _empty_well(20, 10)
+	for y in 14:
+		for x in 10:
+			(busy[y] as Array)[x] = 1
+	t.almost(TetrisRules.fill_ratio(busy), 0.7, 0.0001, "Ein zu 70 % gefülltes Brett")
+	t.equal(TetrisRules.danger_level(busy), 1, "Bei 70 % warnt das Spiel vor dem Turm")
+	t.check(TetrisRules.danger_text(busy).contains("Der Turm wächst"), "Die Warnung nennt den Turm")
+	t.check(TetrisRules.danger_text(busy).contains("6 freie Reihen"), "Die Warnung zählt die freien Reihen")
+
+	var calm := _empty_well(20, 10)
+	for y in 12:
+		for x in 10:
+			(calm[y] as Array)[x] = 1
+	t.equal(TetrisRules.danger_level(calm), 0, "Bei 60 % bleibt es ruhig")
+
+	var full := _empty_well(4, 5)
+	for row in full:
+		for x in 5:
+			(row as Array)[x] = 1
+	t.almost(TetrisRules.fill_ratio(full), 1.0, 0.0001, "Ein volles Brett ist zu 100 % gefüllt")
+	t.equal(TetrisRules.danger_level(full), 2, "Bei 100 % ist es kritisch")
+	t.check(TetrisRules.danger_text(full).contains("GEFAHR"), "Die kritische Warnung schlägt Alarm")
+	t.check(TetrisRules.danger_text(full).contains("0 freie Reihen"), "Ein volles Brett hat keine freie Reihe")
+
+	t.equal(TetrisRules.danger_level(_empty_well(0, 0)), 0, "Ein Brett ohne Zellen ist harmlos")
+	t.almost(TetrisRules.fill_ratio([]), 0.0, 0.0001, "Eine leere Brettliste ergibt 0")
+	t.suite_done()
+
+
+# --- Arena: waves -----------------------------------------------------------
+
+func _enemy_defs() -> Array:
+	return [
+		{"id": "slime", "name": "Schleim", "weight": 10.0, "minWave": 1, "boss": false},
+		{"id": "bat", "name": "Fledermaus", "weight": 6.0, "minWave": 1, "boss": false},
+		{"id": "ghost", "name": "Geist", "weight": 4.0, "minWave": 4, "boss": false},
+		{"id": "hidden", "name": "Versteckt", "weight": 0.0, "minWave": 1, "boss": false},
+		{"id": "warden", "name": "Wärter", "weight": 3.0, "minWave": 1, "boss": true},
+		{"id": "titan", "name": "Titan", "weight": 3.0, "minWave": 8, "boss": true},
+	]
+
+
+func _arena_waves() -> void:
+	t.suite("Arena — Wellenvorschau")
+
+	t.equal(ArenaRuns.wave_at(0.0), 1, "Bei null Sekunden ist Welle 1")
+	t.equal(ArenaRuns.wave_at(29.9), 1, "Welle 1 dauert 30 Sekunden")
+	t.equal(ArenaRuns.wave_at(30.0), 2, "Nach 30 Sekunden kommt Welle 2")
+	t.equal(ArenaRuns.wave_at(95.0), 4, "Nach 95 Sekunden ist Welle 4")
+	t.equal(ArenaRuns.wave_at(-5.0), 1, "Eine negative Zeit zählt als Welle 1")
+	t.almost(ArenaRuns.time_to_next_wave(0.0), 30.0, 0.001, "Zu Welle 1 bleiben 30 Sekunden")
+	t.almost(ArenaRuns.time_to_next_wave(15.0), 15.0, 0.001, "Nach 15 Sekunden bleiben 15")
+	t.almost(ArenaRuns.time_to_next_wave(30.0), 30.0, 0.001, "Eine frische Welle startet die Uhr neu")
+	t.almost(ArenaRuns.time_to_next_wave(45.0), 15.0, 0.001, "Nach 45 Sekunden bleiben 15")
+
+	var defs := _enemy_defs()
+	t.equal(ArenaRuns.eligible(defs, 1).size(), 2, "In Welle 1 gibt es zwei normale Gegner")
+	t.equal(ArenaRuns.eligible(defs, 4).size(), 3, "Ab Welle 4 kommt ein dritter Gegner dazu")
+	for entry in ArenaRuns.eligible(defs, 4):
+		t.check(not bool(entry["boss"]), "Die Vorschau verspricht keine Bosse")
+		t.check(float(entry["weight"]) > 0.0, "Die Vorschau verspricht keine Gewicht-0-Gegner")
+		t.check(int(entry["minWave"]) <= 4, "Die Vorschau kennt keine gesperrten Gegner")
+
+	var preview := ArenaRuns.wave_preview(defs, 4, 3)
+	t.equal(preview.size(), 3, "Die Vorschau zeigt alle verfügbaren Gegner")
+	t.equal(str(preview[0]["id"]), "slime", "Der schwerste Gegner steht vorn")
+	t.equal(str(preview[1]["id"]), "bat", "Danach der zweitschwerste")
+	t.equal(ArenaRuns.wave_preview(defs, 1, 1).size(), 1, "Die Vorschau lässt sich begrenzen")
+
+	t.equal(ArenaRuns.boss_preview(defs, 1)["id"], "warden", "Der erste Bosse ist der Wärter")
+	t.equal(ArenaRuns.boss_preview(defs, 7)["id"], "warden", "Vor Welle 8 bleibt es beim Wärter")
+	t.equal(ArenaRuns.boss_preview(defs, 8)["id"], "titan", "Ab Welle 8 ist der Titan der aktuelle Boss")
+	t.equal(ArenaRuns.boss_preview(defs, 99)["id"], "titan", "Auch weit später bleibt der Titan")
+	t.equal(ArenaRuns.boss_preview([], 9).size(), 0, "Ohne Bosse gibt es keinen Boss")
+
+	t.almost(ArenaRuns.boss_countdown(0.0, 120.0), 120.0, 0.001, "Der erste Boss kommt nach zwei Minuten")
+	t.almost(ArenaRuns.boss_countdown(100.0, 120.0), 20.0, 0.001, "Nach 100 Sekunden bleiben 20 Sekunden")
+	t.equal(ArenaRuns.boss_threat(5.0), 2, "Fünf Sekunden vorher ist es kritisch")
+	t.equal(ArenaRuns.boss_threat(15.0), 1, "Fünfzehn Sekunden vorher warnt das Spiel")
+	t.equal(ArenaRuns.boss_threat(90.0), 0, "Weit im Voraus droht nichts")
+
+	var text := ArenaRuns.preview_text(defs, 2, 0.0)
+	t.check(text.contains("Welle 2"), "Die Vorschau nennt die kommende Welle")
+	t.check(text.contains("Schleim"), "Die Vorschau nennt einen Gegner")
+	t.check(text.contains("Geist") == false, "Die Vorschau kündigt noch nicht gesperrte Gegner an")
+	t.check(ArenaRuns.preview_text([], 3, 0.0).contains("Welle 3"), "Ohne Gegner bleibt die Wellennummer")
+	t.equal(ArenaRuns.color_of({"rarity": "epic"}), ArenaRuns.RARITY_COLORS["epic"], "Die Seltenheit bestimmt die Farbe")
+	t.check(ArenaRuns.color_of({}).is_equal_approx(ArenaRuns.RARITY_COLORS["common"]), "Ohne Seltenheit ist alles gewöhnlich")
+	t.suite_done()
+
+
+# --- Arena: kill chains -----------------------------------------------------
+
+func _arena_chains() -> void:
+	t.suite("Arena — Kill-Ketten")
+
+	var state: Dictionary = {"chain": 0, "last_kill": 0.0}
+	var first := ArenaRuns.register_kill(state, 1.0, 1)
+	t.equal(first["chain"], 1, "Der erste Kill startet die Kette")
+	t.equal(first["bonus"], 0, "Der erste Kill zahlt keinen Bonus")
+	t.equal(first["milestone"], false, "Der erste Kill ist kein Meilenstein")
+
+	var second := ArenaRuns.register_kill(first, 2.0, 1)
+	t.equal(second["chain"], 2, "Der zweite Kill verlängert die Kette")
+	t.equal(second["bonus"], 1, "Der zweite Kill zahlt 1 EP")
+	t.equal(second["milestone"], false, "Zwei Killchains sind noch kein Meilenstein")
+
+	var third := ArenaRuns.register_kill(second, 3.0, 1)
+	t.equal(third["chain"], 3, "Der dritte Kill verlängert weiter")
+	t.equal(third["bonus"], 2, "Der dritte Kill zahlt 2 EP")
+	t.equal(third["milestone"], true, "Beim dritten Kill leuchtet es auf")
+
+	# A gap longer than the window starts a fresh chain.
+	var broken := ArenaRuns.register_kill(third, 3.0 + ArenaRuns.CHAIN_WINDOW + 0.5, 1)
+	t.equal(broken["chain"], 1, "Eine zu lange Pause bricht die Kette")
+	t.equal(broken["bonus"], 0, "Nach dem Bruch gibt es keinen Bonus")
+	t.equal(ArenaRuns.register_kill(broken, 3.0 + ArenaRuns.CHAIN_WINDOW, 1)["chain"], 2,
+		"Genau am Zeitfenster zählt die Kette noch")
+
+	# The bonus is capped so a long streak cannot run away with the run.
+	var long: Dictionary = {"chain": 0, "last_kill": 0.0}
+	for i in 40:
+		long = ArenaRuns.register_kill(long, float(i) * 0.1, 1)
+	t.equal(long["chain"], 40, "Die Kette zählt ohne Unterbrechung weiter")
+	t.check(int(long["bonus"]) <= ArenaRuns.CHAIN_CAP, "Der Bonus bleibt gedeckelt")
+	t.check(int(long["bonus"]) > 0, "Eine lange Kette zahlt sich aus")
+
+	var decayed := ArenaRuns.decay({"chain": 5, "last_kill": 1.0}, 20.0)
+	t.equal(decayed["chain"], 0, "Eine veraltete Kette verschwindet")
+	t.equal(ArenaRuns.decay({"chain": 5, "last_kill": 19.0}, 20.0)["chain"], 5, "Eine frische Kette bleibt")
+	t.equal(ArenaRuns.decay({"chain": 0, "last_kill": 1.0}, 20.0)["chain"], 0, "Ohne Kette passiert nichts")
+
+	t.equal(ArenaRuns.chain_text({"chain": 1, "last_kill": 0.0}), "", "Ein einzelner Kill zeigt nichts an")
+	t.check(ArenaRuns.chain_text({"chain": 4, "last_kill": 0.0}).contains("×4"), "Die Kette wird angezeigt")
+	t.check(ArenaRuns.chain_text({"chain": 4, "last_kill": 0.0}).contains("+3 EP"), "Der Bonus wird angezeigt")
+	t.suite_done()
+
+
+# --- Drachen-RPG: loot rarity ---------------------------------------------
+
+func _loot_rarity() -> void:
+	t.suite("Drachen-RPG — Loot-Rarität")
+
+	t.equal(DragonRpg.RARITIES.size(), 5, "Es gibt fünf Raritätsstufen")
+	for rarity in DragonRpg.RARITIES:
+		t.check(not str(rarity["name"]).is_empty(), "Jede Rarität hat einen deutschen Namen")
+		t.check(DragonRpg.rarity_by_id(str(rarity["id"])) == rarity, "Jede Rarität ist auffindbar")
+	t.equal(DragonRpg.rarity_by_id("nope")["id"], "common", "Eine unbekannte Rarität wird gewöhnlich")
+	t.equal(DragonRpg.rarity_index("legendary"), 4, "Legendär ist die höchste Stufe")
+	t.equal(DragonRpg.rarity_index("common"), 0, "Gewöhnlich ist die niedrigste Stufe")
+	t.equal(DragonRpg.rarity_index("nope"), 0, "Eine unbekannte Rarität hat Index 0")
+
+	for entry in DragonRpg.LOOT_TABLE:
+		t.check(DragonRpg.rarity_of(entry).has("color"), "Jeder Loot-Eintrag hat eine Rarität mit Farbe")
+		t.check(DragonRpg.rarity_of(entry).has("glow"), "Jeder Loot-Eintrag hat eine Rarität mit Leuchten")
+		t.check(DragonRpg.lottery_weight(entry) > 0.0, "Jeder Loot-Eintrag ist erreichbar")
+
+	# Rarity is strictly ordered by loot score, which is what the comparison uses.
+	var by_rarity: Array[Dictionary] = []
+	for rarity in DragonRpg.RARITIES:
+		by_rarity.append({"value": 1, "rarity": str(rarity["id"])})
+	for i in range(1, by_rarity.size()):
+		t.check(DragonRpg.loot_score(by_rarity[i]) > DragonRpg.loot_score(by_rarity[i - 1]),
+			"Rarität %s ist besser als die Stufe davor" % str(by_rarity[i]["rarity"]))
+
+	# Luck shifts the distribution upwards, never downwards.
+	var low := 0
+	var high := 0
+	for _i in 400:
+		var a := DragonRpg.roll_loot(0.0)
+		var b := DragonRpg.roll_loot(1.0)
+		if DragonRpg.rarity_index(str(DragonRpg.rarity_of(a)["id"])) >= 3:
+			low += 1
+		if DragonRpg.rarity_index(str(DragonRpg.rarity_of(b)["id"])) >= 3:
+			high += 1
+	t.check(low < 80, "Ohne Glück fällt selten etwas Seltenes (%d von 400)" % low)
+	t.check(high > 0, "Mit vollem Glück fällt auch Legendäres")
+	t.check(high > low * 2, "Volles Glück liefert deutlich mehr Beute (%d gegen %d)" % [high, low])
+
+	t.equal(DragonRpg.roll_loot(0.5).has("id"), true, "Ein Wurf liefert immer einen Loot-Eintrag")
+	t.equal(DragonRpg.roll_loot(-1.0).has("id"), true, "Auch ein unmöglicher Wurf liefert Loot")
+	t.equal(DragonRpg.roll_loot(9.0).has("id"), true, "Auch übertriebenes Glück liefert Loot")
+
+	var crown := DragonRpg.loot_by_id("crown")
+	var coin := DragonRpg.loot_by_id("coin")
+	t.equal(str(DragonRpg.rarity_of(crown)["id"]), "legendary", "Die Krone ist legendär")
+	t.equal(str(DragonRpg.rarity_of(coin)["id"]), "common", "Die Goldmünze ist gewöhnlich")
+	t.check(DragonRpg.loot_score(crown) > DragonRpg.loot_score(coin), "Die Krone ist die bessere Beute")
+
+	# Comparison against what the player already carries.
+	t.equal(DragonRpg.compare_drop(crown, {}), "upgrade", "Ohne Vergleichsstück ist alles eine Verbesserung")
+	t.equal(DragonRpg.compare_drop(crown, coin), "upgrade", "Die Krone ist besser als eine Münze")
+	t.equal(DragonRpg.compare_drop(coin, crown), "downgrade", "Eine Münze nach der Krone ist schwächer")
+	t.equal(DragonRpg.compare_drop(coin, coin), "same", "Gleiche Beute ist weder besser noch schlechter")
+	t.equal(DragonRpg.compare_drop(coin, {}), "upgrade", "Auch eine Münze verbessert eine leere Tasche")
+
+	t.equal(DragonRpg.luck_for({"boss": true}), 1.0, "Ein Boss bringt volles Glück")
+	t.equal(DragonRpg.luck_for({"boss": false, "tier": 1}), 0.16, "Ein normaler Drache bringt etwas Glück")
+	t.check(DragonRpg.luck_for({"boss": false, "tier": 5}) <= 0.4, "Normale Drachen überschreiten die Obergrenze nicht")
+	t.check(DragonRpg.luck_for({"boss": false, "tier": 9}) <= 0.4, "Auch ein sehr hoher Drachen bleibt gedeckelt")
+	t.suite_done()

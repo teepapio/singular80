@@ -29,20 +29,31 @@ const WEAPONS: Array[Dictionary] = [
 	{"id": "bow", "name": "Bogen", "asset": "rpg/bow", "damage": 9.0, "cooldown": 0.38, "range": 30.0, "arc": 0.1, "scale": 1.0, "ranged": true, "projectileSpeed": 36.0, "color": Color("fbbf24")},
 ]
 
+## Rarity drives both the drop weighting and the loot's look in the world.
+## Order matters: later entries are strictly better, which is what
+## `loot_score` ranks by.
+const RARITIES: Array[Dictionary] = [
+	{"id": "common", "name": "Gewöhnlich", "color": Color("94a3b8"), "weight": 62, "glow": 0.0},
+	{"id": "uncommon", "name": "Ungewöhnlich", "color": Color("4ade80"), "weight": 26, "glow": 0.5},
+	{"id": "rare", "name": "Selten", "color": Color("38bdf8"), "weight": 9, "glow": 1.0},
+	{"id": "epic", "name": "Episch", "color": Color("c084fc"), "weight": 2.5, "glow": 1.5},
+	{"id": "legendary", "name": "Legendär", "color": Color("fbbf24"), "weight": 0.5, "glow": 2.0},
+]
+
 const LOOT_TABLE: Array[Dictionary] = [
-	{"id": "coin", "name": "Goldmünze", "asset": "rpg/coin", "kind": "gold", "value": 3, "weight": 46, "color": Color("fbbf24")},
-	{"id": "gem", "name": "Edelstein", "asset": "rpg/gem", "kind": "treasure", "value": 12, "weight": 20, "color": Color("22d3ee")},
-	{"id": "potion_health", "name": "Heiltrank", "asset": "rpg/potion_health", "kind": "potion", "value": 30, "weight": 12, "color": Color("ef4444")},
-	{"id": "potion_mana", "name": "Manatrank", "asset": "rpg/potion_mana", "kind": "potion", "value": 18, "weight": 8, "color": Color("3b82f6")},
-	{"id": "scroll", "name": "Schriftrolle", "asset": "rpg/scroll", "kind": "treasure", "value": 8, "weight": 8, "color": Color("d6c6a0")},
-	{"id": "key", "name": "Schlüssel", "asset": "rpg/key", "kind": "treasure", "value": 10, "weight": 5, "color": Color("fcd34d")},
-	{"id": "ring", "name": "Ring", "asset": "rpg/ring", "kind": "treasure", "value": 16, "weight": 4, "color": Color("facc15")},
-	{"id": "amulet", "name": "Amulett", "asset": "rpg/amulet", "kind": "treasure", "value": 20, "weight": 3, "color": Color("a855f7")},
-	{"id": "shield", "name": "Schild", "asset": "rpg/shield", "kind": "treasure", "value": 18, "weight": 3, "color": Color("94a3b8")},
-	{"id": "helmet", "name": "Helm", "asset": "rpg/helmet", "kind": "treasure", "value": 15, "weight": 3, "color": Color("cbd5e1")},
-	{"id": "armor", "name": "Rüstung", "asset": "rpg/armor", "kind": "treasure", "value": 22, "weight": 2, "color": Color("94a3b8")},
-	{"id": "boots", "name": "Stiefel", "asset": "rpg/boots", "kind": "treasure", "value": 12, "weight": 3, "color": Color("64748b")},
-	{"id": "crown", "name": "Krone", "asset": "rpg/crown", "kind": "treasure", "value": 40, "weight": 1, "color": Color("fde047")},
+	{"id": "coin", "name": "Goldmünze", "asset": "rpg/coin", "kind": "gold", "value": 3, "weight": 46, "rarity": "common", "color": Color("fbbf24")},
+	{"id": "gem", "name": "Edelstein", "asset": "rpg/gem", "kind": "treasure", "value": 12, "weight": 20, "rarity": "uncommon", "color": Color("22d3ee")},
+	{"id": "potion_health", "name": "Heiltrank", "asset": "rpg/potion_health", "kind": "potion", "value": 30, "weight": 12, "rarity": "uncommon", "color": Color("ef4444")},
+	{"id": "potion_mana", "name": "Manatrank", "asset": "rpg/potion_mana", "kind": "potion", "value": 18, "weight": 8, "rarity": "uncommon", "color": Color("3b82f6")},
+	{"id": "scroll", "name": "Schriftrolle", "asset": "rpg/scroll", "kind": "treasure", "value": 8, "weight": 8, "rarity": "common", "color": Color("d6c6a0")},
+	{"id": "key", "name": "Schlüssel", "asset": "rpg/key", "kind": "treasure", "value": 10, "weight": 5, "rarity": "uncommon", "color": Color("fcd34d")},
+	{"id": "ring", "name": "Ring", "asset": "rpg/ring", "kind": "treasure", "value": 16, "weight": 4, "rarity": "rare", "color": Color("facc15")},
+	{"id": "amulet", "name": "Amulett", "asset": "rpg/amulet", "kind": "treasure", "value": 20, "weight": 3, "rarity": "rare", "color": Color("a855f7")},
+	{"id": "shield", "name": "Schild", "asset": "rpg/shield", "kind": "treasure", "value": 18, "weight": 3, "rarity": "rare", "color": Color("94a3b8")},
+	{"id": "helmet", "name": "Helm", "asset": "rpg/helmet", "kind": "treasure", "value": 15, "weight": 3, "rarity": "rare", "color": Color("cbd5e1")},
+	{"id": "armor", "name": "Rüstung", "asset": "rpg/armor", "kind": "treasure", "value": 22, "weight": 2, "rarity": "epic", "color": Color("94a3b8")},
+	{"id": "boots", "name": "Stiefel", "asset": "rpg/boots", "kind": "treasure", "value": 12, "weight": 3, "rarity": "rare", "color": Color("64748b")},
+	{"id": "crown", "name": "Krone", "asset": "rpg/crown", "kind": "treasure", "value": 40, "weight": 1, "rarity": "legendary", "color": Color("fde047")},
 ]
 
 
@@ -147,17 +158,93 @@ static func random_weapon() -> Dictionary:
 
 # --- loot -------------------------------------------------------------------
 
-## Weighted random loot entry.
-static func roll_loot() -> Dictionary:
-	var total := 0
+## Rarity row by id, falling back to "common".
+static func rarity_by_id(id: String) -> Dictionary:
+	for rarity in RARITIES:
+		if str(rarity["id"]) == id:
+			return rarity
+	return RARITIES[0]
+
+
+## Index of a rarity in `RARITIES`; unknown ids become common.
+static func rarity_index(id: String) -> int:
+	for i in RARITIES.size():
+		if str((RARITIES[i] as Dictionary)["id"]) == id:
+			return i
+	return 0
+
+
+## The rarity a table entry belongs to.
+static func rarity_of(entry: Dictionary) -> Dictionary:
+	return rarity_by_id(str(entry.get("rarity", "common")))
+
+
+## Loot table row by id, falling back to the most common drop.
+static func loot_by_id(id: String) -> Dictionary:
 	for entry in LOOT_TABLE:
-		total += int(entry["weight"])
-	var roll := randf() * float(total)
-	for entry in LOOT_TABLE:
-		roll -= float(entry["weight"])
-		if roll <= 0.0:
+		if str(entry["id"]) == id:
 			return entry
 	return LOOT_TABLE[0]
+
+
+## Effective drop weight of one table row at a given luck level.
+##
+## Rarity 0 keeps its base weight; every step above multiplies it by
+## `1 + luck * index²`, so luck never *reduces* a chance.
+static func lottery_weight(entry: Dictionary, luck: float = 0.0) -> float:
+	var index := rarity_index(str(entry.get("rarity", "common")))
+	var factor: float = 1.0 + clampf(luck, 0.0, 1.0) * float(index) * float(index)
+	return float(entry.get("weight", 0.0)) * factor
+
+
+## Weighted random loot entry.
+##
+## `luck` (0.0–1.0) shifts weight towards the better rarities: a boss at 1.0
+## drops almost exclusively epic or legendary, trash at 0.0 almost never does.
+static func roll_loot(luck: float = 0.0) -> Dictionary:
+	var weights: Array[float] = []
+	var total := 0.0
+	for entry in LOOT_TABLE:
+		var weight := lottery_weight(entry, luck)
+		weights.append(weight)
+		total += weight
+	var roll := randf() * total
+	for i in LOOT_TABLE.size():
+		roll -= weights[i]
+		if roll <= 0.0:
+			return LOOT_TABLE[i]
+	return LOOT_TABLE[0]
+
+
+## How good a drop is, for "you already have something better" comparisons.
+## Value dominates, rarity breaks ties.
+static func loot_score(entry: Dictionary) -> float:
+	var rarity := rarity_of(entry)
+	return float(entry.get("value", 0)) + float(rarity_index(str(rarity["id"]))) * 10.0
+
+
+## Compare a fresh drop against the best item of the same kind already taken.
+##
+## Returns `"upgrade"`, `"downgrade"` or `"same"`; the HUD turns that into the
+## green up-arrow / red down-arrow next to the pickup.
+static func compare_drop(fresh: Dictionary, best_so_far: Dictionary) -> String:
+	if best_so_far.is_empty():
+		return "upgrade"
+	var a := loot_score(fresh)
+	var b := loot_score(best_so_far)
+	if a > b:
+		return "upgrade"
+	if a < b:
+		return "downgrade"
+	return "same"
+
+
+## How much luck a dragon grants: bosses always high, trash never above 0.3.
+static func luck_for(dragon: Dictionary) -> float:
+	if bool(dragon.get("boss", false)):
+		return 1.0
+	var tier: int = int(dragon.get("tier", 1))
+	return clampf(0.1 + float(tier) * 0.06, 0.0, 0.4)
 
 
 # --- combat -----------------------------------------------------------------

@@ -17,6 +17,9 @@ func _run() -> void:
 	var logic := TestLogic.new()
 	logic.run(kit)
 
+	var improvements := TestImprovements.new()
+	improvements.run(kit)
+
 	var screens := TestScreens.new()
 	await screens.run(kit, self)
 

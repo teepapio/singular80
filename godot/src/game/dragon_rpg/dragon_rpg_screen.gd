@@ -8,6 +8,7 @@ const ARENA_RADIUS := 32.0
 const PLAYER_RADIUS := 0.75
 const PLAYER_HALF_HEIGHT := 1.35
 const DRAGON_LIMIT := 40
+const LABEL_POOL_SIZE := 24
 const LOOT_LIMIT := 80
 const PROJECTILE_LIMIT := 56
 const SPAWN_RADIUS := ARENA_RADIUS - 2.5
@@ -56,8 +57,11 @@ var invuln := 0.0
 var running := true
 var dragons: Array[Dictionary] = []
 var loot: Array[Dictionary] = []
+## The best drop of each kind so far, so a new pickup can be compared against it.
+var best_loot: Dictionary = {}
+## Everything currently drawn with a pooled Label3D.
+var _floating: Array[Dictionary] = []
 var projectiles: Array[Dictionary] = []
-var damage_labels: Array[Dictionary] = []
 var heart_light: OmniLight3D
 var particles: MultiMeshInstance3D
 var particle_data := PackedFloat32Array()
@@ -69,6 +73,7 @@ var _level_label: Label
 var _gold_label: Label
 var _weapon_label: Label
 var _kills_label: Label
+var _loot_label: Label
 var _hp_bar: ProgressBar
 var _hp_text: Label
 var _xp_bar: ProgressBar
@@ -78,6 +83,8 @@ var _boss_name: Label
 var _boss_bar: ProgressBar
 var _over_layer: Control
 var _aim := Vector3.ZERO
+## Pre-allocated pool of world-space labels; see `_push_label`.
+var _label_pool: Array[Label3D] = []
 
 
 func _ready_world() -> void:
@@ -86,6 +93,7 @@ func _ready_world() -> void:
 	_build_scenery()
 	_build_player()
 	_build_particles()
+	_build_label_pool()
 	_build_ui()
 	_next_wave.call_deferred()
 	hide_loading()
@@ -191,6 +199,56 @@ func _equip_weapon(next_weapon: Dictionary) -> void:
 	weapon_pivot.add_child(weapon_mesh)
 
 
+## Floating damage numbers and loot verdicts share one pool, so a busy fight
+## never allocates a node mid-frame.
+func _build_label_pool() -> void:
+	for i in LABEL_POOL_SIZE:
+		var label := Label3D.new()
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.no_depth_test = true
+		label.fixed_size = true
+		label.outline_size = 12
+		label.outline_modulate = Color("020617")
+		label.visible = false
+		label.font_size = 96
+		add_child(label)
+		_label_pool.append(label)
+
+
+## Shows `text` at `at` for `life` seconds, fading out. Reuses the oldest free
+## label when the pool is exhausted.
+func _push_label(at: Vector3, text: String, color: Color, life: float, size: float) -> void:
+	var node: Label3D = null
+	for candidate in _label_pool:
+		if not candidate.visible:
+			node = candidate
+			break
+	if node == null:
+		node = _label_pool[0]
+	node.text = text
+	node.modulate = color
+	node.outline_size = 24
+	node.font_size = int(size)
+	node.outline_render_priority = 1
+	node.position = at
+	node.visible = true
+	_floating.append({"node": node, "life": life, "max_life": life})
+
+
+## Ages every floating label and hides the expired ones. Called once per frame
+## with the same delta the rest of the world uses.
+func _update_floating(dt: float) -> void:
+	for i in range(_floating.size() - 1, -1, -1):
+		var entry: Dictionary = _floating[i]
+		entry["life"] = float(entry["life"]) - dt
+		var node: Label3D = entry["node"]
+		node.position += Vector3(0, dt * 1.4, 0)
+		node.modulate.a = clampf(float(entry["life"]) / maxf(0.01, float(entry["max_life"])), 0.0, 1.0)
+		if float(entry["life"]) <= 0.0:
+			node.visible = false
+			_floating.remove_at(i)
+
+
 func _build_particles() -> void:
 	var mesh := SphereMesh.new()
 	mesh.radius = 0.1
@@ -235,23 +293,24 @@ func _build_ui() -> void:
 	_gold_label = _value(column, "Gold", "0", Color("fbbf24"))
 	_weapon_label = _value(column, "Waffe", str(weapon["name"]))
 	_kills_label = _value(column, "Kills", "0")
+	_loot_label = _value(column, "Letzte Beute", "—")
 
 	_hp_bar = Ui.bar(Color("ef4444"), 20.0)
-	_hp_bar.position = Vector2(20, 252)
+	_hp_bar.position = Vector2(20, 264)
 	_hp_bar.size = Vector2(320, 20)
 	hud_root.add_child(_hp_bar)
 	_hp_text = Ui.label("", 13, UiTheme.TEXT, true)
-	_hp_text.position = Vector2(20, 254)
+	_hp_text.position = Vector2(20, 266)
 	_hp_text.size = Vector2(320, 18)
 	_hp_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hud_root.add_child(_hp_text)
 
 	_xp_bar = Ui.bar(Color("38bdf8"), 12.0)
-	_xp_bar.position = Vector2(20, 278)
+	_xp_bar.position = Vector2(20, 292)
 	_xp_bar.size = Vector2(320, 12)
 	hud_root.add_child(_xp_bar)
 	_xp_text = Ui.label("", 12, UiTheme.TEXT_DIM)
-	_xp_text.position = Vector2(20, 280)
+	_xp_text.position = Vector2(20, 294)
 	_xp_text.size = Vector2(320, 16)
 	_xp_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hud_root.add_child(_xp_text)
@@ -369,7 +428,7 @@ func _update_world(delta: float) -> void:
 	_update_dragons(dt)
 	_update_projectiles(dt)
 	_update_loot(dt)
-	_update_damage_labels(dt)
+	_update_floating(dt)
 	_update_particles(dt)
 	_update_hud()
 
@@ -565,20 +624,72 @@ func _hit_dragon(dragon: Dictionary, damage: int, crit: bool) -> void:
 func _drop_loot(dragon: Dictionary) -> void:
 	if loot.size() >= LOOT_LIMIT:
 		return
-	var entry := DragonRpg.roll_loot()
-	var node := WorldScreen.mesh(str(entry["asset"]), entry["color"], 0.6, 0.5)
+	# A boss rolls with full luck, so killing one genuinely pays off.
+	var entry := DragonRpg.roll_loot(DragonRpg.luck_for(dragon))
+	var rarity := DragonRpg.rarity_of(entry)
+	var color: Color = rarity["color"]
+	var node := WorldScreen.mesh(str(entry["asset"]), color, 0.6, 0.5)
 	if node == null:
 		var box := MeshInstance3D.new()
 		var mesh := BoxMesh.new()
 		mesh.size = Vector3(0.4, 0.4, 0.4)
 		box.mesh = mesh
-		box.material_override = WorldScreen.standard_material(entry["color"], 0.4)
+		box.material_override = WorldScreen.standard_material(color, 0.4)
 		node = box
 	var at: Vector3 = (dragon["node"] as Node3D).global_position
 	at.y = 0.6
 	node.position = at
 	add_child(node)
-	loot.append({"node": node, "kind": str(entry["kind"]), "value": int(entry["value"]), "weapon_id": str(entry["id"]) if str(entry["kind"]) == "weapon" else ""})
+
+	# Better-than-common drops get a light column and a pulsing ring, so a rare
+	# find is visible across the arena instead of hiding among the coins.
+	var glow := float(rarity["glow"])
+	if glow > 0.0:
+		var halo := _build_loot_glow(color, glow)
+		halo.position = at
+		add_child(halo)
+		loot.append({
+			"node": halo, "kind": str(entry["kind"]), "value": int(entry["value"]),
+			"id": str(entry["id"]), "name": str(entry["name"]), "rarity": str(rarity["id"]),
+			"color": color, "glow": glow, "phase": randf() * TAU,
+		})
+		return
+	loot.append({
+		"node": node, "kind": str(entry["kind"]), "value": int(entry["value"]),
+		"id": str(entry["id"]), "name": str(entry["name"]), "rarity": str(rarity["id"]),
+		"color": color, "glow": 0.0, "phase": 0.0,
+	})
+
+
+## A translucent cylinder plus a ground ring that marks a rare drop.
+func _build_loot_glow(color: Color, strength: float) -> Node3D:
+	var root := Node3D.new()
+	var column := MeshInstance3D.new()
+	var cylinder := CylinderMesh.new()
+	cylinder.top_radius = 0.42
+	cylinder.bottom_radius = 0.42
+	cylinder.height = 1.6
+	column.mesh = cylinder
+	column.position = Vector3(0, 0.8, 0)
+	var material := WorldScreen.standard_material(color, 0.85)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.emission_enabled = true
+	material.emission = color
+	material.emission_energy_multiplier = 0.5 + strength * 0.9
+	material.albedo_color = Color(color.r, color.g, color.b, 0.16 + strength * 0.05)
+	column.material_override = material
+	root.add_child(column)
+
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.5
+	torus.outer_radius = 0.66
+	torus.rings = 20
+	ring.mesh = torus
+	ring.position = Vector3(0, 0.05, 0)
+	ring.material_override = WorldScreen.standard_material(color, 0.6)
+	root.add_child(ring)
+	return root
 
 
 func _update_loot(dt: float) -> void:
@@ -587,6 +698,10 @@ func _update_loot(dt: float) -> void:
 		var node: Node3D = item["node"]
 		node.rotation.y += dt * 2.0
 		node.position.y = 0.6 + sin(elapsed * 3.0 + node.position.x) * 0.15
+		if float(item["glow"]) > 0.0:
+			# The halo breathes so it reads as "alive" next to static loot.
+			var pulse := 1.0 + sin(elapsed * 3.4 + float(item["phase"])) * 0.12
+			node.scale = Vector3.ONE * pulse
 		if node.global_position.distance_to(player_pos) > stats.pickup_radius:
 			continue
 		_collect(item)
@@ -595,6 +710,13 @@ func _update_loot(dt: float) -> void:
 
 
 func _collect(item: Dictionary) -> void:
+	var id := str(item.get("id", ""))
+	var verdict := ""
+	if id != "":
+		var previous: Dictionary = best_loot.get(id, {})
+		verdict = DragonRpg.compare_drop(item, previous)
+		if verdict == "upgrade" or previous.is_empty():
+			best_loot[id] = {"value": int(item["value"]), "rarity": str(item["rarity"])}
 	match str(item["kind"]):
 		"gold", "treasure":
 			gold += int(item["value"])
@@ -604,25 +726,26 @@ func _collect(item: Dictionary) -> void:
 			Sfx.level_up()
 		_:
 			Sfx.coin()
+	_announce_loot(item, verdict)
+
+
+## Records the pickup in the HUD and floats a short verdict above the player.
+func _announce_loot(item: Dictionary, verdict: String) -> void:
+	var rarity := DragonRpg.rarity_by_id(str(item.get("rarity", "common")))
+	var name_text := str(item.get("name", "?"))
+	if _loot_label != null:
+		_loot_label.text = "%s  ·  %s" % [name_text, str(rarity["name"])]
+		_loot_label.add_theme_color_override("font_color", rarity["color"])
+	if verdict == "":
+		return
+	var arrow := "▲ " if verdict == "upgrade" else ("▼ " if verdict == "downgrade" else "= ")
+	_push_label(player_pos + Vector3(0, 2.4, 0), arrow + name_text, rarity["color"], 1.2, 90.0)
 
 
 func _spawn_damage_label(dragon: Dictionary, damage: int, crit: bool) -> void:
 	var node: Node3D = dragon["node"]
-	damage_labels.append({
-		"position": node.global_position + Vector3(0, 2.0, 0),
-		"life": 0.8,
-		"text": str(damage),
-		"crit": crit,
-	})
-
-
-func _update_damage_labels(dt: float) -> void:
-	for i in range(damage_labels.size() - 1, -1, -1):
-		var label: Dictionary = damage_labels[i]
-		label["life"] = float(label["life"]) - dt
-		label["position"] = Vector3(label["position"]) + Vector3(0, 1.6 * dt, 0)
-		if float(label["life"]) <= 0.0:
-			damage_labels.remove_at(i)
+	var color := Color("fde047") if crit else Color("f8fafc")
+	_push_label(node.global_position + Vector3(0, 2.0, 0), str(damage), color, 0.7, 150.0 if crit else 110.0)
 
 
 func _update_particles(dt: float) -> void:

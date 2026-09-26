@@ -16,3 +16,5 @@ godot/shot.gd
 godot/shot.tscn
 godot/probe.gd
 godot/shot.gd.uid
+godot/lootshot.gd
+godot/lootshot.tscn

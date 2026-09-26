@@ -41,11 +41,30 @@ var h_timer := 0.0
 var paused := false
 var game_over := false
 
+# --- skill scoring ---
+# A T-Spin only counts when the *last* successful action was a rotation, so any
+# move, slide or drop cancels the pending spin.
+var last_move_was_rotation := false
+var combo := 0
+var back_to_back := 0
+var clear_message := ""
+var clear_message_color := Color("facc15")
+var clear_flash := 0.0
+var danger := 0
+
+## How many upcoming pieces the queue shows; clamped to `TetrisRules`.
+var preview_size := 4
+
 var _board_view: BoardView
 var _score_label: Label
 var _level_label: Label
 var _lines_label: Label
 var _highscore_label: Label
+var _combo_label: Label
+var _b2b_label: Label
+var _danger_label: Label
+var _message_label: Label
+var _preview_button: Button
 var _modal: Control
 
 
@@ -73,28 +92,59 @@ func _build_ui() -> void:
 	layer.add_child(title)
 
 	_score_label = _stat(layer, 78, "PUNKTE", "0")
-	_level_label = _stat(layer, 168, "LEVEL", "1")
-	_lines_label = _stat(layer, 258, "LINIEN", "0")
-	_stat(layer, 352, "NÄCHSTER", "")
+	_level_label = _stat(layer, 152, "LEVEL", "1")
+	_lines_label = _stat(layer, 226, "LINIEN", "0")
+	_combo_label = _stat(layer, 300, "COMBO", "0")
+	_b2b_label = _stat(layer, 374, "BACK-TO-BACK", "0")
+
+	_danger_label = Ui.label("", 15, Color("f87171"), true)
+	_danger_label.position = Vector2(24, 458)
+	_danger_label.size = Vector2(226, 44)
+	_danger_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_danger_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	layer.add_child(_danger_label)
+
+	# The clear announcement sits over the well so the eye stays on the board.
+	_message_label = Ui.label("", 30, Color("facc15"), true)
+	_message_label.position = Vector2(BOARD_X, BOARD_Y + BOARD_H * 0.32)
+	_message_label.size = Vector2(BOARD_W, 40)
+	_message_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_message_label.add_theme_constant_override("outline_size", 8)
+	_message_label.add_theme_color_override("font_outline_color", Color("020617"))
+	_message_label.modulate.a = 0.0
+	layer.add_child(_message_label)
+
+	var preview_caption := Ui.label("VORSCHAU", 15, UiTheme.TEXT_DIM)
+	preview_caption.position = Vector2(970, 68)
+	preview_caption.size = Vector2(180, 20)
+	preview_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	layer.add_child(preview_caption)
+
+	var hold_caption := Ui.label("HALTEN", 15, UiTheme.TEXT_DIM)
+	hold_caption.position = Vector2(970, 500)
+	hold_caption.size = Vector2(180, 20)
+	hold_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	layer.add_child(hold_caption)
 
 	_highscore_label = Ui.label("", 15, Color("facc15"))
-	_highscore_label.position = Vector2(0, 666)
+	_highscore_label.position = Vector2(0, 664)
 	_highscore_label.size = Vector2(1280, 22)
 	_highscore_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(_highscore_label)
 
-	var controls := Ui.label("← →  bewegen\n↓  sanft fallen\n↑ / W / X  drehen\nZ  gegen den Uhrzeigersinn\nLeertaste  hart fallen\nC / Shift  halten\nESC / P  Pause\nR  neu starten", 16, Color("cbd5e1"))
-	controls.position = Vector2(800, 92)
-	controls.size = Vector2(320, 200)
-	layer.add_child(controls)
-
 	_build_touch_controls(layer)
 
-	var hint := Ui.label("Tippe die Tasten unten an  ·  dieselben Aktionen gehen mit Tastatur und Gamepad", 13, UiTheme.TEXT_MUTED)
-	hint.position = Vector2(0, 694)
-	hint.size = Vector2(1280, 20)
+	# The full control reference lives in the pause overlay; on-screen players
+	# only need the essentials.
+	var hint := Ui.label("← →  bewegen   ·   ↓  sanft fallen   ·   ↑  drehen   ·   Leertaste  hart   ·   C  halten   ·   ESC  Pause", 13, UiTheme.TEXT_MUTED)
+	hint.position = Vector2(170, 692)
+	hint.size = Vector2(810, 20)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(hint)
+
+
+## German control reference, shown inside the pause overlay.
+const CONTROL_HELP := "← →  bewegen\n↓  sanft fallen\n↑ / W / X  drehen\nZ  gegen den Uhrzeigersinn\nLeertaste  hart fallen\nC / Shift  halten\nESC / P  Pause\nR  neu starten"
 
 
 ## On-screen controls so the game is fully playable without a keyboard.
@@ -152,6 +202,19 @@ func _build_touch_controls(layer: Control) -> void:
 	rotate_ccw.position = Vector2(1108, 650)
 	layer.add_child(rotate_ccw)
 
+	# How far to look ahead is a matter of taste, so it is a button rather than a
+	# buried setting.
+	_preview_button = Ui.button("", Vector2(100, 30), UiTheme.PANEL_LIGHT, _cycle_preview)
+	_preview_button.position = Vector2(1010, 452)
+	layer.add_child(_preview_button)
+
+
+## Steps the queue preview through `TetrisRules.PREVIEW_OPTIONS`.
+func _cycle_preview() -> void:
+	var index := TetrisRules.PREVIEW_OPTIONS.find(preview_size)
+	preview_size = TetrisRules.PREVIEW_OPTIONS[(index + 1) % TetrisRules.PREVIEW_OPTIONS.size()]
+	_refresh()
+
 
 func _stat(layer: Control, y: float, caption: String, value: String) -> Label:
 	var label := Ui.label(caption, 15, UiTheme.TEXT_DIM)
@@ -187,6 +250,12 @@ func reset_game() -> void:
 	h_timer = 0.0
 	paused = false
 	game_over = false
+	last_move_was_rotation = false
+	combo = 0
+	back_to_back = 0
+	clear_message = ""
+	clear_flash = 0.0
+	danger = 0
 	highscore = Game.highscore(Game.HS_TETRIS)
 	close_modals()
 	_spawn_next()
@@ -195,6 +264,13 @@ func reset_game() -> void:
 
 func _process(delta: float) -> void:
 	super(delta)
+	# The clear announcement fades on its own, even while the game is paused, so
+	# a stacked-up screen never shows a stale "TETRIS!".
+	if clear_flash > 0.0:
+		clear_flash = maxf(0.0, clear_flash - delta * 1.8)
+		if _message_label != null:
+			_message_label.modulate.a = clampf(clear_flash * 2.2, 0.0, 1.0)
+
 	if Input.is_action_just_pressed("restart"):
 		reset_game()
 		return
@@ -335,6 +411,7 @@ func _rotate(clockwise: bool) -> void:
 		if not _collides(rotated, int(piece["x"]) + int(kick), piece["y"]):
 			piece["matrix"] = rotated
 			piece["x"] = int(piece["x"]) + int(kick)
+			last_move_was_rotation = true
 			return
 
 
@@ -361,6 +438,7 @@ func _try_move_down() -> bool:
 	if _collides(piece["matrix"], piece["x"], int(piece["y"]) + 1):
 		return false
 	piece["y"] = int(piece["y"]) + 1
+	last_move_was_rotation = false
 	return true
 
 
@@ -371,6 +449,11 @@ func ghost_y() -> int:
 	while not _collides(piece["matrix"], piece["x"], y + 1):
 		y += 1
 	return y
+
+
+## Whether the well is crowded enough to hurt; drives the HUD warning.
+func danger_level() -> int:
+	return TetrisRules.danger_level(board)
 
 
 func _hard_drop() -> void:
@@ -384,9 +467,31 @@ func _hard_drop() -> void:
 	_lock_piece()
 
 
+## True when a board cell counts as occupied for T-Spin detection. Walls and the
+## ceiling above the well count too, which is what makes a wall kick register.
+func _filled_at(x: int, y: int) -> bool:
+	if x < 0 or x >= COLS or y >= ROWS:
+		return true
+	if y < 0:
+		return false
+	return int(board[y][x]) != 0
+
+
+## The spin kind the current piece would score when it locks right now.
+func current_spin() -> String:
+	if piece.is_empty():
+		return "none"
+	var corners := TetrisRules.t_corners(int(piece["x"]), int(piece["y"]), _filled_at)
+	if not TetrisRules.is_t_spin(int(piece["type"]), last_move_was_rotation, corners):
+		return "none"
+	return "mini" if TetrisRules.is_t_spin_mini(corners) else "full"
+
+
 func _lock_piece() -> void:
 	if piece.is_empty():
 		return
+	# The corners must be sampled before the piece joins the well.
+	var spin := current_spin()
 	var matrix: Array = piece["matrix"]
 	for py in matrix.size():
 		for px in (matrix[py] as Array).size():
@@ -397,12 +502,13 @@ func _lock_piece() -> void:
 			if by >= 0 and by < ROWS and bx >= 0 and bx < COLS:
 				board[by][bx] = int(piece["type"]) + 1
 	piece = {}
-	_clear_lines()
+	last_move_was_rotation = false
+	_clear_lines(spin)
 	if not game_over:
 		_spawn_next()
 
 
-func _clear_lines() -> void:
+func _clear_lines(spin: String = "none") -> void:
 	var cleared := 0
 	var y := ROWS - 1
 	# `y` wandert immer eine Zeile nach oben; eine geräumte Zeile kompensiert das,
@@ -422,17 +528,23 @@ func _clear_lines() -> void:
 			cleared += 1
 			y += 1
 		y -= 1
+
+	var award := TetrisRules.score_clear(cleared, level, combo, back_to_back, spin)
+	combo = int(award["combo"])
+	back_to_back = int(award["back_to_back"])
 	if cleared == 0:
 		return
+
 	lines += cleared
-	var base := 100
-	if cleared == 2:
-		base = 300
-	elif cleared == 3:
-		base = 500
-	elif cleared >= 4:
-		base = 800
-	score += base * level
+	score += int(award["points"])
+	clear_message = str(award["message"])
+	clear_message_color = Color("facc15") if spin == "none" else Color("c084fc")
+	clear_flash = clampf(float(award["flash"]), 0.2, 0.7)
+	if _message_label != null:
+		_message_label.text = clear_message
+		_message_label.add_theme_color_override("font_color", clear_message_color)
+		_message_label.modulate.a = 1.0
+
 	var next_level := 1 + int(floor(float(lines) / 10.0))
 	if next_level != level:
 		level = next_level
@@ -451,7 +563,7 @@ func _toggle_pause() -> void:
 			["Fortsetzen", func() -> void: _toggle_pause()],
 			["Neu starten", func() -> void: reset_game()],
 			["◀  Lobby", func() -> void: Router.to_lobby()],
-		])
+		], [CONTROL_HELP])
 	else:
 		close_modals()
 	_refresh()
@@ -484,24 +596,41 @@ func _show_overlay(title: String, title_color: Color, buttons: Array, info: Arra
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_modal.add_child(center)
+	var row := Ui.hbox(28)
+	center.add_child(row)
+
 	var column := Ui.vbox(16)
-	center.add_child(column)
+	row.add_child(column)
 	column.add_child(Ui.title(title, 52, title_color))
-	if not info.is_empty():
-		var text := Ui.label("\n".join(info), 22, info_color)
-		text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		column.add_child(text)
 	for entry in buttons:
 		column.add_child(Ui.button(str(entry[0]), Vector2(380, 58), UiTheme.ACCENT if entry[0] == buttons[0][0] else UiTheme.PANEL_LIGHT, entry[1]))
+
+	if not info.is_empty():
+		# The control reference sits next to the buttons instead of below them,
+		# otherwise the overlay outgrows the screen.
+		var help := Ui.vbox(4)
+		help.custom_minimum_size = Vector2(300, 0)
+		row.add_child(help)
+		for line in info:
+			var text := Ui.label(str(line), 17, info_color)
+			text.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+			help.add_child(text)
 
 
 func _refresh() -> void:
 	_board_view.queue_redraw()
-	if _score_label != null:
-		_score_label.text = str(score)
-		_level_label.text = str(level)
-		_lines_label.text = str(lines)
-		_highscore_label.text = "Highscore: %d" % highscore
+	if _score_label == null:
+		return
+	_score_label.text = str(score)
+	_level_label.text = str(level)
+	_lines_label.text = str(lines)
+	_highscore_label.text = "Highscore: %d" % highscore
+	_combo_label.text = ("×%d" % combo) if combo > 0 else "—"
+	_b2b_label.text = ("×%d" % back_to_back) if back_to_back > 0 else "—"
+	danger = danger_level()
+	_danger_label.text = TetrisRules.danger_text(board)
+	if _preview_button != null:
+		_preview_button.text = "Vorschau %d" % preview_size
 
 
 func _move_h(dir: int) -> void:
@@ -509,12 +638,20 @@ func _move_h(dir: int) -> void:
 		return
 	if not _collides(piece["matrix"], int(piece["x"]) + dir, piece["y"]):
 		piece["x"] = int(piece["x"]) + dir
+		last_move_was_rotation = false
 
 
 ## Draws the well, the settled blocks, the ghost and the active piece.
 class BoardView:
 	extends Control
 	var screen: TetrisScreen
+
+	## Where the queue preview starts and how far apart its entries sit.
+	const CHAIN_X := 1060.0
+	const CHAIN_Y := 108.0
+	const CHAIN_STEP := 56.0
+	const CHAIN_CELL := 13.0
+	const HOLD_Y := 556.0
 
 	func _draw() -> void:
 		if screen == null:
@@ -539,12 +676,38 @@ class BoardView:
 		if not screen.piece.is_empty() and not screen.game_over:
 			var color: Color = (PIECES[int(screen.piece["type"])] as Dictionary)["color"]
 			_piece(screen.piece["matrix"], int(screen.piece["x"]), screen.ghost_y(), color, true)
+			# A T that is about to score spins into a violet frame while it is
+			# still up — the player can see the opportunity before committing.
+			var spin := screen.current_spin()
+			if spin != "none":
+				var ghost := screen.ghost_y()
+				_spin_frame(Vector2(BOARD_X + float(screen.piece["x"]) * CELL, BOARD_Y + float(ghost) * CELL), Color("c084fc"))
 			_piece(screen.piece["matrix"], int(screen.piece["x"]), int(screen.piece["y"]), color, false)
 
-		draw_rect(board_rect.grow(1.5), Color("475569"), false, 3.0)
-		var next_type: int = int(screen.queue[0]) if screen.queue.size() > 0 else -1
-		_preview(next_type, Vector2(245, 425), 22.0)
-		_preview(screen.hold_type, Vector2(245, 586), 22.0)
+		# A clear flashes the well, briefly and in the clear's own colour.
+		if screen.clear_flash > 0.0:
+			draw_rect(board_rect, Color(
+				screen.clear_message_color.r,
+				screen.clear_message_color.g,
+				screen.clear_message_color.b,
+				screen.clear_flash * 0.28
+			))
+
+		var border := Color("475569")
+		if screen.danger == 2:
+			border = Color("ef4444")
+		elif screen.danger == 1:
+			border = Color("f59e0b")
+		draw_rect(board_rect.grow(1.5), border, false, 3.0)
+
+		var chain := TetrisRules.preview_chain(screen.queue, screen.preview_size)
+		for i in chain.size():
+			_preview(chain[i], Vector2(CHAIN_X, CHAIN_Y + float(i) * CHAIN_STEP), CHAIN_CELL)
+		_preview(screen.hold_type, Vector2(CHAIN_X, HOLD_Y), 22.0)
+
+	## Outlines the ghost position of a T-Spin in the T's 3×3 box.
+	func _spin_frame(at: Vector2, color: Color) -> void:
+		draw_rect(Rect2(at - Vector2.ONE, Vector2(CELL * 3.0 + 2.0, CELL * 3.0 + 2.0)), Color(color.r, color.g, color.b, 0.55), false, 2.0)
 
 	func _piece(matrix: Array, px: int, py: int, color: Color, ghost: bool) -> void:
 		for y in matrix.size():
