@@ -6,7 +6,7 @@ spiegelt.
 
 | | |
 |---|---|
-| **App** | Godot 4.5 (GDScript), Android 7.0+ (`arm64-v8a`), Release-APK ca. 124 MB |
+| **App** | Godot 4.5 (GDScript), Android 7.0+ (`arm64-v8a`), Release-APK 81 MB — schlank 29 MB |
 | **Backend** | Fastify + SQLite, Content-Server, Discord-Bot, OpenCode-Runner |
 | **Dashboard** | Vanilla-Web (Vite), bewusst nahezu unverändert |
 | **Assets** | 168 Blender-GLBs in drei Auflösungen, keine Texturen — 2D wird prozedural gezeichnet |

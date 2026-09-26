@@ -15,7 +15,7 @@ können.
 | Signierter AAB-Build | ✅ erledigt (77,5 MB, targetSdk 36, Paketname korrekt) |
 | AAB-Verifikation | ✅ erledigt |
 | Store-Icon + Feature Graphic | ✅ erledigt, von `npm run assets` erzeugt |
-| Schlankes APK ohne med/high | ✅ 73,3 MB statt 129,3 MB, `npm run build:apk` |
+| Schlankes APK ohne med/high | ✅ 29,0 MB statt 81,3 MB, `npm run build:apk` |
 | Store-Texte en/de | ✅ Entwurf, von `npm run preflight` geprüft |
 | Rechtstexte | ⚠️ Entwurf mit Platzhaltern |
 | Screenshots | ❌ headless nicht renderbar, Import-Modus bereit |

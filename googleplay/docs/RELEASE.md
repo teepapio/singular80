@@ -90,9 +90,9 @@ Upload hochzählen. Versionname `1.0.0`, `1.0.1`, …
 
 | Variante | Größe | Hinweis |
 |---|---|---|
-| AAB, arm64, 3 LOD-Stufen | **77,5 MB** | aktueller Stand, ein Basis-Modul |
-| APK (alt, im Repo gebaut) | 124 MB | nicht mehr Play-tauglich |
-| AAB ohne `med/` + `high/` | ~32 MB | Galerie zeigt nur die Low-Poly-Meshes |
+| APK, arm64, 3 LOD-Stufen | **81,3 MB** | Release, native Bibliothek komprimiert |
+| APK ohne `med/` + `high/` | **29,0 MB** | Galerie zeigt nur die Low-Poly-Meshes |
+| AAB, arm64, 3 LOD-Stufen | 77,5 MB | vor der Kompression gemessen; Play liefert pro ABI |
 
 Play liefert pro Gerät nur die passende ABI aus. Deshalb wiegt ein AAB mit
 arm64-Vorrat weniger als ein APK mit derselben Menge — die 200-MB-Grenze für
@@ -145,17 +145,50 @@ die Stufen mitdriften. Verglichen werden deshalb die **md5-Summen** aus den
 | APK | low | med | high |
 |---|---|---|---|
 | schlank | 155/155 | **0/155** | **0/155** |
-| `singular80.apk` (voll) | 155/155 | 155/155 | 155/155 |
+| voll | 155/155 | 155/155 | 155/155 |
+
+Beide Zeilen sind an den ausgelieferten APKs gemessen, nicht geschätzt.
+
+**Die Dateigröße ist dabei kein Beweis.** Zwei schlanke Builds mit identischem
+Inhalt wogen 73,1 MB und 27,6 MB; der Unterschied waren ausschließlich die
+`libgodot_android.so` (66,7 MiB deflatet statt gespeichert, `extractNativeLibs`),
+nicht die Meshes. Aussagekräftig ist allein der md5-Vergleich.
 
 Was im schlanken Build verändert ist:
 
 | | voll | schlank |
 |---|---|---|
-| Größe (gemessen) | 129,3 MB | **73,3 MB** (−56 MB, −43 %) |
+| Größe (gemessen, Release) | 81,3 MB | **29,0 MB** (−52,3 MB, −64 %) |
 | Low-Poly-Meshes | 155 | 155 |
 | Galerie | drei Detailstufen | nur „Low Poly" |
 | `lod.json` | ja | ja (nur die Low-Zahlen sind sichtbar) |
 | Signatur | Debug-Key | Debug-Key — `adb install -r` aktualisiert über die bestehende Installation |
+
+## Wo die Größe wirklich steckt
+
+Zwei Hebel, und der zweite war der größere:
+
+| | voll | schlank |
+|---|---|---|
+| `libgodot_android.so` | 23,2 MB (von 70,0 MB) | 23,2 MB |
+| Meshes (465 bzw. 155 Stufen) | 53,5 MB | 1,4 MB |
+| `classes.dex`, Skripte, `res` | ~4 MB | ~4 MB |
+
+`gradle_build/compress_native_libraries=true` lässt die native Bibliothek
+deflaten: 70,0 auf 23,2 MB, **47,7 MB (37 %) kleiner**. Das ist mehr, als die
+beiden reicheren Mesh-Stufen zusammen gekostet haben.
+
+Der Preis steht nicht im Preset, sondern hier: Android entpackt die Bibliothek
+beim Installieren. Das Gerät belegt damit APK **plus** entpackte `.so`, wo es
+vorher nur das APK belegte — der Download sinkt um 47,7 MB, der Speicherbedarf
+steigt. Wer den Speicher wichtiger findet, dreht genau diese eine Zeile zurück.
+
+Nebenbei gemessen und deshalb als Hebel tauglich, aber nicht als Ziel: das
+Release-Template ist mit 70,0 MB nur 6 MB kleiner als das Debug-Template
+(76,0 MB). `--export-release` lohnt sich aus Gründen der Korrektheit.
+
+Zum Vergleich: der erste Debug-Build ohne Kompression und mit allen drei Stufen
+wog 135,6 MB. Gegenüber dem sind das −40 % (voll) bzw. −79 % (schlank).
 
 Die Galerie beschriftet die tatsächlich gezeigte Stufe. Früher stand dort die
 gewählte Stufe samt Dreieckszahl, also „Mittel — 1.000 Dreiecke" über einem
