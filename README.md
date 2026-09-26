@@ -1,6 +1,6 @@
 # Singular 80
 
-Ein Spiel, das von seinen Spielern gebaut wird — **13 Spiele in einer Android-App**,
+Ein Spiel, das von seinen Spielern gebaut wird — **18 Spiele in einer Android-App**,
 plus ein Web-Dashboard, das Ideen sammelt, priorisiert und zurück in das Spiel
 spiegelt.
 
@@ -9,13 +9,14 @@ spiegelt.
 | **App** | Godot 4.5 (GDScript), Android 7.0+ (`arm64-v8a`), Release-APK ca. 124 MB |
 | **Backend** | Fastify + SQLite, Content-Server, Discord-Bot, OpenCode-Runner |
 | **Dashboard** | Vanilla-Web (Vite), bewusst nahezu unverändert |
-| **Assets** | 158 Blender-GLBs in drei Auflösungen, keine Texturen — 2D wird prozedural gezeichnet |
+| **Assets** | 168 Blender-GLBs in drei Auflösungen, keine Texturen — 2D wird prozedural gezeichnet |
 
 ## Die Spiele
 
 **2D** — Arena-Survival · Tetris · Texas Hold'em · FreeCell · Dame · 2048 · Lobby-Liste
-**3D** — begehbare Lobby · Mesh-Galerie · Crystal Jumper (3 Editionen) ·
-Merge 3D (2 Editionen) · Pferde-Parcours 3D · Drachen-RPG 3D
+**3D** — begehbare Lobby · Mesh-Galerie · Candy Crush (6 Welten, 240 Level) ·
+Crystal Jumper (3 Editionen) · Merge 3D (2 Editionen) · Pferde-Parcours 3D ·
+Drachen-RPG 3D · Drachenflug · Metropol 3D · Pang 3D · Siedler 3D
 
 Jedes Spiel ist per Thumbstick, On-Screen-Buttons, Tastatur **und** Gamepad
 bedienbar. Die 3D-Lobby ist begehbar: zu einer Kategorie-Plaza laufen, an einen

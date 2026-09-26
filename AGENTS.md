@@ -60,6 +60,7 @@ godot/
 │   │   │   ├── tetris_rules.gd      T-Spins, Punkte, B2B, Brettgefahr
 │   │   │   ├── arena_runs.gd        Wellenvorschau, Boss-Ansage, Kill-Ketten
 │   │   │   ├── lobby.gd             Geometrie der 3D-Lobby
+│   │   │   ├── candy_match3.gd      Match-3: Züge, Spezialbonbons, 6 Welten × 40 Level
 │   │   │   ├── inventory.gd         generisches Inventarsystem
 │   │   │   └── …                    Karten, 2048, Merge, Kristall, Drache …
 │   │   └── ui/                Screen/WorldScreen-Basis, Theme, Widgets,
@@ -93,6 +94,15 @@ Kamera-Follow und Touch-Steuerung mit.
 - Für eine kurze Meldung im 3D `notify(text)` benutzen (nicht `show_toast`).
 - `WorldScreen.mesh(key, …)` nimmt einen Registry-**Key** oder einen fertigen
   `res://`-Pfad (für die LOD-Stufen) und liefert `null`, wenn der Import fehlt.
+
+### Level-Spiele (Sterne)
+
+`Game.stars(game_id, key)`, `Game.submit_stars(game_id, key, wert)` und
+`Game.star_map(game_id, keys)` speichern Sterne unter `number.stars/…`. Ein
+Level-Schlüssel ist die globale Levelnummer (`"7"`), das Tageslevel `"daily:JJJJ-MM-TT"`.
+`CandyMatch3.world_stars(levels, welt_id)` zählt die Sterne einer Welt, und
+`world_bonus(stars)` übersetzt sie in Extras (Züge, Undo, Start-Farbbombe).
+`star_max` im `GameRegistry`-Eintrag sagt der Lobby, wie viele Sterne es gibt.
 
 ### Vorschläge
 

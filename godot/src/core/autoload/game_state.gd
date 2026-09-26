@@ -25,9 +25,10 @@ const HS_MERGE_HALLOWEEN := "singular80_merge3d_halloween_highscore"
 const HS_HORSE := "singular80_horserunner_highscore"
 const HS_DRAGON := "singular80_dragonrpg_highscore"
 const HS_2048 := "singular80_2048_highscore"
-const HS_PANG := "singular80_pang_highscore"
 const HS_DRAGONFLIGHT := "singular80_dragonflight_highscore"
 const HS_METRO := "singular80_metro3d_highscore"
+const HS_PANG := "singular80_pang_highscore"
+const HS_CANDY := "singular80_candy_highscore"
 const HS_SIEDLER := "singular80_siedler_highscore"
 
 var muted: bool = false
@@ -144,6 +145,42 @@ func get_number(key: String, fallback: float = 0.0) -> float:
 func set_number(key: String, value: float) -> void:
 	_numbers[key] = value
 	save_settings()
+
+
+# --- star progress (level games) -------------------------------------------
+
+## Stars collected in one level of a level game. The key is the game's id plus a
+## level key, so `candy3d` + `daily:2026-09-26` keeps campaigns and dailies apart.
+func stars(game_id: String, level_key: String) -> int:
+	return int(get_number("stars/%s/%s" % [game_id, level_key]))
+
+
+## Stores stars for a level, keeping the best result. Reports whether the record
+## improved, so the game can celebrate only real improvements.
+func submit_stars(game_id: String, level_key: String, value: int) -> bool:
+	var clamped: int = clampi(value, 0, 3)
+	if clamped <= 0:
+		return false
+	if clamped <= stars(game_id, level_key):
+		return false
+	set_number("stars/%s/%s" % [game_id, level_key], float(clamped))
+	return true
+
+
+## Reads a whole set of level keys in one go — used by the level select to build
+## its star map without 240 individual settings reads per redraw.
+func star_map(game_id: String, level_keys: Array) -> Dictionary:
+	var out := {}
+	for key in level_keys:
+		var value := int(get_number("stars/%s/%s" % [game_id, str(key)]))
+		if value > 0:
+			out[str(key)] = value
+	return out
+
+
+## `YYYY-MM-DD` of today, the key of the daily challenge.
+func today() -> String:
+	return CandyMatch3.date_key()
 
 
 # --- voter identity ---------------------------------------------------------
