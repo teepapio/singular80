@@ -8,7 +8,7 @@ extends RefCounted
 ##
 ## Reference: the modern Tetris Guideline scoring model (T-Spin via the
 ## three-corner rule, Back-to-Back for difficult clears, combo for consecutive
-## line clears).
+## line clears, Perfect Clear for a completely wiped well).
 
 ## `TetrisScreen.PIECES` index of the T piece.
 const T_PIECE_TYPE := 5
@@ -24,6 +24,16 @@ const B2B_STEP := 50
 
 ## Points per combo step (50, 100, 150, …).
 const COMBO_STEP := 50
+
+## Perfect-Clear bases. Index = lines cleared, so wiping the well with a single
+## line pays 800 and with a Quad 2000.
+const PC_SCORES: Array[int] = [0, 800, 1200, 1800, 2000]
+
+## A back-to-back Quad Perfect Clear pays this instead of `PC_SCORES[4]`.
+const PC_B2B_QUAD := 3200
+
+## How long a Perfect Clear is celebrated, in seconds.
+const PC_CELEBRATION := 1.6
 
 ## How many upcoming pieces the queue may show.
 const PREVIEW_OPTIONS: Array[int] = [3, 4, 5, 6]
@@ -154,6 +164,48 @@ static func _message(count: int, spin: String, back_to_back: int, combo: int) ->
 	if combo > 1:
 		parts.append("COMBO ×%d" % combo)
 	return "  ·  ".join(parts)
+
+
+## True when the well holds no block at all — the board was wiped completely.
+##
+## A board without rows is not a Perfect Clear; there is no well to clear.
+static func is_perfect_clear(board: Array) -> bool:
+	if board.is_empty():
+		return false
+	for row in board:
+		for value in row:
+			if int(value) != 0:
+				return false
+	return true
+
+
+## Score a Perfect Clear, the biggest moment the game has.
+##
+## `lines` is the size of the clear that emptied the well (at least one), `level`
+## the current level and `back_to_back` the chain that came in. A Perfect Clear
+## always counts as a difficult clear, so it opens or extends that chain — a
+## Quad Perfect Clear directly after another difficult clear is worth the most
+## of anything in the game.
+static func perfect_clear(lines: int, level: int, back_to_back: int) -> Dictionary:
+	var count: int = clampi(lines, 1, 4)
+	var b2b_quad := count == 4 and back_to_back > 0
+	var base: int = PC_B2B_QUAD if b2b_quad else PC_SCORES[count]
+	var chain: int = maxi(1, back_to_back + 1)
+
+	var parts: Array[String] = ["PERFECT CLEAR!"]
+	if count > 1:
+		parts.append(["", "SINGLE", "DOUBLE", "TRIPLE", "QUAD"][count])
+	if b2b_quad:
+		parts.append("B2B ×%d" % chain)
+
+	return {
+		"points": base * maxi(1, level),
+		"base": base,
+		"text": "  ·  ".join(parts),
+		"back_to_back": chain,
+		"seconds": PC_CELEBRATION,
+		"b2b_quad": b2b_quad,
+	}
 
 
 ## How full the well is, 0.0–1.0, over all cells.

@@ -1,6 +1,7 @@
 class_name TetrisScreen
 extends Screen
-## Tetris — bag randomiser, hold slot, ghost piece, DAS/ARR handling.
+## Tetris — bag randomiser, hold slot, ghost piece, DAS/ARR handling and the
+## Perfect Clear celebration for a completely wiped well.
 ## Port of `scenes/TetrisScene.ts`.
 
 const COLS := 10
@@ -14,6 +15,19 @@ const DAS := 0.15
 const ARR := 0.045
 const SOFT_DROP := 0.045
 const ROTATION_KICKS := [0, -1, 1, -2, 2]
+
+## Gold of a wiped well: the headline, the bonus and the glow in the well.
+const PERFECT_COLOR := Color("fde68a")
+
+## The Perfect Clear announcement spans the whole stage, because a long line
+## ("PERFECT CLEAR!  ·  QUAD  ·  B2B ×2") must not be cut off at the well.
+const PERFECT_HEADLINE_Y := 286.0
+const PERFECT_BONUS_Y := 348.0
+
+## How far the bonus drifts upwards while it fades, and how fast it gets there
+## (in fractions of that distance per second).
+const PERFECT_RISE := 24.0
+const PERFECT_RISE_SPEED := 3.0
 
 const PIECES := [
 	{"color": Color("22d3ee"), "matrix": [[0, 0, 0, 0], [1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0]]},
@@ -52,6 +66,13 @@ var clear_message_color := Color("facc15")
 var clear_flash := 0.0
 var danger := 0
 
+# --- Perfect Clear ---
+# Wiping the well is the biggest moment the game has, so it gets its own
+# announcement, its own fanfare and a run counter the player can chase.
+var perfect_clears := 0
+var perfect_flash := 0.0
+var _perfect_rise := 0.0
+
 ## How many upcoming pieces the queue shows; clamped to `TetrisRules`.
 var preview_size := 4
 
@@ -62,8 +83,11 @@ var _lines_label: Label
 var _highscore_label: Label
 var _combo_label: Label
 var _b2b_label: Label
+var _perfect_stat_label: Label
 var _danger_label: Label
 var _message_label: Label
+var _perfect_headline: Label
+var _perfect_bonus: Label
 var _preview_button: Button
 var _modal: Control
 
@@ -91,14 +115,15 @@ func _build_ui() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(title)
 
-	_score_label = _stat(layer, 78, "PUNKTE", "0")
-	_level_label = _stat(layer, 152, "LEVEL", "1")
-	_lines_label = _stat(layer, 226, "LINIEN", "0")
-	_combo_label = _stat(layer, 300, "COMBO", "0")
-	_b2b_label = _stat(layer, 374, "BACK-TO-BACK", "0")
+	_score_label = _stat(layer, 74, "PUNKTE", "0")
+	_level_label = _stat(layer, 142, "LEVEL", "1")
+	_lines_label = _stat(layer, 210, "LINIEN", "0")
+	_combo_label = _stat(layer, 278, "COMBO", "0")
+	_b2b_label = _stat(layer, 346, "BACK-TO-BACK", "0")
+	_perfect_stat_label = _stat(layer, 414, "PERFEKT", "—")
 
 	_danger_label = Ui.label("", 15, Color("f87171"), true)
-	_danger_label.position = Vector2(24, 458)
+	_danger_label.position = Vector2(24, 486)
 	_danger_label.size = Vector2(226, 44)
 	_danger_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_danger_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -113,6 +138,28 @@ func _build_ui() -> void:
 	_message_label.add_theme_color_override("font_outline_color", Color("020617"))
 	_message_label.modulate.a = 0.0
 	layer.add_child(_message_label)
+
+	# A wiped well replaces that small line with a headline and a bonus that
+	# floats away, so the best moment of a run cannot be mistaken for a Single.
+	# 38 px keeps even the longest line ("…  ·  QUAD  ·  B2B ×2") clear of the
+	# stat column on the left and the queue on the right.
+	_perfect_headline = Ui.label("", 38, PERFECT_COLOR, true)
+	_perfect_headline.position = Vector2(0, PERFECT_HEADLINE_Y)
+	_perfect_headline.size = Vector2(1280, 56)
+	_perfect_headline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_perfect_headline.add_theme_constant_override("outline_size", 10)
+	_perfect_headline.add_theme_color_override("font_outline_color", Color("020617"))
+	_perfect_headline.modulate.a = 0.0
+	layer.add_child(_perfect_headline)
+
+	_perfect_bonus = Ui.label("", 30, Color.WHITE, true)
+	_perfect_bonus.position = Vector2(0, PERFECT_BONUS_Y)
+	_perfect_bonus.size = Vector2(1280, 40)
+	_perfect_bonus.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_perfect_bonus.add_theme_constant_override("outline_size", 8)
+	_perfect_bonus.add_theme_color_override("font_outline_color", Color("020617"))
+	_perfect_bonus.modulate.a = 0.0
+	layer.add_child(_perfect_bonus)
 
 	var preview_caption := Ui.label("VORSCHAU", 15, UiTheme.TEXT_DIM)
 	preview_caption.position = Vector2(970, 68)
@@ -255,6 +302,12 @@ func reset_game() -> void:
 	back_to_back = 0
 	clear_message = ""
 	clear_flash = 0.0
+	perfect_clears = 0
+	perfect_flash = 0.0
+	_perfect_rise = 0.0
+	if _perfect_headline != null:
+		_perfect_headline.modulate.a = 0.0
+		_perfect_bonus.modulate.a = 0.0
 	danger = 0
 	highscore = Game.highscore(Game.HS_TETRIS)
 	close_modals()
@@ -270,6 +323,7 @@ func _process(delta: float) -> void:
 		clear_flash = maxf(0.0, clear_flash - delta * 1.8)
 		if _message_label != null:
 			_message_label.modulate.a = clampf(clear_flash * 2.2, 0.0, 1.0)
+	_fade_perfect_clear(delta)
 
 	if Input.is_action_just_pressed("restart"):
 		reset_game()
@@ -529,6 +583,9 @@ func _clear_lines(spin: String = "none") -> void:
 			y += 1
 		y -= 1
 
+	# `score_clear` may reset a chain that a plain single breaks, so the chain
+	# that came *in* is kept for the Perfect Clear check below.
+	var chain_before := back_to_back
 	var award := TetrisRules.score_clear(cleared, level, combo, back_to_back, spin)
 	combo = int(award["combo"])
 	back_to_back = int(award["back_to_back"])
@@ -537,21 +594,78 @@ func _clear_lines(spin: String = "none") -> void:
 
 	lines += cleared
 	score += int(award["points"])
-	clear_message = str(award["message"])
-	clear_message_color = Color("facc15") if spin == "none" else Color("c084fc")
-	clear_flash = clampf(float(award["flash"]), 0.2, 0.7)
-	if _message_label != null:
-		_message_label.text = clear_message
-		_message_label.add_theme_color_override("font_color", clear_message_color)
-		_message_label.modulate.a = 1.0
+	# The well was just emptied: that outranks every other announcement.
+	var perfect := TetrisRules.is_perfect_clear(board)
+	if perfect:
+		_celebrate_perfect_clear(cleared, chain_before)
+	else:
+		_announce_clear(award, spin)
 
 	var next_level := 1 + int(floor(float(lines) / 10.0))
 	if next_level != level:
 		level = next_level
 		drop_interval = maxf(0.08, 0.8 - float(level - 1) * 0.065)
-		Sfx.level_up()
-	else:
+		if not perfect:
+			Sfx.level_up()
+	elif not perfect:
 		Sfx.kill()
+
+
+## The small line over the well that names an ordinary clear.
+func _announce_clear(award: Dictionary, spin: String) -> void:
+	clear_message = str(award["message"])
+	clear_message_color = Color("facc15") if spin == "none" else Color("c084fc")
+	clear_flash = clampf(float(award["flash"]), 0.2, 0.7)
+	if _message_label == null:
+		return
+	_message_label.text = clear_message
+	_message_label.add_theme_color_override("font_color", clear_message_color)
+	_message_label.modulate.a = 1.0
+
+
+## The well is empty. This is the highlight of a run, so it gets the whole
+## screen: a bonus, a fanfare, a gold wave through the well and a counter that
+## stays for the rest of the run.
+##
+## `chain_before` is the Back-to-Back chain that came in with this clear.
+func _celebrate_perfect_clear(cleared: int, chain_before: int) -> void:
+	var award := TetrisRules.perfect_clear(cleared, level, chain_before)
+	# A Perfect Clear counts as difficult, so it opens or extends the chain even
+	# when the clear that emptied the well was a plain single.
+	back_to_back = maxi(back_to_back, int(award["back_to_back"]))
+	score += int(award["points"])
+	perfect_clears += 1
+	perfect_flash = float(award["seconds"])
+	_perfect_rise = 0.0
+	# The small announcement would compete with the headline, so it stands down.
+	clear_message = str(award["text"])
+	clear_message_color = PERFECT_COLOR
+	clear_flash = 0.0
+	Sfx.coin()
+	Sfx.level_up()
+	if _perfect_headline == null:
+		return
+	_message_label.modulate.a = 0.0
+	_perfect_headline.text = str(award["text"])
+	_perfect_headline.modulate.a = 1.0
+	_perfect_bonus.text = "+%d" % int(award["points"])
+	_perfect_bonus.position.y = PERFECT_BONUS_Y
+	_perfect_bonus.modulate.a = 1.0
+
+
+## Runs the celebration down: the headline fades, the bonus floats away and the
+## gold wave in the well dies out. Like the clear announcement it keeps running
+## while the game is paused, so a frozen celebration never stays behind.
+func _fade_perfect_clear(delta: float) -> void:
+	if perfect_flash <= 0.0 or _perfect_headline == null:
+		return
+	perfect_flash = maxf(0.0, perfect_flash - delta)
+	_perfect_rise = minf(_perfect_rise + delta * PERFECT_RISE * PERFECT_RISE_SPEED, PERFECT_RISE)
+	_perfect_headline.modulate.a = clampf(perfect_flash * 1.6, 0.0, 1.0)
+	_perfect_bonus.position.y = PERFECT_BONUS_Y - _perfect_rise
+	_perfect_bonus.modulate.a = clampf(perfect_flash * 2.2, 0.0, 1.0)
+	if _board_view != null:
+		_board_view.queue_redraw()
 
 
 func _toggle_pause() -> void:
@@ -581,6 +695,7 @@ func _trigger_game_over() -> void:
 	var rows := [
 		["Punkte: %d" % score],
 		["Linien: %d   ·   Level: %d" % [lines, level]],
+		["Perfekte Clears: %d" % perfect_clears],
 		["★ Neuer Highscore! ★" if is_record else "Highscore: %d" % highscore],
 	]
 	_show_overlay("GAME OVER", Color("f87171"), [
@@ -627,6 +742,8 @@ func _refresh() -> void:
 	_highscore_label.text = "Highscore: %d" % highscore
 	_combo_label.text = ("×%d" % combo) if combo > 0 else "—"
 	_b2b_label.text = ("×%d" % back_to_back) if back_to_back > 0 else "—"
+	if _perfect_stat_label != null:
+		_perfect_stat_label.text = str(perfect_clears) if perfect_clears > 0 else "—"
 	danger = danger_level()
 	_danger_label.text = TetrisRules.danger_text(board)
 	if _preview_button != null:
@@ -693,6 +810,8 @@ class BoardView:
 				screen.clear_flash * 0.28
 			))
 
+		_draw_perfect_clear(board_rect)
+
 		var border := Color("475569")
 		if screen.danger == 2:
 			border = Color("ef4444")
@@ -708,6 +827,24 @@ class BoardView:
 	## Outlines the ghost position of a T-Spin in the T's 3×3 box.
 	func _spin_frame(at: Vector2, color: Color) -> void:
 		draw_rect(Rect2(at - Vector2.ONE, Vector2(CELL * 3.0 + 2.0, CELL * 3.0 + 2.0)), Color(color.r, color.g, color.b, 0.55), false, 2.0)
+
+	## The Perfect Clear celebration: the empty well floods gold, a bright band
+	## runs from the ceiling down to the floor and the frame thickens while the
+	## announcement is up.
+	func _draw_perfect_clear(board_rect: Rect2) -> void:
+		if screen.perfect_flash <= 0.0:
+			return
+		var life: float = clampf(screen.perfect_flash / TetrisRules.PC_CELEBRATION, 0.0, 1.0)
+		draw_rect(board_rect, Color(1.0, 0.97, 0.80, 0.10 + 0.26 * life))
+		for row in ROWS:
+			# Each row fades later than the one above it, so the light travels.
+			var wave: float = float(ROWS - 1 - row) / float(ROWS) * 0.55
+			var glow: float = clampf((life - wave) * 2.5, 0.0, 1.0) * 0.16
+			if glow <= 0.0:
+				continue
+			draw_rect(Rect2(board_rect.position.x, board_rect.position.y + float(row) * CELL, BOARD_W, CELL),
+				Color(1.0, 0.98, 0.85, glow))
+		draw_rect(board_rect.grow(1.5), Color(1.0, 0.93, 0.60, 0.30 + 0.70 * life), false, 3.0 + 5.0 * life)
 
 	func _piece(matrix: Array, px: int, py: int, color: Color, ghost: bool) -> void:
 		for y in matrix.size():

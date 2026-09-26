@@ -115,7 +115,65 @@ func _tetris_scoring() -> void:
 		"Hohe Kette und hohes Level zahlen mehr")
 	t.check(float(TetrisRules.score_clear(3, 1, 0, 0, "full")["flash"]) > 0.0, "Eine Dreierreihe blitzt auf")
 	t.check(float(TetrisRules.score_clear(1, 1, 0, 0, "none")["flash"]) < 0.2, "Eine einzelne Zeile blitzt nur kurz")
+
+	# A wiped well is worth more than any other clear, so its rules live in the
+	# scoring suite.
+	_perfect_clear_scoring()
 	t.suite_done()
+
+
+## Perfect Clear: the well is empty again, the player gets the biggest bonus of
+## the game and a chain that survives even a plain single.
+func _perfect_clear_scoring() -> void:
+	t.equal(TetrisRules.is_perfect_clear([]), false, "Ohne Senke gibt es keinen Perfect Clear")
+	t.check(TetrisRules.is_perfect_clear(_empty_well(4, 6)), "Eine leere Senke ist ein Perfect Clear")
+
+	var busy := _empty_well(4, 6)
+	(busy[3] as Array)[0] = 1
+	t.equal(TetrisRules.is_perfect_clear(busy), false, "Ein einzelner Stein ist kein Perfect Clear")
+	var nearly := _empty_well(4, 6)
+	(nearly[0] as Array)[5] = 1
+	t.equal(TetrisRules.is_perfect_clear(nearly), false, "Auch ein Stein ganz oben verhindert ihn")
+
+	# Guideline values: 800/1200/1800/2000, all multiplied by the level.
+	var single := TetrisRules.perfect_clear(1, 1, 0)
+	t.equal(single["points"], 800, "Perfect Clear Single: 800")
+	t.equal(single["text"], "PERFECT CLEAR!", "Ein einzelner Perfect Clear meldet sich")
+	t.equal(single["back_to_back"], 1, "Ein Perfect Clear startet die B2B-Kette")
+	t.equal(single["b2b_quad"], false, "Ein einzelner Perfect Clear ist kein B2B Quad")
+	t.almost(float(single["seconds"]), TetrisRules.PC_CELEBRATION, 0.001, "Die Feier dauert die angegebene Zeit")
+
+	t.equal(TetrisRules.perfect_clear(2, 1, 0)["points"], 1200, "Perfect Clear Double: 1200")
+	t.equal(TetrisRules.perfect_clear(3, 1, 0)["points"], 1800, "Perfect Clear Triple: 1800")
+	t.equal(TetrisRules.perfect_clear(4, 1, 0)["points"], 2000, "Perfect Clear Quad: 2000")
+	t.check(str(TetrisRules.perfect_clear(2, 1, 0)["text"]).contains("DOUBLE"), "Die Meldung nennt die Größe")
+	t.equal(TetrisRules.perfect_clear(1, 4, 0)["points"], 3200, "Level 4 vervierfacht die 800")
+
+	# Ein Perfect Clear räumt mindestens eine Zeile, also kann er nicht nichts
+	# geben und trotzdem eine Kette öffnen.
+	t.equal(TetrisRules.perfect_clear(0, 1, 0)["points"], 800, "Eine leere Zeilenangabe zählt als Single")
+
+	# Der B2B Quad ist der teuerste Zug im Spiel.
+	var b2b := TetrisRules.perfect_clear(4, 1, 2)
+	t.equal(b2b["points"], TetrisRules.PC_B2B_QUAD, "Ein B2B Quad zahlt 3200")
+	t.equal(b2b["b2b_quad"], true, "Der zweite Quad in Folge ist ein B2B Quad")
+	t.equal(b2b["back_to_back"], 3, "Die Kette läuft weiter")
+	t.check(str(b2b["text"]).contains("B2B ×3"), "Die Meldung nennt die Kette")
+	t.check(str(b2b["text"]).contains("QUAD"), "Die Meldung nennt die Größe")
+	t.equal(TetrisRules.perfect_clear(4, 1, 0)["b2b_quad"], false, "Der erste Quad ist noch kein B2B Quad")
+	t.equal(TetrisRules.perfect_clear(3, 1, 2)["points"], 1800, "Ein B2B Triple zahlt nicht den Quad-Bonus")
+
+	# Ein Perfect Clear ist immer eine schwierige Zeile: er beendet keine Kette,
+	# egal wie kurz die räumende Zeile war.
+	t.equal(TetrisRules.perfect_clear(1, 1, 5)["back_to_back"], 6, "Ein einzelner Perfect Clear verlängert die Kette")
+	t.equal(TetrisRules.perfect_clear(1, 1, 5)["b2b_quad"], false, "Ein einzelner Perfect Clear zahlt den Quad-Bonus nicht")
+
+	# Er ist mehr wert als derselbe Clear ohne den leeren Bonus — außer er
+	# schließt direkt an eine Kette an, dann ist er es deutlich mehr.
+	t.check(int(TetrisRules.perfect_clear(1, 1, 0)["points"]) > int(TetrisRules.score_clear(1, 1, 0, 0, "none")["points"]),
+		"Ein Perfect Clear zahlt mehr als ein Single")
+	t.check(int(TetrisRules.perfect_clear(4, 1, 1)["points"]) > int(TetrisRules.perfect_clear(4, 1, 0)["points"]),
+		"Der B2B Quad ist mehr wert als der erste Quad")
 
 
 # --- Tetris: T-Spin detection ----------------------------------------------

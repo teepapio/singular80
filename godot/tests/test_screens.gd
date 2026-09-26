@@ -244,8 +244,38 @@ func _tetris_accepts_moves() -> void:
 	# Fill a row and clear it.
 	for x in 10:
 		screen.board[19][x] = 1
+	screen.board[18][0] = 1
 	screen._clear_lines()
 	t.check(screen.lines >= 1, "Volle Zeile wird geräumt")
+	t.check(not TetrisRules.is_perfect_clear(screen.board), "Ein Stein bleibt liegen")
+	t.check(screen.perfect_clears == 0, "Das ist kein Perfect Clear")
+	t.check(not str(screen.clear_message).contains("PERFECT"), "Der Bildschirm meldet keinen Perfect Clear")
+
+	# The other way round: the well is empty afterwards, so the game celebrates.
+	screen.reset_game()
+	for x in range(4, 10):
+		screen.board[16][x] = 1
+	screen.piece = screen._make_piece(0)
+	screen.piece["x"] = 0
+	screen.piece["y"] = 15
+	screen._lock_piece()
+	screen._refresh()
+	t.check(TetrisRules.is_perfect_clear(screen.board), "Die Senke ist danach komplett leer")
+	t.check(screen.perfect_clears == 1, "Der Perfect Clear wird gezählt")
+	t.check(str(screen.clear_message).contains("PERFECT CLEAR"), "Der Bildschirm meldet den Perfect Clear")
+	t.check(screen.back_to_back >= 1, "Der Perfect Clear eröffnet eine B2B-Kette")
+	t.check(screen._perfect_stat_label.text == "1", "Der Zähler im Bild steht auf 1")
+	t.check(screen._perfect_headline.text.contains("PERFECT CLEAR"), "Die Schlagzeile steht an")
+	t.check(screen._perfect_bonus.text.begins_with("+"), "Der Bonus wird als Punktzahl gezeigt")
+	t.check(screen.score > 0, "Der Perfect Clear bringt Punkte")
+
+	# The celebration fades on its own instead of standing over the well.
+	var seconds: float = screen.perfect_flash
+	screen._fade_perfect_clear(seconds + 0.1)
+	t.equal(screen.perfect_flash, 0.0, "Die Feier ist vorbei")
+	t.equal(screen._perfect_headline.modulate.a, 0.0, "Die Schlagzeile ist ausgeblendet")
+	screen.reset_game()
+	t.equal(screen.perfect_clears, 0, "Ein neuer Lauf zählt wieder von null")
 	await _goto("lobby")
 	t.suite_done()
 
