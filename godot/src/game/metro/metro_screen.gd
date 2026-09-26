@@ -19,6 +19,9 @@ const WATER_Y := -0.18
 const RIBBON_Y := GROUND_Y + 0.07
 const SYMBOL_Y := 2.9
 const GLYPH_Y := 2.05
+## Height of the demand marker: above the interchange ring and the type-change
+## sign, so a stuck station is readable from the normal camera distance.
+const DEMAND_Y := 5.9
 ## Spacing of the direction beads along a line, in world units.
 const BEAD_SPACING := 3.4
 const MAX_BEADS := 34
@@ -94,6 +97,8 @@ var _riding_label: Label
 var _day_label: Label
 var _clock_label: Label
 var _phase_label: Label
+var _demand_label: Label
+var _peak_label: Label
 var _happiness: ProgressBar
 var _critical_panel: Panel
 var _critical_label: Label
@@ -265,9 +270,12 @@ func _build_meshes() -> void:
 	var multimesh := MultiMesh.new()
 	multimesh.transform_format = MultiMesh.TRANSFORM_3D
 	multimesh.mesh = _meshes["passenger"]
+	# `use_colors` may only be switched while the MultiMesh is still empty, so
+	# the commuters get their destination colour — otherwise every
+	# `set_instance_color` below is refused and the crowd stays grey.
+	multimesh.use_colors = true
 	multimesh.instance_count = MAX_CROWD
 	multimesh.visible_instance_count = 0
-	multimesh.use_colors = true
 	_crowd.multimesh = multimesh
 	var crowd_mat := StandardMaterial3D.new()
 	crowd_mat.vertex_color_use_as_albedo = true
@@ -385,6 +393,16 @@ func _sync_stations() -> void:
 			mat.emission = Color("fbbf24").lerp(Color("ef4444"), urgency)
 			mat.emission_energy_multiplier = 0.8 + urgency * 2.4
 		(node.get_node("Changing") as Node3D).visible = float(station["shape_in"]) > 0.0
+		# Demand marker: the destination this queue is stuck on, so the next
+		# line can be aimed at it instead of guessed.
+		var demand: Label3D = node.get_node("Demand")
+		var wanted := metro.stranded_kind(int(station["id"]))
+		var stuck := wanted >= 0 and metro.service_state(int(station["id"])) == Metro.Service.BLOCKED
+		demand.visible = stuck
+		if stuck:
+			var flag := "⚠ %s" % Metro.type_glyph(wanted)
+			if demand.text != flag:
+				demand.text = flag
 
 
 func _make_station_node() -> Node3D:
@@ -435,6 +453,10 @@ func _make_station_node() -> Node3D:
 	changing.add_child(_make_glyph("Sign", 0.0, 110, 0.008, 20, Color("fbbf24")))
 	changing.visible = false
 	root.add_child(changing)
+
+	var demand := _make_glyph("Demand", DEMAND_Y, 110, 0.008, 20, Color("f87171"))
+	demand.visible = false
+	root.add_child(demand)
 	return root
 
 
@@ -876,6 +898,18 @@ func _build_ui() -> void:
 	_phase_label = Ui.label("Morgen", 16, UiTheme.TEXT_DIM)
 	_phase_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	right.add_child(_phase_label)
+	# Two forecast lines: what the city is missing now, and what the next
+	# commute peak will ask for. Both come from the logic module.
+	_demand_label = Ui.label("", 16, UiTheme.DANGER, true)
+	_demand_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_demand_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_demand_label.custom_minimum_size = Vector2(288, 0)
+	right.add_child(_demand_label)
+	_peak_label = Ui.label("", 15, UiTheme.WARNING)
+	_peak_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_peak_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_peak_label.custom_minimum_size = Vector2(288, 0)
+	right.add_child(_peak_label)
 
 	_critical_panel = Ui.rect(Color(0.32, 0.05, 0.05, 0.88), 10, Color("ef4444"), 2)
 	_critical_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
@@ -1118,6 +1152,7 @@ func _show_help() -> void:
 		"▪ ✂ Abbau: Linie oder Zug antippen, um sie zu entfernen. Im Extrem-Modus ist das gesperrt.",
 		"▪ Flüsse lassen sich nur mit Brücke oder Tunnel überqueren. Fehlt beides, entsteht eine provisorische Brücke — die Züge fahren dort nur halb so schnell.",
 		"▪ Zwei Linien an einem Bahnhof ergeben einen Streckenknoten. Dort dürfen Fahrgäste umsteigen, sofern sie eine Umstiegsfreigabe haben.",
+		"▪ Bedarfsprognose: über einem Bahnhof steht ⚠ mit dem Zielort, den niemand erreichen kann. Oben rechts steht, was die Stadt gerade vermisst und was der nächste Berufsverkehr verlangt — baue die fehlende Linie, bevor die Warteschlange steht.",
 		"▪ Alle %d Tage gibt es Karten, zusätzlich jede Woche ein Bonus. Uhrzeit und Wochentag bestimmen, wohin die Menschen wollen." % Metro.CARD_INTERVAL_DAYS,
 		"▪ Bleibt ein Bahnhof %d Sekunden mit mehr als %d Wartenden stehen, kollabiert das Netz." % [int(Metro.OVERCROWD_LIMIT), Metro.STATION_CAPACITY],
 		"▪ Schnell und pünktlich bringt Bonus: Wer unter %d Sekunden wartet, zahlt zusätzlich — und eine Serie lohnt sich immer mehr." % int(Metro.PUNCTUAL_WAIT),
@@ -1660,19 +1695,27 @@ func _fill_inspector(station_id: int) -> void:
 	var station: Dictionary = metro.stations[station_id]
 	var kind := int(station["type"])
 	_inspect_title.text = "%s  %s" % [Metro.type_glyph(kind), Metro.type_name(kind)]
-	var counts := PackedInt32Array()
-	counts.resize(Metro.Kind.size())
-	for index in station["waiting"]:
-		counts[int(metro.passengers[int(index)]["type"])] += 1
 	var lines: Array[String] = []
-	for target in counts.size():
-		if counts[target] > 0:
-			lines.append("%s %s ×%d" % [Metro.type_glyph(target), Metro.type_name(target), counts[target]])
+	var queue := (station["waiting"] as Array).size()
+	var stranded := metro.stranded_at(station_id)
+	# Largest group first, each with the answer to "does any of my lines get me
+	# there?" — a × means the queue has no way out.
+	for entry in metro.forecast(station_id):
+		var target := int(entry["kind"])
+		lines.append("%s %s ×%d  %s" % [
+			Metro.type_glyph(target),
+			Metro.type_name(target),
+			int(entry["want"]),
+			"✓" if bool(entry["route"]) else "×",
+		])
 	if lines.is_empty():
 		lines.append("Keine Wartenden.")
-	var served := metro.lines_at_station(station_id)
 	lines.append("")
-	lines.append("Wartende %d von %d" % [(station["waiting"] as Array).size(), metro.capacity_of(station_id)])
+	lines.append("Wartende %d von %d" % [queue, metro.capacity_of(station_id)])
+	lines.append("Anschluss %d von %d" % [queue - stranded, queue])
+	if stranded >= Metro.STRANDED_MIN:
+		lines.append("⚠ %d Fahrgäste kommen hier nicht weg." % stranded)
+	var served := metro.lines_at_station(station_id)
 	lines.append("Linien %d · Streckenknoten %s" % [served.size(), "ja" if metro.is_transfer(station_id) else "nein"])
 	_inspect_body.text = "\n".join(lines)
 	var can_branch := metro.mode != Metro.Mode.EXTREME and not served.is_empty()
@@ -1709,6 +1752,16 @@ func _drain_events() -> void:
 			"overcrowd":
 				_say("Bahnhof überfüllt!", UiTheme.DANGER)
 				Sfx.hurt()
+			"stranded":
+				# The demand marker has just appeared over this station.
+				_say("Bahnhof ohne Anschluss — %d warten auf %s" % [
+					int(payload["count"]), Metro.type_name(int(payload["kind"]))
+				], UiTheme.DANGER)
+				Sfx.hurt()
+			"unmet":
+				_say("Niemand fährt zum %s — %d Fahrgäste wollen hin" % [
+					Metro.type_name(int(payload["kind"])), int(payload["want"])
+				], UiTheme.WARNING)
 			"card":
 				_say("%s erhalten" % str(payload["name"]), UiTheme.SUCCESS)
 				_refresh_resources()
@@ -1782,6 +1835,9 @@ func _refresh_hud() -> void:
 		phase = "%s · RUSH" % phase
 	_phase_label.text = phase
 	_phase_label.add_theme_color_override("font_color", UiTheme.DANGER if metro.rush_active else UiTheme.TEXT_DIM)
+	# Bedarfsprognose: the missing line, named.
+	_demand_label.text = metro.demand_text()
+	_peak_label.text = metro.peak_text()
 	var happy := metro.happiness()
 	Ui.set_bar(_happiness, happy / 100.0, _mood_color(happy))
 	var critical := metro.critical_station()

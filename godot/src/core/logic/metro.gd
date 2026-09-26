@@ -33,6 +33,10 @@ enum Mode { NORMAL, ENDLESS, EXTREME }
 ## How a line segment deals with water.
 enum Crossing { NONE, BRIDGE, TUNNEL, PROVISIONAL }
 
+## How well the queue at a station is served: every line takes the commuters
+## off, a few are stuck, or the station has no way out at all.
+enum Service { OK, PARTIAL, BLOCKED }
+
 ## Display metadata per `Kind`, index-aligned with the enum above.
 const TYPES: Array[Dictionary] = [
 	{"name": "Wohnen", "glyph": "W", "color": Color("f59e0b"), "symbol": Symbol.ROUND},
@@ -131,6 +135,10 @@ const STATION_MIN_GAP := 13.0
 const STATION_CAPACITY := 20
 ## Seconds a station may stay over capacity before the network collapses.
 const OVERCROWD_LIMIT := 10.0
+## A queue only counts as stranded once at least this many of its commuters
+## cannot be moved by any line: one lost ride is normal traffic, three is a
+## missing line.
+const STRANDED_MIN := 3
 ## Seconds between two commuters at one station, before the difficulty ramp.
 const PASSENGER_SPAWN_BASE := 8.0
 const NEW_STATION_BASE := 35.0
@@ -250,6 +258,12 @@ var riding_total: int = 0
 var streak: int = 0
 var best_streak: int = 0
 var punctual: int = 0
+## Commuters in the whole city whose destination no line can reach, and how
+## many of them wait for a destination kind that no line stops at at all.
+## Filled by the demand forecast, read by the HUD and the station markers.
+var stranded_total: int = 0
+var unmet: Dictionary = {}
+var unmet_total: int = 0
 var max_lines: int = MAX_LINES
 var transfer_permits: int = 1
 var resources: Dictionary = {
@@ -308,6 +322,9 @@ func start(new_mode: int = Mode.NORMAL, seed_value: int = 0) -> void:
 	streak = 0
 	best_streak = 0
 	punctual = 0
+	stranded_total = 0
+	unmet = {}
+	unmet_total = 0
 	transfer_permits = 1
 	resources = {
 		"trains": START_TRAINS,
@@ -372,6 +389,7 @@ func update(delta: float) -> void:
 	update_train_segments()
 	_update_stations(dt)
 	_update_trains(dt)
+	_update_service()
 	_recount()
 	_celebrate()
 
@@ -711,11 +729,288 @@ func refresh_transfers() -> void:
 		station["lines"] = lines_at_station(int(station["id"]))
 
 
+# --- demand forecast --------------------------------------------------------
+
+## Grades every queue against the network so the next line can be *planned*
+## instead of guessed: a flag on the map says which station is stuck and which
+## destination its commuters are waiting for, and the city-wide figures say
+## what the next commute peak will ask for.
+##
+## Everything here is derived from the same `can_train_help` the boarding code
+## uses, so a flag never promises a ride the trains would refuse. Only stations
+## that really have people in line are examined, which ties the cost to the
+## crowd and not to the size of the city.
+
+## Waiting commuters at this station whose destination no line can reach.
+func stranded_at(station_id: int) -> int:
+	if station_id < 0 or station_id >= stations.size():
+		return 0
+	return int(stations[station_id].get("stranded", 0))
+
+
+## The destination the stranded commuters at this station want most, or -1.
+func stranded_kind(station_id: int) -> int:
+	if station_id < 0 or station_id >= stations.size():
+		return -1
+	return int(stations[station_id].get("want_kind", -1))
+
+
+## How well the queue at this station is served right now.
+func service_state(station_id: int) -> int:
+	var stranded := stranded_at(station_id)
+	if stranded <= 0:
+		return int(Service.OK)
+	if stranded >= STRANDED_MIN:
+		return int(Service.BLOCKED)
+	return int(Service.PARTIAL)
+
+
+## The destination breakdown of one station, largest group first. Every entry
+## is `{"kind", "want", "route"}`, and `route` false means no line can carry
+## them from here — with the transfer permits the network currently has.
+func forecast(station_id: int) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if station_id < 0 or station_id >= stations.size():
+		return out
+	var station: Dictionary = stations[station_id]
+	var wants: PackedInt32Array = station.get("wants", PackedInt32Array())
+	var routes: Dictionary = station.get("routes", {})
+	for kind in wants.size():
+		if int(wants[kind]) <= 0:
+			continue
+		out.append({"kind": kind, "want": int(wants[kind]), "route": routes.has(kind)})
+	out.sort_custom(_by_want)
+	return out
+
+
+static func _by_want(a: Dictionary, b: Dictionary) -> bool:
+	return int(a["want"]) > int(b["want"])
+
+
+## How many commuters wait for a destination kind that no line stops at,
+## biggest group first. `{}` when the network covers what the city asks for.
+func unmet_top() -> Dictionary:
+	var best: Dictionary = {}
+	for kind in unmet:
+		if best.is_empty() or int(unmet[kind]) > int(best["want"]):
+			best = {"kind": int(kind), "want": int(unmet[kind])}
+	return best
+
+
+## One HUD line: what the city is missing right now. Empty when every commuter
+## waiting can be moved.
+func demand_text() -> String:
+	var top := unmet_top()
+	if not top.is_empty():
+		return "%d warten auf %s — keine Linie fährt dorthin" % [
+			int(top["want"]), type_name(int(top["kind"]))]
+	if stranded_total > 0:
+		return "%d Fahrgäste ohne Anschluss" % stranded_total
+	return ""
+
+
+## The hour of the next commute peak, 0..23 — the running one while it lasts.
+func next_peak_hour() -> int:
+	var hour := hour_of_day()
+	if RUSH_HOURS.has(hour):
+		return hour
+	for step in range(1, 25):
+		var candidate := (hour + step) % 24
+		if RUSH_HOURS.has(candidate):
+			return candidate
+	return hour
+
+
+## What the next commute peak will ask for: the destination kinds of the
+## commute table, weighted by how many commuters leave from that kind here, each
+## marked with `route` — whether a line stops at such a station at all.
+##
+## `hour` defaults to the next peak. A peak that lies ahead of the clock
+## belongs to the next day, otherwise the forecast would describe a morning
+## that has already passed.
+func peak_demand(hour: int = -1) -> Array[Dictionary]:
+	var target_day := day
+	if hour < 0:
+		hour = next_peak_hour()
+	if hour < hour_of_day():
+		target_day = (day + 1) % 7
+	var present: Array[int] = []
+	var origins := PackedInt32Array()
+	origins.resize(Kind.size())
+	for station in stations:
+		var kind := int(station["type"])
+		if not present.has(kind):
+			present.append(kind)
+		origins[kind] += 1
+	var weight := PackedInt32Array()
+	weight.resize(Kind.size())
+	for origin in present:
+		for target in likely_destinations(origin, target_day, hour, present):
+			weight[target] += origins[origin]
+	var covered := _covered_kinds()
+	var out: Array[Dictionary] = []
+	for kind in Kind.size():
+		if int(weight[kind]) <= 0:
+			continue
+		out.append({"kind": kind, "want": int(weight[kind]), "route": covered[kind] == 1})
+	out.sort_custom(_by_want)
+	return out
+
+
+## One HUD line: what the next peak wants and whether the network is ready.
+func peak_text() -> String:
+	var hour := next_peak_hour()
+	var open: Array[String] = []
+	var asked := false
+	for entry in peak_demand(hour):
+		asked = true
+		if not bool(entry["route"]):
+			open.append(type_name(int(entry["kind"])))
+	if not asked:
+		return ""
+	if open.is_empty():
+		return "%02d:00 abgedeckt" % hour
+	return "%02d:00 ohne Anschluss: %s" % [hour, ", ".join(open)]
+
+
+## Grades every queue against the network and notes what the city is missing.
+## Runs once per tick, after boarding, so the numbers describe what the trains
+## have just done.
+func _update_service() -> void:
+	var served := _served_kinds()
+	# Without a transfer permit an interchange opens nothing, so the forecast
+	# must not promise a ride the trains would refuse.
+	var hubs: Dictionary = _hub_kinds(served) if transfer_permits > 0 else {}
+	var covered := _covered_kinds(served)
+	var city := PackedInt32Array()
+	city.resize(Kind.size())
+	var stranded := 0
+	for station in stations:
+		var wants: PackedInt32Array = station["wants"]
+		var stuck: PackedInt32Array = station["stuck"]
+		for kind in wants.size():
+			wants[kind] = 0
+			stuck[kind] = 0
+		var waiting: Array = station["waiting"]
+		var routes: Dictionary = station["routes"]
+		routes.clear()
+		# Only a station with a crowd can strand anybody, and the walk over the
+		# lines is what makes this the expensive half.
+		if not waiting.is_empty():
+			for line_id in station["lines"]:
+				# A line that was just torn down can still be listed here for a
+				# tick; a stale id must not take the forecast down with it.
+				if int(line_id) < 0 or int(line_id) >= lines.size():
+					continue
+				var flags := _kinds_ahead(int(line_id), int(station["id"]), hubs)
+				for kind in flags.size():
+					if flags[kind] == 1:
+						routes[kind] = true
+		var count := 0
+		var top := -1
+		for pid in waiting:
+			var kind := int(passengers[int(pid)]["type"])
+			wants[kind] += 1
+			city[kind] += 1
+			if routes.has(kind):
+				continue
+			stuck[kind] += 1
+			count += 1
+			if top < 0 or int(stuck[kind]) > int(stuck[top]):
+				top = kind
+		station["stranded"] = count
+		station["want_kind"] = top
+		var blocked := count >= STRANDED_MIN
+		if blocked and int(station["blocked"]) == 0:
+			emit_event("stranded", {"station": int(station["id"]), "kind": top, "count": count})
+		station["blocked"] = 1 if blocked else 0
+		stranded += count
+
+	var missing: Dictionary = {}
+	var total := 0
+	for kind in city.size():
+		if int(city[kind]) > 0 and covered[kind] == 0:
+			missing[kind] = int(city[kind])
+			total += int(city[kind])
+	for kind in missing:
+		if not unmet.has(kind):
+			emit_event("unmet", {"kind": int(kind), "want": int(missing[kind])})
+	unmet = missing
+	unmet_total = total
+	stranded_total = stranded
+
+
+## Per line: which destination kinds it stops at.
+func _served_kinds() -> Array:
+	var out: Array = []
+	for line in lines:
+		var flags := PackedByteArray()
+		flags.resize(Kind.size())
+		for station_id in line["stations"]:
+			flags[int(stations[int(station_id)]["type"])] = 1
+		out.append(flags)
+	return out
+
+
+## The kinds at least one line stops at anywhere in the network. `served` is
+## the per-line table of `_served_kinds` when the caller already has it.
+func _covered_kinds(served: Array = []) -> PackedByteArray:
+	var out := PackedByteArray()
+	out.resize(Kind.size())
+	if served.is_empty():
+		served = _served_kinds()
+	for flags in served:
+		for kind in flags.size():
+			if flags[kind] == 1:
+				out[kind] = 1
+	return out
+
+
+## Per interchange: the kinds its lines reach, so `_kinds_ahead` can merge them
+## without searching the network again.
+func _hub_kinds(served: Array) -> Dictionary:
+	var out: Dictionary = {}
+	for entry in transfers:
+		var merged := PackedByteArray()
+		merged.resize(Kind.size())
+		for line_id in entry["lines"]:
+			var index := int(line_id)
+			if index < 0 or index >= served.size():
+				continue
+			var flags: PackedByteArray = served[index]
+			for kind in merged.size():
+				if flags[kind] == 1:
+					merged[kind] = 1
+		out[int(entry["station"])] = merged
+	return out
+
+
+## The destination kinds a commuter at `station_id` can still reach on a train
+## of `line_id`: everything the line passes, plus whatever the interchanges on
+## the way open up.
+func _kinds_ahead(line_id: int, station_id: int, hubs: Dictionary) -> PackedByteArray:
+	var out := PackedByteArray()
+	out.resize(Kind.size())
+	for next in stations_ahead(lines[line_id]["stations"], station_id):
+		out[int(stations[next]["type"])] = 1
+		if not hubs.has(next):
+			continue
+		var merged: PackedByteArray = hubs[next]
+		for kind in out.size():
+			if merged[kind] == 1:
+				out[kind] = 1
+	return out
+
+
 # --- station creation & growth ----------------------------------------------
 
 func _spawn_station_at(pos: Vector2, kind: int) -> int:
 	var id := _next_station_id
 	_next_station_id += 1
+	var wants := PackedInt32Array()
+	wants.resize(Kind.size())
+	var stuck := PackedInt32Array()
+	stuck.resize(Kind.size())
 	stations.append({
 		"id": id,
 		"type": kind,
@@ -725,6 +1020,13 @@ func _spawn_station_at(pos: Vector2, kind: int) -> int:
 		"spawn": _rng.randf_range(2.0, 5.0),
 		"over": 0.0,
 		"shape_in": 0.0,
+		# Demand forecast, refilled every tick by `_update_service`.
+		"wants": wants,
+		"stuck": stuck,
+		"routes": {} as Dictionary,
+		"stranded": 0,
+		"blocked": 0,
+		"want_kind": -1,
 	})
 	return id
 

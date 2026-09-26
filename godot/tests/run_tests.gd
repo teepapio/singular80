@@ -89,16 +89,18 @@ func _run() -> void:
 	# added later is picked up here without editing this runner.
 	if _wants_class("res://tests/test_metro.gd", only):
 		TestMetro.new().run(kit)
+	if _wants_class("res://tests/test_metro3d.gd", only):
+		# By path, like the screen suites below: a class added since the last
+		# editor start is not in the global class cache, and a static name
+		# would not resolve before the autoloads are registered.
+		var metro3d: GDScript = load("res://tests/test_metro3d.gd")
+		await metro3d.new().run(kit, self)
 	if _wants_class("res://tests/test_crystal3d.gd", only):
 		await TestCrystal3d.new().run(kit, self)
 	if _wants_class("res://tests/test_candy_match3.gd", only):
 		TestCandyMatch3.new().run(kit)
 	if _wants_class("res://tests/test_arena.gd", only):
-		# By path: `--script` mode does not refresh the global class cache, so a
-		# class added today is unknown until the next `godot:import`.
-		var arena_suite: GDScript = load("res://tests/test_arena.gd")
-		if arena_suite != null:
-			arena_suite.new().run(kit)
+		TestArena.new().run(kit)
 	if _wants_class("res://tests/test_poker.gd", only):
 		# By path, like the suites above: `--script` mode does not refresh the
 		# global class cache, so a class added today is unknown.

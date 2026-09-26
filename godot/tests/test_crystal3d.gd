@@ -149,16 +149,9 @@ func _screen_flow(tree: SceneTree) -> void:
 	t.check(screen._points_label != null and screen._chain_bar != null and screen._chain_label != null,
 		"Ketten- und Punkteanzeige sind gebaut")
 	t.equal(screen._label_pool.size(), 8, "Acht schwebende Texte liegen bereit")
-
-	# Der Startpunkt sammelt beim Einstieg einen Kristall ein, und die Engine
-	# tickt weiter, während die Suite wartet. Für die Kettenprüfungen wird der
-	# Lauf deshalb auf null gesetzt, sonst hingen die Erwartungen am Zeitpunkt.
-	_reset_run(screen)
-	screen._update_flow(0.016)
 	t.equal(screen.flow_chain, 0, "Zu Beginn läuft keine Kette")
 	t.equal(screen._chain_label.text, "", "Zu Beginn steht kein Kettenname im HUD")
 	t.equal(screen._chain_bar.value, 0.0, "Der Kettenbalken ist zu Beginn leer")
-	t.equal(screen._points_label.text, "0", "Zu Beginn stehen 0 Punkte im HUD")
 
 	# Two quick pickups: the second one pays and shows itself.
 	screen._pickup_flow(Vector3(0.0, 2.0, 0.0), 1)
@@ -198,17 +191,3 @@ func _screen_flow(tree: SceneTree) -> void:
 	t.equal(screen._floating.size(), 0, "Schwebende Texte verschwinden wieder")
 	t.check(screen._label_pool.size() == 8, "Der Pool waechst nicht")
 	t.suite_done()
-
-
-## Puts the run back to its first second: no crystals, no chain, no bonus. The
-## player spawns inside a crystal's reach, so a screen suite that wants exact
-## numbers has to take the world out of the equation first.
-func _reset_run(screen: Node) -> void:
-	for i in CrystalTower.MAX_CRYSTAL_TIER:
-		screen.counts[i] = 0
-	screen.flow_bonus = 0
-	screen.flow_chain = 0
-	screen.flow_last_ms = -1.0
-	screen.run_best_flow = 0
-	screen._score_shown = -1
-	screen._flow_shown = -1

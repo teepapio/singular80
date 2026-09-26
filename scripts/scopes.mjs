@@ -109,6 +109,8 @@ const SCOPE_SUITES = {
   metro3d: [
     'Metropol 3D — Regeln', 'Metropol 3D — Netz', 'Metropol 3D — Wirtschaft',
     'Metropol 3D — Screen', 'Metropol 3D — Linienbau', 'Metropol 3D — Spielablauf',
+    'Metropol 3D — Bedarfsprognose', 'Metropol 3D — Fehlende Linien',
+    'Metropol 3D — Berufsverkehrs-Prognose', 'Metropol 3D — Anschluss-Marker',
   ],
   '2048': ['2048'],
   candy3d: [
