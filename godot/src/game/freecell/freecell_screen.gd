@@ -1,7 +1,8 @@
 class_name FreeCellScreen
 extends Screen
 ## FreeCell — solitaire with four free cells, supermove capacity, an undo stack
-## and the "auto" hint that plays out every safe card. Port of
+## and the "Tipp" button that points at the single best next move. The rules
+## live in `Cards.freecell_*`; this file only draws them. Port of
 ## `scenes/FreeCellScene.ts`.
 
 const COLS := 8
@@ -14,6 +15,12 @@ const TABLEAU_Y := 230.0
 const TABLEAU_BOTTOM := 616.0
 const BASE_DY := 32.0
 const MIN_DY := 10.0
+## Was ein Tipp kostet. Ein Tipp nimmt dem Spieler eine Entscheidung ab, also
+## soll er Punkte kosten — sonst löst man das Spiel mit der Taste ab.
+const HINT_COST := 25
+## Wie lange der Tipp aufleuchtet, in Sekunden.
+const HINT_LIFE := 5.0
+const CONTROLS := "Karten antippen und dann ein Ziel wählen  ·  A = sichere Karten ablegen  ·  U = zurück  ·  R = neu  ·  F1 = Tipp"
 
 var free_cells: Array = [null, null, null, null]
 var foundations: Array = [[], [], [], []]
@@ -24,11 +31,19 @@ var score := 0
 var highscore := 0
 var won := false
 var history: Array = []
+## Wie oft in diesem Durchgang gefragt wurde — der Zähler macht den Tipp zu
+## etwas, das man sich überlegt, statt etwas, das man hortet.
+var hints_used := 0
+## Der aktuell leuchtende Vorschlag und seine Restlaufzeit.
+var hint_move: Dictionary = {}
+var hint_life := 0.0
+var _hint_cursor := 0
 
 var _view: BoardView
 var _moves_label: Label
 var _score_label: Label
 var _highscore_label: Label
+var _help_label: Label
 
 
 func _ready_game() -> void:
@@ -71,21 +86,23 @@ func _build_ui() -> void:
 	_score_label = _stat(layer, 640)
 	_highscore_label = _stat(layer, 980)
 
-	var hint := Ui.label("Karten antippen und dann ein Ziel wählen  ·  A = sichere Karten ablegen  ·  U = zurück  ·  R = neu", 13, UiTheme.TEXT_DIM)
-	hint.position = Vector2(0, 650)
-	hint.size = Vector2(1280, 20)
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	layer.add_child(hint)
+	var help_label := Ui.label(CONTROLS, 13, UiTheme.TEXT_DIM)
+	help_label.position = Vector2(0, 650)
+	help_label.size = Vector2(1280, 20)
+	help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	layer.add_child(help_label)
+	_help_label = help_label
 
-	_button(layer, 300, 692, "Neu", func() -> void: new_deal())
-	_button(layer, 500, 692, "Zurück", func() -> void: undo())
-	_button(layer, 760, 692, "Auto", func() -> void: auto_move())
-	_button(layer, 980, 692, "Lobby", func() -> void: Router.to_lobby())
+	_button(layer, 160, 692, "Neu", func() -> void: new_deal(), 200.0)
+	_button(layer, 400, 692, "Zurück", func() -> void: undo(), 200.0)
+	_button(layer, 640, 692, "Auto", func() -> void: auto_move(), 200.0)
+	_button(layer, 880, 692, "Tipp (−%d)" % HINT_COST, func() -> void: hint(), 200.0)
+	_button(layer, 1120, 692, "Lobby", func() -> void: Router.to_lobby(), 200.0)
 
 
-func _button(layer: Control, x: float, y: float, text: String, on_press: Callable) -> void:
-	var button := Ui.button(text, Vector2(180, 44), UiTheme.PANEL_LIGHT, on_press)
-	button.position = Vector2(x - 90, y - 22)
+func _button(layer: Control, x: float, y: float, text: String, on_press: Callable, width: float = 180.0) -> void:
+	var button := Ui.button(text, Vector2(width, 44), UiTheme.PANEL_LIGHT, on_press)
+	button.position = Vector2(x - width * 0.5, y - 22)
 	layer.add_child(button)
 
 
@@ -113,13 +130,23 @@ func new_deal() -> void:
 	score = 0
 	won = false
 	history = []
+	hints_used = 0
+	_hint_cursor = 0
+	_clear_hint()
 	highscore = Game.highscore(Game.HS_FREECELL)
 	close_modals()
 	_refresh()
 
 
-func _process(_delta: float) -> void:
-	super(_delta)
+func _process(delta: float) -> void:
+	super(delta)
+	# Der Tipp pulsiert, solange er steht — und nur dann wird neu gezeichnet.
+	if hint_life > 0.0:
+		hint_life = maxf(0.0, hint_life - delta)
+		if hint_life <= 0.0:
+			hint_move = {}
+			_refresh()
+		_redraw_view()
 	if Input.is_action_just_pressed("restart"):
 		new_deal()
 		return
@@ -128,8 +155,21 @@ func _process(_delta: float) -> void:
 	if Input.is_action_just_pressed("undo"):
 		undo()
 		return
-	if Input.is_action_just_pressed("fire") and Input.is_key_pressed(KEY_A):
-		auto_move()
+	if Input.is_action_just_pressed("suggest"):
+		hint()
+		return
+
+
+## "A" ist im Projekt keiner Eingabe-Action zugeordnet, deshalb kommt der
+## Buchstabe hier an — die Taste stand schon immer in der Hilfezeile, vorher
+## konnte sie aber gar nichts auslösen.
+func _unhandled_input(event: InputEvent) -> void:
+	if won or not (event is InputEventKey):
+		return
+	var key := event as InputEventKey
+	if not key.pressed or key.echo or key.keycode != KEY_A:
+		return
+	auto_move()
 
 
 func _on_view_input(event: InputEvent) -> void:
@@ -205,23 +245,12 @@ func _click_column(col: int, card_index: int) -> void:
 
 func _select_column(col: int, card_index: int) -> void:
 	var cards: Array = columns[col]
-	if card_index < 0 or card_index >= cards.size() or not _is_sequence(cards, card_index):
+	if not Cards.freecell_sequence(cards, card_index):
 		selection = {}
 	else:
 		selection = {"from": "col", "index": col, "start": card_index}
 	Sfx.select()
 	_refresh()
-
-
-func _is_sequence(cards: Array, start: int) -> bool:
-	for i in range(start, cards.size() - 1):
-		var a: Cards.Card = cards[i]
-		var b: Cards.Card = cards[i + 1]
-		if a.rank != b.rank + 1:
-			return false
-		if Cards.is_red_card(a) == Cards.is_red_card(b):
-			return false
-	return true
 
 
 func _selection_cards() -> Array:
@@ -247,22 +276,6 @@ func _remove_selection(count: int) -> void:
 		column.remove_at(start)
 
 
-func _count_free_cells() -> int:
-	var count := 0
-	for cell in free_cells:
-		if cell == null:
-			count += 1
-	return count
-
-
-func _count_empty_columns() -> int:
-	var count := 0
-	for column in columns:
-		if (column as Array).is_empty():
-			count += 1
-	return count
-
-
 func _try_move_to_column(col: int) -> bool:
 	if selection.is_empty():
 		return false
@@ -277,14 +290,7 @@ func _try_move_to_column(col: int) -> bool:
 		var first: Cards.Card = moving[0]
 		if top.rank != first.rank + 1 or Cards.is_red_card(top) == Cards.is_red_card(first):
 			return false
-	var free_count := _count_free_cells()
-	var empty_cols := _count_empty_columns()
-	var capacity: int = 0
-	if target.is_empty():
-		capacity = (free_count + 1) * int(pow(2.0, float(maxi(0, empty_cols - 1))))
-	else:
-		capacity = (free_count + 1) * int(pow(2.0, float(empty_cols)))
-	if moving.size() > capacity:
+	if moving.size() > Cards.freecell_capacity(free_cells, columns, col):
 		return false
 	_push_history()
 	_remove_selection(moving.size())
@@ -355,16 +361,7 @@ func _try_move_to_foundation(foundation: int) -> bool:
 ## True when the card's own foundation is ready and no opposite-suit foundation
 ## is further behind — the classic FreeCell safety test.
 func _is_safe(card: Cards.Card) -> bool:
-	if (foundations[card.suit] as Array).size() != card.rank:
-		return false
-	if card.rank <= 1:
-		return true
-	for suit in 4:
-		if Cards.is_red_suit(suit) == Cards.is_red_card(card):
-			continue
-		if (foundations[suit] as Array).size() < card.rank:
-			return false
-	return true
+	return Cards.freecell_safe(foundations, card)
 
 
 ## Plays out every safe card, repeating until nothing more can go home.
@@ -408,15 +405,46 @@ func auto_move() -> void:
 
 
 func _push_history() -> void:
+	# Jede Änderung am Brett räumt den Tipp weg — er zeigte auf alte Felder.
+	_clear_hint()
 	history.append({
 		"freeCells": free_cells.duplicate(),
 		"foundations": foundations.duplicate(true),
 		"columns": columns.duplicate(true),
 		"moves": moves,
 		"score": score,
+		"hints": hints_used,
 	})
 	if history.size() > 300:
 		history.pop_front()
+
+
+## Zeigt den einen Zug, der jetzt am meisten bringt, und lässt ihn aufleuchten.
+## Fragen kostet Punkte: der Tipp nimmt dem Spieler eine Entscheidung ab, und
+## ohne Preis löst man die Partie mit der Taste. Am Brett ändert er nichts — nur
+## am Punktestand, und `undo()` erstattet ihn nicht wieder, sonst ließe sich der
+## Preis per Tipp/Zurück zurücksetzen.
+func hint() -> void:
+	if won:
+		return
+	var list := Cards.freecell_suggest(free_cells, foundations, columns)
+	if list.is_empty():
+		hint_move = {}
+		hint_life = HINT_LIFE
+		_refresh()
+		return
+	hint_move = list[_hint_cursor % list.size()]
+	_hint_cursor += 1
+	hints_used += 1
+	score = maxi(0, score - HINT_COST)
+	hint_life = HINT_LIFE
+	Sfx.select()
+	_refresh()
+
+
+func _clear_hint() -> void:
+	hint_move = {}
+	hint_life = 0.0
 
 
 func undo() -> void:
@@ -426,9 +454,13 @@ func undo() -> void:
 	free_cells = (snapshot["freeCells"] as Array).duplicate()
 	foundations = (snapshot["foundations"] as Array).duplicate(true)
 	columns = (snapshot["columns"] as Array).duplicate(true)
+	# Ein Tipp, den man schon gesehen hat, bleibt bezahlt: sonst ließe sich die
+	# Punktekosten durch undo/zurück/undo endlos zurücksetzen.
+	var paid := maxi(0, hints_used - int(snapshot.get("hints", hints_used)))
 	moves = int(snapshot["moves"])
-	score = int(snapshot["score"])
+	score = maxi(0, int(snapshot["score"]) - paid * HINT_COST)
 	selection = {}
+	_clear_hint()
 	Sfx.kill()
 	_refresh()
 
@@ -443,6 +475,7 @@ func _check_win() -> void:
 		return
 	won = true
 	selection = {}
+	_clear_hint()
 	score += 500
 	Game.submit_score(Game.HS_FREECELL, score)
 	Sfx.level_up()
@@ -454,18 +487,34 @@ func _check_win() -> void:
 	var column := Ui.vbox(14)
 	center.add_child(column)
 	column.add_child(Ui.title("🏆  GEWONNEN!", 52, Color("4ade80")))
-	column.add_child(Ui.label("Züge: %d\nPunkte: %d" % [moves, score], 22, Color("e2e8f0")))
+	column.add_child(Ui.label("Züge: %d\nPunkte: %d\nTipps: %d" % [moves, score, hints_used], 22, Color("e2e8f0")))
 	column.add_child(Ui.button("Neues Spiel", Vector2(360, 56), UiTheme.ACCENT, func() -> void: new_deal()))
 	column.add_child(Ui.button("Lobby", Vector2(360, 56), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))
 
 
 func _refresh() -> void:
-	_view.queue_redraw()
+	_redraw_view()
 	if _moves_label == null:
 		return
 	_moves_label.text = "Züge: %d" % moves
 	_score_label.text = "Punkte: %d" % score
 	_highscore_label.text = "Bestwert: %d" % highscore
+	if _help_label == null:
+		return
+	if hint_move.is_empty():
+		_help_label.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
+		if hint_life > 0.0:
+			_help_label.text = "Kein sinnvoller Zug mehr  ·  R mischt neu"
+		else:
+			_help_label.text = CONTROLS
+		return
+	_help_label.add_theme_color_override("font_color", UiTheme.ACCENT)
+	_help_label.text = "Tipp: %s  ·  −%d Punkte" % [Cards.freecell_hint_text(hint_move), HINT_COST]
+
+
+func _redraw_view() -> void:
+	if _view != null:
+		_view.queue_redraw()
 
 
 ## Draws the foundations, the free cells and the eight tableau columns.
@@ -505,6 +554,51 @@ class BoardView:
 			for j in column.size():
 				var selected: bool = not screen.selection.is_empty() and str(screen.selection["from"]) == "col" and int(screen.selection["index"]) == c and j >= int(screen.selection["start"])
 				CardRenderer.card(self, Rect2(Vector2(x, TABLEAU_Y + float(j) * dy), Vector2(CARD_W, CARD_H)), column[j], true, selected)
+
+		_hint()
+
+	## Pulses a frame around the hinted card and around its destination: blue
+	## where the card stands, green where it belongs.
+	func _hint() -> void:
+		if screen.hint_move.is_empty() or screen.hint_life <= 0.0:
+			return
+		var rects := _hint_rects()
+		if rects.size() < 2:
+			return
+		var wave := sin(float(Time.get_ticks_msec()) * 0.005)
+		var fade: float = clampf(screen.hint_life / 0.8, 0.0, 1.0)
+		var width := 4.0 + 2.0 * wave
+		draw_rect((rects[0] as Rect2).grow(3.0), Color(UiTheme.ACCENT.r, UiTheme.ACCENT.g, UiTheme.ACCENT.b, fade * (0.6 + 0.4 * wave)), false, width)
+		draw_rect((rects[1] as Rect2).grow(3.0), Color(UiTheme.SUCCESS.r, UiTheme.SUCCESS.g, UiTheme.SUCCESS.b, fade * (0.6 + 0.4 * wave)), false, width)
+
+	## The two rectangles the hint points at — where the card is and where it goes.
+	func _hint_rects() -> Array:
+		var from: Dictionary = screen.hint_move["from"]
+		var to: Dictionary = screen.hint_move["to"]
+		var source := Rect2()
+		if str(from["zone"]) == "cell":
+			source = Rect2(Vector2(screen.col_x(int(from["index"])), TOP_Y), Vector2(CARD_W, CARD_H))
+		else:
+			var origin: Array = screen.columns[int(from["index"])]
+			var start := int(from["start"])
+			if start < origin.size():
+				var y := TABLEAU_Y + float(start) * screen.stack_dy(origin.size())
+				source = Rect2(Vector2(screen.col_x(int(from["index"])), y), Vector2(CARD_W, CARD_H))
+		var target := Rect2()
+		var zone := str(to["zone"])
+		if zone == "foundation":
+			target = Rect2(Vector2(screen.col_x(4 + int(to["index"])), TOP_Y), Vector2(CARD_W, CARD_H))
+		elif zone == "cell":
+			target = Rect2(Vector2(screen.col_x(int(to["index"])), TOP_Y), Vector2(CARD_W, CARD_H))
+		else:
+			var column: Array = screen.columns[int(to["index"])]
+			var ty := TABLEAU_Y
+			if not column.is_empty():
+				ty = TABLEAU_Y + float(column.size() - 1) * screen.stack_dy(column.size())
+			target = Rect2(Vector2(screen.col_x(int(to["index"])), ty), Vector2(CARD_W, CARD_H))
+		if source.size == Vector2.ZERO or target.size == Vector2.ZERO:
+			return []
+		return [source, target]
 
 	func _text(text: String, pos: Vector2, w: float, h: float, size: int, color: Color, alpha: float) -> void:
 		var font := Ui.font_bold()
