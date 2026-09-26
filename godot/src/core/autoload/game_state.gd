@@ -25,6 +25,7 @@ const HS_MERGE_HALLOWEEN := "singular80_merge3d_halloween_highscore"
 const HS_HORSE := "singular80_horserunner_highscore"
 const HS_DRAGON := "singular80_dragonrpg_highscore"
 const HS_2048 := "singular80_2048_highscore"
+const HS_DRAGONFLIGHT := "singular80_dragonflight_highscore"
 
 var muted: bool = false
 var arena_weapon: String = "pistol"

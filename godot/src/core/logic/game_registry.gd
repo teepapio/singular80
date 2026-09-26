@@ -189,6 +189,17 @@ const GAMES: Array[Dictionary] = [
 		"highscore_key": Game.HS_DRAGON,
 	},
 	{
+		"id": "dragonflight",
+		"name": "Drachenflug",
+		"description": "Fliege mit deinem Drachen über 30 Level, züchte Nachkommen mit vererbtenTraits und sammle Drachengold.",
+		"icon": "☄",
+		"screen": "dragonflight",
+		"accent": Color(0.055, 0.647, 0.898),
+		"accent_hex": 0x0ea5e9,
+		"category": CATEGORY_ADVENTURE,
+		"highscore_key": Game.HS_DRAGONFLIGHT,
+	},
+	{
 		"id": "2048",
 		"name": "2048",
 		"description": "Das Sucht-Puzzle: Verschiebe die Kacheln, verschmelze gleiche Zahlen und baue die 2048.",
