@@ -3,12 +3,11 @@ extends RefCounted
 ## Tests for the demand forecast of "Metropol 3D" — the feature that makes a
 ## missing line visible before the queue collapses.
 ##
-## The forecast is the part of the game that answers "where should the next line
-## go?", so it gets its own file instead of growing the older metro suites.
-## The screen suite loads `metro_screen.gd` **by path** for the same reason
-## `test_metro_screens.gd` does: a static reference would drag the screen into
-## the compile chain of `run_tests.gd`, which happens before the engine
-## registers the autoloads.
+## The forecast answers "where should the next line go?", so it gets its own
+## file instead of growing the older metro suites. The screen suite reaches the
+## screen through the router instead of naming `MetroScreen`: a static
+## reference would drag the screen into the compile chain of `run_tests.gd`,
+## which happens before the engine registers the autoloads.
 
 var t: TestKit
 
