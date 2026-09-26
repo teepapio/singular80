@@ -188,21 +188,41 @@ func _current_screen_id() -> String:
 	return Router.current_id if Router != null else ""
 
 
-## Ein echter Touch, genau wie ihn der Finger erzeugt. Über `parse_input_event`
-## läuft er durch dieselbe Kette wie im echten Betrieb — inklusive der
-## Maus-Emulation, die in `project.godot` steht.
+## Ein echter Tipp, genau wie ihn der Finger erzeugt.
+##
+## Zwei Dinge, die hier lange gedauert haben und deshalb festgehalten sind:
+## Der Weg geht über `push_input` und **nicht** über `Input.parse_input_event` —
+## letzterer landet nicht im GUI des Viewports, ein damit geschickter Klick
+## bewegt also gar nichts. Und es kommen **beide** Ereignisse: erst der Touch
+## und daraus, über `pointing/emulate_mouse_from_touch`, der Klick, auf den ein
+## `Button` überhaupt hört. Genau das schickt ein Gerät auch.
 func _tap(point: Vector2, hold: float) -> void:
-	var press := InputEventScreenTouch.new()
-	press.index = 0
-	press.pressed = true
-	press.position = point
-	Input.parse_input_event(press)
+	var viewport := get_viewport()
+	_push(viewport, _touch(point, true))
 	await get_tree().create_timer(hold).timeout
-	var release := InputEventScreenTouch.new()
-	release.index = 0
-	release.pressed = false
-	release.position = point
-	Input.parse_input_event(release)
+	_push(viewport, _mouse(point, false))
+	_push(viewport, _touch(point, false))
+
+
+func _push(viewport: Viewport, event: InputEvent) -> void:
+	viewport.push_input(event, true)
+
+
+func _touch(point: Vector2, pressed: bool) -> InputEventScreenTouch:
+	var event := InputEventScreenTouch.new()
+	event.index = 0
+	event.pressed = pressed
+	event.position = point
+	return event
+
+
+func _mouse(point: Vector2, pressed: bool) -> InputEventMouseButton:
+	var event := InputEventMouseButton.new()
+	event.button_index = MOUSE_BUTTON_LEFT
+	event.pressed = pressed
+	event.position = point
+	event.global_position = point
+	return event
 
 
 ## Tippt den ersten Knopf, dessen Beschriftung `needle` enthält.

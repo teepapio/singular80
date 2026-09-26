@@ -107,6 +107,11 @@ func _run() -> void:
 		TestDragonFlight.new().run(kit)
 	if _wants_class("res://tests/test_candy_match3.gd", only):
 		TestCandyMatch3.new().run(kit)
+	if _wants_class("res://tests/test_devfarm.gd", only):
+		# Der Farm-Audit braucht den SceneTree, also mit `self`.
+		var devfarm_suite: GDScript = load("res://tests/test_devfarm.gd")
+		if devfarm_suite != null:
+			await devfarm_suite.new().run(kit, self)
 	if _wants_class("res://tests/test_tetris.gd", only):
 		# Loaded by path, like the screen suites around it: `--script` mode does
 		# not refresh the global class cache, so a class added today is unknown

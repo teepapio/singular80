@@ -146,7 +146,8 @@ const SCOPE_SUITES = {
     'Vorschlags-Warteschlange — Zustellung', 'Rechtliches & Melden'],
   content: ['Content', 'Content-Integrität', 'Content-Synchronisation'],
   dashboard: [],
-  tests: [],
+  tests: ['Farm-Audit — freier Knopf', 'Farm-Audit — zugedeckter Knopf',
+    'Farm-Audit — Geometrie', 'Farm-Audit — untätig ohne Schalter'],
 };
 
 /** Screens each scope should open in the integration sweep. */
