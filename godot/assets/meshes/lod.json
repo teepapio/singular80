@@ -1,4 +1,69 @@
 {
+  "candy/bonbon": {
+    "high": 11571,
+    "low": 540,
+    "med": 1172
+  },
+  "candy/chocolate": {
+    "high": 13568,
+    "low": 212,
+    "med": 1108
+  },
+  "candy/daisy": {
+    "high": 10642,
+    "low": 380,
+    "med": 1292
+  },
+  "candy/gift": {
+    "high": 10435,
+    "low": 348,
+    "med": 1392
+  },
+  "candy/gumdrop": {
+    "high": 13056,
+    "low": 204,
+    "med": 1055
+  },
+  "candy/heart": {
+    "high": 11602,
+    "low": 134,
+    "med": 1073
+  },
+  "candy/jellybean": {
+    "high": 11288,
+    "low": 240,
+    "med": 1248
+  },
+  "candy/lily": {
+    "high": 10812,
+    "low": 346,
+    "med": 1384
+  },
+  "candy/lolly": {
+    "high": 10423,
+    "low": 484,
+    "med": 1130
+  },
+  "candy/lotus": {
+    "high": 10204,
+    "low": 480,
+    "med": 1180
+  },
+  "candy/rose": {
+    "high": 10058,
+    "low": 460,
+    "med": 1144
+  },
+  "candy/sunflower": {
+    "high": 10635,
+    "low": 500,
+    "med": 1287
+  },
+  "candy/tulip": {
+    "high": 11145,
+    "low": 240,
+    "med": 1238
+  },
   "crystal": {
     "high": 11424,
     "low": 20,
@@ -558,6 +623,141 @@
     "high": 10240,
     "low": 10,
     "med": 1020
+  },
+  "siedler/bakery": {
+    "high": 12126,
+    "low": 256,
+    "med": 1024
+  },
+  "siedler/blacksmith": {
+    "high": 11411,
+    "low": 284,
+    "med": 1136
+  },
+  "siedler/castle": {
+    "high": 10997,
+    "low": 344,
+    "med": 1376
+  },
+  "siedler/coal_mine": {
+    "high": 10383,
+    "low": 412,
+    "med": 1200
+  },
+  "siedler/coal_node": {
+    "high": 10403,
+    "low": 100,
+    "med": 1195
+  },
+  "siedler/construction": {
+    "high": 14336,
+    "low": 224,
+    "med": 1182
+  },
+  "siedler/farm": {
+    "high": 10985,
+    "low": 512,
+    "med": 1138
+  },
+  "siedler/fish_spot": {
+    "high": 11330,
+    "low": 80,
+    "med": 1280
+  },
+  "siedler/fishery": {
+    "high": 11230,
+    "low": 300,
+    "med": 1200
+  },
+  "siedler/flag": {
+    "high": 11406,
+    "low": 80,
+    "med": 1280
+  },
+  "siedler/forester": {
+    "high": 12003,
+    "low": 276,
+    "med": 1104
+  },
+  "siedler/gold_mine": {
+    "high": 10383,
+    "low": 412,
+    "med": 1200
+  },
+  "siedler/gold_node": {
+    "high": 10403,
+    "low": 100,
+    "med": 1195
+  },
+  "siedler/iron_mine": {
+    "high": 10383,
+    "low": 412,
+    "med": 1200
+  },
+  "siedler/iron_node": {
+    "high": 10403,
+    "low": 100,
+    "med": 1195
+  },
+  "siedler/knight": {
+    "high": 12416,
+    "low": 194,
+    "med": 1019
+  },
+  "siedler/oak": {
+    "high": 11611,
+    "low": 60,
+    "med": 1286
+  },
+  "siedler/quarry": {
+    "high": 11801,
+    "low": 136,
+    "med": 1057
+  },
+  "siedler/sawmill": {
+    "high": 11300,
+    "low": 300,
+    "med": 1200
+  },
+  "siedler/settler": {
+    "high": 10324,
+    "low": 102,
+    "med": 1142
+  },
+  "siedler/smelter": {
+    "high": 12032,
+    "low": 188,
+    "med": 1011
+  },
+  "siedler/stone_node": {
+    "high": 10403,
+    "low": 100,
+    "med": 1195
+  },
+  "siedler/toolsmith": {
+    "high": 10896,
+    "low": 312,
+    "med": 1248
+  },
+  "siedler/warehouse": {
+    "high": 11534,
+    "low": 1024,
+    "med": 1024
+  },
+  "siedler/watchtower": {
+    "high": 11653,
+    "low": 266,
+    "med": 1064
+  },
+  "siedler/windmill": {
+    "high": 11495,
+    "low": 242,
+    "med": 1272
+  },
+  "siedler/woodcutter": {
+    "high": 10874,
+    "low": 340,
+    "med": 1360
   },
   "tree": {
     "high": 11455,

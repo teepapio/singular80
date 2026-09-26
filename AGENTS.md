@@ -4,16 +4,24 @@ Godot-4-Spiel (Android) + Fastify-Backend + Web-Dashboard. Die App läuft offlin
 komplett; mit konfigurierter Server-Adresse holt sie Content und Vorschläge vom
 Backend.
 
+> **Achtung, gemeinsamer Arbeitsbaum:** Der Runner (`server/runner.ts`) startet für
+> eingereichte Vorschläge einen zweiten Agenten im selben Verzeichnis. Vor dem
+> Commit `git status` prüfen und nur die eigenen Dateien stagen — fremde, halb
+> fertige Änderungen weder committen noch zurücksetzen. Zum Prüfen gegen HEAD
+> eine Kopie in `/tmp` anlegen und dort die Suite laufen lassen.
+
 ## Befehle
 
 - `npm run typecheck` — `tsc --noEmit`, muss fehlerfrei sein.
 - `npm test` — prüft zuerst den Content-Sync, dann `vitest run` (Server/Dashboard).
-- `npm run test:game` — **742 GDScript-Tests** (headless, Regeln + echte Screens).
+- `npm run test:game` — **headless GDScript-Suite** (Regeln *und* echte Screens).
 - `npm run build` — Vite-Build des Dashboards.
 - `npm run content:sync` — `content/*.json` nach `godot/assets/content/` spiegeln
   (Pflicht vor jedem Godot-Build; `npm test` schlägt bei Abweichung fehl).
 - `npm run godot:import` — Content spiegeln + Godot-Import der Assets.
 - `npm run godot:apk` — Debug-APK, `npm run godot:apk:release` — signiertes Release.
+- `npm run godot:android-template` — Godot-Android-Build-Template installieren
+  (läuft in `godot:apk*` automatisch mit).
 - `npm run smoke` — API-Smoke-Test.
 - Reihenfolge für Änderungen: `typecheck` → `test` → `test:game` → `build` → `godot:apk`.
 
@@ -37,7 +45,7 @@ godot/
 ├── project.godot             Autoloads, Eingaben, Renderer (gl_compatibility)
 ├── export_presets.cfg        Android-APK (arm64, minSdk 24, targetSdk 35)
 ├── assets/
-│   ├── meshes/               78 Blender-GLBs (+ rpg/-Unterordner)
+│   ├── meshes/               Low-Poly-GLBs (+ med/, high/, lod.json)
 │   ├── content/              gespiegelte content/*.json
 │   └── fonts/                DejaVu Sans (normal + fett)
 ├── src/
@@ -45,17 +53,19 @@ godot/
 │   ├── core/
 │   │   ├── autoload/         InputSetup, Game, Content, Sfx, Api, Router
 │   │   ├── logic/            reine Spiellogik (Renderer-frei, testbar)
-│   │   │   ├── asset_registry.gd   zentrale Mesh-Liste (Key → Pfad)
-│   │   │   ├── game_registry.gd    Kategorien + alle 13 Spiele
-│   │   │   ├── lobby.gd            Geometrie der 3D-Lobby
-│   │   │   ├── inventory.gd        generisches Inventarsystem
-│   │   │   ├── checkers/cards/holdem/twenty48/merge3d/
-│   │   │   ├── crystal_tower/dragon_rpg/horse_runner
-│   │   │   └── mechanics/          Mechanik-Registry + Dash
+│   │   │   ├── asset_registry.gd    Mesh-Keys, Kategorien, LOD-Stufen
+│   │   │   ├── game_registry.gd     Kategorien + alle Spiele
+│   │   │   ├── mesh_gallery.gd      Galerie-Geometrie, Merkliste, Vorschlag
+│   │   │   ├── suggestion_context.gd  Herkunft eines Vorschlags
+│   │   │   ├── tetris_rules.gd      T-Spins, Punkte, B2B, Brettgefahr
+│   │   │   ├── arena_runs.gd        Wellenvorschau, Boss-Ansage, Kill-Ketten
+│   │   │   ├── lobby.gd             Geometrie der 3D-Lobby
+│   │   │   ├── inventory.gd         generisches Inventarsystem
+│   │   │   └── …                    Karten, 2048, Merge, Kristall, Drache …
 │   │   └── ui/                Screen/WorldScreen-Basis, Theme, Widgets,
 │   │                          VirtualStick, Kartenrenderer, Dialoge
 │   └── game/<spiel>/          ein Verzeichnis je Spiel (s. u.)
-└── tests/                    TestKit + Regel- und Screentests
+└── tests/                    TestKit, Regel-, Verbesserungs- und Screentests
 ```
 
 ### Ein Spiel hinzufügen
@@ -71,24 +81,61 @@ godot/
 6. Logo-Icon: **DejaVuschrift** kann ♠♥♦♣♞☄✦◆▣▦◼ u. a. — keine Emojis.
 7. Hochscore über `Game.submit_score(<key>, wert)`, niemals selbst speichern.
 
+### Basisklassen
+
+`Screen` (2D) und `WorldScreen` (3D) bringen Top-Bar, Vorschlagsdialog, Theme,
+Kamera-Follow und Touch-Steuerung mit.
+
+- **Namen der Basisklasse nicht überschreiben.** Ein Unterklasse, die
+  `_build_hud`/`_build_environment`/`show_toast` selbst definiert, bricht die
+  Basis. Eigene Einstiegspunkte heißen `_ready_game`, `_ready_world`,
+  `_update_world`, `_build_ui`, `_build_panels`, `_build_scenery`.
+- Für eine kurze Meldung im 3D `notify(text)` benutzen (nicht `show_toast`).
+- `WorldScreen.mesh(key, …)` nimmt einen Registry-**Key** oder einen fertigen
+  `res://`-Pfad (für die LOD-Stufen) und liefert `null`, wenn der Import fehlt.
+
+### Vorschläge
+
+`SuggestDialog.open(self, kontext)` bzw. `open_world(self, kontext)`. Ohne
+`kontext` wird der aktive Bildschirm als Herkunft eingesetzt und dem Text
+vorangestellt (`SuggestionContext.compose`), damit niemand „geht um Tetris“
+tippen muss. `Api.submit_suggestion(text, author, kontext)` macht das gleiche für
+Aufrufe außerhalb des Dialogs.
+
 ### Performance-Regeln
 
 - Keine Allokationen im `_process`/`_update_world`: Pools vorallozieren
-  (Arena: 220 Gegner, 400 Geschosse, 160 Kristalle).
+  (Arena: 220 Gegner, 400 Geschosse, 160 Kristalle; Drachen-RPG: 24 schwebende
+  `Label3D` aus `_build_label_pool`).
 - `_draw()` nur bei Änderung (`queue_redraw()`), nie im Takt neu aufbauen.
 - 3D-Materialien entstehen einmalig über `WorldScreen.tint()` /
   `WorldScreen.standard_material()`; `StandardMaterial3D` nicht pro Frame anlegen.
 - Meshes kommen **ausschließlich** über `AssetRegistry`/`WorldScreen.mesh()`.
 
-### Meshes
+### Meshes und Detailstufen
 
 - Format: binäres glTF 2.0 (`.glb`), Godot importiert nativ.
 - Erzeugen: `blender --background --python scripts/blender/make_mesh.py -- --out … --name <builder>`
   bzw. `scripts/blender/generate_rpg_meshes.py` für den Drachen-Pack.
-- Jedes neue Mesh braucht einen Key in `AssetRegistry.KEYS` — der Test
-  `Asset-Registry` schlägt fehl, wenn Liste und Ordner auseinanderlaufen.
+- **Jedes neue Mesh braucht einen Key in `AssetRegistry.KEYS`** — zwei Tests
+  schlagen fehl, wenn Liste und Ordner auseinanderlaufen.
 - Fehlt ein Mesh, benutzt `WorldScreen.mesh()` ein prozedurales Primitiv;
   3D-Spiele starten dadurch nie mit leerer Szene.
+- Jedes Mesh liegt in drei Stufen: `assets/meshes/<key>.glb` (Low, das benutzen
+  die Spiele), `assets/meshes/med/<key>.glb` (~1.000 Dreiecke) und
+  `assets/meshes/high/<key>.glb` (~10.000 Dreiecke, mit Displacement).
+  Neu erzeugen:
+  ```bash
+  blender --background --python scripts/blender/generate_lod_meshes.py -- \
+      --out godot/assets/meshes --stats godot/assets/meshes/lod.json
+  ```
+  Das Skript misst die Dreieckzahlen und schreibt sie nach `lod.json`; die
+  Galerie zeigt sie an, der Test prüft `med ≥ low` und `high ≥ med`.
+  **Nach jedem neuen Mesh erneut laufen lassen**, sonst fehlen die höheren Stufen.
+- Die beiden reichen Stufen kosten zusammen rund 45 MB APK. Ohne sie wird das
+  Release gut 80 MB kleiner — dafür zeigt die Galerie nur ein einziges Mesh.
+- `include_filter="*.json"` im Export-Preset ist Pflicht: `.json` wird nicht
+  importiert und käme sonst nicht ins Paket (die Galerie braucht `lod.json`).
 
 ### Android
 
@@ -96,4 +143,6 @@ godot/
   Geräteabdeckung), `stretch/mode = canvas_items`, `aspect = expand`.
 - 2D-Spiele mit festem Layout bauen in `stage()` (1280×720, zentriert);
   Menüs in `content_layer()` (füllt das Fenster) mit Containern.
+- `config/name` muss ein gültiger Android-Identifier sein (kein Leerzeichen);
+  der schöne Anzeigename steht in `package/name` im Export-Preset.
 - Keine Godot-Editor-Komponenten zur Laufzeit; keine externen Dateien zur Laufzeit.

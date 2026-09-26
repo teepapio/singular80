@@ -6,16 +6,16 @@ spiegelt.
 
 | | |
 |---|---|
-| **App** | Godot 4.5 (GDScript), Android 7.0+ (`arm64-v8a`), Release-APK ca. 73 MB |
+| **App** | Godot 4.5 (GDScript), Android 7.0+ (`arm64-v8a`), Release-APK ca. 124 MB |
 | **Backend** | Fastify + SQLite, Content-Server, Discord-Bot, OpenCode-Runner |
 | **Dashboard** | Vanilla-Web (Vite), bewusst nahezu unverändert |
-| **Assets** | 78 Blender-GLBs, keine Texturen, keine Bilddateien — 2D wird prozedural gezeichnet |
+| **Assets** | 158 Blender-GLBs in drei Auflösungen, keine Texturen — 2D wird prozedural gezeichnet |
 
 ## Die Spiele
 
 **2D** — Arena-Survival · Tetris · Texas Hold'em · FreeCell · Dame · 2048 · Lobby-Liste
-**3D** — begehbare Lobby · Crystal Jumper (3 Editionen) · Merge 3D (2 Editionen) ·
-Pferde-Parcours 3D · Drachen-RPG 3D
+**3D** — begehbare Lobby · Mesh-Galerie · Crystal Jumper (3 Editionen) ·
+Merge 3D (2 Editionen) · Pferde-Parcours 3D · Drachen-RPG 3D
 
 Jedes Spiel ist per Thumbstick, On-Screen-Buttons, Tastatur **und** Gamepad
 bedienbar. Die 3D-Lobby ist begehbar: zu einer Kategorie-Plaza laufen, an einen
@@ -40,27 +40,54 @@ Damit Vorschläge und Live-Content funktionieren, im Hauptmenü auf
 (z. B. `http://192.168.1.20:8787`). Offline eingereichte Vorschläge werden
 nachgeholt, sobald wieder ein Server erreichbar ist.
 
+## Vorschläge sagen von selbst, woher sie kommen
+
+Jeder Vorschlag trägt den Bildschirm, aus dem er abgeschickt wurde — im Dialog
+sichtbar als „Aus: Tetris“ und im Text als `Tetris: …`. Niemand muss mehr
+tippen, welches Spiel gemeint ist, und das Dashboard kann die Ideen nach Herkunft
+sortieren.
+
+## Die Mesh-Galerie
+
+In der Lobby führt ein Lichtring in einen runden Raum mit einem Sockel je Mesh.
+Dort lässt sich jedes mitgelieferte Mesh in drei Auflösungen ansehen:
+
+| Stufe | Dreiecke | Zweck |
+|---|---|---|
+| Low Poly | ~200 | die Fassung, die die Spiele benutzen |
+| Mittel | ~1.000 | mehr Rundung, echte Kanten |
+| Hoch | ~10.000 | zusätzlich mit Oberflächenrelief |
+
+Ein Mesh vormerken, eine Notiz dazu schreiben, und alles zusammen geht als ein
+**fertig ausgefüllter** Vorschlag ans Dashboard — inklusive Mesh-Schlüssel,
+deutschem Namen, betrachteter Detailstufe und Dreieckzahl.
+
+Die reicheren Stufen sind keine eigenen Modelle, sondern aus den Low-Poly-Meshes
+abgeleitet (`scripts/blender/generate_lod_meshes.py`), damit die Geometrie in allen
+drei Stufen identisch bleibt. Sie kosten zusammen rund 45 MB APK.
+
 ## Qualitätssicherung
 
 ```bash
 npm run typecheck   # Server + Dashboard
 npm test            # 54 Vitest-Tests + Content-Sync-Prüfung
-npm run test:game   # 742 GDScript-Tests: Regeln *und* echte Screens
+npm run test:game   # GDScript-Suite: Regeln *und* echte Screens, headless
 ```
 
-Die Spieltests fahren headless durch alle 13 Spiele, simulieren Züge
-(Tetris, Dame, Karten, Arena inkl. Level-Up und Pause) und prüfen, dass die
-Asset-Registry exakt zum Mesh-Ordner passt.
+Die Spieltests fahren headless durch alle Screens, simulieren Züge (Tetris, Dame,
+Karten, Arena inkl. Level-Up und Pause), prüfen die Asset-Registry exakt gegen den
+Mesh-Ordner, die LOD-Stufen gegen ihre Dreieckbudgets und die Mesh-Galerie als
+kompletten Durchlauf vom Vormerken bis zum abgeschickten Vorschlag.
 
 ## Aufbau
 
 ```
-godot/            das Spiel: Autoloads, reine Logik, UI-Basisklassen, 13 Screens
-  assets/meshes/  78 GLBs (Blender-Generator in scripts/blender/)
+godot/            das Spiel: Autoloads, reine Logik, UI-Basisklassen, alle Screens
+  assets/meshes/  GLBs in drei Stufen (Blender-Generator in scripts/blender/)
 server/           Fastify-API, SQLite, Discord, OpenCode-Runner
 src/dashboard/    Web-Dashboard
 content/          einzige Quelle der Spieldaten (wird in die App gespiegelt)
-scripts/          Content-Sync, API-Smoke, Blender-Mesh-Generator
+scripts/          Content-Sync, Android-Template, API-Smoke, Blender-Meshes
 tests/            Vitest für Server und Dashboard
 ```
 
