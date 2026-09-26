@@ -12,6 +12,7 @@ __pycache__/
 *.pyc
 *.apk
 godot/build/
+run/
 godot/shot.gd
 godot/shot.tscn
 godot/probe.gd

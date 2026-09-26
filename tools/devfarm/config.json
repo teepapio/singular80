@@ -1,0 +1,44 @@
+{
+  "$comment": [
+    "Konfiguration der Android-Testfarm. Sie ist absichtlich datengetrieben: der",
+    "Farm startet N Instanzen, jede mit eigenem adb-Port, und vermittelt sie",
+    "per Lease an genau einen Agenten zur Zeit.",
+    "",
+    "Warum nicht Waydroid: Waydroid braucht die Kernel-Module binder_ls und",
+    "ashmem. Der Ubuntu-Mainline-Kernel liefert sie nicht, und waydroid steht",
+    "nicht einmal in den Quellen. Mit /dev/kvm ist der Android-Emulator die",
+    "tragfähige Alternative und unterstützt -read-only, also N Instanzen aus",
+    "einem einzigen AVD ohne N-fache Festplatte.",
+    "",
+    "Die Farm ist laufzeitneutral gebaut: jeder Backend-Typ, der sich per adb",
+    "ansprechen lässt (Emulator, Waydroid, echtes Tablet über USB) erfüllt",
+    "dieselbe Schnittstelle. `backend: emulator` ist der, der hier läuft."
+  ],
+
+  "backend": "emulator",
+  "avd": "s80-farm",
+  "systemImage": "system-images;android-34;default;x86_64",
+  "deviceProfile": "pixel_5",
+
+  "$instances_comment": "So viele Instanzen parallel. Jede braucht ~1,5 GB RAM; 4 sind auf diesem Host (12 Kerne, 30 GB) gut vertretbar.",
+  "instances": 4,
+  "basePort": 5554,
+
+  "$emulator_comment": "swiftshader_indirect rendert ohne GPU in Software. Das ist auf einer Maschine ohne Grafikkarte die einzige Möglichkeit und für Screenshots ausreichend.",
+  "gpu": "swiftshader_indirect",
+  "bootTimeoutSeconds": 240,
+
+  "package": "de.singular80.game",
+  "activity": "de.singular80.game/.MainActivity",
+
+  "$apk_comment": "Das ausgelieferte APK ist arm64-only und lässt sich auf einem x86_64-Emulator nicht installieren. Deshalb ein eigenes Test-Preset mit beiden Architekturen; am ausgelieferten Preset ändert sich nichts.",
+  "apkPreset": "Android (Farm)",
+  "apkPath": "build/singular80-farm.apk",
+
+  "$bridge_comment": "10.0.2.2 ist die Host-Schleife aus der Sicht des Emulators. darüber spricht die App mit der Farm.",
+  "bridgeHost": "10.0.2.2",
+  "bridgePort": 8731,
+
+  "outDir": "log/devfarm",
+  "stateDir": "run/devfarm"
+}

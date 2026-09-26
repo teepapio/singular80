@@ -10,6 +10,94 @@ Backend.
 > fertige Änderungen weder committen noch zurücksetzen. Zum Prüfen gegen HEAD
 > eine Kopie in `/tmp` anlegen und dort die Suite laufen lassen.
 
+## Vor der ersten Änderung
+
+Drei Sekunden, die in dieser Sitzung einen halben Tag ersetzt haben:
+
+1. **`git status` lesen.** Der Runner kann eine Arbeit halbfertig liegen lassen
+   und dabei den Index ruinieren. Der Zustand, der hier auftrat: acht Dateien
+   im Index als *gelöscht*, obwohl sie byte-identisch auf der Platte lagen, und
+   vier Dateien mit gestaged Änderung, die im Arbeitsbaum exakt zurückgenommen
+   war. Beides sieht harmlos aus und ist es nicht — `git add -A` nimmt es mit.
+   Ist der Index veraltet: `git reset` (nichts geht verloren, es ändert nur den
+   Index) und die Dateien neu stagen. **Nichts zurücksetzen, was dir nicht
+   gehört.**
+2. **`node scripts/scopes.mjs list`** — beendet sich mit Code 1 bei jedem
+   Manifest-Fehler. Eine Suite, die in keinem Scope steht, läuft in einem
+   Scoped-Lauf *stillschweigend nicht*: der Agent, der sie geschrieben hat,
+   glaubt, sie sei geprüft.
+3. **`godot --headless --path godot --import`**, sobald du eine neue Datei mit
+   `class_name` angelegt hast. Siehe unten — das ist der teuerste Fehler
+   überhaupt.
+
+## Neue `class_name` → sofort importieren
+
+`--script`-Modus erneuert den globalen Klassen-Cache **nicht**. Eine neue
+`class_name` ist damit bis zum nächsten Import unbekannt, und der Fehler
+verschiebt sich dorthin, wo man nicht suchen würde:
+
+- `Screen`/`WorldScreen` parst nicht mehr, **jeder** Screen des Spiels lädt
+  nicht mehr, der Router bleibt im Lobby-Screen. Ein Test meldet dann
+  „Es ist der 2048-Screen nicht" und prüft dann Eigenschaften eines
+  `Lobby3DScreen`.
+- Die Suite **hängt** sich tot, weil der Absturz vor `quit()` passiert.
+
+Beides hat in dieser Sitzung gleichzeitig ausgesehen wie „ein kaputter Bildschirm
+und ein hängender Test". Nach jeder neuen `class_name` also einmal importieren;
+bestehende Suites laden ihre Module bewusst per Pfad (`load("res://…")`) statt
+per Klassenname, genau aus diesem Grund.
+
+## Testsuite registrieren: zwei Stellen, nicht eine
+
+Eine neue Suite `t.suite("…")` in `godot/tests/test_<id>.gd` ist **halb**
+registriert, bis beides gilt:
+
+- `SCOPE_SUITES` in `scripts/scopes.mjs` — sonst läuft sie in keinem
+  Scoped-Lauf mit.
+- `godot/tests/run_tests.gd` — sonst lädt der Runner die Datei nie und sie läuft
+  auch im Volllauf nicht. GDScript kann die Dateien nicht selbst finden
+  (unterschiedliche Parameterzahl, `await`-Probleme beim `call()`), der Runner
+  bleibt deshalb handgepflegt; beide Prüfungen laufen über `npm test`.
+
+`npm test` schlägt inzwischen fehl, wenn eine Suite in keinem Scope steht oder
+eine `test_*.gd` nicht geladen wird — diese Lücke war lange offen und hat
+gleichzeitig sechs nicht registrierte Suites und eine nie geladene Testdatei
+durchgewunken.
+
+## Exportieren und Artefakte prüfen
+
+- **Relative Exportpfade zählen gegen `godot/`, nicht gegen das Repo-Root.**
+  `build/x.apk` bedeutet `godot/build/x.apk` und der Export bricht mit
+  „Target folder does not exist" ab. Immer absolut übergeben.
+- **`exclude_filter` erreicht importierte Ressourcen nicht.** Godot wendet ihn
+  auf Nicht-Ressourcen an, ein importiertes `.glb` ist aber eine Ressource:
+  gemessen lagen mit `assets/meshes/med/*, assets/meshes/high/*` im Filter alle
+  310 reicheren Meshes trotzdem im Paket. `export_filter="exclude"` ist
+  schlimmer — es packt die Roh-`.glb`, und ein exportiertes Spiel kann eine
+  Roh-`.glb` gar nicht laden. Was wirkt, ist eine `.gdignore` je Ordner.
+- **„Export erfolgreich" ist kein Beweis.** Ein schlankes Build kann 120 MB
+  wiegen und trotzdem korrekt exiten. `googleplay/scripts/build-apk-slim.mjs`
+  prüft den Inhalt (Meshes, `lod.json`, keine Roh-`.glb`); für alles andere
+  gilt: das Ergebnis messen, nicht behaupten.
+- **Größenangaben in den Docs sind Messungen.** Wenn sich ein Preset ändert,
+  neu bauen und die Zahl nachtragen.
+
+## Was ein headless Test nicht sieht
+
+`is_touchscreen_available()` ist unter `npm run test:game` false, es wird also
+mit der Maus getestet. Gerätekonfiguration und Nur-Touch-Verhalten fallen
+dadurch vollständig durch — echtes Beispiel: `pointing/emulate_mouse_from_touch`
+stand auf `false`, und auf dem Tablet war **jeder Knopf des Spiels tot, weil
+Godots `Button` auf `InputEventMouseButton` reagiert und ein Fingerdruck nur ein
+`InputEventScreenTouch` liefert. Der VirtualStick funktionierte, weil er Touch
+selbst auswertet; das Bildschirm-Logbuch sah „Joystick geht, Knöpfe nicht".
+
+Wenn eine Eingabe auf dem Gerät nicht ankommt: erst `project.godot` unter
+`[input_devices]` lesen, dann in `res://log/touch/` nach Screenshots schauen,
+dann auf dem Gerät messen (`adb` + Logcat). Für das Anhängen von Bildern und
+das Auswerten von Logcat gibt es die Agenten `apk` und `device-debug`.
+
+
 ## Befehle
 
 - `npm run typecheck` — `tsc --noEmit`, muss fehlerfrei sein.
@@ -151,8 +239,52 @@ Aufrufe außerhalb des Dialogs.
 
 - `project.godot`: `renderer/rendering_method = gl_compatibility` (breite
   Geräteabdeckung), `stretch/mode = canvas_items`, `aspect = expand`.
+- `pointing/emulate_mouse_from_touch` **muss `true` bleiben.** Godots `Button`
+  reagiert auf `InputEventMouseButton`; mit `false` liefert ein Fingerdruck nur
+  ein `InputEventScreenTouch` und damit ist auf dem Tablet jeder Knopf tot,
+  während der VirtualStick funktioniert, weil er Touch selbst auswertet. Der
+  Fehler sieht aus wie „Bildschirm kaputt" und ist es nicht.
 - 2D-Spiele mit festem Layout bauen in `stage()` (1280×720, zentriert);
   Menüs in `content_layer()` (füllt das Fenster) mit Containern.
 - `config/name` muss ein gültiger Android-Identifier sein (kein Leerzeichen);
   der schöne Anzeigename steht in `package/name` im Export-Preset.
 - Keine Godot-Editor-Komponenten zur Laufzeit; keine externen Dateien zur Laufzeit.
+
+## Android-Testfarm
+
+`tools/devfarm/` fährt echte Android-Instanzen hoch, mehrere parallel, und
+steuert die App so, wie ein Spieler es tut. Ausführlich in
+`tools/devfarm/README.md`.
+
+```bash
+npm run farm:doctor     # sagt, was fehlt, statt zu raten
+npm run farm:bridge     # Schleife, läuft als eigener Prozess weiter
+npm run farm:start      # Instanzen aufziehen
+npm run farm:status
+npm run farm:session -- --game tetris --audit --shots 2
+npm run farm:sweep      # alle Spiele nacheinander
+```
+
+- **Nicht Waydroid.** Waydroid braucht `binder_ls` und `ashmem`; der
+  Ubuntu-Mainline-Kernel hat sie nicht. Die Farm redet nur mit `adb` und ist
+  damit backend-neutral — Emulator, Waydroid-Container oder ein Tablet an USB
+  erfüllen dieselbe Schnittstelle.
+- **Ein AVD, N Instanzen** über `-read-only`. Ohne das Flag teilen sich die
+  Instanzen ein userdata-Image, und die erste schreibt darauf, während die
+  zweite noch bootet — die Sorte Absturz, die man dem Werkzeug nicht anlasten
+  will.
+- **Ein eigenes Farm-APK** (`Android (Farm)`), weil das ausgelieferte arm64-only
+  ist und ein x86_64-Emulator es mit „no matching ABI" ablehnt. Eigener
+  Paketname `de.singular80.farm`, damit die Farm neben dem echten Spiel liegt
+  und dessen Spielstand nicht anfasst.
+- **Der Audit ist das Wichtigste.** Er schickt für jeden Knopf einen echten
+  `InputEventScreenTouch` auf seine Mitte und prüft Fläche, Deckung und ob
+  `pressed` kommt. Damit findet er zugedeckte und nicht verdrahtete Knöpfe —
+  beides sieht im Screenshot tadellos aus und fällt im headless Test nie auf,
+  weil dort `is_touchscreen_available()` false ist.
+- **Eine Instanz pro Agent zur Zeit**, gehalten über `flock` auf einer Datei.
+  `session.mjs` gibt die Lease im `finally` frei, und stirbt der Agent, gibt
+  der Kernel sie frei. Ein Agent darf also drei Fehler an drei Spielen
+  **gleichzeitig** suchen; sie landen auf drei Instanzen.
+- Der Bericht ist `log/devfarm/<lauf>/<spiel>/report.json` — maschinenlesbar,
+  damit ein Agent Zahlen liest, statt Bilder anzusehen.
