@@ -104,6 +104,8 @@ const SCOPE_SUITES = {
   dragonflight: [
     'Drachenflug — Stammdaten', 'Drachenflug — Vererbung', 'Drachenflug — Zuchtvorhersage',
     'Drachenflug — Elemente', 'Drachenflug — Werte', 'Drachenflug — Profil & Zucht',
+    'Drachenflug — Allele', 'Drachenflug — Blutbild', 'Drachenflug — Zuchtziel',
+    'Drachenflug — Beste Paarung', 'Drachenflug — Ei-Vorschau',
   ],
   pang: ['Pang', 'Pang — Treffer', 'Pang — Doppelgriff', 'Pang — Kugelbudget'],
   metro3d: [

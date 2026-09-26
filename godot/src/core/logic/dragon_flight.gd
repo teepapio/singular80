@@ -632,6 +632,217 @@ static func _shares_lineage(a: Dictionary, b: Dictionary, trait_id: String) -> b
 	return false
 
 
+# --- bloodline readout ------------------------------------------------------
+
+## The three states one gene can be in for one dragon. `carrier` only ever
+## happens for a recessive gene: the dragon hides the trait but can pass it on.
+## That hidden letter is the whole point of the readout — a recessive trait
+## needs two carriers, and before this the roster could not show whether a
+## dragon was one.
+const GENE_SHOWS := "shows"
+const GENE_CARRIER := "carrier"
+const GENE_CLEAR := "clear"
+
+## A gene at or below this `weight` counts as rare: a random dragon is unlikely
+## to carry it, so keeping the line alive is worth waiting for.
+const RARE_TRAIT_WEIGHT := 0.2
+
+
+## The two allele letters of one gene, dominant letter first. A missing or short
+## pair reads as "not carried" instead of crashing an old save.
+static func allele_pair(alleles: Dictionary, trait_id: String) -> String:
+	var gene := trait_by_id(trait_id)
+	if gene.is_empty():
+		return ""
+	var dominant := str(gene["dom"])
+	var recessive := _recessive_letter(dominant)
+	var pair := str(alleles.get(trait_id, ""))
+	if pair.length() < 2:
+		return ""
+	# "rR" and "Rr" are the same dragon; the readout always sorts the letters.
+	if pair[0] == recessive and pair[1] == dominant:
+		return dominant + recessive
+	return pair.substr(0, 2)
+
+
+## How many of a gene's recessive letters a dragon carries: 0, 1 or 2. Two
+## means the trait shows, one means the dragon is only a carrier.
+static func recessive_allele_count(alleles: Dictionary, trait_id: String) -> int:
+	var gene := trait_by_id(trait_id)
+	if gene.is_empty():
+		return 0
+	var recessive := _recessive_letter(str(gene["dom"]))
+	var count := 0
+	for letter in allele_pair(alleles, trait_id):
+		if letter == recessive:
+			count += 1
+	return count
+
+
+## `shows`, `carrier` or `clear` — the state every screen draws a gene in.
+static func gene_state(alleles: Dictionary, trait_id: String) -> String:
+	var gene := trait_by_id(trait_id)
+	if gene.is_empty():
+		return GENE_CLEAR
+	if expressed(alleles, trait_id):
+		return GENE_SHOWS
+	# A dominant gene is already visible with a single letter, so only a
+	# recessive one has something to hide.
+	if bool(gene.get("recessive", false)) and recessive_allele_count(alleles, trait_id) > 0:
+		return GENE_CARRIER
+	return GENE_CLEAR
+
+
+## True when the dragon hides a recessive trait but can still pass it on.
+static func is_carrier(alleles: Dictionary, trait_id: String) -> bool:
+	return gene_state(alleles, trait_id) == GENE_CARRIER
+
+
+## The whole genome as drawable rows, in registry order.
+static func genotype(alleles: Dictionary) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for gene in TRAITS:
+		var id := str(gene["id"])
+		out.append({
+			"id": id,
+			"name": str(gene["name"]),
+			"hue": str(gene["hue"]),
+			"desc": str(gene["desc"]),
+			"recessive": bool(gene.get("recessive", false)),
+			"pair": allele_pair(alleles, id),
+			"state": gene_state(alleles, id),
+		})
+	return out
+
+
+## The recessive genes a dragon hides but still carries, rarest first. This is
+## the "which line do I keep" list a hatchling never shows on its own.
+static func carried_traits(alleles: Dictionary) -> Array[String]:
+	var out: Array[String] = []
+	for row in genotype(alleles):
+		if str(row["state"]) == GENE_CARRIER:
+			out.append(str(row["id"]))
+	out.sort_custom(func(a: String, b: String) -> bool:
+		return float(trait_by_id(a).get("weight", 1.0)) < float(trait_by_id(b).get("weight", 1.0))
+	)
+	return out
+
+
+## How many of the allele a breeding goal needs a dragon carries. A recessive
+## goal needs the small letter, a dominant one the big one — so this single
+## number ranks the whole roster for both kinds of goal.
+static func goal_allele_count(alleles: Dictionary, trait_id: String) -> int:
+	var gene := trait_by_id(trait_id)
+	if gene.is_empty():
+		return 0
+	var dominant := str(gene["dom"])
+	var wanted: String = _recessive_letter(dominant) if bool(gene.get("recessive", false)) else dominant
+	var count := 0
+	for letter in allele_pair(alleles, trait_id):
+		if letter == wanted:
+			count += 1
+	return count
+
+
+## Every dragon of the roster that could help with a breeding goal, best first:
+## those that show the trait, then the carriers, then the rest. Dragons that
+## carry nothing of the goal drop out as soon as somebody in the stable does —
+## a list of clean dragons is not an answer, but when nobody carries it, the
+## player gets to see exactly why the goal is out of reach.
+static func target_candidates(profile: Dictionary, trait_id: String, limit: int = 6) -> Array[Dictionary]:
+	var rows := _ranked(profile, trait_id)
+	var best_score := 0
+	for row in rows:
+		best_score = maxi(best_score, int(row["score"]))
+	if best_score > 0:
+		var useful: Array[Dictionary] = []
+		for row in rows:
+			if int(row["score"]) > 0:
+				useful.append(row)
+		rows = useful
+	if limit > 0 and rows.size() > limit:
+		rows = rows.slice(0, limit)
+	return rows
+
+
+## The whole roster ranked by goal usefulness, without the filter above — this
+## is what `best_pair()` searches, so a goal nobody carries still reports its
+## honest 0 % instead of "no pair at all".
+static func _ranked(profile: Dictionary, trait_id: String) -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	for entry in dragons_of(profile):
+		var dragon: Dictionary = entry
+		rows.append({
+			"dragon": dragon,
+			"uid": int(dragon.get("uid", 0)),
+			"score": goal_allele_count(dragon.get("alleles", {}), trait_id),
+		})
+	rows.sort_custom(func(x: Dictionary, y: Dictionary) -> bool:
+		if int(x["score"]) != int(y["score"]):
+			return int(x["score"]) > int(y["score"])
+		var gen_x := int((x["dragon"] as Dictionary).get("gen", 1))
+		var gen_y := int((y["dragon"] as Dictionary).get("gen", 1))
+		if gen_x != gen_y:
+			return gen_x > gen_y
+		return int(x["uid"]) < int(y["uid"])
+	)
+	return rows
+
+
+## How many dragons of the roster carry a goal at all — showing it or hiding
+## it. One is not enough for a recessive trait, so this is also the answer to
+## "can I breed this at all yet".
+static func goal_carriers(profile: Dictionary, trait_id: String) -> int:
+	var count := 0
+	for entry in dragons_of(profile):
+		var state := gene_state((entry as Dictionary).get("alleles", {}), trait_id)
+		if state == GENE_SHOWS or state == GENE_CARRIER:
+			count += 1
+	return count
+
+
+## The best pairing the roster can manage for a goal. Every candidate is tried
+## against every other — cheap for a stable of a few dozen dragons — so the
+## player gets a concrete answer instead of a probability to guess at. Returns
+## `{"a": dragon, "b": dragon, "chance": p}`, or `{}` below two dragons.
+static func best_pair(profile: Dictionary, trait_id: String) -> Dictionary:
+	var candidates := _ranked(profile, trait_id)
+	var best := {"a": {}, "b": {}, "chance": -1.0}
+	for i in candidates.size():
+		for j in range(i + 1, candidates.size()):
+			var a: Dictionary = (candidates[i]["dragon"] as Dictionary).duplicate(true)
+			var b: Dictionary = (candidates[j]["dragon"] as Dictionary).duplicate(true)
+			var chance := trait_probability(a, b, trait_id)
+			if chance > float(best["chance"]):
+				best = {"a": a, "b": b, "chance": chance}
+	if (best["a"] as Dictionary).is_empty() or (best["b"] as Dictionary).is_empty():
+		return {}
+	return best
+
+
+## What an egg is worth before it opens: the traits it will show, the recessive
+## genes it only carries, and the rarest of both. The genome is already rolled
+## when the egg is laid, so the incubator can tell the truth — which is what
+## turns a hatched-by-surprise dragon into a line the player chose.
+static func egg_readout(dragon: Dictionary) -> Dictionary:
+	var alleles: Dictionary = dragon.get("alleles", {})
+	var traits := expressed_traits(alleles)
+	var carriers := carried_traits(alleles)
+	var rarest := ""
+	var rarest_weight := 2.0
+	for id in traits + carriers:
+		var weight := float(trait_by_id(id).get("weight", 1.0))
+		if weight < rarest_weight:
+			rarest_weight = weight
+			rarest = id
+	return {
+		"traits": traits,
+		"carriers": carriers,
+		"rarest": rarest,
+		"rare": not rarest.is_empty() and rarest_weight <= RARE_TRAIT_WEIGHT,
+	}
+
+
 ## Breed two dragons. The child inherits a breed from one parent, a mixed genome
 ## and a generation counter. Returns a plain dragon Dictionary.
 static func breed_parents(parent_a: Dictionary, parent_b: Dictionary, uid: int) -> Dictionary:

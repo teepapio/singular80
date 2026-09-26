@@ -89,6 +89,8 @@ func _run() -> void:
 	# added later is picked up here without editing this runner.
 	if _wants_class("res://tests/test_metro.gd", only):
 		TestMetro.new().run(kit)
+	if _wants_class("res://tests/test_dragonflight.gd", only):
+		TestDragonFlight.new().run(kit)
 	if _wants_class("res://tests/test_metro3d.gd", only):
 		# By path, like the screen suites below: a class added since the last
 		# editor start is not in the global class cache, and a static name

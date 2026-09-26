@@ -16,6 +16,8 @@ var profile: Dictionary = {}
 var parent_a := 0
 var parent_b := 0
 var now := 0.0
+## The trait this pairing is bred for. Set by the player from the chip grid.
+var target_trait := "riesenwuchs"
 
 var dragons: Array = []
 var nests: Array = []
@@ -27,7 +29,11 @@ var _label_title: Label
 var _label_slots: Label
 var _label_info: Label
 var _label_pedigree: Label
+var _label_goal: Label
 var _forecast_box: VBoxContainer
+var _candidate_box: VBoxContainer
+var _target_grid: GridContainer
+var _target_chips: Dictionary = {}
 var _pair_button: Button
 var _lay_button: Button
 var _breed_box: VBoxContainer
@@ -45,6 +51,7 @@ func _ready_world() -> void:
 	_build_nests()
 	_build_roost()
 	_build_ui()
+	_build_target_chips()
 	refresh()
 	hide_loading()
 
@@ -192,8 +199,23 @@ func _build_ui() -> void:
 	_pair_button = Ui.button("Paaren", Vector2(400, 48), UiTheme.ACCENT, _on_pair)
 	body.add_child(_pair_button)
 
-	# Zuchtziel: which trait this pairing is most likely to produce.
-	body.add_child(Ui.label("Zuchtziel — Wahrscheinlichkeiten", 16, UiTheme.TEXT, true))
+	# Zuchtziel: which trait this pairing is bred for. The chips are the whole
+	# breeding plan in one block, and the list below answers "which two of my
+	# dragons can actually produce it".
+	body.add_child(Ui.label("Zuchtziel", 16, UiTheme.TEXT, true))
+	_target_grid = GridContainer.new()
+	_target_grid.columns = 3
+	_target_grid.add_theme_constant_override("h_separation", 4)
+	_target_grid.add_theme_constant_override("v_separation", 4)
+	body.add_child(_target_grid)
+	_label_goal = Ui.label("", 14, UiTheme.TEXT)
+	_label_goal.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.add_child(_label_goal)
+	_candidate_box = Ui.vbox(3)
+	body.add_child(_candidate_box)
+
+	# Zuchtvorhersage: what the pair that is actually selected will produce.
+	body.add_child(Ui.label("Zuchtvorhersage", 16, UiTheme.TEXT, true))
 	_forecast_box = Ui.vbox(2)
 	body.add_child(_forecast_box)
 
@@ -222,6 +244,51 @@ func _build_ui() -> void:
 	hud_root.add_child(hint)
 
 	# WorldScreen brings its own `notify()`; nothing to add here.
+
+
+## One chip per gene. They are built once and only repainted afterwards, so
+## changing the goal never rebuilds twelve buttons.
+func _build_target_chips() -> void:
+	for gene in DragonFlight.TRAITS:
+		var id := str(gene["id"])
+		var chip := Ui.button(str(gene["name"]), Vector2(130, 32), Color(str(gene["hue"])), _on_pick_target.bind(id))
+		chip.add_theme_font_size_override("font_size", 12)
+		chip.tooltip_text = "%s · %s" % [str(gene["desc"]), "rezessiv" if bool(gene.get("recessive", false)) else "dominant"]
+		_target_grid.add_child(chip)
+		_target_chips[id] = chip
+
+
+## The selected chip keeps its gene colour, the rest fade back — so the current
+## breeding goal is readable at a glance even in a list of twelve.
+func _paint_target_chips() -> void:
+	for id in _target_chips:
+		var chip: Button = _target_chips[id]
+		var hue := Color(str(DragonFlight.trait_by_id(str(id))["hue"]))
+		var selected: bool = str(id) == target_trait
+		chip.add_theme_stylebox_override("normal", _chip_box(hue if selected else hue.darkened(0.55),
+			hue if selected else UiTheme.BORDER))
+		chip.add_theme_color_override("font_color", Color("0b1220") if selected else hue.lightened(0.2))
+
+
+## A tighter stylebox than `UiTheme.flat`: the chips are small, and the shared
+## content margins would eat a third of a 130 px button.
+func _chip_box(fill: Color, border: Color) -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = fill
+	box.set_corner_radius_all(7)
+	box.border_color = border
+	box.set_border_width_all(2)
+	box.content_margin_left = 4
+	box.content_margin_right = 4
+	box.content_margin_top = 2
+	box.content_margin_bottom = 2
+	return box
+
+
+func _on_pick_target(id: String) -> void:
+	Sfx.select()
+	target_trait = id
+	_refresh_panel()
 
 
 # --- refresh ----------------------------------------------------------------
@@ -356,9 +423,92 @@ func _refresh_panel() -> void:
 		var ring: MeshInstance3D = spot["ring"]
 		ring.visible = int(spot["uid"]) != 0 and (int(spot["uid"]) == parent_a or int(spot["uid"]) == parent_b)
 	_refresh_pedigree()
+	_refresh_goal()
 	_refresh_forecast(a, b)
 	_refresh_egg_button()
 	_refresh_breeds()
+
+
+## The goal line and the list of dragons that can serve it. This is what turns
+## breeding from a blind roll into a plan: the roster says which dragons carry
+## the gene, and `best_pair()` names the two that give the best odds.
+func _refresh_goal() -> void:
+	_paint_target_chips()
+	var gene := DragonFlight.trait_by_id(target_trait)
+	var recessive: bool = bool(gene.get("recessive", false))
+	var carriers := DragonFlight.goal_carriers(profile, target_trait)
+	var needed := 2 if recessive else 1
+	var lines: Array[String] = ["Ziel: %s · %s · %d von %d Trägern" % [
+		str(gene.get("name", target_trait)), "rezessiv" if recessive else "dominant",
+		mini(carriers, needed), needed,
+	]]
+	var best := DragonFlight.best_pair(profile, target_trait)
+	if best.is_empty():
+		lines.append("Zu wenige Drachen im Stall.")
+		_label_goal.text = "\n".join(lines)
+		_refresh_candidates()
+		return
+	var a: Dictionary = best["a"]
+	var b: Dictionary = best["b"]
+	lines.append("Beste Paarung: %s (%s) × %s (%s) = %d %%" % [
+		_dragon_label(a), DragonFlight.allele_pair(a.get("alleles", {}), target_trait),
+		_dragon_label(b), DragonFlight.allele_pair(b.get("alleles", {}), target_trait),
+		roundi(float(best["chance"]) * 100.0),
+	])
+	if float(best["chance"]) <= 0.0:
+		lines.append("Kein Paar bringt es — ein zweiter Träger fehlt.")
+	_label_goal.text = "\n".join(lines)
+	_refresh_candidates()
+
+
+## Every dragon that helps with the goal, best first. Tapping one selects it as
+## a parent, exactly like tapping its pedestal.
+func _refresh_candidates() -> void:
+	for child in _candidate_box.get_children():
+		child.queue_free()
+	var candidates := DragonFlight.target_candidates(profile, target_trait, 5)
+	if candidates.is_empty():
+		_candidate_box.add_child(Ui.label("Keine Drachen im Stall.", 13, UiTheme.TEXT_MUTED))
+		return
+	var hue := Color(str(DragonFlight.trait_by_id(target_trait)["hue"]))
+	for entry in candidates:
+		var dragon: Dictionary = entry["dragon"]
+		var uid := int(entry["uid"])
+		var alleles: Dictionary = dragon.get("alleles", {})
+		var state := DragonFlight.gene_state(alleles, target_trait)
+		var mark := "zeigt" if state == DragonFlight.GENE_SHOWS else ("Träger" if DragonFlight.is_carrier(alleles, target_trait) else "—")
+		var caption := "%s · %s · %s" % [_dragon_label(dragon), DragonFlight.allele_pair(alleles, target_trait), mark]
+		if uid == parent_a:
+			caption = "A · " + caption
+		elif uid == parent_b:
+			caption = "B · " + caption
+		# The gene's own colour, so the list belongs to the chosen goal.
+		_candidate_box.add_child(Ui.button(caption, Vector2(400, 32), hue.darkened(0.74), _on_pick_candidate.bind(uid)))
+
+
+func _on_pick_candidate(uid: int) -> void:
+	_assign_parent(uid)
+	_refresh_panel()
+
+
+## Shared by the pedestals and the candidate list. The first pick fills A, a
+## second different dragon fills B, and tapping a selected dragon again drops
+## it — so a mis-tap is always recoverable. (Before, a second pick overwrote A,
+## which meant B could never be filled and breeding was unreachable by tapping.)
+func _assign_parent(uid: int) -> void:
+	if uid == 0:
+		return
+	if parent_a == 0:
+		parent_a = uid
+	elif uid == parent_a:
+		parent_a = 0
+	elif parent_b == 0:
+		parent_b = uid
+	elif uid == parent_b:
+		parent_b = 0
+	else:
+		parent_b = uid
+	Sfx.select()
 
 
 ## Ancestry of the first selected parent, so a bred dragon can be traced back.
@@ -395,11 +545,22 @@ func _refresh_forecast(a: Dictionary, b: Dictionary) -> void:
 		_forecast_box.add_child(Ui.label("Noch kein Paar gewählt.", 14, UiTheme.TEXT_MUTED))
 		return
 	var forecast := DragonFlight.breeding_forecast(a, b)
+	# The goal the player picked comes first, the rest stays sorted by chance:
+	# without this the trait they are actually chasing could be cut off the
+	# seven-row tail entirely.
+	var ordered: Array[Dictionary] = []
+	for entry in forecast:
+		if str(entry["id"]) == target_trait:
+			ordered.append(entry)
+	for entry in forecast:
+		if str(entry["id"]) != target_trait:
+			ordered.append(entry)
 	# Only the interesting tail: things likely, and things worth chasing.
 	var shown := 0
-	for entry in forecast:
+	for entry in ordered:
 		var chance := float(entry["chance"])
-		if chance < 0.05:
+		var is_goal: bool = str(entry["id"]) == target_trait
+		if chance < 0.05 and not is_goal:
 			continue
 		shown += 1
 		if shown > 7:
@@ -409,7 +570,8 @@ func _refresh_forecast(a: Dictionary, b: Dictionary) -> void:
 		var head := Ui.hbox(6)
 		row.add_child(head)
 		head.add_child(Ui.rect(Color(str(entry["hue"])), 10, Color(0, 0, 0, 0), 0))
-		head.add_child(Ui.label(str(entry["name"]), 14, Color(str(entry["hue"])), true))
+		head.add_child(Ui.label(str(entry["name"]) if not is_goal else "▶ " + str(entry["name"]),
+			14, Color(str(entry["hue"])), true))
 		head.add_child(Ui.spacer())
 		head.add_child(Ui.label("%d %%" % roundi(chance * 100.0), 14, Color.WHITE, true))
 		var bar := Ui.bar(Color(str(entry["hue"])), 8.0)
@@ -512,6 +674,8 @@ func _refresh_list() -> void:
 		Ui.set_bar(bar, DragonFlight.egg_progress(dragon, now), Color(str(breed["eggColor"])))
 		row.add_child(bar)
 		_progress.append(bar)
+		var readout := DragonFlight.egg_readout(dragon)
+		_egg_readout_line(row, readout)
 		if remaining > 0.0:
 			var cost := DragonFlight.hatch_cost(dragon)
 			row.add_child(Ui.button("Ausbrüten für %d ◈" % cost, Vector2(400, 34), UiTheme.PANEL_LIGHT, func() -> void:
@@ -521,6 +685,31 @@ func _refresh_list() -> void:
 			row.add_child(Ui.button("Schlüpfen lassen", Vector2(400, 34), UiTheme.SUCCESS, func() -> void:
 				_hatch_now(dragon, 0)
 			))
+
+
+## What the egg will hatch as, and what it passes on. The genome is already
+## rolled when the egg is laid, so showing it here is not a spoiler but the
+## answer to "is this egg worth waiting for" — and a hidden carrier is the one
+## thing a hatched dragon can never show on its own.
+func _egg_readout_line(row: VBoxContainer, readout: Dictionary) -> void:
+	var shown: Array[String] = readout.get("traits", [])
+	var carriers: Array[String] = readout.get("carriers", [])
+	if shown.is_empty() and carriers.is_empty():
+		row.add_child(Ui.label("schlüpft ohne Merkmale", 12, UiTheme.TEXT_MUTED))
+		return
+	var parts: Array[String] = []
+	if not shown.is_empty():
+		parts.append("schlüpft mit: %s" % _names(shown))
+	else:
+		parts.append("schlüpft ohne Merkmale")
+	if not carriers.is_empty():
+		parts.append("trägt weiter: %s" % _names(carriers))
+	if bool(readout.get("rare", false)):
+		parts.append("seltenes Gen")
+	var text := Ui.label(" · ".join(parts), 12,
+		Color("fbbf24") if bool(readout.get("rare", false)) else UiTheme.TEXT_DIM)
+	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	row.add_child(text)
 
 
 # --- interaction ------------------------------------------------------------
@@ -567,16 +756,7 @@ func _pick_at(screen_point: Vector2) -> void:
 	var uid := int(pedestals[best]["uid"])
 	if uid == 0:
 		return
-	# First pick fills A, a second different dragon fills B; a third starts over.
-	if uid == parent_a or (parent_b == 0 and uid != parent_a):
-		parent_a = uid
-	elif uid == parent_b:
-		parent_b = 0
-	else:
-		parent_b = uid
-	if parent_b == 0 and parent_a != 0:
-		parent_b = 0
-	Sfx.select()
+	_assign_parent(uid)
 	_refresh_panel()
 
 

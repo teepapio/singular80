@@ -177,7 +177,12 @@ func _rebuild_dragons() -> void:
 		var uid := int(dragon["uid"])
 		var is_active: bool = uid == selected_dragon
 		var traits: Array[String] = DragonFlight.expressed_traits(dragon.get("alleles", {}))
+		# "+2" is the hidden part of the dragon's value: two recessive genes
+		# this one carries without showing them.
+		var carried := DragonFlight.carried_traits(dragon.get("alleles", {}))
 		var caption := "%s\nG%d · %d Merkmale" % [str(breed["name"]), int(dragon.get("gen", 1)), traits.size()]
+		if not carried.is_empty():
+			caption += " · +%d" % carried.size()
 		var button := Ui.button(caption, Vector2(100, 78), Color(str(breed["accent"])) if is_active else UiTheme.PANEL_LIGHT, _on_pick_dragon.bind(uid))
 		button.add_theme_font_size_override("font_size", 12)
 		_dragon_row.add_child(button)
@@ -226,6 +231,15 @@ func _refresh_stats() -> void:
 			head.add_child(Ui.rect(Color(str(gene["hue"])), 10, Color(0, 0, 0, 0), 0))
 			head.add_child(Ui.label(str(gene["name"]), 14, Color(str(gene["hue"])), true))
 			row.add_child(_wrap(str(gene["desc"]), 12, UiTheme.TEXT_DIM))
+	# A recessive gene that this dragon does not show is still worth knowing:
+	# it is a carrier, and a carrier paired with a second one is the only way
+	# to breed the trait at all.
+	var carried: Array[String] = DragonFlight.carried_traits(dragon.get("alleles", {}))
+	if not carried.is_empty():
+		var names: Array[String] = []
+		for id in carried:
+			names.append(str(DragonFlight.trait_by_id(id)["name"]))
+		_stats.add_child(_wrap("Verdeckte Träger: %s" % ", ".join(names), 13, Color("fbbf24")))
 
 
 func _on_pick_dragon(uid: int) -> void:
