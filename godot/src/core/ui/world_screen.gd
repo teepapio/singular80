@@ -186,17 +186,31 @@ func follow_camera(target: Vector3, height: float, distance: float, lerp_speed: 
 
 ## Adds a thumb stick anchored to a screen corner. Returns it so the game can
 ## read `value` every frame.
+##
+## The corner inset goes through `offset_*` and never through `position`:
+## `position` is measured from the parent origin as soon as the control is in
+## the tree, so a negative offset meant as "24 px above the bottom edge" lands
+## 24 px *below the top* edge instead — off screen, where the stick can neither
+## be seen nor touched. `offset_*` is always relative to the anchor.
+##
+## `Control` re-clamps its size to the minimum whenever an offset pair is
+## momentarily inconsistent, so the wanted size is read once up front and the
+## leading edges are written before the trailing ones.
 func add_stick(corner: String = "bottom_left", label_text: String = "") -> VirtualStick:
 	var stick := VirtualStick.new()
 	stick.label_text = label_text
 	stick.size = VirtualStick.SIZE
 	hud_root.add_child(stick)
+	var extent := stick.size
 	if corner == "bottom_right":
-		stick.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-		stick.position = -stick.size - Vector2(24, 24)
+		stick.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+		stick.offset_left = -24.0 - extent.x
 	else:
-		stick.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-		stick.position = Vector2(24, -stick.size.y - 24)
+		stick.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+		stick.offset_left = 24.0
+	stick.offset_right = stick.offset_left + extent.x
+	stick.offset_top = -24.0 - extent.y
+	stick.offset_bottom = -24.0
 	return stick
 
 
@@ -219,8 +233,13 @@ func add_action_button(text: String, radius: float = 62.0, action: StringName = 
 	if on_press.is_valid():
 		node.pressed.connect(on_press)
 	hud_root.add_child(node)
-	node.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	node.position = -node.size - Vector2(28, 28) + offset
+	# Corner inset via offsets, for the same reason as in `add_stick()`.
+	var extent := node.size
+	node.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	node.offset_left = -28.0 + offset.x - extent.x
+	node.offset_right = -28.0 + offset.x
+	node.offset_top = -28.0 + offset.y - extent.y
+	node.offset_bottom = -28.0 + offset.y
 	return node
 
 
