@@ -98,7 +98,8 @@ const SCOPE_SUITES = {
     'Poker — Persönlichkeiten', 'Poker — Tisches lesen', 'Poker — Typen-Bilanz'],
   freecell: ['Kartenspiele — Eingabe', 'FreeCell — Folgen', 'FreeCell — Supermove-Kapazität',
     'FreeCell — Sicherheit', 'FreeCell — Tipptext', 'FreeCell — Tippvorschlag',
-    'FreeCell — Tipp ist immer erlaubt', 'FreeCell — Sackgasse'],
+    'FreeCell — Tipp ist immer erlaubt', 'FreeCell — Sackgasse', 'FreeCell — Tipp am Anfang',
+    'FreeCell — Tipp am Screen'],
   dame: ['Dame — Regeln', 'Dame — Schlagzug-Analyse', 'Dame — Ziehbare Steine', 'Dame — Tipp am Brett'],
   crystal3d: ['Crystal Tower', 'Crystal Tower — Flusskette', 'Crystal Tower — Flusspunkte',
     'Crystal Tower — Screen'],
@@ -446,9 +447,40 @@ export function validate(scopes = buildScopes()) {
       if (!suites.has(suite)) problems.push(`Scope '${name}': Suite '${suite}' existiert nicht in den Tests`);
     }
   }
+
+  // Und umgekehrt: eine Suite-Datei, die der Runner nie aufruft, wird nie
+  // ausgeführt — der grüne Lauf prüft dann weniger, als das Repo enthält.
+  //
+  // Eine automatische-discovery im Runner wäre die bessere Lösung, aber GDScript
+  // kann das nicht: die Suites haben unterschiedliche Parameterzahl, und eine
+  // asynchrone `run()` lässt sich per `call()` nicht aufrufen ("Trying to call an
+  // async function without await"). Der Runner bleibt deshalb handgepflegt, und
+  // dieser Check macht das Handpflegen überprüfbar.
+  const runner = readFileSync(join(root, 'godot/tests/run_tests.gd'), 'utf8');
+  for (const file of suiteFiles()) {
+    // Accept either reference form: by path (`load("res://tests/test_x.gd")`) or
+    // by `class_name` (`TestX.new()`). The class-name form only resolves if the
+    // global class cache was built, which is why the per-game suites all moved
+    // to the path form — but the two original suites still use it, and they do
+    // run.
+    const base = file.split('/').pop();
+    const className = (readFileSync(join(root, file), 'utf8').match(/class_name\s+(\w+)/) ?? [])[1];
+    if (!runner.includes(base) && !(className && runner.includes(className))) {
+      problems.push(`${file} wird von run_tests.gd nicht geladen — die Suite läuft nie`);
+    }
+  }
   return problems;
 }
 
+/** Test files that define a suite, i.e. everything but the shared TestKit. */
+function suiteFiles() {
+  const dir = join(root, 'godot/tests');
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((n) => n.startsWith('test_') && n.endsWith('.gd'))
+    .filter((n) => readFileSync(join(dir, n), 'utf8').includes('func run('))
+    .map((n) => `godot/tests/${n}`);
+}
 /** Suites that belong to the harness itself rather than to any one scope. */
 const INFRA_SUITES = new Set(['Screens', 'Vorschlagsdialog']);
 
