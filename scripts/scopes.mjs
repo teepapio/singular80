@@ -95,7 +95,7 @@ const SCOPE_SUITES = {
   poker: ['Karten & Texas Hold\'em', 'Kartenspiele — Eingabe',
     'Poker — Persönlichkeiten', 'Poker — Tisches lesen', 'Poker — Typen-Bilanz'],
   freecell: ['Kartenspiele — Eingabe'],
-  dame: ['Dame — Regeln'],
+  dame: ['Dame — Regeln', 'Dame — Schlagzug-Analyse', 'Dame — Ziehbare Steine', 'Dame — Tipp am Brett'],
   crystal3d: ['Crystal Tower', 'Crystal Tower — Flusskette', 'Crystal Tower — Flusspunkte',
     'Crystal Tower — Screen'],
   merge3d: ['Merge 3D'],

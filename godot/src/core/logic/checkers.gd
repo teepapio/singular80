@@ -227,6 +227,66 @@ static func has_moves(board: PackedInt32Array, side: int) -> bool:
 	return false
 
 
+# --- Schlagzug-Analyse -------------------------------------------------------
+# Alles, was der Bildschirm zum Anzeigen und für den Hinweis braucht: welcher
+# Stein wie viele Steine schlägt, welcher Schlagzug der stärkste ist und welche
+# Steine überhaupt ziehen dürfen. Reine Abfragen — sie verändern nichts und
+# werden einmal pro Stellung gerechnet, nicht pro Bild.
+
+
+## Rang einer Kette: mehr Steine schlägt eine Dame, bei Gleichstand das
+## niedrigere Feld. Fest sortiert, damit derselbe Aufbau immer denselben
+## Tipp ergibt und die Markierung nicht springt.
+static func _chain_rank(board: PackedInt32Array, turn: Dictionary) -> int:
+	var steps: Array = turn["steps"]
+	var from := int((steps[0] as Array)[0])
+	return int(turn["captures"]) * 10000 + (1000 if is_king(board[from]) else 0) + CELL_COUNT - from
+
+
+## Jeder schlagende Stein mit seiner stärksten Kette, stärkster zuerst.
+## Einträge: `{"from": int, "captures": int, "steps": Array}`.
+static func capture_candidates(board: PackedInt32Array, side: int) -> Array:
+	var chains: Dictionary = {}
+	var ranks: Dictionary = {}
+	for turn in generate_turns(board, side):
+		var captures := int(turn["captures"])
+		if captures <= 0:
+			continue
+		var from := int(((turn["steps"] as Array)[0] as Array)[0])
+		var rank := _chain_rank(board, turn)
+		if ranks.has(from) and rank <= int(ranks[from]):
+			continue
+		ranks[from] = rank
+		chains[from] = {"from": from, "captures": captures, "steps": turn["steps"]}
+	var out: Array = chains.values()
+	out.sort_custom(func(a, b) -> bool:
+		if int(a["captures"]) != int(b["captures"]):
+			return int(a["captures"]) > int(b["captures"])
+		return int(a["from"]) < int(b["from"]))
+	return out
+
+
+## Der stärkste Schlagzug der Seite — oder `{}`, wenn es keinen gibt.
+static func best_capture(board: PackedInt32Array, side: int) -> Dictionary:
+	var candidates := capture_candidates(board, side)
+	if candidates.is_empty():
+		return {}
+	var top: Dictionary = candidates[0]
+	return {"steps": top["steps"], "captures": int(top["captures"])}
+
+
+## Alle Felder der Seite, von denen ein legaler Zug ausgeht. Beantwortet die
+## Frage "welche Steine dürfen ziehen?", wenn nichts zu schlagen ist.
+static func movable_squares(board: PackedInt32Array, side: int) -> Array:
+	var out: Array = []
+	for square in CELL_COUNT:
+		if side_of(board[square]) != side:
+			continue
+		if not generate_piece_steps(board, square).is_empty():
+			out.append(square)
+	return out
+
+
 # --- AI ---------------------------------------------------------------------
 
 ## Static evaluation from black's point of view: positive is good for black.
