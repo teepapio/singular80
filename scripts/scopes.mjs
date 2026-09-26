@@ -104,7 +104,7 @@ const SCOPE_SUITES = {
     'Drachenflug — Stammdaten', 'Drachenflug — Vererbung', 'Drachenflug — Zuchtvorhersage',
     'Drachenflug — Elemente', 'Drachenflug — Werte', 'Drachenflug — Profil & Zucht',
   ],
-  pang: ['Pang'],
+  pang: ['Pang', 'Pang — Treffer', 'Pang — Doppelgriff', 'Pang — Kugelbudget'],
   metro3d: [
     'Metropol 3D — Regeln', 'Metropol 3D — Netz', 'Metropol 3D — Wirtschaft',
     'Metropol 3D — Screen', 'Metropol 3D — Linienbau', 'Metropol 3D — Spielablauf',
@@ -263,9 +263,11 @@ export function buildScopes() {
     if (!dir) continue;
     // A game agent also gets a private test file of its own. That is where new
     // regression tests go, so two games never append to the same suite file.
+    // The trailing `*` also claims Godot's `test_<id>.gd.uid`, which is
+    // committed like every other script and would otherwise be unownable.
     const own = [
       `godot/src/game/${dir}/**`,
-      `godot/tests/test_${base}.gd`,
+      `godot/tests/test_${base}.gd*`,
       ...(GAME_LOGIC[base] ?? GAME_LOGIC[dir] ?? []),
     ];
     scopes.set(base, {

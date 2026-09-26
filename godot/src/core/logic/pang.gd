@@ -48,6 +48,36 @@ const SIZES: Array[Dictionary] = [
 	{"level": 4, "radius": 0.42, "speedMult": 1.95, "bounce": 6.4, "points": 10, "color": Color("38bdf8")},
 ]
 
+# --- the two-shot trick ------------------------------------------------------
+# The signature of the original: the smallest ball takes two hits. The first
+# one does not split it, it only arms it — the ball crawls and blinks, and the
+# second harpoon pops it for a bonus. That is the difference between a level
+# that ends in two twitchy little balls you have to chase again, and a level a
+# good player ends with the second shot of a planned pair.
+
+const HIT_SPLIT := "split"
+const HIT_ARM := "arm"
+const HIT_POP := "pop"
+
+## How long an armed ball stays armable. Long enough to walk over and line up
+## the second shot, short enough that it is not a free pop later on.
+const ARM_WINDOW := 6.0
+## An armed ball crawls: slow enough to be worth chasing, still fast enough to
+## punish a player who walks away from it.
+const ARM_SLOWDOWN := 0.32
+## The first hit pays a little, so arming is never simply a wasted harpoon.
+const ARM_POINTS := 5
+## The second hit pays the ball's own value plus this, which is the reward for
+## spending a second harpoon instead of doubling the problem.
+const ARM_BONUS := 15
+## Blink period of the armed tell. One clock drives every ball, so the whole
+## board flashes in step instead of looking like noise.
+const ARM_BLINK := 0.26
+const ARM_TINT := Color("f8fafc")
+## The one-line rule the HUD teaches. It lives here with the rest of the rules
+## so the copy and the behaviour cannot drift apart.
+const ARM_HINT := "Kleinste Kugel: 1. Treffer lässt sie blinken, 2. Treffer platzt"
+
 # --- harpoon ----------------------------------------------------------------
 
 const HARPOON_SPEED := 17.0
@@ -133,6 +163,47 @@ static func bounce_of(size_level: int) -> float:
 
 static func points_for(size_level: int) -> int:
 	return int(size_spec(size_level)["points"])
+
+
+## Only the smallest size has the two-shot trick, exactly like in the arcade
+## original: every bigger ball has to be split.
+static func needs_two_hits(size_level: int) -> bool:
+	return clampi(size_level, SIZE_LARGEST, SIZE_SMALLEST) >= SIZE_SMALLEST
+
+
+## What one harpoon hit does to a ball of this size; `armed` is the ball's
+## state before the hit. Above the smallest size every hit splits, the smallest
+## size arms itself on the first hit and pops on the second.
+static func hit_outcome(size_level: int, armed: bool) -> String:
+	if not needs_two_hits(size_level):
+		return HIT_SPLIT
+	return HIT_POP if armed else HIT_ARM
+
+
+## Points one hit is worth. Arming pays a consolation, finishing pays the full
+## value of the ball plus the bonus, and a ball that splits always pays its
+## plain value.
+static func hit_points(size_level: int, armed: bool) -> int:
+	if not needs_two_hits(size_level):
+		return points_for(size_level)
+	return points_for(size_level) + ARM_BONUS if armed else ARM_POINTS
+
+
+## How many harpoons a ball of this size costs to clear.
+static func shots_needed(size_level: int) -> int:
+	return 2 if needs_two_hits(size_level) else 1
+
+
+## Horizontal speed of an armed ball. Unarmed it keeps `speed_of`; the screen
+## applies this once when a ball is armed, so a bounce can never slow it twice.
+static func armed_speed(size_level: int) -> float:
+	return speed_of(size_level) * ARM_SLOWDOWN
+
+
+## True while the armed tell blinks. `clock` is the run clock, which keeps every
+## armed ball in step.
+static func is_blinking(clock: float) -> bool:
+	return fmod(maxf(0.0, clock), ARM_BLINK) < ARM_BLINK * 0.5
 
 
 ## Vertical speed that makes a ball reach `bounce_of(size)` after a floor hit.

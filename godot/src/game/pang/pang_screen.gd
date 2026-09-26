@@ -249,7 +249,7 @@ func _build_pools() -> void:
 	for i in ORB_LIMIT:
 		orbs.append({
 			"node": null, "active": false, "x": 0.0, "y": 0.0, "vx": 0.0, "vy": 0.0,
-			"size": 3, "flash": 0.0,
+			"size": 3, "flash": 0.0, "arm": 0.0, "blink": false,
 		})
 		orb_nodes.append(_orb_node())
 
@@ -428,6 +428,14 @@ func _build_ui() -> void:
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hud_root.add_child(hint)
 
+	# The two-shot trick is the one rule a newcomer cannot guess, so it is said
+	# out loud on the floor of the screen.
+	var trick := Ui.label(Pang.ARM_HINT, 14, Color("f8fafc"))
+	trick.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	trick.position = Vector2(0, -146)
+	trick.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hud_root.add_child(trick)
+
 
 func _value(parent: VBoxContainer, caption: String, value: String, color: Color) -> Label:
 	var row := Ui.hbox(10)
@@ -531,6 +539,8 @@ func _spawn_ball(x: float, y: float, size: int) -> Dictionary:
 	slot["y"] = y
 	slot["size"] = size
 	slot["flash"] = 0.0
+	slot["arm"] = 0.0
+	slot["blink"] = false
 	slot["vx"] = (1.0 if randf() < 0.5 else -1.0) * Pang.speed_of(size) * speed_mult
 	slot["vy"] = -Pang.jump_velocity(size) * 0.8
 	# One mesh serves all four sizes, so the colour has to follow the level.
@@ -714,6 +724,13 @@ func _tick_balls(dt: float) -> void:
 
 			_bounce_off_obstacles(orb, radius)
 
+		# An armed ball recovers on its own once the window is over: the bonus
+		# is a chance, not a promise.
+		if float(orb["arm"]) > 0.0:
+			orb["arm"] = float(orb["arm"]) - dt
+			if float(orb["arm"]) <= 0.0:
+				_disarm(orb)
+
 		# Roll the ball in the direction it travels, so it reads as a bouncing
 		# ball rather than a sliding circle.
 		var spin := -float(orb["x"]) / maxf(radius, 0.05)
@@ -722,6 +739,7 @@ func _tick_balls(dt: float) -> void:
 		node.rotation = Vector3(spin * 0.35, spin, 0.0)
 		orb["flash"] = maxf(0.0, float(orb["flash"]) - dt)
 		node.scale = Vector3.ONE * radius * (1.0 + float(orb["flash"]) * 0.4)
+		_sync_orb_tint(orb, node)
 
 	# The separation pass is O(n²); running it every third frame is visually
 	# identical and keeps the frame budget for rendering.
@@ -729,6 +747,25 @@ func _tick_balls(dt: float) -> void:
 	if separate_tick >= 3:
 		separate_tick = 0
 		_separate_balls()
+
+
+## The armed tell: the ball flashes bright, and the second hit kills it. The
+## material is only rebuilt when the blink actually flips, so the frame loop
+## never allocates one.
+func _sync_orb_tint(orb: Dictionary, node: Node3D) -> void:
+	var blink := float(orb["arm"]) > 0.0 and Pang.is_blinking(run_time)
+	if blink == bool(orb["blink"]):
+		return
+	orb["blink"] = blink
+	WorldScreen.tint(node, Pang.ARM_TINT if blink else Color(Pang.size_spec(int(orb["size"]))["color"]))
+
+
+## Restores a ball's normal pace. The speed is taken from the rules rather than
+## multiplied back up, so a ball can never end up faster than a fresh one.
+func _disarm(orb: Dictionary) -> void:
+	orb["arm"] = 0.0
+	orb["blink"] = false
+	orb["vx"] = signf(float(orb["vx"])) * Pang.speed_of(int(orb["size"])) * speed_mult
 
 
 ## Pushes overlapping balls apart and swaps their horizontal direction, which is
@@ -947,27 +984,63 @@ func _pop_ball(slot: Dictionary) -> void:
 	var target: Dictionary = slot["target"]
 	if target.is_empty() or not bool(target.get("active", false)):
 		return
-	_hit_ball(target)
+	_strike_ball(target)
 
 
-func _hit_ball(orb: Dictionary) -> void:
+## One harpoon hit on one ball. Everything above the smallest size splits, the
+## smallest size is the two-shot trick: the first hit only arms it, the second
+## pops it. `Pang.hit_outcome` decides which, so the rule is testable and this
+## file only draws the result.
+func _strike_ball(orb: Dictionary) -> void:
+	var size := int(orb["size"])
+	var armed := float(orb["arm"]) > 0.0
+	var outcome := Pang.hit_outcome(size, armed)
 	var x := float(orb["x"])
 	var y := float(orb["y"])
-	var size := int(orb["size"])
-	_retire_orb(orb)
-	balls_popped += 1
-	var points := Pang.points_for(size)
+	var points := Pang.hit_points(size, armed)
 	score += points
-	_burst(Vector3(x, y, ORB_Z), Pang.size_spec(size)["color"], 14, 4.5)
-	_add_label(Vector3(x, y, ORB_Z + 0.6), "+%d" % points, Pang.size_spec(size)["color"])
+
+	if outcome == Pang.HIT_ARM:
+		# The two-shot trick: the first harpoon only arms the ball. Nothing is
+		# removed and nothing is born, which is the whole point of the move.
+		_arm_ball(orb, x, y, points)
+		return
+
+	# Both other outcomes take the ball off the board and differ only in what
+	# they leave behind. The finish of a pair burns in the tell's colour.
+	var color: Color = Pang.ARM_TINT if armed else Pang.size_spec(size)["color"]
+	_retire_orb(orb)
+	_pop_ball_fx(x, y, color, points)
+	balls_popped += 1
+	if outcome == Pang.HIT_SPLIT:
+		_split_ball(x, y, size)
+
+
+## Slows a ball down and makes it blink. The pace is applied once, so a bounce
+## off a wall or a crate can never compound it.
+func _arm_ball(orb: Dictionary, x: float, y: float, points: int) -> void:
+	orb["arm"] = Pang.ARM_WINDOW
+	orb["vx"] = float(orb["vx"]) * Pang.ARM_SLOWDOWN
+	orb["flash"] = 0.25
+	_burst(Vector3(x, y, ORB_Z), Pang.ARM_TINT, 10, 3.2)
+	_add_label(Vector3(x, y, ORB_Z + 0.6), "1/2 +%d" % points, Pang.ARM_TINT)
+	Sfx.hit()
+	shake = maxf(shake, 0.06)
+
+
+## The common part of a kill: burst, label, sound, screen shake and maybe a
+## drop. Splitting and the two-shot finish share it so both feel the same.
+func _pop_ball_fx(x: float, y: float, color: Color, points: int) -> void:
+	_burst(Vector3(x, y, ORB_Z), color, 14, 4.5)
+	_add_label(Vector3(x, y, ORB_Z + 0.6), "+%d" % points, color)
 	Sfx.kill()
 	shake = maxf(shake, 0.12)
 	_maybe_drop(x, y)
 
-	# The smallest size is the end of the chain; anything bigger becomes two
-	# balls one size down. This is the whole game in three lines.
-	if size >= Pang.SIZE_SMALLEST:
-		return
+
+## The smallest size is the end of the chain; anything bigger becomes two balls
+## one size down. This is the whole game in three lines.
+func _split_ball(x: float, y: float, size: int) -> void:
 	for dir in [-1.0, 1.0]:
 		var child := _spawn_ball(x + dir * Pang.radius_of(size) * 0.5, y, size + 1)
 		if child.is_empty():
