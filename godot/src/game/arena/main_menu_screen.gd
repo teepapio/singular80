@@ -116,10 +116,21 @@ func _build_content() -> void:
 	help.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(help)
 
+	# Die Laufzeile zeigt den gerade umgesetzten Vorschlag — und genau dort
+	# steht der Meldeknopf. Google Play verlangt für nutzergenerierten Inhalt
+	# einen Meldeweg *im Spiel*; ein Vorschlag ist für den Spieler nur hier
+	# sichtbar, also kann er auch nur hier melden. Der Knopf liest den
+	# aktuellen Ticker-Stand im Moment des Klicks, nicht beim Aufbau, weil die
+	# Laufzeile alle 4,5 Sekunden weiterschaltet.
+	var ticker_row := Ui.hbox(8)
+	ticker_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	_ticker = Ui.label("", 13, Color(0.290, 0.871, 0.502))
 	_ticker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_ticker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.add_child(_ticker)
+	ticker_row.add_child(_ticker)
+	ticker_row.add_child(Ui.button("Inhalt melden", Vector2(150, 30), UiTheme.PANEL_LIGHT,
+		func() -> void: _report_current()))
+	column.add_child(ticker_row)
 
 
 func _spacer(height: float) -> Control:
@@ -294,3 +305,21 @@ func _show_ticker() -> void:
 	if detail.length() > 90:
 		detail = detail.substr(0, 90) + "…"
 	_ticker.text = "✓ #%d umgesetzt: %s" % [int(item.get("id", 0)), detail]
+
+
+## Meldet den Vorschlag, den die Laufzeile gerade zeigt. Ohne Laufzeile gibt es
+## nichts zu melden — dann sagt der Knopf das auch, statt ein leeres Fenster
+## zu öffnen.
+func _report_current() -> void:
+	Sfx.select()
+	if _ticker_items.is_empty():
+		_ticker.text = "Es läuft gerade kein Vorschlag — nichts zu melden."
+		return
+	var item: Dictionary = _ticker_items[_ticker_index % _ticker_items.size()]
+	var text := str(item.get("text", ""))
+	var run: Variant = item.get("run", null)
+	if run is Dictionary:
+		var summary := str((run as Dictionary).get("resultSummary", "")).strip_edges()
+		if summary != "":
+			text = summary
+	ReportDialog.open(self, int(item.get("id", 0)), text)

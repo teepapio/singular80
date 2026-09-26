@@ -1,0 +1,12 @@
+# Artefakte: AAB, Screenshots, runtergeladene Werkzeuge
+build/
+
+# Store-Grafiken werden erzeugt, nicht gepflegt (siehe scripts/store-assets.mjs).
+# Falls du eigene Grafiken hochlädst, leg sie hier ab und entferne diese Zeile.
+assets/generated/
+
+# Nichts aus dem Publishing-Bereich committen, was ein Geheimnis ist.
+*.keystore
+*.jks
+*.p12
+secrets.env

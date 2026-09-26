@@ -1,0 +1,71 @@
+{
+  "$comment": [
+    "Single source of truth for the Google Play release of Singular 80.",
+    "Every script in ../scripts reads this file. Change a value here, run",
+    "`npm run preflight`, and the same value shows up in the AAB, the store",
+    "listing validator and the docs checklist.",
+    "Fields marked TODO need input from the developer - see ../docs/PLAN.md."
+  ],
+
+  "app": {
+    "packageName": "de.singular80.game",
+    "storeName": "Singular 80",
+    "appCategory": "GAME",
+    "defaultLanguage": "en-US",
+    "languages": ["en-US", "de-DE"]
+  },
+
+  "version": {
+    "versionCode": 1,
+    "versionName": "1.0.0"
+  },
+
+  "android": {
+    "minSdk": 24,
+    "targetSdk": 36,
+    "compileSdk": 36,
+    "buildTools": "36.0.0",
+    "platform": "android-36",
+    "architectures": {
+      "arm64-v8a": true,
+      "armeabi-v7a": false,
+      "x86_64": false,
+      "x86": false
+    },
+    "exportFormat": "aab",
+    "keystoreEnv": {
+      "$comment": "Passwords never live in this repo. Export them before building.",
+      "pathEnv": "PLAY_KEYSTORE_PATH",
+      "userEnv": "PLAY_KEYSTORE_USER",
+      "passwordEnv": "PLAY_KEYSTORE_PASSWORD"
+    }
+  },
+
+  "listing": {
+    "$comment": "Free-form text lives in ../listing/*.md - the validator reads it from there.",
+    "contentRating": "13+",
+    "targetAgeGroups": ["13 and under", "18 and under"],
+    "containsAds": false,
+    "inAppPurchases": false,
+    "isGame": true,
+    "appFree": true
+  },
+
+  "owner": {
+    "$comment": "TODO: fill in before the first Play Console submission. Legal texts reference these.",
+    "legalName": "TODO: legal name (as on your ID)",
+    "legalCountry": "TODO: DE",
+    "contactEmail": "TODO: public support address",
+    "privateEmail": "TODO: address Google uses to reach you (may differ)",
+    "website": "TODO: https://example.invalid",
+    "organization": "TODO: name of the legally responsible entity or 'personal account'"
+  },
+
+  "urls": {
+    "$comment": "TODO: must be publicly reachable over HTTPS and must NOT be a localhost/private address.",
+    "privacyPolicy": "TODO: https://example.invalid/privacy",
+    "termsOfUse": "TODO: https://example.invalid/terms",
+    "support": "TODO: https://example.invalid/support",
+    "backend": "TODO: https://api.example.invalid"
+  }
+}

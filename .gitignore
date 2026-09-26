@@ -18,3 +18,7 @@ godot/probe.gd
 godot/shot.gd.uid
 godot/lootshot.gd
 godot/lootshot.tscn
+# Von `googleplay/scripts/install-export-preset.mjs` nach godot/ kopiert
+# (Quelle: googleplay/scripts/validate-presets.gd).
+godot/_cfgtest.gd
+godot/_cfgtest.gd.uid

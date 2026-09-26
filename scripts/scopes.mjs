@@ -140,7 +140,7 @@ const SCOPE_SUITES = {
   core: ['Mechaniken', 'Inventar', 'Vorschlag — Herkunft',
     'Vorschlags-Warteschlange', 'Vorschlags-Warteschlange — Ablage',
     'Vorschlags-Warteschlange — Backoff', 'Vorschlags-Warteschlange — Obergrenze',
-    'Vorschlags-Warteschlange — Zustellung'],
+    'Vorschlags-Warteschlange — Zustellung', 'Rechtliches & Melden'],
   content: ['Content', 'Content-Integrität', 'Content-Synchronisation'],
   dashboard: [],
   tests: [],

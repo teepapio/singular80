@@ -1,0 +1,19 @@
+{
+  "name": "singular80-googleplay",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Google-Publishing-Werkzeuge für Singular 80 (AAB, Store-Texte, Grafiken, Rechtstexte)",
+  "scripts": {
+    "check": "node scripts/check-env.mjs",
+    "prepare": "node scripts/prepare-toolchain.mjs",
+    "keystore": "node scripts/make-keystore.mjs",
+    "preset": "node scripts/install-export-preset.mjs",
+    "screenshots": "node scripts/screenshots.mjs",
+    "assets": "node scripts/store-assets.mjs",
+    "build": "node scripts/build-aab.mjs",
+    "verify": "node scripts/verify-aab.mjs",
+    "preflight": "node scripts/preflight.mjs",
+    "release": "npm run preflight && npm run build"
+  }
+}

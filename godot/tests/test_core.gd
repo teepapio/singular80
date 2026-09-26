@@ -14,6 +14,11 @@ extends RefCounted
 ## cache, so a class added today would not resolve before the next import.
 const QueueClass := preload("res://src/core/logic/suggestion_queue.gd")
 
+## Second reason: the same `--script` caveat applies to the legal module. It
+## carries `class_name AppLegal`, which `suggest_dialog.gd` uses by name, so it
+## is already part of every screen's load path.
+const LegalClass := preload("res://src/core/logic/app_legal.gd")
+
 ## A private file, so the suite never touches the queue a real run would use.
 const TEST_PATH := "user://test_suggestions.json"
 
@@ -33,6 +38,7 @@ func run(kit: TestKit, scene_tree: SceneTree) -> void:
 	_cap()
 	_close()
 	await _delivery()
+	_legal()
 
 
 func _close() -> void:
@@ -335,3 +341,74 @@ class FakeServer extends Node:
 		_conn.put_data(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" % payload.length()).to_utf8_buffer())
 		_conn.put_data(payload.to_utf8_buffer())
 		_conn = null
+
+
+# --- Rechtliches & Melden ---------------------------------------------------
+
+## Die Melde- und Zustimmungswege, die Google Play für nutzergenerierten Inhalt
+## verlangt. Reine Logik, also ohne Fenster prüfbar — und das Modul ist genau
+## deshalb renderer-frei.
+func _legal() -> void:
+	t.suite("Rechtliches & Melden")
+
+	# Die Gründe sind eine Pflichtangabe der Plattform: der Spieler muss sagen
+	# können, *woran* es liegt, und ein leerer Grund wäre wieder nur "gefaellt
+	# mir nicht".
+	t.check(LegalClass.REASONS.size() >= 3, "Es gibt mehrere Meldegruende zur Auswahl")
+	var reasons_filled := true
+	for reason in LegalClass.REASONS:
+		reasons_filled = reasons_filled and not str(reason).strip_edges().is_empty()
+	t.check(reasons_filled, "Kein Meldegrund ist leer")
+
+	# `is_configured` und `missing` muessen dasselbe sagen. Sie pruefen an
+	# verschiedenen Stellen, ob die Adressen noch Platzhalter sind — driftet
+	# eine der beiden, wuerde der Dialog entweder eine erfundene Adresse
+	# verschicken oder eine echte Adresse verweigern.
+	t.equal(not LegalClass.is_configured(), not LegalClass.missing().is_empty(),
+		"is_configured und missing urteilen gleich")
+	if not LegalClass.is_configured():
+		t.check(LegalClass.missing().has("MODERATION_MAIL"),
+			"Die fehlende Meldeadresse wird auch beim Namen genannt")
+
+	# Das Zitat ist das, was die Meldung im Postfach laesst lesen — also muss
+	# es zeilenumbruchfrei bleiben und darf nicht ungekuerzt in den Betreff.
+	var flat := LegalClass.quote("erste Zeile\r\nzweite Zeile")
+	t.check(not flat.contains("\n") and not flat.contains("\r"),
+		"Ein Zitat bricht keine Zeile um")
+	var long_text := "x".repeat(LegalClass.MAX_QUOTE * 2)
+	var quoted := LegalClass.quote(long_text)
+	t.check(quoted.length() <= LegalClass.MAX_QUOTE + 1,
+		"Ein Zitat bleibt kuerzer als %d Zeichen" % LegalClass.MAX_QUOTE)
+	t.equal(LegalClass.quote("  rand  "), "rand", "Rand Leerzeichen fallen weg")
+
+	# Betreff und Rumpf muessen die Nummer tragen, sonst laesst sich im
+	# Postfach nicht zurueckfinden, was gemeldet wurde.
+	t.check(str(LegalClass.report_subject(7)).contains("7"),
+		"Der Betreff nennt die Nummer des Vorschlags")
+	var body := LegalClass.report_body(7, "Beleidigung", str(LegalClass.REASONS[0]), "  ")
+	t.check(body.contains("7"), "Der Rumpf nennt die Nummer")
+	t.check(body.contains(str(LegalClass.REASONS[0])), "Und den gewaehlten Grund")
+	t.check(not body.contains("Ergänzung"),
+		"Eine leere Ergaenzung landet nicht im Rumpf")
+	t.check(LegalClass.report_body(7, "x", "", "Bitte pruefen").contains("Ergänzung"),
+		"Eine gefuellte Ergaenzung landet darin")
+	t.check(LegalClass.report_body(7, "Beleidigung", "", "n").contains(
+			str(LegalClass.REASONS[LegalClass.REASONS.size() - 1])),
+		"Ohne gewaehlten Grund greift der letzte, statt ein leerer zu bleiben")
+
+	# `mailto:` bricht an Zeilenumbruechen und Nicht-ASCII ab, deshalb wird
+	# alles kodiert. Ohne das waere die Meldung bei Umlauten nur ein Betreff
+	# ohne Text.
+	var mailto := str(LegalClass.report_mailto(7, "Beleidigung für alle", "Grund", "Notiz"))
+	t.check(mailto.begins_with("mailto:"), "Die Meldung ist eine mailto-Adresse")
+	t.check(not mailto.contains(" "), "Kein Leerzeichen bricht die URL")
+	t.check(mailto.contains("subject=") and mailto.contains("body="),
+		"Betreff und Text stehen in der Adresse")
+	# Ein Umlaut muss prozentkodiert sein. Bricht er die `mailto:`-Adresse,
+	# kommt auf manchen Geraeten nur der Betreff ohne Text an — die Meldung
+	# waere dann leer, ohne dass irgendwo ein Fehler stuende.
+	t.check(not mailto.contains("ü"), "Der Umlaut ist prozentkodiert")
+	t.equal(LegalClass.report_message(7, "Beleidigung", "Grund", "n"),
+		LegalClass.report_body(7, "Beleidigung", "Grund", "n"),
+		"Zwischenablage und Mail tragen denselben Text")
+	t.suite_done()
