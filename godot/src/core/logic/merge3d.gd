@@ -12,6 +12,9 @@ const MAX_MERGE_TIER := 5
 const MERGE_3 := 3
 const MERGE_5 := 5
 const EMPTY_CELL := 0
+## Free cells from which the run is in danger. The tip button offers itself
+## when the board is this close to being closed.
+const PRESSURE_CELLS := 4
 
 const THEME_CHRISTMAS := "christmas"
 const THEME_HALLOWEEN := "halloween"
@@ -80,6 +83,13 @@ static func tier_value(tier: int) -> int:
 	if tier <= 0:
 		return 0
 	return int(pow(3.0, float(mini(MAX_MERGE_TIER, tier) - 1)))
+
+
+## Points for merging `amount` items of `tier` into the next tier. Both the
+## merge itself and the tip text read their number from here, so the preview
+## can never promise more than the merge pays.
+static func merge_score(tier: int, amount: int) -> int:
+	return tier_value(tier) * maxi(amount, 0)
 
 
 static func create_board(size: int) -> PackedInt32Array:
@@ -166,7 +176,65 @@ static func perform_merge(board: PackedInt32Array, cells: PackedInt32Array, requ
 		var cell := cells[i]
 		next[cell] = tier + 1
 		created.append({"cell": cell, "tier": tier + 1})
-	return {"board": next, "created": created, "score": tier_value(tier) * required, "consumedTier": tier}
+	return {"board": next, "created": created, "score": merge_score(tier, required), "consumedTier": tier}
+
+
+## The cells of the most valuable merge the board currently offers, in
+## ascending order — what the Tipp button points at. Empty when nothing can be
+## merged at all.
+##
+## The highest mergeable tier wins, because a tier-4 merge is worth 27 times a
+## tier-1 one and because the plentiful low items stay on the board for the
+## next 3-merge. `required` is a lower bound: a tier with more items than that
+## gives back exactly `required` cells, so the answer is always a valid
+## selection for `perform_merge`.
+static func find_hint(board: PackedInt32Array, required: int, max_tier: int = MAX_MERGE_TIER) -> PackedInt32Array:
+	var empty := PackedInt32Array()
+	if required < 1:
+		return empty
+	for tier in range(mini(max_tier, MAX_MERGE_TIER) - 1, 0, -1):
+		var cells := PackedInt32Array()
+		for i in board.size():
+			if board[i] != tier:
+				continue
+			cells.append(i)
+			if cells.size() >= required:
+				return cells
+	return empty
+
+
+## How many merges of `required` items the board allows right now, summed over
+## all tiers. Zero is the "nothing left to merge" case the tip reports.
+static func merge_opportunities(board: PackedInt32Array, required: int, max_tier: int = MAX_MERGE_TIER) -> int:
+	var per_merge: int = maxi(required, 1)
+	var total := 0
+	for tier in range(1, mini(max_tier, MAX_MERGE_TIER)):
+		total += count_tier(board, tier) / per_merge
+	return total
+
+
+## True when only a few cells are free: the run ends at the next spawn unless
+## the player merges. Allocation free, so the frame loop may ask every tick.
+static func is_pressing(board: PackedInt32Array, limit: int = PRESSURE_CELLS) -> bool:
+	return board.size() - used_cells(board) <= limit
+
+
+## One line for the tip, e.g. "3× Tannenzapfen → 1× Zuckerstange · +3". Empty
+## when there is nothing to point at.
+static func hint_text(theme: Dictionary, board: PackedInt32Array, cells: PackedInt32Array) -> String:
+	if cells.is_empty() or cells[0] < 0 or cells[0] >= board.size():
+		return ""
+	var tier: int = board[cells[0]]
+	if tier == EMPTY_CELL or tier >= MAX_MERGE_TIER:
+		return ""
+	var created: int = 2 if cells.size() >= MERGE_5 else 1
+	return "%d× %s → %d× %s  +%d" % [
+		cells.size(),
+		tier_name(theme, tier),
+		created,
+		tier_name(theme, tier + 1),
+		merge_score(tier, cells.size()),
+	]
 
 
 ## Whether any tier on the board still has enough items for a 3-merge.
