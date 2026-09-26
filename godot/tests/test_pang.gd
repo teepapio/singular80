@@ -3,15 +3,20 @@ extends RefCounted
 ## Rule tests for "Pang 3D" — the 1990 arcade original.
 ##
 ## This file is Pang's own. The shared suites carry the campaign, the arena
-## constants and the save data; everything about a *hit* lives here. The
-## headline rule is the two-shot trick — the smallest ball arms itself on the
-## first harpoon and pops on the second — because that is the mechanic the
-## original is known for and the one a player has to be able to rely on.
+## constants and the save data; everything about a *hit*, about the ball budget
+## and about the reinforcement waves lives here. The headline rule is the
+## two-shot trick — the smallest ball arms itself on the first harpoon and pops
+## on the second — because that is the mechanic the original is known for and
+## the one a player has to be able to rely on.
 
 var t: TestKit
 
 
 ## Entry point used by `run_tests.gd`.
+##
+## The three "ball" bodies share one suite header: `scripts/scopes.mjs` maps
+## every suite name to the scopes that run it, and that manifest is not this
+## file's to change.
 func run(kit: TestKit) -> void:
 	t = kit
 	_suite(_take_hits)
@@ -115,28 +120,175 @@ func _two_shot_trick() -> void:
 	t.suite_done()
 
 
+# --- more balls -------------------------------------------------------------
+
+## Harpoons per second a level asks for: the campaign's pressure curve. It is
+## the number that decides whether "more balls" is a fuller screen or a faster
+## firing range, so it is measured instead of guessed.
+func _pressure(level: int) -> float:
+	var layout := Pang.level_data(level)
+	return float(Pang.shot_cost(layout)) / float(layout["timeLimit"])
+
+
+## The campaign ships more balls than the arcade original did: more chain balls,
+## a crowd of small ones, and reinforcements from the middle on.
+func _more_balls() -> void:
+	# The ramp has to be a real one.
+	var first := Pang.total_balls(Pang.level_data(1))
+	var last := Pang.total_balls(Pang.level_data(Pang.TOTAL_LEVELS))
+	t.check(first >= Pang.BALLS_START, "Level 1 öffnet mit mindestens %d Kugeln" % Pang.BALLS_START)
+	t.check(last >= 16, "Der letzte Level bringt eine gefüllte Arena (hat %d)" % last)
+	t.check(last > first * 2, "Die Kampagne wächst deutlich über ihr Level 1 hinaus")
+	t.check(int(Pang.level_config(Pang.TOTAL_LEVELS)["ballCount"]) > int(Pang.level_config(1)["ballCount"]),
+		"Die Kettenkugeln selbst werden mehr")
+
+	# The riffle is what makes the arena look busy without making it expensive:
+	# only the two smallest sizes, and never bigger than the level's own balls.
+	for level in range(1, Pang.TOTAL_LEVELS + 1):
+		var layout := Pang.level_data(level)
+		var config := Pang.level_config(level)
+		var riffle := int(config["riffleCount"])
+		var balls: Array = layout["balls"]
+		var chain: int = balls.size() - riffle
+		t.equal(chain, int(config["ballCount"]), "Level %d legt seine Kettenkugeln einzeln aus" % level)
+		if level < Pang.RIFFLE_FIRST_LEVEL:
+			t.equal(riffle, 0, "Level %d bleibt noch ohne Kleinzeug" % level)
+		for index in range(chain, balls.size()):
+			var size := int(balls[index]["size"])
+			t.check(size <= Pang.RIFFLE_SIZE, "Die Riffle-Kugel %d in Level %d ist klein" % [index, level])
+			t.check(size >= int(config["baseSize"]), "…und nie größer als die Kettenkugeln des Levels")
+
+	# More balls are only free if they also come with seconds. The pressure may
+	# rise across the campaign, but it stays inside what a thumb can fire.
+	var start_pressure := _pressure(1)
+	var end_pressure := _pressure(Pang.TOTAL_LEVELS)
+	for level in range(1, Pang.TOTAL_LEVELS + 1):
+		var pressure := _pressure(level)
+		t.check(pressure >= 0.1, "Level %d verlangt mindestens 0,1 Haken pro Sekunde" % level)
+		t.check(pressure <= 3.5, "Level %d verlangt höchstens 3,5 Haken pro Sekunde" % level)
+	t.check(end_pressure > start_pressure, "Spätere Level verlangen mehr pro Sekunde")
+	t.check(end_pressure <= start_pressure * 20.0, "Der Druck wächst höchstens um das Zwanzigfache")
+
+
+# --- reinforcement waves ----------------------------------------------------
+
+## Reinforcement: the second and third batch of a level. It has to arrive while
+## the level runs, it has to stay inside the ball budget, and a level must never
+## be finished before its wave has shown up.
+func _reinforcements() -> void:
+	t.equal(Pang.wave_count(1), 0, "Level 1 kennt keine Wellen")
+	t.equal(Pang.wave_count(Pang.WAVE_FIRST_LEVEL - 1), 0, "…und die Level davor auch nicht")
+	t.check(Pang.wave_count(Pang.TOTAL_LEVELS) >= 1, "Der letzte Level schickt mindestens eine Welle")
+	t.check(Pang.wave_count(Pang.TOTAL_LEVELS) <= Pang.WAVE_MAX, "Nie mehr Wellen als erlaubt")
+	var previous := 0
+	for level in range(1, Pang.TOTAL_LEVELS + 1):
+		var waves := Pang.wave_count(level)
+		t.check(waves >= previous, "Die Wellen kommen später dazu, nicht früher weg (Level %d)" % level)
+		previous = waves
+
+	# A wave that never arrives would make its level unclearable, a wave with a
+	# negative trigger would arrive on the first frame. Both are rejected.
+	var wave := {"index": 0, "trigger": 5, "maxDelay": 11.0, "balls": [{"x": 0.0, "y": 15.0, "size": 3}]}
+	t.check(not Pang.wave_due(wave, 20, 0.0), "Ein volles Brett wartet auf die Welle")
+	t.check(not Pang.wave_due(wave, 6, 0.0), "Ein randvolles Brett wartet noch")
+	t.check(Pang.wave_due(wave, 5, 0.0), "Sobald das Brett dünn ist, kommt sie")
+	t.check(Pang.wave_due(wave, 40, 11.0), "Und spätestens nach ihrer eigenen Wartezeit")
+	t.check(Pang.wave_due(wave, 40, 99.0), "Auch bei einem dauerhaft vollen Brett")
+	t.check(not Pang.wave_due({}, 0, 99.0), "Eine leere Welle kommt nie")
+	t.check(Pang.WAVE_TRIGGER > 0, "Die Welle wartet auf ein Brett, das noch Bälle hat")
+	t.check(Pang.WAVE_MAX_DELAY > 0.0, "Die Wartezeit ist endlich")
+
+	var base := {"level": 1, "timeLimit": 60.0, "balls": [{"x": 0.0, "y": 8.0, "size": 2}]}
+	var with_wave := base.duplicate()
+	with_wave["waves"] = [wave]
+	t.equal(Pang.validate_level(with_wave).size(), 0, "Eine saubere Welle ist spielbar")
+	var empty := base.duplicate()
+	empty["waves"] = [{"trigger": 5, "maxDelay": 11.0, "balls": []}]
+	t.check(Pang.validate_level(empty).size() > 0, "Eine Welle ohne Kugeln wird erkannt")
+	var stalled := base.duplicate()
+	stalled["waves"] = [{"trigger": 5, "maxDelay": 0.0, "balls": [{"x": 0.0, "y": 15.0, "size": 3}]}]
+	t.check(Pang.validate_level(stalled).size() > 0, "Eine Welle, die nie ankommt, wird erkannt")
+	var stranded := base.duplicate()
+	stranded["waves"] = [{"trigger": 5, "maxDelay": 11.0, "balls": [{"x": 0.0, "y": 1.0, "size": 3}]}]
+	t.check(Pang.validate_level(stranded).size() > 0, "Eine Welle mit Kugeln im Spielersockel wird erkannt")
+
+	# A layout without waves is still a layout: the counters have to read the old
+	# shape instead of tripping over the missing key.
+	t.equal(Pang.total_balls(base), 1, "Ein Layout ohne Wellen zählt nur seine Kugeln")
+	t.equal(Pang.peak_balls(base), Pang.chain_peak(2), "…und misst dieselbe Spitze ohne Wellen")
+	t.check(Pang.shot_cost(base) > 0, "…und kostet trotzdem Haken")
+
+	# The wave balls are part of the level, not of the screen: the level select,
+	# the budget and the player all count the same ones.
+	for level in range(1, Pang.TOTAL_LEVELS + 1):
+		var layout := Pang.level_data(level)
+		var config := Pang.level_config(level)
+		var waves: Array = layout["waves"]
+		t.equal(waves.size(), int(config["waves"]), "Level %d bringt genau so viele Wellen mit" % level)
+		t.equal(Pang.level_ball_total(level), Pang.total_balls(layout), "Die Kartenzahl stimmt mit dem Layout überein (Level %d)" % level)
+		t.equal(Pang.level_ball_total(level), int(config["ballCount"]) + int(config["riffleCount"]) + _sum_wave_balls(waves),
+			"…und sie zählt Kette, Riffle und Wellen (Level %d)" % level)
+		for wave_entry in waves:
+			var batch: Array = (wave_entry as Dictionary)["balls"]
+			t.check(not batch.is_empty(), "Eine Welle in Level %d hat Kugeln dabei" % level)
+			for ball in batch:
+				# The reinforcement is never bigger than the rules ask for, so a
+				# wave can never cost more pool slots than the cap reserves.
+				t.check(int(ball["size"]) <= Pang.reinforcement_size(int(config["baseSize"])),
+					"Der Nachschub in Level %d hält sich an die Größenregel" % level)
+		# The layout is reproducible, waves included.
+		t.equal(Pang.level_data(level)["waves"], waves, "Die Wellen sind reproduzierbar (Level %d)" % level)
+
+	t.check(Pang.wave_balls(Pang.TOTAL_LEVELS, 1) >= Pang.wave_balls(Pang.TOTAL_LEVELS, 0),
+		"Die zweite Welle eines Levels ist mindestens so groß wie die erste")
+	t.check(Pang.wave_balls(1, 0) >= Pang.WAVE_BALLS_START, "Eine Welle hat mindestens %d Kugeln" % Pang.WAVE_BALLS_START)
+	t.check(Pang.wave_balls(1, 99) <= Pang.WAVE_BALLS_END, "Und wird nicht beliebig groß")
+	t.check(Pang.reinforcement_size(Pang.SIZE_LARGEST) > Pang.SIZE_LARGEST, "Der Nachschub ist kleiner als die Kettenkugeln")
+	t.check(Pang.reinforcement_size(Pang.SIZE_SMALLEST) <= Pang.SIZE_SMALLEST, "Und bleibt in der Größentabelle")
+
+	# The count sits in front of a noun in the HUD and on the level card.
+	t.equal(Pang.wave_label(1), "1 Welle", "Eine einzelne Welle heißt Welle")
+	t.equal(Pang.wave_label(0), "0 Wellen", "Keine heißt Wellen")
+	t.equal(Pang.wave_label(2), "2 Wellen", "Zwei heißen Wellen")
+
+
+func _sum_wave_balls(waves: Array) -> int:
+	var total := 0
+	for wave in waves:
+		total += ((wave as Dictionary)["balls"] as Array).size()
+	return total
+
+
 # --- ball budget ------------------------------------------------------------
 
 ## Worst case for one layout: every ball splits down to the size above the
 ## smallest, and the smallest one is cleared with two hits instead of doubling.
+## The reinforcement waves are counted, because they are live balls too.
 func _peak_balls(layout: Dictionary) -> int:
-	var peak := 0
-	for ball in layout["balls"]:
-		peak += 1 << maxi(0, Pang.SIZE_SMALLEST - 1 - int(ball["size"]))
-	return peak
+	return _sum_peak(layout, Pang.SIZE_SMALLEST - 1)
 
 
 ## The same number for a game without the two-shot trick, i.e. every ball
 ## splitting all the way down.
 func _peak_splitting_everything(layout: Dictionary) -> int:
+	return _sum_peak(layout, Pang.SIZE_SMALLEST)
+
+
+func _sum_peak(layout: Dictionary, leaf: int) -> int:
 	var peak := 0
 	for ball in layout["balls"]:
-		peak += 1 << maxi(0, Pang.SIZE_SMALLEST - int(ball["size"]))
+		peak += 1 << maxi(0, leaf - int(ball["size"]))
+	for wave in layout.get("waves", []):
+		for ball in (wave as Dictionary)["balls"]:
+			peak += 1 << maxi(0, leaf - int(ball["size"]))
 	return peak
 
 
 func _ball_budget() -> void:
 	t.suite("Pang — Kugelbudget")
+
+	_more_balls()
+	_reinforcements()
 
 	var widest := 0
 	var widest_naive := 0
@@ -150,7 +302,12 @@ func _ball_budget() -> void:
 		# the high-water mark.
 		t.check(peak <= naive, "Level %d ballt mit dem Doppelgriff nicht mehr auf" % level)
 		t.check(peak <= Pang.ORB_SAFE_CAP, "Level %d passt in den Pool" % level)
+		# The rule the screen sizes its pool from has to agree with the walk
+		# above, otherwise the cap is a coincidence.
+		t.equal(Pang.peak_balls(layout), peak, "Die Pool-Regel zählt Level %d genauso" % level)
 	t.check(widest > 0, "Die Kampagne hat überhaupt Kugeln")
 	t.check(widest < widest_naive, "Der Doppelgriff senkt das Maximum gegenüber dem reinen Teilen")
 	t.check(Pang.ORB_SAFE_CAP >= widest_naive, "Der Pool fasst weiterhin auch den ungeschonten Worst Case")
+	# Headroom is what lets a wave drop into a board that is already splitting.
+	t.check(Pang.ORB_SAFE_CAP >= widest * 2, "Der Pool hat Reserve für eine Welle auf vollem Brett")
 	t.suite_done()

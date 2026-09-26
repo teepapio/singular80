@@ -11,6 +11,11 @@ extends WorldScreen
 ## The arena is a shallow stage — balls and harpoons share one Z plane, the
 ## scenery sits behind and in front of them — so the side-on readability of the
 ## original survives while every prop is a real mesh.
+##
+## Levels ship more balls than the original did: a crowd of small ones right
+## away, and from the middle of the campaign on reinforcement waves that drop in
+## while the level runs. Both arrive through the same pooled spawn as the
+## opening layout, so a wave costs no allocation and no new node.
 
 ## The ball pool is sized from the rules, not guessed: see `Pang.ORB_SAFE_CAP`.
 const ORB_LIMIT := Pang.ORB_SAFE_CAP
@@ -72,6 +77,18 @@ var best_time := 0.0
 var new_record := false
 var speed_mult := 1.0
 
+# --- reinforcements ---------------------------------------------------------
+# A level ships its balls in two batches: the opening layout and the waves that
+# drop in while it runs. The rules decide both (`Pang.level_data`), the screen
+# only counts down to the next one and puts it on the board.
+
+var waves: Array = []
+var waves_left := 0
+var wave_index := 0
+var waves_total := 0
+var wave_clock := 0.0
+var layout_total := 0
+
 var player_x := 0.0
 var player_facing := 1.0
 var walk_phase := 0.0
@@ -114,6 +131,11 @@ var _time_bar: ProgressBar
 var _level_label: Label
 var _lives_label: Label
 var _balls_label: Label
+## Last values written to `_balls_label`. Comparing the integers instead of the
+## formatted string keeps the label — and the frame loop — free of allocations
+## while nothing changes.
+var _balls_shown := -1
+var _balls_shown_waves := -1
 var _hook_label: Label
 var _effect_box: VBoxContainer
 var _overlay: Control
@@ -468,6 +490,14 @@ func _start_level() -> void:
 	speed_mult = float(layout.get("speedMult", 1.0))
 	time_left = float(layout["timeLimit"])
 	best_time = Pang.level_best_time(level)
+	# Both counts walk the whole layout, so they are read once here instead of
+	# in the frame loop.
+	waves = layout.get("waves", [])
+	waves_total = waves.size()
+	waves_left = waves_total
+	wave_index = 0
+	wave_clock = 0.0
+	layout_total = Pang.total_balls(layout)
 	score = 0
 	balls_popped = 0
 	run_time = 0.0
@@ -627,6 +657,7 @@ func _update_world(delta: float) -> void:
 
 	if state == STATE_PLAYING:
 		_tick_countdown(dt)
+		_tick_waves(dt)
 		_tick_input()
 		_tick_player(dt)
 		_tick_balls(dt)
@@ -663,6 +694,35 @@ func _tick_countdown(dt: float) -> void:
 	time_left = maxf(0.0, time_left - dt)
 	if time_left <= 0.0:
 		_lose("Die Zeit ist um")
+
+
+## The reinforcement. `Pang.wave_due` owns the rule — a wave arrives as soon as
+## the board has thinned out, and at the latest when its own wait is up — so
+## this only has to count the wait and put the batch on the board.
+func _tick_waves(dt: float) -> void:
+	if waves_left <= 0:
+		return
+	# A frozen level waits for the reinforcements too, otherwise they would drop
+	# into a board that is standing still.
+	if not Pang.is_frozen(freeze):
+		wave_clock += dt
+	if not Pang.wave_due(waves[wave_index], balls_left, wave_clock):
+		return
+	var wave: Dictionary = waves[wave_index]
+	var batch: Array = wave.get("balls", [])
+	for ball in batch:
+		_spawn_ball(float(ball["x"]), float(ball["y"]), int(ball["size"]))
+	wave_index += 1
+	waves_left -= 1
+	wave_clock = 0.0
+	# The arrival is the one moment the level interrupts itself, so it says so —
+	# on screen, in the corner list and through the floor.
+	notify("Nachschub: %d Kugeln" % batch.size())
+	_effect_chip("☄  Nachschub!  %s" % ("Noch " + Pang.wave_label(waves_left) if waves_left > 0 else "Letzte Welle"), Color("f472b6"), 2.4)
+	# A falling alarm tone. None of the named effects means "something just
+	# arrived above you", and this one cannot be mistaken for a shot.
+	Sfx.tone(760.0, 0.12, "square", -22.0, 240.0)
+	shake = maxf(shake, 0.18)
 
 
 func _tick_input() -> void:
@@ -1135,19 +1195,26 @@ func _take_hit() -> void:
 # --- end states -------------------------------------------------------------
 
 func _check_cleared() -> void:
-	if balls_left > 0 or state != STATE_PLAYING:
+	# A level with reinforcements still on the way is not done: the wave owns
+	# the rest of the ball budget, so the screen has to wait for it.
+	if balls_left > 0 or waves_left > 0 or state != STATE_PLAYING:
 		return
 	state = STATE_CLEARED
 	new_record = Pang.record_level_time(level, run_time)
 	score += Pang.clear_bonus(level, time_left)
 	Game.submit_score(Game.HS_PANG, score)
 	Sfx.level_up()
-	_show_overlay("Level geschafft!", Color("4ade80"), [
+	var lines: Array[String] = [
 		"%s  ·  %.1f s" % [Pang.level_title(level), run_time],
 		"Bestzeit: %s" % ("neuer Rekord!" if new_record else ("%.1f s" % best_time if best_time > 0.0 else "—")),
 		"Zeitbonus: +%d" % Pang.clear_bonus(level, time_left),
-		"Punkte: %s" % Ui.format_number(score),
-	])
+		"Kugeln: %d" % layout_total,
+	]
+	if waves_total > 0:
+		var arrived := waves_total - waves_left
+		lines.append("Nachschub: %s" % ("alle Wellen gekommen" if arrived == waves_total else "%d von %d Wellen gekommen" % [arrived, waves_total]))
+	lines.append("Punkte: %s" % Ui.format_number(score))
+	_show_overlay("Level geschafft!", Color("4ade80"), lines)
 
 
 func _lose(reason: String) -> void:
@@ -1156,12 +1223,15 @@ func _lose(reason: String) -> void:
 	state = STATE_LOST
 	Game.submit_score(Game.HS_PANG, score)
 	Sfx.game_over()
-	_show_overlay("Game Over", Color("f87171"), [
+	var lines: Array[String] = [
 		reason,
 		"Level %d  ·  Kugeln: %d" % [level, balls_popped],
-		"Punkte: %s" % Ui.format_number(score),
-		"Bestwert: %s" % Ui.format_number(maxi(Game.highscore(Game.HS_PANG), score)),
-	])
+	]
+	if waves_left > 0:
+		lines.append("Nachschub: %s kamen nicht mehr" % Pang.wave_label(waves_left))
+	lines.append("Punkte: %s" % Ui.format_number(score))
+	lines.append("Bestwert: %s" % Ui.format_number(maxi(Game.highscore(Game.HS_PANG), score)))
+	_show_overlay("Game Over", Color("f87171"), lines)
 
 
 func _toggle_pause() -> void:
@@ -1312,7 +1382,12 @@ func _sync_hud() -> void:
 	_level_label.text = "%d/%d" % [level, Pang.TOTAL_LEVELS]
 	_score_label.text = Ui.format_number(score)
 	_lives_label.text = "♥%d" % lives
-	_balls_label.text = str(balls_left)
+	# Balls still in the air, plus the ones a pending wave is going to add, so
+	# the number never promises an empty board while reinforcements wait.
+	if balls_left != _balls_shown or waves_left != _balls_shown_waves:
+		_balls_shown = balls_left
+		_balls_shown_waves = waves_left
+		_balls_label.text = ("%d +%d" % [balls_left, waves_left]) if waves_left > 0 else str(balls_left)
 	_hook_label.text = "%d/%d" % [active_harpoons, Pang.max_harpoons(harpoons_extra)]
 	var ratio: float = clampf(time_left / maxf(1.0, float(layout.get("timeLimit", 1.0))), 0.0, 1.0)
 	Ui.set_bar(_time_bar, ratio, Color("f87171") if ratio < 0.2 else Color("38bdf8"))

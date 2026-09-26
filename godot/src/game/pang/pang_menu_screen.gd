@@ -50,6 +50,7 @@ func _build_chrome() -> void:
 
 	column.add_child(Ui.title("PANG 3D", 44, UiTheme.ACCENT))
 	column.add_child(Ui.label("Spieß alle Kugeln auf, bevor die Zeit abläuft.", 17, UiTheme.TEXT_DIM))
+	column.add_child(Ui.label("Ab Level %d kommt Nachschub von der Decke." % Pang.WAVE_FIRST_LEVEL, 15, Color("f472b6")))
 	_page_label = Ui.label("", 16, UiTheme.TEXT_DIM)
 	_page_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(_page_label)
@@ -128,7 +129,13 @@ func _level_card(level: int) -> Control:
 	column.add_child(headline)
 
 	var config := Pang.level_config(level)
-	var count := Ui.label("%d Kugeln" % int(config["ballCount"]), 13, UiTheme.TEXT_DIM)
+	# The card counts every ball the level ships, reinforcements included, so it
+	# never promises a nearly empty arena.
+	var waves := int(config["waves"])
+	var count_text := "%d Kugeln" % Pang.level_ball_total(level)
+	if waves > 0:
+		count_text += "  ·  " + Pang.wave_label(waves)
+	var count := Ui.label(count_text, 13, UiTheme.TEXT_DIM)
 	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(count)
 
