@@ -211,6 +211,17 @@ const GAMES: Array[Dictionary] = [
 		"highscore_key": Game.HS_METRO,
 	},
 	{
+		"id": "pang",
+		"name": "Pang 3D",
+		"description": "Klassiker im 3D-Diorama: Spieß alle Kugeln auf, bevor die Zeit abläuft — 30 Level und vier Boni.",
+		"icon": "⇈",
+		"screen": "pang_menu",
+		"accent": Color(0.961, 0.620, 0.043),
+		"accent_hex": 0xf59e0b,
+		"category": CATEGORY_ACTION,
+		"highscore_key": Game.HS_PANG,
+	},
+	{
 		"id": "2048",
 		"name": "2048",
 		"description": "Das Sucht-Puzzle: Verschiebe die Kacheln, verschmelze gleiche Zahlen und baue die 2048.",

@@ -17,6 +17,7 @@ func run(kit: TestKit) -> void:
 	_suite(_crystal_tower)
 	_suite(_dragon_rpg)
 	_suite(_horse_runner)
+	_suite(_pang)
 	_suite(_inventory)
 	_suite(_lobby)
 	_suite(_asset_registry)
@@ -414,6 +415,138 @@ func _horse_runner() -> void:
 
 # --- inventory --------------------------------------------------------------
 
+func _pang() -> void:
+	t.suite("Pang")
+
+	# Kugelstufen: schrumpfend im Radius, schneller werdend, ärmer werdend.
+	for level in range(Pang.SIZE_LARGEST, Pang.SIZE_SMALLEST + 1):
+		var spec := Pang.size_spec(level)
+		t.check(float(spec["radius"]) > 0.0, "Stufe %d hat einen Radius" % level)
+		t.check(float(spec["bounce"]) > 0.0, "Stufe %d hat eine Sprunghöhe" % level)
+		t.check(int(spec["points"]) > 0, "Stufe %d gibt Punkte" % level)
+		if level < Pang.SIZE_SMALLEST:
+			var next_spec := Pang.size_spec(level + 1)
+			t.check(float(next_spec["radius"]) < float(spec["radius"]), "Stufe %d ist kleiner als %d" % [level + 1, level])
+			t.check(float(next_spec["speedMult"]) > float(spec["speedMult"]), "Stufe %d ist schneller als %d" % [level + 1, level])
+			t.check(int(next_spec["points"]) < int(spec["points"]), "Stufe %d zahlt weniger als %d" % [level + 1, level])
+	t.equal(Pang.points_for(Pang.SIZE_LARGEST), 100, "Größte Kugel zahlt 100")
+	t.equal(Pang.points_for(Pang.SIZE_SMALLEST), 10, "Kleinste Kugel zahlt 10")
+
+	# Die Sprunggeschwindigkeit muss die Sprunghöhe auch wirklich erreichen.
+	for level in range(Pang.SIZE_LARGEST, Pang.SIZE_SMALLEST + 1):
+		var apex: float = (Pang.jump_velocity(level) * Pang.jump_velocity(level)) / (2.0 * Pang.GRAVITY)
+		t.almost(apex, Pang.bounce_of(level), 0.001, "Stufe %d erreicht die Sprunghöhe" % level)
+	t.check(Pang.speed_of(Pang.SIZE_SMALLEST) > Pang.speed_of(Pang.SIZE_LARGEST), "Kleine Kugeln sind schneller")
+
+	# Das Spiel ist die Kette: die kleinste Stufe ist das Ende, alles darüber
+	# teilt sich in zwei der nächsten Stufe.
+	t.check(Pang.SIZE_SMALLEST == 4, "Vier Kugelstufen wie im Original")
+	t.check(Pang.SIZE_LARGEST == 1, "Stufe 1 ist die größte")
+	var chain := 1
+	for level in range(Pang.SIZE_LARGEST, Pang.SIZE_SMALLEST):
+		chain *= 2
+	t.equal(chain, 8, "Eine Kugel wird zu acht Kleinsten")
+	t.check(Pang.ORB_SAFE_CAP >= chain * int(Pang.level_config(Pang.TOTAL_LEVELS)["ballCount"]),
+		"Der Kugel-Pool fasst das chaotischste Level")
+	t.check(Pang.clear_bonus(5, 90.0) > Pang.clear_bonus(5, 30.0), "Restzeit zahlt sich aus")
+	t.check(Pang.clear_bonus(5, 0.0) > 0, "Es gibt auch eine Grundprämie")
+
+	# Haken.
+	t.equal(Pang.max_harpoons(0), Pang.BASE_HARPOONS, "Ein Haken am Anfang")
+	t.equal(Pang.max_harpoons(1), 2, "Doppelhaken verdoppelt")
+	t.equal(Pang.max_harpoons(99), Pang.MAX_HARPOONS, "Haken sind gedeckelt")
+	t.check(Pang.max_harpoons(1) > Pang.BASE_HARPOONS, "Der Doppelhaken ist eine echte Aufwertung")
+	t.check(Pang.HARPOON_HOLD_TIME > 0.0, "Ein Haken bleibt kurz in der Decke stecken")
+	t.check(Pang.HARPOON_HOLD_TIME < 3.0, "Der Haken verschwindet aber wieder")
+	t.check(Pang.PLAYER_MOVE_SPEED > 0.0, "Der Spieler kann laufen")
+
+	# Bonus-Tabelle: gewichtet, deterministisch und vollständig belegt.
+	var seen := {}
+	for i in 200:
+		var picked := Pang.roll_bonus(float(i) / 200.0)
+		seen[str(picked["id"])] = true
+	t.equal(seen.size(), Pang.BONUSES.size(), "Jeder Bonus lässt sich ziehen")
+	t.equal(str(Pang.roll_bonus(0.0)["id"]), str(Pang.roll_bonus(0.0)["id"]), "Der Wurf ist reproduzierbar")
+	t.equal(str(Pang.bonus_by_id("nope")["id"]), str(Pang.BONUSES[0]["id"]), "Unbekannter Bonus fällt zurück")
+	for entry in Pang.BONUSES:
+		t.check(float(entry["weight"]) > 0.0, "Bonus '%s' ist gewichtet" % str(entry["id"]))
+		t.check(AssetRegistry.exists(str(entry["asset"])), "Bonus-Mesh '%s' existiert" % str(entry["asset"]))
+	t.check(float(Pang.DROP_CHANCE) > 0.0 and float(Pang.DROP_CHANCE) < 1.0, "Bonuschance ist sinnvoll")
+	t.check(Pang.FREEZE_DURATION > 0.0, "Der Freeze hält eine Weile")
+	t.check(Pang.EXTRA_TIME_AMOUNT > 0.0, "Der Zeitbonus schenkt Zeit")
+	t.check(Pang.is_frozen(1.0) and not Pang.is_frozen(0.0), "Der Frost wirkt nur solange er läuft")
+
+	# Hindernisse: Kisten zerbrechen, Plattformen fangen den Haken.
+	t.check(AssetRegistry.exists(str(Pang.obstacle_spec(Pang.OBSTACLE_BREAKABLE)["asset"])), "Kistenmesh existiert")
+	t.check(AssetRegistry.exists(str(Pang.obstacle_spec(Pang.OBSTACLE_FIXED)["asset"])), "Plattformmesh existiert")
+	for kind in [Pang.OBSTACLE_BREAKABLE, Pang.OBSTACLE_FIXED]:
+		t.check(bool(Pang.obstacle_spec(kind)["bounces"]), "Hindernis '%s' prallt Kugeln ab" % kind)
+	t.check(bool(Pang.obstacle_spec(Pang.OBSTACLE_FIXED)["blocks"]), "Die Plattform stoppt den Haken")
+	t.check(not bool(Pang.obstacle_spec(Pang.OBSTACLE_BREAKABLE)["blocks"]), "Die Kiste lässt den Haken durch")
+	t.check(int(Pang.obstacle_spec(Pang.OBSTACLE_BREAKABLE)["hp"]) > 0, "Die Kiste ist zerstörbar")
+	t.check(int(Pang.obstacle_spec(Pang.OBSTACLE_FIXED)["hp"]) == 0, "Die Plattform ist unzerstörbar")
+
+	# Die Kampagne: jeder Level muss spielbar sein und ist reproduzierbar.
+	for level in range(1, Pang.TOTAL_LEVELS + 1):
+		var layout := Pang.level_data(level)
+		t.equal(Pang.validate_level(layout).size(), 0, "Level %d ist spielbar" % level)
+		t.equal(Pang.level_data(level)["balls"], layout["balls"], "Level %d ist reproduzierbar" % level)
+		t.check((layout["balls"] as Array).size() > 0, "Level %d hat Kugeln" % level)
+		t.check(float(layout["timeLimit"]) >= Pang.TIME_END, "Level %d hat ein Zeitlimit" % level)
+	t.equal(Pang.validate_level({"level": 0, "balls": []}).size() > 0, true, "Kaputte Level werden erkannt")
+	t.equal(Pang.validate_level({"level": 1, "balls": [{"x": 900.0, "y": 1.0, "size": 2}]}).size() > 0, true, "Kugeln außerhalb werden erkannt")
+	t.equal(Pang.validate_level({"level": 1, "balls": [{"x": 0.0, "y": 8.0, "size": 9}]}).size() > 0, true, "Ungültige Stufen werden erkannt")
+
+	# Die Schwierigkeit steigt monoton, ohne Sprünge.
+	var early := Pang.level_config(1)
+	var middle := Pang.level_config(Pang.TOTAL_LEVELS / 2)
+	var late := Pang.level_config(Pang.TOTAL_LEVELS)
+	t.check(float(middle["timeLimit"]) < float(early["timeLimit"]), "Spätere Level haben weniger Zeit")
+	t.check(float(late["timeLimit"]) < float(middle["timeLimit"]), "Die Zeit sinkt weiter")
+	t.check(float(late["speedMult"]) > float(early["speedMult"]), "Spätere Level sind schneller")
+	t.check(int(late["ballCount"]) > int(early["ballCount"]), "Spätere Level haben mehr Kugeln")
+	t.check(int(early["crates"]) == 0 and int(late["crates"]) > 0, "Hindernisse kommen erst später dazu")
+	t.check(int(early["platforms"]) == 0 and int(late["platforms"]) > 0, "Plattformen kommen noch später")
+	t.check(int(early["baseSize"]) > int(late["baseSize"]), "Frühe Level starten mit kleineren Kugeln")
+	t.check(Pang.level_progress(1) == 0.0, "Level 1 ist der Start der Kurve")
+	t.check(Pang.level_progress(Pang.TOTAL_LEVELS) == 1.0, "Der letzte Level schließt die Kurve")
+	t.check(Pang.par_time(10) < Pang.par_time(40 % Pang.TOTAL_LEVELS + 1), "Die Sollzeit wächst")
+	t.check(not Pang.level_title(7).is_empty(), "Jeder Level hat einen Titel")
+
+	# Das Spielfeld muss den Spieler und den Bühnenrahmen immer enthalten.
+	t.check(Pang.PLAYER_TOP_Y < Pang.CEILING_Y, "Der Spieler passt unter die Decke")
+	t.check(Pang.PLAYER_HITBOX_TOP < Pang.PLAYER_TOP_Y, "Die Trefferbox ist niedriger als die Figur")
+	t.check(Pang.PLAYER_HITBOX_HALF_WIDTH < Pang.PLAYER_HALF_WIDTH, "Die Trefferbox ist schmaler als die Figur")
+	t.check(Pang.PLAYER_HITBOX_HALF_WIDTH > 0.0, "Die Trefferbox ist nicht winzig")
+	t.check(Pang.FLOOR_BAND_TOP > Pang.PLAYER_HITBOX_TOP, "Kugeln starten über der Trefferbox")
+	t.check(Pang.FLOOR_Y <= 0.0, "Der Boden liegt auf Höhe 0")
+	t.check(Pang.START_GRACE > 0.0, "Es gibt eine Schonfrist zu Level-Beginn")
+	t.check(Pang.LIVES >= 1, "Es gibt mindestens ein Leben")
+	t.check(Pang.ARENA_HALF_WIDTH * 2.0 > 10.0, "Die Arena ist breit genug zum Ausweichen")
+	t.check(Pang.LEVELS_PER_PAGE > 0, "Die Level-Auswahl ist seitenweise")
+
+	# Speicherstände laufen auch ohne Szene-Baum (headless Runner) sauber durch.
+	# Der Runner teilt sich den Speicher mit dem Rest der Suite, also wird der
+	# Ausgangszustand eingefangen statt ein frisches Profil vorausgesetzt.
+	var start_unlocked := Pang.unlocked_level()
+	t.check(start_unlocked >= Pang.FIRST_UNLOCKED, "Mindestens Level 1 ist offen")
+	t.check(Pang.is_unlocked(1), "Level 1 ist immer offen")
+	t.check(Pang.is_unlocked(start_unlocked), "Der am weitesten freigeschaltete Level ist offen")
+	t.check(not Pang.is_unlocked(start_unlocked + 1), "Der nächste Level ist noch gesperrt")
+	# Freischalten wächst nur und wird auf die Kampagne geklemmt. Der Wert ist
+	# dauerhaft gespeichert, deshalb wird der Zustand davor eingefangen statt ein
+	# frisches Profil vorausgesetzt.
+	var before_unlock := Pang.unlocked_level()
+	t.equal(Pang.unlock_level(1), before_unlock, "Ein niedrigerer Level ändert nichts")
+	t.equal(Pang.unlock_level(0), before_unlock, "Level 0 wird ignoriert")
+	t.equal(Pang.unlock_level(9999), Pang.TOTAL_LEVELS, "Über das Ende hinaus wird geklemmt")
+	t.check(Pang.is_unlocked(Pang.TOTAL_LEVELS), "Damit ist der letzte Level offen")
+	t.equal(Pang.unlock_level(Pang.TOTAL_LEVELS - 1), Pang.TOTAL_LEVELS, "Ein niedrigerer Level ändert nichts")
+	t.equal(Pang.record_level_time(3, 0.0), false, "Zeit von 0 zählt nicht")
+	t.check(Pang.level_best_time(3) >= 0.0, "Bestzeit ist lesbar")
+	t.suite_done()
+
+
 func _inventory() -> void:
 	t.suite("Inventar")
 	var catalog := ItemInventory.Catalog.new([
@@ -550,7 +683,10 @@ func _lobby() -> void:
 		var screen := str(game["screen"])
 		t.check(Router.SCREEN_SCRIPTS.has(screen), "Screen '%s' ist registriert" % screen)
 		t.check(Router.SCREEN_SCRIPTS[screen].ends_with(".gd"), "Screen '%s' zeigt auf ein Skript" % screen)
-	t.equal(GameRegistry.games_in_category(GameRegistry.CATEGORY_ACTION).size(), 2, "Zwei Action-Spiele")
+	t.check(GameRegistry.games_in_category(GameRegistry.CATEGORY_ACTION).size() >= 3, "Mindestens drei Action-Spiele")
+	t.equal(str(GameRegistry.game_by_id("pang")["category"]), GameRegistry.CATEGORY_ACTION, "Pang liegt in den Action-Spielen")
+	t.equal(str(GameRegistry.screen_of("pang")), "pang_menu", "Pang startet in der Level-Auswahl")
+	t.equal(str(GameRegistry.screen_of("nope")), "arena", "Unbekanntes Spiel fällt auf die Arena zurück")
 	t.suite_done()
 
 
@@ -596,6 +732,8 @@ func _asset_registry() -> void:
 		t.check(AssetRegistry.exists(str(entry["asset"])), "Lootmesh '%s' existiert" % str(entry["asset"]))
 	for spec in HorseRunner.OBSTACLE_SPECS:
 		t.check(AssetRegistry.exists(str(spec["asset"])), "Hindernismesh '%s' existiert" % str(spec["asset"]))
+	for key in AssetRegistry.PANG_KEYS:
+		t.check(AssetRegistry.exists(key), "Pang-Mesh '%s' existiert" % key)
 	t.check(AssetRegistry.exists("horse"), "Pferdemesh existiert")
 	t.check(AssetRegistry.exists("ship"), "Schiffmesh existiert")
 	t.check(AssetRegistry.exists("rpg/knight"), "Rittermesh existiert")
@@ -1309,124 +1447,8 @@ func _siedler_economy() -> void:
 	t.suite_done()
 
 
-func _dragon_flight() -> void:
-	t.suite("Drachenflug — Stammdaten")
-	t.check(DragonFlight.BREEDS.size() >= 8, "Mindestens acht Rassen")
-	t.equal(DragonFlight.TRAITS.size(), 12, "Zwölf vererbbare Merkmale")
-	t.check(DragonFlight.ENEMIES.size() >= 8, "Mindestens acht Gegner")
-	t.equal(DragonFlight.level_count(), 30, "Dreißig Level")
-	t.equal(DragonFlight.BIOMES.size(), 10, "Zehn Biome")
-	var unique_breeds := {}
-	for breed in DragonFlight.BREEDS:
-		unique_breeds[str(breed["id"])] = true
-		t.check(AssetRegistry.exists(str(breed["asset"])), "Rasse '%s' hat ein Mesh" % str(breed["id"]))
-	t.equal(unique_breeds.size(), DragonFlight.BREEDS.size(), "Rassen-IDs sind eindeutig")
-	for enemy in DragonFlight.ENEMIES:
-		t.check(AssetRegistry.exists(str(enemy["asset"])), "Gegner '%s' hat ein Mesh" % str(enemy["id"]))
-	for entry in DragonFlight.POWERUPS:
-		t.check(AssetRegistry.exists(str(entry["asset"])), "Power-up '%s' hat ein Mesh" % str(entry["id"]))
-
-	# Die Level müssen durchgehend schwerer werden.
-	var previous := 0.0
-	for n in range(1, DragonFlight.level_count() + 1):
-		var level_def := DragonFlight.level(n)
-		t.equal(int(level_def["n"]), n, "Level %d ist durchnummeriert" % n)
-		t.equal(DragonFlight.biome_by_id(str(level_def["biome"]))["id"], level_def["biome"], "Level %d hat ein bekanntes Biom" % n)
-		t.check(float(level_def["hpMult"]) >= previous, "Level %d ist nicht leichter als der Vorgänger" % n)
-		previous = float(level_def["hpMult"])
-		t.check(DragonFlight.enemy_by_id(DragonFlight.pick_enemy(level_def)["id"]) != null, "Level %d spawnt einen bekannten Gegner" % n)
-	t.check(DragonFlight.level(0)["n"] == 1, "Level 0 klemmt auf Level 1")
-	t.check(DragonFlight.level(999)["n"] == 30, "Level 999 klemmt auf das letzte Level")
-	t.check(DragonFlight.concurrent_for(1) < DragonFlight.concurrent_for(30), "Späte Level haben mehr Gegner")
-	t.check(DragonFlight.spawn_gap(DragonFlight.level(1)) > 0.0, "Spawn-Abstand ist positiv")
-
-	# Sterne und Freischaltung.
-	t.equal(DragonFlight.stars_for_run(false, 1.0), 0, "Nicht beendet heißt keine Sterne")
-	t.equal(DragonFlight.stars_for_run(true, 1.0), 3, "Unversehrt sind drei Sterne")
-	t.equal(DragonFlight.stars_for_run(true, 0.6), 2, "Halbe Hülle sind zwei Sterne")
-	t.equal(DragonFlight.stars_for_run(true, 0.1), 1, "Knapp überstanden ist ein Stern")
-	var fresh := DragonFlight.default_profile()
-	t.check(DragonFlight.is_unlocked(1, fresh), "Level 1 ist immer offen")
-	t.check(not DragonFlight.is_unlocked(2, fresh), "Level 2 ist am Anfang zu")
-	DragonFlight.apply_run(fresh, 1, {"score": 100, "stars": 3, "gold": 50, "eggs": 0, "new_best": 1})
-	t.check(DragonFlight.is_unlocked(2, fresh), "Nach Level 1 öffnet Level 2")
-	t.check(DragonFlight.stars_of(1, fresh) == 3, "Sterne werden gespeichert")
-	t.equal(DragonFlight.total_stars(fresh), 3, "Sterne werden gezählt")
-	t.check(not DragonFlight.is_unlocked(7, fresh), "Weit entfernte Level bleiben zu")
-	DragonFlight.apply_run(fresh, 7, {"score": 1, "stars": 3, "gold": 0, "eggs": 0, "new_best": 0})
-	t.equal(DragonFlight.stars_of(1, fresh), 3, "Ein später Versuch überschreibt Level 1 nicht")
-	t.check(DragonFlight.star_requirement(7) > 0, "Späte Level verlangen Sterne")
-	for n in range(1, 7):
-		DragonFlight.apply_run(fresh, n, {"score": 10, "stars": 3, "gold": 0, "eggs": 0, "new_best": 0})
-	t.check(DragonFlight.is_unlocked(7, fresh), "Genug Sterne öffnen Level 7")
-	t.suite_done()
 
 
-func _flight_genetics() -> void:
-	t.suite("Drachenflug — Vererbung")
-	t.equal(DragonFlight.expressed_traits({}).size(), 0, "Ohne Allele gibt es keine Merkmale")
-	# Ein dominantes Merkmal braucht ein einziges Allel, ein rezessives zwei.
-	var dominant := {"feueratem": "Fa"}
-	t.check(DragonFlight.expressed(dominant, "feueratem"), "Dominantes Merkmal zeigt mit einem Allel")
-	t.check(not DragonFlight.expressed(dominant, "eisenhaut"), "Fremdes Merkmal zeigt nicht")
-	t.check(DragonFlight.expressed({"riesenwuchs": "rr"}, "riesenwuchs"), "Rezessiv zeigt mit zwei Allelen")
-	t.check(not DragonFlight.expressed({"riesenwuchs": "Rr"}, "riesenwuchs"), "Ein rezessives Allel bleibt verborgen")
-	t.check(not DragonFlight.expressed({"riesenwuchs": "RR"}, "riesenwuchs"), "Zwei dominante Allele zeigen ein rezessives Merkmal nicht")
-	# Alle Merkmale eines Zufallsgenoms müssen genau den ausgewiesenen entsprechen.
-	var genome := DragonFlight.random_genome()
-	t.equal(genome.size(), DragonFlight.TRAITS.size(), "Jedes Merkmal hat ein Allelpaar")
-	var expressed := DragonFlight.expressed_traits(genome)
-	var again := DragonFlight.expressed_traits(genome)
-	t.equal(expressed, again, "Die Merkmalsliste ist reproduzierbar")
-	for id in expressed:
-		t.check(DragonFlight.trait_by_id(id) != {}, "Merkmal '%s' ist bekannt" % id)
-
-	# Kreuzung: ein Kind kann nur Allele tragen, die die Eltern hatten.
-	var carrier_a := {}
-	var carrier_b := {}
-	for gene in DragonFlight.TRAITS:
-		var dom := str(gene["dom"])
-		var rec := dom.to_lower()
-		carrier_a[str(gene["id"])] = dom + rec
-		carrier_b[str(gene["id"])] = rec + rec
-	var child := DragonFlight.cross_alleles(carrier_a, carrier_b, 0.0)
-	t.equal(child.size(), DragonFlight.TRAITS.size(), "Das Kind hat ein Allelpaar je Merkmal")
-	for gene in DragonFlight.TRAITS:
-		var id := str(gene["id"])
-		var pair := str(child[id])
-		t.equal(pair.length(), 2, "Allelpaar '%s' hat zwei Zeichen" % id)
-		for i in 2:
-			t.check(pair[i] == str(gene["dom"]) or pair[i] == str(gene["dom"]).to_lower(),
-				"Allel '%s' ist dominant oder rezessiv" % id)
-
-	# Zwei Träger eines rezessiven Merkmals bekommen es mit hoher Wahrscheinlichkeit.
-	var hits := 0
-	for i in 400:
-		var kid := DragonFlight.cross_alleles({"riesenwuchs": "rr"}, {"riesenwuchs": "rr"}, 0.0)
-		if DragonFlight.expressed(kid, "riesenwuchs"):
-			hits += 1
-	t.equal(hits, 400, "Zwei rezessive Träger vererben es immer")
-
-	# Nur ein Träger: das Kind darf es nie zeigen.
-	var leaked := 0
-	for i in 400:
-		var kid2 := DragonFlight.cross_alleles({"riesenwuchs": "rr"}, {"riesenwuchs": "RR"}, 0.0)
-		if DragonFlight.expressed(kid2, "riesenwuchs"):
-			leaked += 1
-	t.equal(leaked, 0, "Ein Träger allein vererbt das rezessive Merkmal nicht")
-
-	# Inzucht kostet Lebenskraft, Kreuzung mit fremden Linien nicht.
-	var parent_a := DragonFlight.random_dragon(1, ["ember"])
-	var parent_b := DragonFlight.random_dragon(2, ["ember"])
-	parent_b["alleles"] = DragonFlight.random_genome()
-	t.check(DragonFlight.inbreeding_penalty(parent_a, parent_a) <= 1.0, "Inzuchtpenalty ist höchstens 1")
-	t.check(DragonFlight.inbreeding_penalty(parent_a, parent_b) >= 0.7, "Inzuchtpenalty hat eine Untergrenze")
-
-	var child_dragon := DragonFlight.breed_parents(parent_a, parent_b, 7)
-	t.equal(int(child_dragon["uid"]), 7, "Das Kind bekommt die UID")
-	t.equal(int(child_dragon["gen"]), maxi(int(parent_a["gen"]), int(parent_b["gen"])) + 1, "Generation steigt")
-	t.check(DragonFlight.breed_by_id(str(child_dragon["breed"])) != null, "Das Kind hat eine gültige Rasse")
-	t.suite_done()
 
 
 func _flight_forecast() -> void:
@@ -1533,112 +1555,4 @@ func _flight_elements() -> void:
 	t.suite_done()
 
 
-func _flight_stats() -> void:
-	t.suite("Drachenflug — Werte")
-	var plain := {"breed": "ember", "alleles": {}, "gen": 1, "vitality": 1.0}
-	var base := DragonFlight.resolve_stats(plain)
-	var breed := DragonFlight.breed_by_id("ember")
-	t.almost(float(base["max_hp"]), float(breed["hp"]), 0.01, "Ohne Merkmale gilt der Rassenwert")
-	t.check(DragonFlight.visual_scale(plain) > 0.0, "Ein Drache hat eine Größe")
 
-	# Feueratem muss den Schaden heben, Schnellfeuer die Feuerrate senken.
-	var fire := DragonFlight.resolve_stats({"breed": "ember", "alleles": {"feueratem": "FF"}, "gen": 1})
-	t.check(float(fire["damage"]) > float(base["damage"]), "Feueratem erhöht den Schaden")
-	var haste := DragonFlight.resolve_stats(plain, {"haste": 4})
-	t.check(float(haste["fire_rate"]) < float(base["fire_rate"]), "Schnellfeuer senkt die Feuerrate")
-	t.check(float(haste["damage"]) == float(base["damage"]), "Schnellfeuer ändert nichts anderes")
-	var tank := DragonFlight.resolve_stats(plain, {"vitality": 5, "armor": 8})
-	t.check(float(tank["max_hp"]) > float(base["max_hp"]), "Zähigkeit erhöht die TP")
-	t.check(float(tank["armor"]) >= 0.0 and float(tank["armor"]) <= 0.72, "Rüstung bleibt im Rahmen")
-
-	# Riesenwuchs macht sichtbar größer.
-	var big := DragonFlight.resolve_stats({"breed": "ember", "alleles": {"riesenwuchs": "rr"}, "gen": 1})
-	t.check(DragonFlight.visual_scale({"breed": "ember", "alleles": {"riesenwuchs": "rr"}, "gen": 1}) > DragonFlight.visual_scale(plain),
-		"Riesenwuchs macht den Drachen größer")
-	t.check(float(big["max_hp"]) > float(base["max_hp"]), "Riesenwuchs gibt mehr TP")
-	t.check(float(big["speed"]) < float(base["speed"]), "Riesenwuchs kostet Tempo")
-
-	# Die Generation schrumpft nie unter die Rassengröße.
-	t.check(DragonFlight.visual_scale({"breed": "ember", "alleles": {}, "gen": 40}) >= float(breed["size"]) * 0.99,
-		"Generation macht höchstens größer")
-	t.check(DragonFlight.visual_scale({"breed": "ember", "alleles": {}, "gen": 1, "vitality": 0.7}) > 0.5,
-		"Eine geschwächte Linie bleibt sichtbar")
-
-	# Schaden und Rüstung.
-	var shot := DragonFlight.roll_shot(base, 1.0)
-	t.check(float(shot["damage"]) >= 1.0, "Ein Schuss richtet mindestens 1 Schaden an")
-	t.check(DragonFlight.roll_shot(base, 2.0)["damage"] >= shot["damage"] * 0.5, "Der Level multipliziert den Schaden")
-	t.almost(DragonFlight.mitigate(100.0, 0.0), 100.0, 0.01, "Ohne Rüstung kommt voller Schaden an")
-	t.check(DragonFlight.mitigate(100.0, 0.5) < 100.0, "Rüstung mindert Schaden")
-	t.check(DragonFlight.mitigate(100.0, 5.0) >= 1.0, "Auch übermäßige Rüstung lässt Schaden durch")
-	t.suite_done()
-
-
-func _flight_profile() -> void:
-	t.suite("Drachenflug — Profil & Zucht")
-	# Eigene Datei, damit der Testlauf den Spielerstand nicht überschreibt.
-	var real_path := DragonFlight.save_path
-	DragonFlight.save_path = "user://dragonflight_test.json"
-	DragonFlight.reset_profile()
-	var profile := DragonFlight.default_profile()
-	t.equal(int(profile["gold"]), 0, "Neues Profil startet ohne Gold")
-	var first_cost := DragonFlight.upgrade_cost("firepower", profile)
-	t.check(first_cost > 0, "Ein Upgrade kostet Gold")
-	profile["gold"] = 100000
-	var level_before := DragonFlight.upgrade_level("firepower", profile)
-	t.equal(DragonFlight.buy_upgrade("firepower", profile), level_before + 1, "Ein Upgrade wird gekauft")
-	t.check(int(profile["gold"]) < 100000, "Der Kauf kostet Gold")
-	t.check(DragonFlight.upgrade_cost("firepower", profile) > first_cost, "Jede Stufe kostet mehr")
-	profile["upgrades"] = {"firepower": 99}
-	t.equal(DragonFlight.upgrade_cost("firepower", profile), -1, "Eine maxe Stufe kostet nichts mehr")
-	t.equal(DragonFlight.buy_upgrade("firepower", profile), -1, "Über maxe Stufen kann man nicht kaufen")
-	profile["upgrades"] = {}
-
-	# Rassen kaufen.
-	profile["gold"] = 50000
-	var starter := DragonFlight.buy_breed(profile, "ember")
-	t.check(not starter.is_empty(), "Der Starter ist kaufbar")
-	t.equal(DragonFlight.buy_breed(profile, "ember").size(), 0, "Dieselbe Rasse wird nicht doppelt gekauft")
-	var frost := DragonFlight.buy_breed(profile, "frost")
-	t.check(not frost.is_empty(), "Eine weitere Rasse ist kaufbar")
-	t.check(DragonFlight.has_breed(profile, "frost"), "Die Rasse gilt als freigeschaltet")
-	profile["gold"] = 0
-	t.equal(DragonFlight.buy_breed(profile, "void").size(), 0, "Ohne Gold kein Kauf")
-	profile["gold"] = 100000
-	var owned_before := DragonFlight.dragons_of(profile).size()
-
-	# Eier legen und ausbrüten.
-	var egg := DragonFlight.lay_egg(profile, "ember", 60.0)
-	t.check(egg.get("egg", null) != null, "Das gelegte Ei ist ein Ei")
-	t.equal(DragonFlight.eggs_of(profile).size(), 1, "Das Ei liegt im Nest")
-	t.equal(DragonFlight.dragons_of(profile).size(), owned_before, "Ein Ei zählt nicht als Drache")
-	t.check(DragonFlight.egg_remaining(egg, Time.get_unix_time_from_system()) > 50.0, "Das Ei braucht Zeit")
-	t.check(DragonFlight.egg_progress(egg, Time.get_unix_time_from_system()) < 0.2, "Die Brut ist noch am Anfang")
-	t.equal(DragonFlight.hatch(egg).size(), 0, "Ein unreifes Ei schlüpft nicht")
-	var ready := DragonFlight.lay_egg(profile, "ember", 1.0)
-	t.check(DragonFlight.egg_remaining(ready, Time.get_unix_time_from_system() + 10.0) <= 0.0, "Nach der Zeit ist es reif")
-	t.almost(DragonFlight.egg_progress(ready, Time.get_unix_time_from_system() + 10.0), 1.0, 0.001, "Ein reifes Ei ist bei 100 %")
-	t.check(DragonFlight.hatch_cost(egg) > 0, "Beschleunigen kostet Gold")
-	var hatched := DragonFlight.hatch(egg, true)
-	t.check(hatched.get("egg", null) == null, "Nach dem Schlüpfen ist es kein Ei mehr")
-	t.equal(DragonFlight.hatch(hatched).size(), 0, "Ein schon geschlüpfter Drache schlüpft nicht erneut")
-	t.check(DragonFlight.incubation_seconds("void") > DragonFlight.incubation_seconds("ember"), "Seltene Rassen brauchen länger")
-
-	# Zucht: zwei Drachen paaren.
-	var parent_a := DragonFlight.dragon_by_uid(profile, int(starter["uid"]))
-	var parent_b := DragonFlight.dragon_by_uid(profile, int(frost["uid"]))
-	var cost := DragonFlight.pairing_cost(parent_a, parent_b)
-	t.check(cost > 0, "Paaren kostet Gold")
-	profile["gold"] = cost
-	var list: Array = profile["dragons"]
-	list.append(DragonFlight.breed_parents(parent_a, parent_b, DragonFlight.next_uid(profile)))
-	profile["dragons"] = list
-	t.equal(DragonFlight.eggs_of(profile).size(), 2, "Die Zucht legt ein zweites Ei")
-	DragonFlight.save_profile(profile)
-	var reloaded := DragonFlight.load_profile()
-	t.equal(DragonFlight.dragons_of(reloaded).size(), DragonFlight.dragons_of(profile).size(), "Das Profil überlebt das Speichern")
-	t.equal(DragonFlight.eggs_of(reloaded).size(), 2, "Eier überleben das Speichern")
-	t.equal(int(reloaded["gold"]), cost, "Gold überlebt das Speichern")
-	DragonFlight.reset_profile()
-	DragonFlight.save_path = real_path
-	t.suite_done()

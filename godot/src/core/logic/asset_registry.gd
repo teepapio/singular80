@@ -74,15 +74,12 @@ const KEYS: Array[String] = [
 	"metro/transfer_ring",
 	"metro/tunnel_portal",
 	"ornament",
-	"pang/anchor",
-	"pang/beam",
-	"pang/bomb",
-	"pang/cage",
-	"pang/glue",
+	"pang/clock",
 	"pang/harpoon",
+	"pang/heart",
+	"pang/ice",
 	"pang/orb",
-	"pang/orb_crystal",
-	"pang/watch",
+	"pang/platform",
 	"pumpkin",
 	"rock",
 	"rpg/amulet",
@@ -202,11 +199,10 @@ const GEGNER_KEYS: Array[String] = [
 	"flight/wyvern", "flight/imp", "flight/harpy", "flight/ballista", "flight/golem",
 ]
 
-## Orbs, harpoon, obstacles and power-up props of the Pang clone.
+## Ball, harpoon, platform and the three bonus pickups of the Pang clone.
 const PANG_KEYS: Array[String] = [
-	"pang/orb", "pang/orb_crystal", "pang/harpoon",
-	"pang/beam", "pang/cage",
-	"pang/bomb", "pang/watch", "pang/glue", "pang/anchor",
+	"pang/orb", "pang/harpoon", "pang/platform",
+	"pang/ice", "pang/clock", "pang/heart",
 ]
 
 const MERGE_KEYS: Array[String] = [

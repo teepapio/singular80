@@ -294,50 +294,35 @@
     "low": 440,
     "med": 1204
   },
-  "pang/anchor": {
-    "high": 11904,
-    "low": 186,
-    "med": 1003
-  },
-  "pang/beam": {
-    "high": 10843,
-    "low": 72,
-    "med": 1152
-  },
-  "pang/bomb": {
-    "high": 11381,
-    "low": 236,
-    "med": 1249
-  },
-  "pang/cage": {
-    "high": 13561,
-    "low": 156,
-    "med": 1064
-  },
-  "pang/glue": {
-    "high": 12051,
-    "low": 248,
-    "med": 1308
+  "pang/clock": {
+    "high": 11023,
+    "low": 324,
+    "med": 1296
   },
   "pang/harpoon": {
     "high": 13056,
     "low": 204,
     "med": 1080
   },
+  "pang/heart": {
+    "high": 11603,
+    "low": 66,
+    "med": 1056
+  },
+  "pang/ice": {
+    "high": 10484,
+    "low": 30,
+    "med": 1121
+  },
   "pang/orb": {
     "high": 10403,
     "low": 100,
     "med": 1195
   },
-  "pang/orb_crystal": {
-    "high": 10829,
-    "low": 504,
-    "med": 1139
-  },
-  "pang/watch": {
-    "high": 11023,
-    "low": 324,
-    "med": 1296
+  "pang/platform": {
+    "high": 10843,
+    "low": 72,
+    "med": 1152
   },
   "pumpkin": {
     "high": 11039,
