@@ -170,7 +170,7 @@ func _screen_flow(tree: SceneTree) -> void:
 	# Half the window gone: the bar is half empty and the chain still lives.
 	screen.flow_last_ms -= CrystalTower.FLOW_WINDOW_MS * 0.5
 	screen._update_flow(0.016)
-	t.equal(screen.flow_chain, 2, "Die Kette haelt die-halbe Zeit durch")
+	t.equal(screen.flow_chain, 2, "Die Kette haelt die halbe Zeit durch")
 	t.almost(screen._chain_bar.value, 0.5, 0.05, "Der Balken ist halb geleert")
 	t.almost(CrystalTower.flow_ratio(screen.elapsed * 1000.0, screen.flow_last_ms, screen.flow_chain),
 		screen._chain_bar.value, 0.001, "Der Balken folgt der Logik")
@@ -186,7 +186,7 @@ func _screen_flow(tree: SceneTree) -> void:
 	t.equal(screen.run_best_flow, 2, "Der Lauf merkt sich seine beste Kette")
 
 	# The floating text ages out instead of piling up forever.
-	for i in 6:
+	for _i in 6:
 		screen._update_floating(0.4)
 	t.equal(screen._floating.size(), 0, "Schwebende Texte verschwinden wieder")
 	t.check(screen._label_pool.size() == 8, "Der Pool waechst nicht")
