@@ -143,6 +143,99 @@ static func xp_to_next(level: int) -> int:
 	return roundi(8.0 + float(l) * 6.0 + float(l) * float(l) * 1.5)
 
 
+# --- Drachenflucht ----------------------------------------------------------
+
+## Tuning of the escape burst. It has to be strong enough to outrun the fastest
+## dragon of a late wave, otherwise the button is decoration: from wave 18 on a
+## Sturmdrache is quicker than the player, so walking away is not an option.
+const DASH_DURATION := 0.24
+const DASH_COOLDOWN := 1.15
+const DASH_SPEED_MULT := 2.6
+## The invulnerability outlives the burst on purpose — the frames right after
+## the last one are exactly the ones in which a dragon would catch up.
+const DASH_IFRAMES := 0.38
+
+
+## Ground distance a dash covers, which is `move_speed` × the burst time. The
+## tests compare it against a dragon's speed to prove the escape works.
+static func dash_distance(move_speed: float) -> float:
+	return maxf(0.0, move_speed) * DASH_SPEED_MULT * DASH_DURATION
+
+
+## Direction of a panic dash.
+##
+## `wanted` is the stick, `to_threat` points from the player to the nearest
+## dragon. The stick wins; a player who does not touch it still flees straight
+## away from the dragon, which is what makes the button usable while both thumbs
+## are busy. `fallback` (the facing) closes the last gap so the result is never
+## the zero vector.
+static func dash_direction(wanted: Vector2, to_threat: Vector2, fallback: Vector3) -> Vector3:
+	if wanted.length() > 0.05:
+		return Vector3(wanted.x, 0.0, wanted.y).normalized()
+	if to_threat.length() > 0.01:
+		return Vector3(-to_threat.x, 0.0, -to_threat.y).normalized()
+	var safe := fallback
+	safe.y = 0.0
+	if safe.length() < 0.01:
+		return Vector3.FORWARD
+	return safe.normalized()
+
+
+class Dash:
+	extends RefCounted
+	## One escape slot: the burst itself plus the cooldown that follows. The
+	## screen only asks `step()` where to go and `iframes()` whether a dragon may
+	## still land a hit.
+
+	var cooldown_left: float = 0.0
+	var time_left: float = 0.0
+	var iframe_left: float = 0.0
+	var direction: Vector3 = Vector3.ZERO
+
+	## True while the next press would be accepted.
+	func ready() -> bool:
+		return time_left <= 0.0 and cooldown_left <= 0.0
+
+	## Starts the burst. Returns false when the cooldown is still running or when
+	## there is no direction to flee to at all.
+	func start(wanted: Vector3) -> bool:
+		if not ready():
+			return false
+		var safe := wanted
+		safe.y = 0.0
+		if safe.length() < 0.01:
+			return false
+		direction = safe.normalized()
+		time_left = DASH_DURATION
+		cooldown_left = DASH_COOLDOWN
+		iframe_left = DASH_IFRAMES
+		return true
+
+	## Ages all three timers; call once per frame.
+	func tick(dt: float) -> void:
+		cooldown_left = maxf(0.0, cooldown_left - dt)
+		time_left = maxf(0.0, time_left - dt)
+		iframe_left = maxf(0.0, iframe_left - dt)
+
+	## Displacement for this frame — zero while the player walks normally, which
+	## is what lets the screen fall back to its own movement. Never overshoots
+	## the burst, however long the frame was.
+	func step(dt: float, move_speed: float) -> Vector3:
+		if time_left <= 0.0:
+			return Vector3.ZERO
+		return direction * maxf(0.0, move_speed) * DASH_SPEED_MULT * minf(dt, time_left)
+
+	## Remaining invulnerability, for the player's hurt check.
+	func iframes() -> float:
+		return iframe_left
+
+	## 1.0 = ready, 0.0 = just fled. The HUD fills its bar with it.
+	func charge() -> float:
+		if ready():
+			return 1.0
+		return clampf(1.0 - cooldown_left / DASH_COOLDOWN, 0.0, 1.0)
+
+
 # --- weapons ----------------------------------------------------------------
 
 static func weapon_by_id(id: String) -> Dictionary:

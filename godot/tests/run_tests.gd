@@ -118,6 +118,12 @@ func _run() -> void:
 		# global class cache, and a static name would not resolve.
 		var horserunner: GDScript = load("res://tests/test_horserunner.gd")
 		horserunner.new().run(kit)
+	if _wants_class("res://tests/test_dragonrpg.gd", only):
+		# By path, like the suites above: `--script` mode does not refresh the
+		# global class cache, so a class added today is unknown.
+		var dragonrpg_suite: GDScript = load("res://tests/test_dragonrpg.gd")
+		if dragonrpg_suite != null:
+			dragonrpg_suite.new().run(kit)
 	if _wants_class("res://tests/test_improvements.gd", only):
 		TestImprovements.new().run(kit)
 	if _wants_class("res://tests/test_metro_screens.gd", only):

@@ -100,7 +100,8 @@ const SCOPE_SUITES = {
     'Crystal Tower — Screen'],
   merge3d: ['Merge 3D'],
   horserunner: ['Pferde-Parcours', 'Pferde-Parcours — Beinahe-Treffer', 'Pferde-Parcours — Kette'],
-  dragonrpg: ['Drachen-RPG', 'Drachen-RPG — Loot-Rarität'],
+  dragonrpg: ['Drachen-RPG', 'Drachen-RPG — Loot-Rarität',
+    'Drachen-RPG — Fluchttuning', 'Drachen-RPG — Fluchtrichtung', 'Drachen-RPG — Drachenflucht'],
   dragonflight: [
     'Drachenflug — Stammdaten', 'Drachenflug — Vererbung', 'Drachenflug — Zuchtvorhersage',
     'Drachenflug — Elemente', 'Drachenflug — Werte', 'Drachenflug — Profil & Zucht',

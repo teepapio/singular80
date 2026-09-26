@@ -55,6 +55,10 @@ var cooldown := 0.0
 var swing := 0.0
 var invuln := 0.0
 var running := true
+## The escape burst; the rules live in `DragonRpg.Dash`.
+var dash := DragonRpg.Dash.new()
+## Set while the dash action is held, so a tap never falls between two frames.
+var dash_requested := false
 var dragons: Array[Dictionary] = []
 var loot: Array[Dictionary] = []
 ## The best drop of each kind so far, so a new pickup can be compared against it.
@@ -78,6 +82,9 @@ var _hp_bar: ProgressBar
 var _hp_text: Label
 var _xp_bar: ProgressBar
 var _xp_text: Label
+var _dash_bar: ProgressBar
+var _dash_text: Label
+var _dash_button: Button
 var _boss_box: Control
 var _boss_name: Label
 var _boss_bar: ProgressBar
@@ -278,8 +285,8 @@ func _build_particles() -> void:
 func _build_ui() -> void:
 	_stick = add_stick("bottom_left")
 	add_action_button("⚔", 74.0, "fire")
-	var dodge := add_action_button("»", 54.0, "dash")
-	dodge.position = dodge.position + Vector2(-140, -70)
+	_dash_button = add_action_button("»", 54.0, "dash")
+	_dash_button.position = _dash_button.position + Vector2(-140, -70)
 
 	var column := VBoxContainer.new()
 	column.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
@@ -315,6 +322,16 @@ func _build_ui() -> void:
 	_xp_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hud_root.add_child(_xp_text)
 
+	_dash_bar = Ui.bar(Color("7dd3fc"), 8.0)
+	_dash_bar.position = Vector2(20, 312)
+	_dash_bar.size = Vector2(320, 8)
+	hud_root.add_child(_dash_bar)
+	_dash_text = Ui.label("", 12, UiTheme.TEXT_DIM)
+	_dash_text.position = Vector2(20, 322)
+	_dash_text.size = Vector2(320, 16)
+	_dash_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hud_root.add_child(_dash_text)
+
 	_boss_box = Control.new()
 	_boss_box.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	_boss_box.offset_top = 62
@@ -333,7 +350,7 @@ func _build_ui() -> void:
 	_boss_bar.offset_top = 26
 	_boss_box.add_child(_boss_bar)
 
-	var hint := Ui.label("Stick bewegen · ⚔ Angriff (auch Auto-Ziel) · » Dash", 15, UiTheme.TEXT_DIM)
+	var hint := Ui.label("Stick bewegen · ⚔ Angriff (auch Auto-Ziel) · » Drachenflucht (kurze Unverwundbarkeit)", 15, UiTheme.TEXT_DIM)
 	hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	hint.position = Vector2(0, -130)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -420,8 +437,12 @@ func _update_world(delta: float) -> void:
 	if not running:
 		return
 	invuln = maxf(0.0, invuln - dt)
+	# The dash owns a slice of that invulnerability, so it is merged into the
+	# hurt timer here instead of competing with it.
+	invuln = maxf(invuln, dash.iframes())
 	cooldown = maxf(0.0, cooldown - dt)
 	swing = maxf(0.0, swing - dt)
+	dash.tick(dt)
 
 	_update_waves(dt)
 	_update_player(dt)
@@ -464,13 +485,25 @@ func _update_waves(dt: float) -> void:
 
 func _update_player(dt: float) -> void:
 	var move_vector := VirtualStick.combined(_stick.value, &"move_left", &"move_right")
-	if move_vector.length() > 0.05:
-		var step := Vector3(move_vector.x, 0.0, move_vector.y) * stats.move_speed * dt
-		player_pos += step
-		var length := player_pos.length()
-		if length > ARENA_RADIUS - PLAYER_RADIUS:
-			player_pos = player_pos.normalized() * (ARENA_RADIUS - PLAYER_RADIUS)
+	# A tap on the round » button can be shorter than a frame, so the press is
+	# latched instead of read as an edge — the attack is read as a level, too.
+	if Input.is_action_pressed("dash"):
+		dash_requested = true
+	if dash_requested:
+		dash_requested = false
+		_dash(move_vector)
+	var step := dash.step(dt, stats.move_speed)
+	if step.length() > 0.0:
+		# During the burst the stick is ignored — the player has committed.
+		player_facing = atan2(dash.direction.x, dash.direction.z)
+	elif move_vector.length() > 0.05:
+		step = Vector3(move_vector.x, 0.0, move_vector.y) * stats.move_speed * dt
 		player_facing = atan2(move_vector.x, move_vector.y)
+	player_pos += step
+	# Neither walking nor dashing leaves the arena.
+	var length := player_pos.length()
+	if length > ARENA_RADIUS - PLAYER_RADIUS:
+		player_pos = player_pos.normalized() * (ARENA_RADIUS - PLAYER_RADIUS)
 
 	# Auto-aim at the closest dragon; the player only chooses when to swing.
 	var target := _closest_dragon()
@@ -478,7 +511,8 @@ func _update_player(dt: float) -> void:
 		_aim = Vector3(sin(player_facing), 0.0, cos(player_facing))
 	else:
 		_aim = ((target["node"] as Node3D).global_position - player_pos).normalized()
-		if move_vector.length() < 0.05:
+		# The auto-aim must not turn the knight back around mid-dash.
+		if move_vector.length() < 0.05 and dash.time_left <= 0.0:
 			player_facing = atan2(_aim.x, _aim.z)
 		if Input.is_action_pressed("fire"):
 			_attack()
@@ -489,6 +523,22 @@ func _update_player(dt: float) -> void:
 		player.visible = int(invuln * 14.0) % 2 == 0
 	else:
 		player.visible = true
+
+
+## Starts the escape burst. Fleeing away from the closest dragon is the
+## fallback, so the button still does the right thing when the stick is idle —
+## which is exactly the moment a player reaches for it.
+func _dash(move_vector: Vector2) -> void:
+	var to_threat := Vector2.ZERO
+	var threat := _closest_dragon()
+	if not threat.is_empty():
+		var offset: Vector3 = (threat["node"] as Node3D).global_position - player_pos
+		to_threat = Vector2(offset.x, offset.z)
+	var facing := Vector3(sin(player_facing), 0.0, cos(player_facing))
+	if not dash.start(DragonRpg.dash_direction(move_vector, to_threat, facing)):
+		return
+	Sfx.dash()
+	_push_label(player_pos + Vector3(0, 2.6, 0), "»", Color("7dd3fc"), 0.5, 110.0)
 
 
 func _closest_dragon() -> Dictionary:
@@ -772,6 +822,13 @@ func _update_hud() -> void:
 	var need := DragonRpg.xp_to_next(level)
 	Ui.set_bar(_xp_bar, clampf(float(xp) / float(need), 0.0, 1.0), Color("38bdf8"))
 	_xp_text.text = "XP %d / %d" % [xp, need]
+
+	# The escape is the one button the player must be able to find without a
+	# manual, so it gets its own bar next to HP and XP.
+	var charge := dash.charge()
+	Ui.set_bar(_dash_bar, charge, Color("7dd3fc") if charge >= 1.0 else Color("334155"))
+	_dash_text.text = "» Drachenflucht bereit" if charge >= 1.0 else "» Drachenflucht %.1fs" % dash.cooldown_left
+	_dash_button.modulate.a = 1.0 if charge >= 1.0 else 0.45
 	if not boss.is_empty():
 		var dragon: Dictionary = boss["dragon"]
 		_boss_bar.value = clampf(float(dragon["hp"]) / maxf(1.0, float(dragon["max_hp"])), 0.0, 1.0)
