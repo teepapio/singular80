@@ -98,7 +98,7 @@ const SCOPE_SUITES = {
   crystal3d: ['Crystal Tower', 'Crystal Tower — Flusskette', 'Crystal Tower — Flusspunkte',
     'Crystal Tower — Screen'],
   merge3d: ['Merge 3D'],
-  horserunner: ['Pferde-Parcours'],
+  horserunner: ['Pferde-Parcours', 'Pferde-Parcours — Beinahe-Treffer', 'Pferde-Parcours — Kette'],
   dragonrpg: ['Drachen-RPG', 'Drachen-RPG — Loot-Rarität'],
   dragonflight: [
     'Drachenflug — Stammdaten', 'Drachenflug — Vererbung', 'Drachenflug — Zuchtvorhersage',

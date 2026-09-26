@@ -93,6 +93,11 @@ func _run() -> void:
 		await TestCrystal3d.new().run(kit, self)
 	if _wants_class("res://tests/test_candy_match3.gd", only):
 		TestCandyMatch3.new().run(kit)
+	if _wants_class("res://tests/test_horserunner.gd", only):
+		# By path: a class added since the last editor start is not in the
+		# global class cache, and a static name would not resolve.
+		var horserunner: GDScript = load("res://tests/test_horserunner.gd")
+		horserunner.new().run(kit)
 	if _wants_class("res://tests/test_improvements.gd", only):
 		TestImprovements.new().run(kit)
 	if _wants_class("res://tests/test_metro_screens.gd", only):

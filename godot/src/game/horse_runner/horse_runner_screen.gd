@@ -12,10 +12,20 @@ const TREE_MIN_X := HorseRunner.PATH_HALF_WIDTH + 0.8
 const TREE_MAX_X := 26.0
 const START_Z := 6.0
 const INVULN_TIME := 0.9
+## Placeholder in the chain row while no chain is running.
+const NO_CHAIN := "—"
+const FLASH_TIME := 0.28
+const SCORE_COLOR := Color("facc15")
+const FLASH_COLOR := Color("fde047")
 
 var distance := 0.0
 var score := 0
 var highscore := 0
+var points := 0
+var chain := 0
+var best_chain := 0
+var grazes := 0
+var since_graze := 0.0
 var lane := 1
 var lane_x := 0.0
 var vel_y := 0.0
@@ -39,9 +49,13 @@ var dirt: MeshInstance3D
 
 var _stick: VirtualStick
 var _score_label: Label
+var _points_label: Label
 var _speed_label: Label
+var _chain_label: Label
 var _over_layer: Control
 var _shake := 0.0
+var _flash := 0.0
+var _flashing := false
 
 
 func _ready_world() -> void:
@@ -54,7 +68,9 @@ func _ready_world() -> void:
 	lane_x = HorseRunner.lane_x(lane)
 	horse.position = Vector3(lane_x, 0.0, START_Z)
 	_score_label.text = "0 m"
+	_points_label.text = "0"
 	_speed_label.text = "0.0"
+	_chain_label.text = NO_CHAIN
 	hide_loading()
 
 
@@ -240,14 +256,24 @@ func _build_ui() -> void:
 	hud_root.add_child(column)
 	var title := Ui.label("♞  PFERDE-PARCOURS 3D", 22, UiTheme.TEXT, true)
 	column.add_child(title)
-	_score_label = _value(column, "Strecke", "0 m", Color("facc15"))
+	_score_label = _value(column, "Strecke", "0 m", SCORE_COLOR)
+	_points_label = _value(column, "Punkte", "0", SCORE_COLOR)
 	_speed_label = _value(column, "Tempo", "0.0", UiTheme.TEXT)
+	_chain_label = _value(column, "Kette", NO_CHAIN, Color("f97316"))
 
 	var hint := Ui.label("Stick oder ◀ ▶ zum Spurwechsel · ▲ springen", 15, UiTheme.TEXT_DIM)
-	hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	hint.position = Vector2(0, -130)
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hud_root.add_child(hint)
+	_hint(hint, -164)
+	var graze_hint := Ui.label("Knapp vorbei an einem Block zahlt Punkte und baut die Kette", 15, Color("fb923c"))
+	_hint(graze_hint, -132)
+
+
+## A centred line above the touch controls. The y offset is counted from the
+## bottom edge because the preset anchors the label there.
+func _hint(label: Label, offset_y: float) -> void:
+	label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	label.position = Vector2(0, offset_y)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hud_root.add_child(label)
 
 
 func _value(parent: VBoxContainer, caption: String, value: String, color: Color) -> Label:
@@ -291,8 +317,10 @@ func _update_world(delta: float) -> void:
 		on_ground = true
 	var height := maxf(feet, 0.0)
 
-	distance += speed * dt
-	score = int(distance * 10.0)
+	var step: float = speed * dt
+	distance += step
+	_expire_chain(step)
+	score = int(distance * 10.0) + points
 	gallop += dt * (6.0 + speed * 0.35)
 
 	horse.position = Vector3(lane_x, height, START_Z)
@@ -306,9 +334,21 @@ func _update_world(delta: float) -> void:
 	_update_obstacles(dt, difficulty, speed, height)
 	_update_scenery(dt, speed)
 	_follow(dt)
+	_update_flash(dt)
 
 	_score_label.text = "%d m" % int(distance)
+	_points_label.text = Ui.format_number(score)
 	_speed_label.text = "%.1f" % speed
+
+
+## Lets the score row light up for a moment when a graze paid out.
+func _update_flash(dt: float) -> void:
+	_flash = maxf(0.0, _flash - dt)
+	var flashing: bool = _flash > 0.0
+	if flashing == _flashing:
+		return
+	_flashing = flashing
+	_points_label.add_theme_color_override("font_color", FLASH_COLOR if flashing else SCORE_COLOR)
 
 
 func _animate_horse(dt: float, grounded: bool, speed: float) -> void:
@@ -327,6 +367,7 @@ func _update_obstacles(dt: float, difficulty: Dictionary, speed: float, height: 
 	for obstacle in obstacles:
 		var node: Node3D = obstacle["node"]
 		if bool(obstacle["active"]):
+			var previous_z: float = node.position.z
 			node.position.z += speed * dt
 			if node.position.z > DESPAWN_Z:
 				obstacle["active"] = false
@@ -336,11 +377,54 @@ func _update_obstacles(dt: float, difficulty: Dictionary, speed: float, height: 
 			if invuln <= 0.0 and HorseRunner.collides(lane_x, height, START_Z, float(obstacle["x"]), node.position.z, spec):
 				_hit()
 				continue
+			# The frame the obstacle crosses the horse is the frame of the
+			# smallest distance, so a graze is judged exactly there.
+			if previous_z < START_Z and node.position.z >= START_Z:
+				_judge_pass(float(obstacle["x"]), spec, height)
 	# Spawn a new row when the gap demands it.
 	next_spawn_z += speed * dt
 	if next_spawn_z > SPAWN_Z + HorseRunner.spawn_gap(difficulty):
 		next_spawn_z = SPAWN_Z
 		_spawn_row(difficulty)
+
+
+## How one obstacle went past: a graze pays, a touch ends the run.
+func _judge_pass(obstacle_x: float, spec: Dictionary, height: float) -> void:
+	match HorseRunner.pass_of(lane_x, height, obstacle_x, spec):
+		HorseRunner.PASS_HIT:
+			if invuln <= 0.0:
+				_hit()
+		HorseRunner.PASS_NEAR:
+			_graze()
+
+
+## Skims count, chain grows, chain pays. A near miss is the only way to make
+## more than the metres are worth, so it is the reason to ride the line between
+## two blocks instead of always taking the empty lane.
+func _graze() -> void:
+	chain += 1
+	since_graze = 0.0
+	grazes += 1
+	best_chain = maxi(best_chain, chain)
+	var bonus: int = HorseRunner.chain_bonus(chain)
+	points += bonus
+	_flash = FLASH_TIME
+	Sfx.kill()
+	_chain_label.text = "%d · %s" % [chain, Ui.format_number(bonus)]
+	if chain == 1 or chain % 5 == 0:
+		notify("KNAPP VORBEI  ×%d   +%s" % [chain, Ui.format_number(bonus)], 1.3)
+
+
+## Bleeds one link per `CHAIN_HOLD` metres without a graze, so the bonus has to
+## be re-earned instead of being collected once.
+func _expire_chain(step: float) -> void:
+	since_graze += step
+	var lost: int = HorseRunner.chain_after(since_graze)
+	if lost <= 0:
+		return
+	chain = maxi(0, chain - lost)
+	since_graze = fmod(since_graze, HorseRunner.CHAIN_HOLD)
+	_chain_label.text = ("%d · %s" % [chain, Ui.format_number(HorseRunner.chain_bonus(chain))]) if chain > 0 else NO_CHAIN
 
 
 func _spawn_row(difficulty: Dictionary) -> void:
@@ -419,5 +503,6 @@ func _end_run() -> void:
 	center.add_child(column)
 	column.add_child(Ui.title("Sturz", 48, Color("f87171")))
 	column.add_child(Ui.label("Strecke: %d m   ·   Punkte: %s   ·   Bestwert: %d m" % [int(distance), Ui.format_number(score), maxi(highscore, int(distance))], 20, UiTheme.TEXT))
+	column.add_child(Ui.label("Knapp vorbei: %d   ·   längste Kette: %d" % [grazes, best_chain], 18, Color("fb923c")))
 	column.add_child(Ui.button("Nochmal", Vector2(340, 56), UiTheme.ACCENT, func() -> void: Router.go_to(screen_id)))
 	column.add_child(Ui.button("Lobby", Vector2(340, 56), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))
