@@ -210,6 +210,17 @@ const GAMES: Array[Dictionary] = [
 		"category": CATEGORY_PUZZLE,
 		"highscore_key": Game.HS_2048,
 	},
+	{
+		"id": "siedler",
+		"name": "Siedler 3D",
+		"description": "Aufbauspiel nach Die Siedler: Fahnen und Träger tragen deine Waren, Werkzeuge und Minen hungern.",
+		"icon": "⌂",
+		"screen": "siedler",
+		"accent": Color(0.518, 0.8, 0.086),
+		"accent_hex": 0x84cc16,
+		"category": CATEGORY_BOARD,
+		"highscore_key": Game.HS_SIEDLER,
+	},
 ]
 
 

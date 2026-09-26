@@ -25,6 +25,10 @@ func run(kit: TestKit) -> void:
 	_suite(_flight_genetics)
 	_suite(_flight_stats)
 	_suite(_flight_profile)
+	_suite(_siedler_map)
+	_suite(_siedler_chains)
+	_suite(_siedler_roads)
+	_suite(_siedler_economy)
 
 
 ## Runs one suite and fails it if it returned before its own `t.suite_done()`,
@@ -837,4 +841,463 @@ func _flight_profile() -> void:
 	t.equal(int(reloaded["gold"]), cost, "Gold überlebt das Speichern")
 	DragonFlight.reset_profile()
 	DragonFlight.save_path = real_path
+	t.suite_done()
+
+
+# --- Siedler 3D --------------------------------------------------------------
+#
+# Ports of the browser build's Siedler suites, plus the invariants that were
+# found to be load-bearing while porting: the opening kit has to break the
+# iron/food chicken-and-egg, a road has to accept buildings and water as its
+# endpoints, and a settler must keep their tool.
+
+## A ready game with a fixed seed, so every expectation below is stable.
+func _siedler(seed_value: int = 21, size: int = 44) -> Siedler:
+	var siedler := Siedler.new()
+	siedler.setup(seed_value, size)
+	return siedler
+
+
+## Nearest free cell of a terrain kind within `max_r` tiles of the castle.
+func _cell_near(siedler: Siedler, res: String, max_r: int = 4) -> int:
+	var castle_cell: int = siedler.buildings[siedler.castle_id]["cell"]
+	var cx: int = castle_cell % siedler.map_size
+	var cy: int = castle_cell / siedler.map_size
+	for r in range(1, max_r + 1):
+		for dy in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				if maxi(absi(dx), absi(dy)) != r:
+					continue
+				var x := cx + dx
+				var y := cy + dy
+				if not siedler.in_bounds(x, y):
+					continue
+				var index := siedler.cell_index(x, y)
+				var cell: Dictionary = siedler.cells[index]
+				if str(cell["res"]) != res:
+					continue
+				if int(cell["building"]) >= 0 or int(cell["flag"]) >= 0:
+					continue
+				return index
+	return -1
+
+
+func _run(siedler: Siedler, seconds: float) -> void:
+	var steps := int(seconds * 30.0)
+	for i in steps:
+		siedler.tick(1.0 / 30.0)
+
+
+func _siedler_map() -> void:
+	t.suite("Siedler — Insel")
+
+	# Deterministic for a seed, different across seeds.
+	var a := Siedler.new()
+	a.generate(7, 30)
+	var b := Siedler.new()
+	b.generate(7, 30)
+	var c := Siedler.new()
+	c.generate(8, 30)
+	var sig_a := ""
+	var sig_c := ""
+	for i in a.cells.size():
+		sig_a += "%s:%d" % [a.cells[i]["res"], int(a.cells[i]["height"] * 10.0)]
+		sig_c += "%s:%d" % [c.cells[i]["res"], int(c.cells[i]["height"] * 10.0)]
+	var sig_b := ""
+	for i in b.cells.size():
+		sig_b += "%s:%d" % [b.cells[i]["res"], int(b.cells[i]["height"] * 10.0)]
+	t.equal(sig_a, sig_b, "Gleicher Seed, gleiche Insel")
+	t.check(sig_a != sig_c, "Anderer Seed, andere Insel")
+
+	# Land, Wasser und jede Lagerstätte, die die Wirtschaft braucht.
+	var counts: Dictionary = {}
+	for cell in a.cells:
+		counts[str(cell["res"])] = int(counts.get(str(cell["res"]), 0)) + 1
+	for res in ["grass", "water", "forest", "stone", "coal", "iron", "gold"]:
+		t.check(int(counts.get(res, 0)) > 0, "Es gibt '%s'" % res)
+
+	# Offenes Wasser trägt einen Fischgrund, sonst könnte keine Fischerhütte
+	# arbeiten.
+	var water := 0
+	for cell in a.cells:
+		if str(cell["res"]) == "water" and int(cell["amount"]) > 0:
+			water += 1
+	t.check(water > 0, "Wasser hat einen abbaubaren Fischbestand")
+	t.equal(int(counts.get("water", 0)), water, "Jedes Wasserfeld ist fischbar")
+
+	# Genau eine Spielerburg, dazu Rivalen.
+	var siedler := _siedler()
+	var castles := 0
+	var rival_castles := 0
+	for building in siedler.buildings:
+		if str(building["kind"]) == "castle" and str(building["owner"]) == "player":
+			castles += 1
+		if str(building["kind"]) == "castle" and str(building["owner"]) == "rival":
+			rival_castles += 1
+	t.equal(castles, 1, "Es gibt genau eine Spielerburg")
+	t.check(rival_castles >= 1, "Es gibt mindestens eine Rivalenburg")
+	t.check(siedler.in_territory(int(siedler.buildings[siedler.castle_id]["cell"])),
+		"Die Burg liegt im eigenen Territorium")
+	t.check(siedler.edges.size() > 0, "Am Anfang steht bereits eine Straße")
+	t.suite_done()
+
+
+func _siedler_chains() -> void:
+	t.suite("Siedler — Produktionsketten")
+
+	# Welches Gebäude erzeugt welche Ware?
+	var producers: Dictionary = {}
+	for kind in Siedler.buildable_kinds():
+		var spec := Siedler.spec_of(kind)
+		for good in (spec["outputs"] as Dictionary):
+			if int(spec["outputs"][good]) > 0:
+				producers[good] = true
+	# Die Schlosserei macht alle neun Werkzeuge.
+	for tool in Siedler.TOOLS:
+		producers[tool] = true
+
+	# Jede verbrauchte Ware hat einen Erzeuger — keine Kette darf ins Leere laufen.
+	var orphans: Array[String] = []
+	for kind in Siedler.buildable_kinds():
+		for good in (Siedler.spec_of(kind)["inputs"] as Dictionary):
+			if not producers.has(good):
+				orphans.append("%s <- %s" % [kind, good])
+	t.equal(orphans.size(), 0, "Jede verbrauchte Ware hat einen Erzeuger")
+
+	# Die dokumentierten Ketten aus Siedler 1.
+	t.equal(Siedler.spec_of("sawmill")["inputs"], {"logs": 2}, "Schreiner verbraucht Stämme")
+	t.equal(Siedler.spec_of("windmill")["inputs"], {"grain": 2}, "Mühle verbraucht Korn")
+	t.equal(Siedler.spec_of("bakery")["inputs"], {"flour": 2}, "Bäckerei verbraucht Mehl")
+	t.equal(Siedler.spec_of("smelter")["inputs"], {"ironOre": 1, "coal": 1}, "Schmelze braucht Erz und Kohle")
+	t.equal(Siedler.spec_of("toolsmith")["inputs"], {"iron": 1, "logs": 1},
+		"Schlosserei schmiedet aus 1 Eisen + 1 Holz")
+	t.equal(Siedler.spec_of("blacksmith")["inputs"], {"iron": 1, "coal": 1}, "Schmiede braucht Erz und Kohle")
+	t.equal(Siedler.spec_of("goldsmith")["inputs"], {"goldOre": 1, "coal": 1}, "Goldschmiede braucht Gold und Kohle")
+	t.equal(Siedler.TOOLS.size(), 9, "Neun Werkzeuge wie im Original")
+
+	# Acht Werkzeuge trägt ein Arbeitsplatz; die Schaufel gehört dem Planierer,
+	# der vor dem Bauen eine Fläche ebnet.
+	var users: Dictionary = {}
+	for kind in Siedler.buildable_kinds():
+		var tool := str(Siedler.spec_of(kind)["tool"])
+		if tool != "":
+			users[tool] = true
+	for tool in Siedler.TOOLS:
+		if tool == "shovel":
+			continue
+		t.check(users.has(tool), "Werkzeug '%s' wird benutzt" % tool)
+	t.check(not users.has("shovel"), "Die Schaufel gehört dem Planierer, keinem Arbeitsplatz")
+
+	# Nahrungsmittel und Werkzeuge sind sauber getrennt.
+	for food in Siedler.FOODS:
+		t.check(Siedler.is_food_good(food), "'%s' ist Nahrung" % food)
+	for tool in Siedler.TOOLS:
+		t.check(Siedler.is_tool_good(tool), "'%s' ist ein Werkzeug" % tool)
+	t.check(not Siedler.is_food_good("logs"), "Stämme sind keine Nahrung")
+
+	# Jedes Gebäude hat Namen, Beschreibung und Zyklus.
+	for kind in Siedler.KINDS:
+		var spec := Siedler.spec_of(kind)
+		t.check(not str(spec["name"]).is_empty(), "%s hat einen Namen" % kind)
+		t.check(not str(spec["desc"]).is_empty(), "%s hat eine Beschreibung" % kind)
+		t.check(float(spec["cycle"]) > 0.0, "%s hat einen Zyklus" % kind)
+		t.check(AssetRegistry.exists(str(Siedler.MESH_BY_KIND[kind])), "%s hat ein Mesh" % kind)
+	t.suite_done()
+
+
+func _siedler_roads() -> void:
+	t.suite("Siedler — Fahnen und Straßen")
+
+	# Fahnen wachsen mit der Länge — die Regel des Originals.
+	t.equal(Siedler.flags_for(1.0), 2, "Ein Feld braucht zwei Fahnen")
+	t.equal(Siedler.flags_for(float(Siedler.FLAG_SPACING)), 2, "Am Flaggenabstand zwei Fahnen")
+	t.check(Siedler.flags_for(float(Siedler.FLAG_SPACING) + 1.0) > 2, "Darüber kommt eine dritte Fahne dazu")
+	t.check(Siedler.flags_for(float(Siedler.FLAG_SPACING) * 3.0) > Siedler.flags_for(float(Siedler.FLAG_SPACING)),
+		"Längere Straßen brauchen mehr Fahnen")
+
+	# Eine Straße verbindet Burg und Ziel und setzt Fahnen. Das Ziel liegt
+	# bewusst weit weg, damit mehrere Fahne-zu-Fahne-Abschnitte entstehen.
+	var siedler := _siedler()
+	var castle_cell: int = siedler.buildings[siedler.castle_id]["cell"]
+	var target := _cell_near(siedler, "grass", 4)
+	t.check(target >= 0, "Es gibt ein Zielfeld")
+	var result := siedler.build_road(castle_cell, target)
+	t.check(bool(result["ok"]), "Straße von der Burg wird gebaut")
+	var flags := 0
+	for node in siedler.nodes:
+		if bool(node["flag"]):
+			flags += 1
+	t.check(flags >= 1, "Die Straße hat mindestens eine Fahne")
+	t.check(int(result["flags"]) >= 1, "Die Meldung zählt die gesetzten Fahnen mit")
+
+	# Eine ausgedehnte Straße über mehrere Felder.
+	var far_cell := -1
+	var far_reach := 0
+	for i in siedler.cells.size():
+		var cell: Dictionary = siedler.cells[i]
+		if str(cell["res"]) != "grass" or int(cell["building"]) >= 0 or int(cell["flag"]) >= 0:
+			continue
+		var d: int = maxi(absi(i % siedler.map_size - castle_cell % siedler.map_size),
+			absi(i / siedler.map_size - castle_cell / siedler.map_size))
+		if d > far_reach:
+			far_reach = d
+			far_cell = i
+	var long_result := {}
+	if far_cell >= 0:
+		long_result = siedler.build_road(castle_cell, far_cell)
+		t.check(bool(long_result["ok"]), "Eine lange Straße lässt sich bauen")
+		t.check(int(long_result["flags"]) >= 3, "Eine lange Straße bekommt mehrere Fahnen")
+
+	# Jedes Straßensegment trägt mindestens einen, höchstens die Höchstzahl an
+	# Trägern.
+	var road_edges := 0
+	for edge in siedler.edges:
+		if str(edge["kind"]) != "road":
+			continue
+		road_edges += 1
+		var count: int = (edge["carriers"] as Array).size()
+		t.check(count >= 1, "Jede Straße hat Träger")
+		t.check(count <= Siedler.MAX_CARRIERS_PER_ROAD, "Trägerzahl bleibt im Rahmen")
+	t.check(road_edges > 0, "Es gibt Straßensegmente")
+
+	# Eine zusätzliche Fahne erhöht den Durchsatz.
+	var before := 0
+	for edge in siedler.edges:
+		if str(edge["kind"]) == "road":
+			before += (edge["carriers"] as Array).size()
+	var linked: Array[int] = []
+	for edge in siedler.edges:
+		if str(edge["kind"]) == "road":
+			linked.append(int(siedler.nodes[int(edge["a"])]["cell"]))
+			linked.append(int(siedler.nodes[int(edge["b"])]["cell"]))
+	var placed := false
+	for cell in linked:
+		if placed:
+			break
+		for offset in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var x: int = cell % siedler.map_size + offset.x
+			var y: int = cell / siedler.map_size + offset.y
+			if not siedler.in_bounds(x, y):
+				continue
+			var index := siedler.cell_index(x, y)
+			if str(siedler.cells[index]["res"]) == "water":
+				continue
+			if int(siedler.cells[index]["flag"]) >= 0 or int(siedler.cells[index]["building"]) >= 0:
+				continue
+			if siedler.add_flag(index):
+				placed = true
+			break
+	t.check(placed, "Eine Extra-Fahne lässt sich setzen")
+	var after := 0
+	for edge in siedler.edges:
+		if str(edge["kind"]) == "road":
+			after += (edge["carriers"] as Array).size()
+	t.check(after > before, "Die Extra-Fahne erhöht die Trägerzahl")
+
+	# Wasser blockiert, ausser es ist das Ziel — eine Fischerhütte liegt ja im
+	# See.
+	var water_cell := -1
+	var land_cell := -1
+	for i in siedler.cells.size():
+		if str(siedler.cells[i]["res"]) == "water" and water_cell < 0:
+			water_cell = i
+		if str(siedler.cells[i]["res"]) == "grass" and int(siedler.cells[i]["building"]) < 0 and land_cell < 0:
+			land_cell = i
+	if water_cell >= 0 and land_cell >= 0:
+		var blocked := siedler.build_road(land_cell, water_cell)
+		var water_distance := Vector2(
+			float(water_cell % siedler.map_size - land_cell % siedler.map_size),
+			float(water_cell / siedler.map_size - land_cell / siedler.map_size)
+		).length()
+		if water_distance >= 12.0:
+			t.check(not bool(blocked["ok"]), "Wasser blockiert den direkten Weg")
+			t.check(not str(blocked["reason"]).is_empty(), "Der Grund steht im Weg-Meldung")
+
+	# Die Priorität verteilt die Träger neu.
+	var first_road := {}
+	for edge in siedler.edges:
+		if str(edge["kind"]) == "road":
+			first_road = edge
+			break
+	if not first_road.is_empty():
+		var low: int = (first_road["carriers"] as Array).size()
+		siedler.set_road_priority(int(first_road["id"]), 0)
+		var fewer: int = (siedler.edges[int(first_road["id"])]["carriers"] as Array).size()
+		siedler.set_road_priority(int(first_road["id"]), 8)
+		var more: int = (siedler.edges[int(first_road["id"])]["carriers"] as Array).size()
+		t.check(fewer <= low, "Niedrige Priorität nimmt Träger weg")
+		t.check(more >= fewer, "Hohe Priorität gibt Träger dazu")
+
+	for edge in siedler.edges:
+		t.check(siedler.edge_throughput(int(edge["id"])) >= 0.0, "Durchsatz ist messbar")
+	t.suite_done()
+
+
+func _siedler_economy() -> void:
+	t.suite("Siedler — Wirtschaft")
+
+	# Das Startpaket muss den klassischen-Zyklus brechen: Minen essen, die
+	# Nahrungskette braucht eine Sense, eine Sense braucht Eisen, und Eisen
+	# braucht eine abgebaute Lagerstätte.
+	var siedler := _siedler()
+	t.check(int(siedler.store.get("pickaxe", 0)) > 0,
+		"Ohne Spitzhacke ginge keine Mine auf, und damit kein Eisen")
+	t.check(int(siedler.store.get("hammer", 0)) > 0, "Es gibt Hammer für den ersten Bau")
+	t.check(int(siedler.store.get("axe", 0)) > 0, "Es gibt eine Axt für den ersten Holzfäller")
+	t.check(siedler.food_pieces() > 0, "Die Vorratskammer ist nicht leer")
+
+	# Siedler werden bis zur Obergrenze ausgebildet, nicht darüber.
+	_run(siedler, 6.0)
+	t.equal(siedler.current_serfs(), Siedler.CASTLE_SERFS, "Die Burg stellt zehn Siedler an")
+	t.equal(siedler.serf_quota(), Siedler.CASTLE_SERFS, "Ohne Lager bleibt die Grenze bei zehn")
+
+	# Ein Lager hebt die Grenze.
+	siedler.store["planks"] = 200
+	var plot := _cell_near(siedler, "grass", 4)
+	if plot >= 0 and siedler.place_building("warehouse", plot):
+		siedler.build_road(int(siedler.buildings[siedler.castle_id]["cell"]), plot)
+		_run(siedler, 20.0)
+		t.equal(siedler.serf_quota(), Siedler.CASTLE_SERFS + Siedler.WAREHOUSE_SERFS,
+			"Ein Lager erlaubt sechs weitere Siedler")
+		t.check(siedler.current_serfs() > Siedler.CASTLE_SERFS, "Die Burg bildet daraufhin nach")
+
+	# Das Werkzeug entscheidet über die Arbeit. Die Axt muss verschwunden
+	# sein, *bevor* der Holzfäller bezogen wird — ein Siedler, der sie schon
+	# hält, behält sie (Werkzeug ist persönliche Ausrüstung, kein Verbrauch).
+	var tool_state := _siedler()
+	tool_state.store["axe"] = 0
+	var forest := _cell_near(tool_state, "forest", 4)
+	if forest >= 0:
+		tool_state.place_building("woodcutter", forest)
+		_run(tool_state, 16.0)
+		var cutter := {}
+		for building in tool_state.buildings:
+			if str(building["kind"]) == "woodcutter":
+				cutter = building
+		if not cutter.is_empty():
+			t.equal(str(cutter["status"]), "noTool", "Ohne Axt arbeitet der Holzfäller nicht")
+			tool_state.store["axe"] = 1
+			_run(tool_state, 16.0)
+			t.check(str(cutter["status"]) != "noTool", "Mit Axt arbeitet er wieder")
+
+	# Ein Siedler behält sein Werkzeug, es wird nicht verbraucht.
+	var keep := _siedler()
+	var stand := _cell_near(keep, "grass", 4)
+	if stand >= 0:
+		keep.place_building("sawmill", stand)
+		_run(keep, 25.0)
+		var holders := 0
+		for serf in keep.serfs:
+			if str(serf["tool"]) == "hammer":
+				holders += 1
+		t.check(holders > 0, "Der Erbauer behält seinen Hammer")
+		var hammers := int(keep.store.get("hammer", 0))
+		_run(keep, 30.0)
+		t.equal(int(keep.store.get("hammer", 0)), hammers, "Kein Hammer verschwindet pro Zyklus")
+
+	# Eine vollständige Siedlung: Waren fließen wirklich über die Straßen.
+	var run_state := _siedler(21, 44)
+	run_state.store["planks"] = 200
+	run_state.store["stone"] = 200
+	var wood := _cell_near(run_state, "forest", 4)
+	var rock := _cell_near(run_state, "stone", 4)
+	var mill := _cell_near(run_state, "grass", 4)
+	if wood >= 0:
+		run_state.place_building("woodcutter", wood)
+	if rock >= 0:
+		run_state.place_building("quarry", rock)
+	if mill >= 0:
+		run_state.place_building("sawmill", mill)
+	for building in run_state.buildings:
+		if str(building["owner"]) == "player" and str(building["kind"]) != "castle":
+			run_state.build_road(int(run_state.buildings[run_state.castle_id]["cell"]), int(building["cell"]))
+	var before_score := run_state.score()
+	_run(run_state, 100.0)
+	t.check(run_state.delivered_total > 0, "Es wurde Ware zugestellt")
+	t.check(run_state.produced_total > 0, "Es wurde Ware produziert")
+	t.check(run_state.score() > before_score, "Die Punktzahl steigt")
+
+	# Ware ohne Abnehmer wird gemeldet statt still zu verschwinden.
+	var orphan_state := _siedler()
+	var lone := _cell_near(orphan_state, "forest", 4)
+	if lone >= 0:
+		orphan_state.place_building("woodcutter", lone)
+		_run(orphan_state, 30.0)
+		var orphans := orphan_state.orphan_goods()
+		t.check(orphans.has("logs"), "Stämme ohne Schreiner werden als 'kein Abnehmer' gemeldet")
+		t.check(orphans.has("grain"), "Korn ohne Mühle wird gemeldet")
+
+	# Der Förster macht einen leeren Wald wieder auf.
+	var forest_state := _siedler()
+	var target_forest := _cell_near(forest_state, "forest", 4)
+	if target_forest >= 0:
+		t.check(int(forest_state.cells[target_forest]["amount"]) > 0, "Der Wald ist anfangs voller Stämme")
+		forest_state.cells[target_forest]["amount"] = 0
+		var size := forest_state.map_size
+		var fx: int = target_forest % size
+		var fy: int = target_forest / size
+		var nursery := -1
+		for r in range(1, 4):
+			if nursery >= 0:
+				break
+			for dy in range(-r, r + 1):
+				if nursery >= 0:
+					break
+				for dx in range(-r, r + 1):
+					var index := forest_state.cell_index(clampi(fx + dx, 0, size - 1), clampi(fy + dy, 0, size - 1))
+					var cell: Dictionary = forest_state.cells[index]
+					if str(cell["res"]) != "grass" or int(cell["building"]) >= 0 or int(cell["flag"]) >= 0:
+						continue
+					nursery = index
+					break
+		if nursery >= 0 and forest_state.place_building("forester", nursery):
+			forest_state.build_road(int(forest_state.buildings[forest_state.castle_id]["cell"]), nursery)
+			_run(forest_state, 60.0)
+			t.check(int(forest_state.cells[target_forest]["amount"]) > 0, "Der Förster pflanzt nach")
+
+	# Territorium wächst nur über einen besetzten Wachturm.
+	var military := _siedler()
+	for building in military.buildings:
+		if str(building["kind"]) == "watchtower":
+			building["garrison"] = 0
+	military.refresh_territory()
+	var without := military.territory_share()
+	for building in military.buildings:
+		if str(building["kind"]) == "watchtower":
+			building["garrison"] = 2
+	military.refresh_territory()
+	t.check(military.territory_share() >= without, "Ein besetzter Wachturm erweitert das Territorium")
+
+	# Ein zugestelltes Schwert und Schild wird zum Ritter.
+	var armed := _siedler()
+	armed.store["sword"] = 1
+	armed.store["shield"] = 1
+	var knights_before := armed.knights
+	armed.tick(1.0 / 30.0)
+	t.equal(armed.knights, knights_before + 1, "Schwert und Schild werden zu einem Ritter")
+	t.equal(int(armed.store.get("sword", 0)), 0, "Das Schwert wird verbraucht")
+
+	# Die Angriffsmoral steigt mit Gold, ist aber gedeckelt.
+	var rich := _siedler()
+	var plain := rich.attack_morale()
+	rich.store["goldBar"] = 500
+	t.check(rich.attack_morale() > plain, "Gold hebt die Moral")
+	t.check(rich.attack_morale() <= 1.8, "Die Moral ist gedeckelt")
+
+	# tick bleibt stabil.
+	var stable := _siedler(21, 40)
+	stable.tick(1.0)
+	var first := stable.time
+	stable.tick(1000.0)
+	t.check(stable.time - first <= 0.26, "Ein riesiger Schritt wird begrenzt")
+	stable.won = true
+	var frozen := stable.time
+	stable.tick(1.0)
+	t.equal(stable.time, frozen, "Nach dem Ende steht die Uhr still")
+	_run(stable, 30.0)
+	for cell in stable.cells:
+		t.check(int(cell["amount"]) >= 0, "Kein Lagerstätte wird negativ")
+		break
+	for good in Siedler.GOODS:
+		t.check(int(stable.store.get(good, 0)) >= 0, "'%s' wird nicht negativ" % good)
 	t.suite_done()
