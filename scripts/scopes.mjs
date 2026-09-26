@@ -91,9 +91,10 @@ const VARIANT_BASE = {
  * The `Screens` sweep is driven separately, by `screens` below.
  */
 const SCOPE_SUITES = {
-  arena: ['PlayerStats', 'Arena — Spielablauf', 'Arena — Wellenvorschau', 'Arena — Kill-Ketten', 'Arena — Dash'],
+  arena: ['PlayerStats', 'Arena — Spielablauf', 'Arena — Wellenvorschau', 'Arena — Kill-Ketten', 'Arena — Dash',
+    'Arena — Level-Angebote', 'Arena — Kennzahl-Schreibweisen'],
   tetris: ['Tetris — Eingabe', 'Tetris — Punktewertung', 'Tetris — T-Spin-Erkennung',
-    'Tetris — Vorschaukette', 'Tetris — Brettgefahr'],
+    'Tetris — Vorschaukette', 'Tetris — Brettgefahr', 'Tetris — Drehen & Wall-Kicks'],
   poker: ['Karten & Texas Hold\'em', 'Kartenspiele — Eingabe',
     'Poker — Persönlichkeiten', 'Poker — Tisches lesen', 'Poker — Typen-Bilanz'],
   freecell: ['Kartenspiele — Eingabe', 'FreeCell — Folgen', 'FreeCell — Supermove-Kapazität',
@@ -113,7 +114,7 @@ const SCOPE_SUITES = {
     'Drachenflug — Allele', 'Drachenflug — Blutbild', 'Drachenflug — Zuchtziel',
     'Drachenflug — Beste Paarung', 'Drachenflug — Ei-Vorschau',
   ],
-  pang: ['Pang', 'Pang — Treffer', 'Pang — Doppelgriff', 'Pang — Kugelbudget'],
+  pang: ['Pang', 'Pang — Treffer', 'Pang — Doppelgriff', 'Pang — Kugelbudget', 'Pang — Wellenwarnung'],
   metro3d: [
     'Metropol 3D — Regeln', 'Metropol 3D — Netz', 'Metropol 3D — Wirtschaft',
     'Metropol 3D — Screen', 'Metropol 3D — Linienbau', 'Metropol 3D — Spielablauf',
@@ -127,13 +128,15 @@ const SCOPE_SUITES = {
     'Candy Crush — Level', 'Candy Crush — Tageslevel', 'Candy Crush — Belohnungen',
     'Candy Crush — Undo', 'Candy Crush — Momente',
     'Candy Crush — Frame-Takt', 'Candy Crush — Ergebnisbildschirm', 'Candy Crush — Spielablauf',
+    'Candy Crush — Kombinationen',
   ],
   siedler: ['Siedler — Insel', 'Siedler — Produktionsketten', 'Siedler — Fahnen und Straßen',
     'Siedler — Wirtschaft', 'Siedler — Ratgeber: Erzeuger', 'Siedler — Ratgeber: Stillstand',
     'Siedler — Ratgeber: Rangfolge', 'Siedler — Ratgeber: Taktgleichheit',
     'Siedler — Ratgeber: Handlung', 'Siedler — Handelswege: Messung',
     'Siedler — Handelswege: Bericht', 'Siedler — Handelswege: Optimierung',
-    'Siedler — Handelswege: Ware und Wert', 'Siedler — Handelswege: Streckenteilung'],
+    'Siedler — Handelswege: Ware und Wert', 'Siedler — Handelswege: Streckenteilung',
+    'Siedler — Ratgeber: Lagerplatz'],
   meshes: ['Asset-Registry', 'Mesh-Galerie', 'Mesh — Detailstufen', 'Mesh-Galerie — Anordnung',
     'Mesh-Galerie — Merkliste'],
   lobby: ['Lobby-Geometrie', 'Vorschlagsdialog'],

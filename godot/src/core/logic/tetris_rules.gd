@@ -1,17 +1,22 @@
 class_name TetrisRules
 extends RefCounted
-## Scoring, T-Spin detection and board-threat rules for Tetris.
+## Scoring, T-Spin detection, rotation (Super Rotation System) and board-threat
+## rules for Tetris.
 ##
 ## The screen owns the animation; everything that decides *whether a move was
-## skilful and what it is worth* lives here so it can be unit tested without a
-## viewport.
+## skilful, what it is worth and where a piece may turn* lives here so it can be
+## unit tested without a viewport.
 ##
 ## Reference: the modern Tetris Guideline scoring model (T-Spin via the
 ## three-corner rule, Back-to-Back for difficult clears, combo for consecutive
-## line clears, Perfect Clear for a completely wiped well).
+## line clears, Perfect Clear for a completely wiped well) and its Super
+## Rotation System (four rotation states, per-piece kick tables).
 
 ## `TetrisScreen.PIECES` index of the T piece.
 const T_PIECE_TYPE := 5
+
+## `TetrisScreen.PIECES` index of the I piece; it gets its own kick table.
+const I_PIECE_TYPE := 0
 
 ## Points for a line clear before level and difficulty bonuses.
 const LINE_SCORES: Array[int] = [0, 100, 300, 500, 800]
@@ -263,4 +268,244 @@ static func preview_count(value: int) -> int:
 	for option in PREVIEW_OPTIONS:
 		if absi(option - value) < absi(best - value):
 			best = option
+	return best
+
+
+# --- Rotation: the Super Rotation System -------------------------------------
+#
+# A piece has four states, 0 (the one it spawns in), R, 2 and L, and a turn is
+# never just "rotate and hope": the guideline shifts the piece by a table of
+# five offsets and takes the first one that fits. Those offsets are the whole
+# reason a T-Spin is possible at all — a T that rotates flush into a wall has to
+# be *lifted* out of it, and only the table knows by how much. Without them the
+# T-Spin scoring, the Back-to-Back chain and the spin preview in the HUD are
+# unreachable code.
+#
+# The tables are published with y pointing **up**; the board counts its rows
+# down, so `kicks()` flips the sign on the way out.
+
+## The four rotation states, in turn order. Every piece spawns in 0.
+const STATE_0 := 0
+const STATE_R := 1
+const STATE_2 := 2
+const STATE_L := 3
+
+## Kick offsets for the J, L, S, T and Z, one list per turn. First the plain
+## rotation, then the four offsets that may rescue it.
+const KICKS_JLSTZ := {
+	"0>1": [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]],
+	"1>0": [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]],
+	"1>2": [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]],
+	"2>1": [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]],
+	"2>3": [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]],
+	"3>2": [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]],
+	"3>0": [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]],
+	"0>3": [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]],
+}
+
+## The I rotates about a different point and therefore kicks differently: it is
+## the only piece that may move two cells sideways.
+const KICKS_I := {
+	"0>1": [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2]],
+	"1>0": [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]],
+	"1>2": [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]],
+	"2>1": [[0, 0], [1, 0], [-2, 0], [1, -2], [-2, 1]],
+	"2>3": [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]],
+	"3>2": [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2]],
+	"3>0": [[0, 0], [1, 0], [-2, 0], [1, -2], [-2, 1]],
+	"0>3": [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]],
+}
+
+
+## The matrix `matrix` turned a quarter turn. Squares only — which is what the
+## SRS boxes are — and rigid: the box keeps its size and every block keeps its
+## place in it, so a turn never loses or moves a cell on its own.
+static func rotate_matrix(matrix: Array, clockwise: bool) -> Array:
+	var n := matrix.size()
+	var out: Array = []
+	for y in n:
+		var row: Array = []
+		for x in n:
+			row.append(1 if clockwise else 0)
+		out.append(row)
+	for y in n:
+		for x in n:
+			if clockwise:
+				out[y][x] = int((matrix[n - 1 - x] as Array)[y])
+			else:
+				out[y][x] = int((matrix[x] as Array)[n - 1 - y])
+	return out
+
+
+## How many cells of the matrix are set — the invariant a rotation must keep.
+static func cell_count(matrix: Array) -> int:
+	var count := 0
+	for row in matrix:
+		for value in row:
+			if int(value) != 0:
+				count += 1
+	return count
+
+
+## The state a turn out of `state` leads to: 0 → R → 2 → L → 0 clockwise, and
+## back the other way anticlockwise.
+static func next_state(state: int, clockwise: bool) -> int:
+	return posmod(state + (1 if clockwise else 3), 4)
+
+
+## The short name the tables and the HUD use for a state.
+static func state_name(state: int) -> String:
+	return ["0", "R", "2", "L"][posmod(state, 4)]
+
+
+## The five kick offsets of one turn, in board coordinates: x to the right, y
+## downwards. Empty for a half turn: the guideline tabulates the four quarter
+## turns, and the game only ever turns a quarter (`next_state` steps by one).
+static func kicks(piece_type: int, from_state: int, to_state: int) -> Array[Vector2i]:
+	var table: Dictionary = KICKS_I if piece_type == I_PIECE_TYPE else KICKS_JLSTZ
+	var entries: Array = table.get("%d>%d" % [from_state, to_state], [])
+	var out: Array[Vector2i] = []
+	for entry in entries:
+		out.append(Vector2i(int(entry[0]), -int(entry[1])))
+	return out
+
+
+## True for the eight quarter turns, the only ones the tables describe.
+static func is_quarter_turn(from_state: int, to_state: int) -> bool:
+	var step := posmod(to_state - from_state, 4)
+	return step == 1 or step == 3
+
+
+## A kick in words, for the hint in the HUD: "Kick ↓2" or "ohne Kick".
+static func kick_text(kick: Vector2i) -> String:
+	if kick == Vector2i.ZERO:
+		return "ohne Kick"
+	var parts: Array[String] = []
+	if kick.x < 0:
+		parts.append("←%d" % -kick.x)
+	elif kick.x > 0:
+		parts.append("→%d" % kick.x)
+	if kick.y < 0:
+		parts.append("↑%d" % -kick.y)
+	elif kick.y > 0:
+		parts.append("↓%d" % kick.y)
+	return "Kick " + "+".join(parts)
+
+
+## The topmost row of the matrix that holds a block, or the matrix height when it
+## is empty.
+static func top_row(matrix: Array) -> int:
+	for y in matrix.size():
+		for value in matrix[y] as Array:
+			if int(value) != 0:
+				return y
+	return matrix.size()
+
+
+## True when the piece may stand there: clear of the walls and the floor, and not
+## lifted out over the ceiling. `collides` answers the first part — the screen
+## passes its own `_collides`, which treats the space above the well as free, so
+## an upward kick has to be stopped here.
+static func _fits(matrix: Array, x: int, y: int, collides: Callable) -> bool:
+	if y + top_row(matrix) < 0:
+		return false
+	return not bool(collides.call(matrix, x, y))
+
+
+## Plan a turn. The first kick that fits wins, exactly as the guideline asks, so
+## the same call both moves the piece and tells the player which offset paid off.
+## Empty when the piece cannot be turned at all — then the screen leaves it be.
+static func plan_rotation(piece_type: int, state: int, x: int, y: int, matrix: Array, clockwise: bool, collides: Callable) -> Dictionary:
+	var to_state := next_state(state, clockwise)
+	var turned := rotate_matrix(matrix, clockwise)
+	for kick in kicks(piece_type, state, to_state):
+		var nx := x + kick.x
+		var ny := y + kick.y
+		if not _fits(turned, nx, ny, collides):
+			continue
+		return {"matrix": turned, "x": nx, "y": ny, "state": to_state, "kick": kick}
+	return {}
+
+
+## How far the piece falls from `(x, y)`, in rows.
+static func drop_distance(matrix: Array, x: int, y: int, collides: Callable) -> int:
+	var distance := 0
+	while _fits(matrix, x, y + distance + 1, collides):
+		distance += 1
+	return distance
+
+
+## How many rows the piece would complete where it stands: a row becomes full
+## when the piece covers exactly the cells that were still empty. `row_holes` is
+## the well's free cells per row, so the preview needs no copy of the board.
+static func rows_completed(matrix: Array, x: int, y: int, row_holes: Array) -> int:
+	var per_row := {}
+	for py in matrix.size():
+		for px in (matrix[py] as Array).size():
+			if int((matrix[py] as Array)[px]) == 0:
+				continue
+			var row: int = y + int(py)
+			if row < 0:
+				continue
+			per_row[row] = int(per_row.get(row, 0)) + 1
+	var cleared := 0
+	for row in per_row:
+		var cells := int(per_row[row])
+		if cells > 0 and row < row_holes.size() and int(row_holes[row]) == cells:
+			cleared += 1
+	return cleared
+
+
+## The name a T-Spin gets, e.g. "T-Spin Double".
+static func spin_name(spin: String, rows: int) -> String:
+	var name := "T-Spin Mini" if spin == "mini" else "T-Spin"
+	if rows > 0:
+		name += " " + ["", "Single", "Double", "Triple", "Quad"][clampi(rows, 1, 4)]
+	return name
+
+
+## The turn the player should make *right now* to score a T-Spin, and the place
+## the piece would come to rest afterwards. Empty when neither turn spins.
+##
+## This is what turns the kick tables from hidden plumbing into a decision: a
+## player no longer has to know them by heart to see that the T fits into the
+## notch. The turn with the most rows wins, a full spin beating a mini, and the
+## result carries the kick so the board can draw the landing spot.
+static func spin_preview(piece_type: int, state: int, x: int, y: int, matrix: Array, row_holes: Array, filled_at: Callable, collides: Callable) -> Dictionary:
+	if piece_type != T_PIECE_TYPE:
+		return {}
+	var best := {}
+	var best_rows := -1
+	var best_full := false
+	for clockwise in [true, false]:
+		var plan := plan_rotation(piece_type, state, x, y, matrix, clockwise, collides)
+		if plan.is_empty():
+			continue
+		var landing: int = int(plan["y"]) + drop_distance(plan["matrix"], int(plan["x"]), int(plan["y"]), collides)
+		var corners := t_corners(int(plan["x"]), landing, filled_at)
+		if not is_t_spin(piece_type, true, corners):
+			continue
+		var full := not is_t_spin_mini(corners)
+		var rows := rows_completed(plan["matrix"], int(plan["x"]), landing, row_holes)
+		if rows < best_rows or (rows == best_rows and best_full and not full):
+			continue
+		best_rows = rows
+		best_full = full
+		var spin := "full" if full else "mini"
+		best = {
+			"matrix": plan["matrix"],
+			"x": int(plan["x"]),
+			"y": landing,
+			"from_state": state,
+			"state": int(plan["state"]),
+			"kick": plan["kick"],
+			"spin": spin,
+			"rows": rows,
+			"label": "%s  ·  %s→%s  %s" % [
+				spin_name(spin, rows),
+				state_name(state),
+				state_name(int(plan["state"])),
+				kick_text(plan["kick"]),
+			],
+		}
 	return best

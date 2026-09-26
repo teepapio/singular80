@@ -17,7 +17,6 @@ const BOSS_INTERVAL := 120.0
 const WAVE_DURATION := 30.0
 const SPAWN_MARGIN := 60.0
 
-const RARITY_WEIGHT := {"common": 10.0, "uncommon": 6.0, "rare": 3.0, "epic": 1.5}
 const RARITY_COLOR := {
 	"common": Color(0.392, 0.455, 0.545),
 	"uncommon": Color(0.133, 0.773, 0.369),
@@ -164,6 +163,9 @@ var sparks: Array[Spark] = []
 var mechanics: Array[Mechanic] = []
 var upgrade_stacks: Dictionary = {}
 var pending_choices: Array[Dictionary] = []
+## Which of the three offers the game would take. `confirm` follows it, because
+## on a keyboard there is no other way to reach the second or third card.
+var recommended := -1
 
 var player_pos := Vector2(ARENA_W * 0.5, ARENA_H * 0.5)
 var aim_dir := Vector2.RIGHT
@@ -249,6 +251,7 @@ func _reset_state() -> void:
 	game_ended = false
 	upgrade_stacks.clear()
 	pending_choices.clear()
+	recommended = -1
 	mechanics.clear()
 
 
@@ -409,7 +412,9 @@ func _process(delta: float) -> void:
 	if Input.is_action_just_pressed("pause"):
 		toggle_pause()
 	if Input.is_action_just_pressed("confirm") and choosing_upgrade and not pending_choices.is_empty():
-		_choose_upgrade(0)
+		# The keyboard has no key for card two or three, so confirm takes the
+		# one the draft marked — the player still decides by tapping a card.
+		_choose_upgrade(recommended if recommended >= 0 else 0)
 	if paused or choosing_upgrade:
 		return
 
@@ -822,43 +827,41 @@ func _gain_xp(amount: float) -> void:
 		_show_upgrade_choices()
 
 
+## The level-up draft: three offers, three directions, each one readable.
+##
+## A raw weighted draw is not a decision — two of three cards used to be
+## variations of the same number, and none of them said what it was worth.
+## The draft therefore keeps one card per stat, puts the numbers each card
+## changes on the card itself and marks the strongest one.
 func _pick_upgrade_choices() -> Array[Dictionary]:
 	var pool: Array[Dictionary] = []
 	for upgrade in Content.upgrades:
 		if int(upgrade.get("minLevel", 1)) <= stats.level and int(upgrade_stacks.get(str(upgrade["id"]), 0)) < int(upgrade.get("maxStacks", 99)):
 			pool.append(upgrade)
-	var picks: Array[Dictionary] = []
-	var available: Array = pool.duplicate()
-	while picks.size() < 3 and not available.is_empty():
-		var total := 0.0
-		for upgrade in available:
-			total += float(RARITY_WEIGHT.get(str((upgrade as Dictionary).get("rarity", "common")), 1.0))
-		var roll := randf() * total
-		var index := 0
-		for i in available.size():
-			roll -= float(RARITY_WEIGHT.get(str((available[i] as Dictionary).get("rarity", "common")), 1.0))
-			if roll <= 0.0:
-				index = i
-				break
-		picks.append(available[index])
-		available.remove_at(index)
-	while picks.size() < 3:
-		picks.append({
-			"id": "heal_%d" % picks.size(),
-			"name": "Reparatur",
-			"description": "+25 Leben",
-			"stat": "hp",
-			"amount": 25,
-			"maxStacks": 99,
-			"rarity": "common",
-			"minLevel": 1,
-		})
+	var picks := ArenaRuns.weighted_draft(
+		ArenaRuns.one_per_stat(pool, upgrade_stacks), ArenaRuns.DRAFT_SIZE, _draft_rolls()
+	)
+	# The pool can be smaller than the row: exhausted upgrades, and a level 1
+	# whose cards are all still locked, both do it. The rest is then healing —
+	# in three different sizes instead of three copies of the same button.
+	while picks.size() < ArenaRuns.DRAFT_SIZE:
+		picks.append(ArenaRuns.repair_offer(stats, picks.size()))
 	return picks
+
+
+## The random numbers the weighted draw consumes, gathered here so the rule in
+## `ArenaRuns` stays a pure function of them.
+func _draft_rolls() -> PackedFloat32Array:
+	var rolls := PackedFloat32Array()
+	for i in ArenaRuns.DRAFT_SIZE:
+		rolls.append(randf())
+	return rolls
 
 
 func _show_upgrade_choices() -> void:
 	choosing_upgrade = true
 	pending_choices = _pick_upgrade_choices()
+	recommended = ArenaRuns.best_offer_index(pending_choices, stats)
 	var layer := modal()
 	layer.add_child(Ui.backdrop(0.74))
 
@@ -866,59 +869,108 @@ func _show_upgrade_choices() -> void:
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	layer.add_child(center)
 
-	var column := Ui.vbox(20)
+	var column := Ui.vbox(18)
 	center.add_child(column)
 	column.add_child(Ui.title("Level %d — Upgrade wählen" % stats.level, 32))
+
+	# What the draft is worth, in one line, before a single card is read.
+	var headline := ArenaRuns.draft_headline(pending_choices, stats)
+	if headline != "":
+		var summary := Ui.label(headline, 17, UiTheme.TEXT_DIM)
+		summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		column.add_child(summary)
 
 	var row := Ui.hbox(22)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	column.add_child(row)
 
 	for index in pending_choices.size():
-		var upgrade: Dictionary = pending_choices[index]
-		var rarity := str(upgrade.get("rarity", "common"))
-		var stacks := int(upgrade_stacks.get(str(upgrade["id"]), 0))
-		var tint: Color = RARITY_COLOR.get(rarity, UiTheme.BORDER)
-		var button := Ui.button("", Vector2(300, 244), UiTheme.PANEL, func() -> void: _choose_upgrade(index))
-		button.add_theme_stylebox_override("normal", UiTheme.flat(Color(0.059, 0.090, 0.165, 0.97), tint, 14, 3))
-		button.add_theme_stylebox_override("hover", UiTheme.flat(Color(0.090, 0.125, 0.212, 0.99), tint, 14, 3))
-		button.add_theme_stylebox_override("pressed", UiTheme.flat(Color(0.039, 0.063, 0.114, 0.99), tint, 14, 3))
-		row.add_child(button)
+		var card_button := _build_offer_card(index)
+		if card_button != null:
+			row.add_child(card_button)
 
-		var card := Ui.vbox(6)
-		card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		card.offset_left = 14
-		card.offset_right = -14
-		card.offset_top = 16
-		card.offset_bottom = -16
-		card.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		button.add_child(card)
+	# Both input paths say what they do: tap the card you want, or let the
+	# strongest one be taken.
+	var footer := Ui.label("Karte antippen = wählen   ·   Bestätigen = stärkstes Angebot", 14, UiTheme.TEXT_MUTED)
+	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(footer)
 
-		var name_label := Ui.label(str(upgrade.get("name", "")), 21, UiTheme.TEXT, true)
-		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		card.add_child(name_label)
-		card.add_child(Ui.spacer(Vector2(0, 10)))
 
-		var description := Ui.label(str(upgrade.get("description", "")), 16, UiTheme.TEXT_DIM)
-		description.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		description.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		card.add_child(description)
+## One offer as a button with the numbers on it: name, axis and stacks, the
+## before → after pair, the description and a bar that makes the three worth
+## comparable at a glance. The strongest card carries a badge and a brighter
+## frame, so "what would make sense now" is answered without arithmetic.
+func _build_offer_card(index: int) -> Button:
+	if index < 0 or index >= pending_choices.size():
+		return null
+	var upgrade: Dictionary = pending_choices[index]
+	var rarity := str(upgrade.get("rarity", "common"))
+	var stacks := int(upgrade_stacks.get(str(upgrade["id"]), 0))
+	var tint: Color = RARITY_COLOR.get(rarity, UiTheme.BORDER)
+	var is_best := index == recommended
+	var accent: Color = UiTheme.ACCENT if is_best else tint
 
-		var meta := rarity.to_upper()
-		if int(upgrade.get("maxStacks", 99)) < 90:
-			meta += "  ·  %d/%d" % [stacks, int(upgrade["maxStacks"])]
-		meta += "\n[%d]" % (index + 1)
-		var meta_label := Ui.label(meta, 14, UiTheme.TEXT_MUTED)
-		meta_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		card.add_child(meta_label)
+	var button := Ui.button("", Vector2(316, 274), UiTheme.PANEL, func() -> void: _choose_upgrade(index))
+	button.add_theme_stylebox_override("normal", UiTheme.flat(Color(0.059, 0.090, 0.165, 0.97), accent, 14, 4 if is_best else 3))
+	button.add_theme_stylebox_override("hover", UiTheme.flat(Color(0.090, 0.125, 0.212, 0.99), UiTheme.ACCENT, 14, 4))
+	button.add_theme_stylebox_override("pressed", UiTheme.flat(Color(0.039, 0.063, 0.114, 0.99), accent, 14, 4))
+
+	var card := Ui.vbox(7)
+	card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	card.offset_left = 14
+	card.offset_right = -14
+	card.offset_top = 14
+	card.offset_bottom = -14
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(card)
+
+	var name_label := Ui.label(str(upgrade.get("name", "")), 21, UiTheme.TEXT, true)
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	card.add_child(name_label)
+
+	# What kind of card this is, and how often it has been taken already.
+	var meta := "STÄRKSTES  ·  " if is_best else ""
+	meta += ArenaRuns.axis_label(upgrade).to_upper()
+	if int(upgrade.get("maxStacks", 99)) < 90:
+		meta += "  ·  %d/%d" % [stacks, int(upgrade["maxStacks"])]
+	var meta_label := Ui.label(meta, 13, UiTheme.ACCENT if is_best else UiTheme.TEXT_MUTED, true)
+	meta_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	card.add_child(meta_label)
+
+	# The pair the player compares. A stat the draft does not know leaves this
+	# empty instead of printing a line that says nothing.
+	var effect := ArenaRuns.effect_text(upgrade, stats, weapon)
+	if effect != "":
+		var effect_label := Ui.label(effect, 19, accent, true)
+		effect_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		effect_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		card.add_child(effect_label)
+
+	var description := Ui.label(str(upgrade.get("description", "")), 15, UiTheme.TEXT_DIM)
+	description.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	description.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	card.add_child(description)
+
+	card.add_child(Ui.spacer(Vector2(0, 4)))
+
+	# Three bars of different length say more than three numbers with a legend.
+	# No "[1]" hint on a card: the game binds a key to the recommendation, not
+	# to a position, so a number there would promise an input that does not
+	# exist.
+	var power := ArenaRuns.effect_value(upgrade, stats)
+	var bar := Ui.bar(accent, 9.0)
+	bar.custom_minimum_size = Vector2(0, 9.0)
+	Ui.set_bar(bar, ArenaRuns.effect_ratio(power), accent)
+	card.add_child(bar)
+	return button
 
 
 func _choose_upgrade(index: int) -> void:
 	if not choosing_upgrade or index < 0 or index >= pending_choices.size():
 		return
-	stats.apply_upgrade(pending_choices[index])
+	stats.apply_upgrade(ArenaRuns.applied_form(pending_choices[index]))
 	var id := str(pending_choices[index]["id"])
 	upgrade_stacks[id] = int(upgrade_stacks.get(id, 0)) + 1
 	Sfx.merge()
@@ -926,6 +978,7 @@ func _choose_upgrade(index: int) -> void:
 	close_modals()
 	choosing_upgrade = false
 	pending_choices.clear()
+	recommended = -1
 	if pending_level_ups > 0:
 		_show_upgrade_choices.call_deferred()
 

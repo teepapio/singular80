@@ -107,6 +107,14 @@ func _run() -> void:
 		TestDragonFlight.new().run(kit)
 	if _wants_class("res://tests/test_candy_match3.gd", only):
 		TestCandyMatch3.new().run(kit)
+	if _wants_class("res://tests/test_tetris.gd", only):
+		# Loaded by path, like the screen suites around it: `--script` mode does
+		# not refresh the global class cache, so a class added today is unknown
+		# until the next `godot:import`. The tetris rules suite is synchronous,
+		# so there is nothing to await.
+		var tetris_suite: GDScript = load("res://tests/test_tetris.gd")
+		if tetris_suite != null:
+			tetris_suite.new().run(kit)
 	if _wants_class("res://tests/test_candy3d.gd", only):
 		# By path, like the screen suites around it: `--script` mode does not
 		# refresh the global class cache, so a class added today is unknown

@@ -12,7 +12,10 @@ extends WorldScreen
 ## Bewusst besser als 1993 (das Original kritisierte man vor allem für seine
 ## steile Lernkurve und den unsichtbaren Zustand): jedes Gebäude sagt, **warum**
 ## es stillsteht, eine Ware ohne Abnehmer wird gemeldet statt still zu
-## verstopfen, und jede Straße zeigt ihren Durchsatz.
+## verstopfen, und jede Straße zeigt ihren Durchsatz. Dazu die eine Zahl, an der
+## Siedler-Veteranen als Erstes den Speicherplatz der Burg vermissen: das Lager
+## ist endlich, ein Lagerhaus erweitert ihn wirklich, und ist die Kammer voll,
+## steht die Zahl im Kopf — samt der Ware, die den Platz frisst.
 ##
 ## Darstellung:
 ##  - das Gelände ist **ein** `ArrayMesh` mit Vertexfarben, kein Mesh je Feld
@@ -1043,6 +1046,7 @@ func _sync_carriers() -> void:
 
 func _update_stats() -> void:
 	var food := siedler.food_pieces()
+	var store := siedler.store_report()
 	var lines: Array[String] = [
 		"Bauholz %d · Bauholzstämme %d" % [int(siedler.store.get("planks", 0)), int(siedler.store.get("logs", 0))],
 		"Stein %d · Kohle %d · Eisen %d" % [
@@ -1052,6 +1056,17 @@ func _update_stats() -> void:
 		],
 		"Werkzeuge %d" % _tool_count(),
 	]
+	# Die Lagerzeile steht über der Nahrung, weil sie dieselbe Frage beantwortet:
+	# Wie viel ist da, und wie viel geht noch hinein? Ohne sie sieht der Spieler
+	# eine prall gefüllte Burg erst dann, wenn nichts mehr hineinpasst. Die Zahl
+	# der abgewiesenen Lieferungen steht hier und nicht auf der Ratgeber-Karte,
+	# denn sie zählt im Sekundentakt weiter.
+	if bool(store["full"]):
+		lines.append("Lager voll: %d von %d Plätzen · %d Lieferungen abgewiesen" % [
+			int(store["used"]), int(store["capacity"]), int(store["refused_total"]),
+		])
+	else:
+		lines.append("Lager %d von %d Plätzen" % [int(store["used"]), int(store["capacity"])])
 	if food <= 0:
 		lines.append("Nahrung 0 — Minen hungern!")
 	else:
@@ -1426,6 +1441,21 @@ func _update_inspector() -> void:
 	if not rival:
 		status_color = UiTheme.SUCCESS if str(building["status"]) == "ok" else UiTheme.WARNING
 	_inspector_body.add_child(_row("Zustand", status_text, status_color))
+	# Die Burg *ist* die Vorratskammer. Deshalb steht hier der Lagerplatz, und
+	# nicht irgendein Warenbestand: eine volle Kammer nimmt keine Lieferung mehr
+	# an, und das sieht man sonst erst an der Stau-Zeile.
+	if not rival and str(building["kind"]) == "castle":
+		var store := siedler.store_report()
+		_inspector_body.add_child(_row(
+			"Lager", "%d von %d Plätzen" % [int(store["used"]), int(store["capacity"])],
+			UiTheme.DANGER if bool(store["full"]) else UiTheme.TEXT
+		))
+		if int(store["refused_total"]) > 0:
+			_inspector_body.add_child(_row(
+				"Vor dem Tor", "%d Lieferungen abgewiesen, %d warten" % [
+					int(store["refused_total"]), int(store["stuck"]),
+				], UiTheme.WARNING
+			))
 	if int(spec["workers"]) > 0:
 		_inspector_body.add_child(_row("Siedler", "%d/%d" % [int(building["workers"]), int(spec["workers"])], UiTheme.TEXT))
 	if str(spec["tool"]) != "":

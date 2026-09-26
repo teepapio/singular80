@@ -50,7 +50,9 @@ func _build_chrome() -> void:
 
 	column.add_child(Ui.title("PANG 3D", 44, UiTheme.ACCENT))
 	column.add_child(Ui.label("Spieß alle Kugeln auf, bevor die Zeit abläuft.", 17, UiTheme.TEXT_DIM))
-	column.add_child(Ui.label("Ab Level %d kommt Nachschub von der Decke." % Pang.WAVE_FIRST_LEVEL, 15, Color("f472b6")))
+	column.add_child(Ui.label(
+		"Ab Level %d kündigt sich der Nachschub an; die Karte nennt die Seite." % Pang.WAVE_FIRST_LEVEL, 15, Color("f472b6")
+	))
 	_page_label = Ui.label("", 16, UiTheme.TEXT_DIM)
 	_page_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(_page_label)
@@ -138,6 +140,13 @@ func _level_card(level: int) -> Control:
 	var count := Ui.label(count_text, 13, UiTheme.TEXT_DIM)
 	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(count)
+
+	# Which flank a wave arrives over is half the battle in that level, so the
+	# card says it up front instead of letting the player find out on the floor.
+	if waves > 0:
+		var flanks := Ui.label("Nachschub: " + Pang.wave_flanks_label(level), 12, Color("f472b6"))
+		flanks.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		column.add_child(flanks)
 
 	var record := Ui.label("%.1f s" % best if best > 0.0 else "—", 18, Color("facc15") if best > 0.0 else UiTheme.TEXT_MUTED, true)
 	record.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

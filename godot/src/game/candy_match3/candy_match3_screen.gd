@@ -4,8 +4,11 @@ extends WorldScreen
 ##
 ## Swap two neighbours to line up three candies; matches clear, the board refills
 ## and cascades score more the longer they chain. Four in a row creates a striped
-## candy, an L/T a wrapped one and five in a row a colour bomb. The rules live in
-## `candy_match3.gd`, this screen only draws them and feeds the input.
+## candy, an L/T a wrapped one and five in a row a colour bomb. Swapping two
+## special candies into each other combines them — the rules live in
+## `candy_match3.gd`, this screen only draws them and feeds the input. It also
+## shows what a combination would clear while the player holds one of them, so
+## the table can be read off the board instead of guessed.
 ##
 ## The board stands upright in the XY plane (like a board game) with the camera in
 ## front of it — that keeps the pieces readable on a phone and lets the touch
@@ -15,6 +18,9 @@ const CELL := 1.0
 const PIECE_SCALE := 0.74
 const SELECTED_SCALE := 1.24
 const HINT_SCALE := 1.14
+## How much a candy grows when it is part of the combination the player is
+## holding together — the preview has to be loud enough to read as one shape.
+const COMBO_SCALE := 1.18
 const SWAP_TIME := 0.17
 const STEP_TIME := 0.3
 const DRAG_THRESHOLD := 26.0
@@ -30,6 +36,11 @@ var state: Dictionary = {}
 var mode: int = MODE_SELECT
 var selected: int = -1
 var hint_cells: PackedInt32Array = PackedInt32Array()
+## The cells the combination with the selected candy would clear, as a set: the
+## preview is asked for on a tap and read every frame, so a lookup beats a scan.
+var combo_set: Dictionary = {}
+## The name the board announces for that combination, e.g. "Dreifachblitz".
+var combo_label: String = ""
 var hint_until: float = 0.0
 var swap_back: Dictionary = {}
 var steps: Array = []
@@ -225,6 +236,7 @@ func _apply_level(level: Dictionary) -> void:
 	selected = -1
 	ring.visible = false
 	hint_cells = PackedInt32Array()
+	_clear_combo()
 	swap_back = {}
 	steps = []
 	undo_stack = []
@@ -887,6 +899,7 @@ func _pointer_down(screen_position: Vector2) -> void:
 	if cell < 0:
 		selected = -1
 		ring.visible = false
+		_clear_combo()
 		return
 	Sfx.select()
 	if selected >= 0 and selected != cell:
@@ -894,12 +907,53 @@ func _pointer_down(screen_position: Vector2) -> void:
 			var from := selected
 			selected = -1
 			ring.visible = false
+			_clear_combo()
 			_try_swap(from, cell)
 			_drag_from = -1
 			return
 	selected = cell
 	ring.position = _cell_position(cell)
 	ring.visible = true
+	_show_combo_partners(cell)
+
+
+## Marks what the selected candy would blow up if it met a special neighbour, so
+## the combination table can be read off the board instead of guessed. Only a
+## tap builds this; the frame loop just asks the set. A candy with more than one
+## partner announces the biggest of them.
+func _show_combo_partners(cell: int) -> void:
+	_clear_combo()
+	var board: Dictionary = state["board"]
+	var specials: Array = board["specials"]
+	if specials[cell] == CandyMatch3.SPECIAL_NONE:
+		return
+	var col := CandyMatch3.col_of(cell)
+	var row := CandyMatch3.row_of(cell)
+	var biggest := 0
+	for step: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var c: int = col + step.x
+		var r: int = row + step.y
+		if c < 0 or c >= CandyMatch3.COLS or r < 0 or r >= CandyMatch3.ROWS:
+			continue
+		var other := CandyMatch3.cell_index(c, r)
+		if not CandyMatch3.has_candy(board, other) or specials[other] == CandyMatch3.SPECIAL_NONE:
+			continue
+		var blast := CandyMatch3.combo_blast(board, cell, other)
+		if blast.is_empty():
+			continue
+		for target in blast:
+			combo_set[target] = true
+		if blast.size() > biggest:
+			biggest = blast.size()
+			combo_label = CandyMatch3.combo_name(CandyMatch3.combo_kind(specials[cell], specials[other]))
+	if biggest == 0:
+		return
+	_toast("Kombination möglich: %s" % combo_label)
+
+
+func _clear_combo() -> void:
+	combo_set.clear()
+	combo_label = ""
 
 
 func _pointer_move(screen_position: Vector2) -> void:
@@ -934,6 +988,7 @@ func _try_swap(a: int, b: int) -> void:
 	selected = -1
 	ring.visible = false
 	hint_cells = PackedInt32Array()
+	_clear_combo()
 
 	if outcome.is_empty():
 		# Illegal swap: the pieces bounce and come back.
@@ -956,7 +1011,10 @@ func _try_swap(a: int, b: int) -> void:
 	pieces[a] = view_b
 	Sfx.hit()
 	state["movesLeft"] = int(state["movesLeft"]) - 1
-	steps = CandyMatch3.continue_cascades(state, outcome["step"])
+	var combo := int(outcome["combo"])
+	steps = CandyMatch3.continue_cascades(state, outcome["step"], combo)
+	if combo != CandyMatch3.COMBO_NONE:
+		_toast("%s!" % CandyMatch3.combo_name(combo), 2.4)
 	step_timer = clock + SWAP_TIME
 	mode = MODE_BUSY
 
@@ -974,6 +1032,7 @@ func _undo() -> void:
 	selected = -1
 	ring.visible = false
 	hint_cells = PackedInt32Array()
+	_clear_combo()
 	mode = MODE_SELECT
 	Sfx.select()
 	_toast("Zug zurückgenommen")
@@ -987,6 +1046,7 @@ func _show_hint() -> void:
 	if swaps.is_empty():
 		_toast("Kein Zug möglich — das Brett wird gemischt.")
 		return
+	_clear_combo()
 	var swap: Dictionary = swaps[0]
 	hint_cells = PackedInt32Array([int((swap as Dictionary)["a"]), int((swap as Dictionary)["b"])])
 	hint_until = clock + 2.6
@@ -1013,6 +1073,7 @@ func _lose() -> void:
 
 
 func _finish_move() -> void:
+	_clear_combo()
 	_refresh()
 	if CandyMatch3.is_won(state):
 		_win()
@@ -1170,7 +1231,9 @@ func _update_world(delta: float) -> void:
 		position = position.lerp(target, ease)
 		var is_selected: bool = int(cell) == selected
 		var is_hint: bool = hinting and hint_cells.has(int(cell))
-		var wanted: float = PIECE_SCALE * (SELECTED_SCALE if is_selected else (HINT_SCALE if is_hint else 1.0))
+		var is_combo: bool = combo_set.has(cell)
+		var wanted: float = PIECE_SCALE * (SELECTED_SCALE if is_selected else
+			(HINT_SCALE if is_hint else (COMBO_SCALE if is_combo else 1.0)))
 		var current: float = lerpf(float(view["scale"]), wanted, minf(1.0, dt * 12.0))
 		var dying: float = float(view["dying"])
 		if dying > 0.0:

@@ -1,7 +1,8 @@
 class_name TetrisScreen
 extends Screen
-## Tetris — bag randomiser, hold slot, ghost piece, DAS/ARR handling and the
-## Perfect Clear celebration for a completely wiped well.
+## Tetris — bag randomiser, hold slot, ghost piece, DAS/ARR handling, the Super
+## Rotation System and the Perfect Clear celebration for a completely wiped
+## well.
 ## Port of `scenes/TetrisScene.ts`.
 
 const COLS := 10
@@ -14,10 +15,13 @@ const BOARD_H := ROWS * CELL
 const DAS := 0.15
 const ARR := 0.045
 const SOFT_DROP := 0.045
-const ROTATION_KICKS := [0, -1, 1, -2, 2]
 
 ## Gold of a wiped well: the headline, the bonus and the glow in the well.
 const PERFECT_COLOR := Color("fde68a")
+
+## Violet of a T-Spin: the announcement, the landing spot of the turn that
+## scores, and the hint that names the turn.
+const SPIN_COLOR := Color("c084fc")
 
 ## The Perfect Clear announcement spans the whole stage, because a long line
 ## ("PERFECT CLEAR!  ·  QUAD  ·  B2B ×2") must not be cut off at the well.
@@ -66,6 +70,15 @@ var clear_message_color := Color("facc15")
 var clear_flash := 0.0
 var danger := 0
 
+# --- rotation (Super Rotation System) ---
+# Every piece remembers its state, because the kick a turn needs depends on
+# which way it points: 0 is the spawn state, then R, 2 and L.
+var spin_preview: Dictionary = {}
+# Free cells per row, cached for the preview: it asks every frame's worth of
+# "would this row be full", and counting empties is far cheaper than copying the
+# whole well.
+var row_holes: Array[int] = []
+
 # --- Perfect Clear ---
 # Wiping the well is the biggest moment the game has, so it gets its own
 # announcement, its own fanfare and a run counter the player can chase.
@@ -89,6 +102,7 @@ var _message_label: Label
 var _perfect_headline: Label
 var _perfect_bonus: Label
 var _preview_button: Button
+var _spin_hint: Label
 var _modal: Control
 
 
@@ -128,6 +142,16 @@ func _build_ui() -> void:
 	_danger_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_danger_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layer.add_child(_danger_label)
+
+	# Under the danger line: which turn would score a T-Spin right now, and what
+	# it brings. Without it a kick the player does not know by heart is invisible,
+	# and the whole T-Spin scoring stays theoretical.
+	_spin_hint = Ui.label("", 13, SPIN_COLOR, true)
+	_spin_hint.position = Vector2(18, 532)
+	_spin_hint.size = Vector2(238, 46)
+	_spin_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_spin_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	layer.add_child(_spin_hint)
 
 	# The clear announcement sits over the well so the eye stays on the board.
 	_message_label = Ui.label("", 30, Color("facc15"), true)
@@ -192,6 +216,10 @@ func _build_ui() -> void:
 
 ## German control reference, shown inside the pause overlay.
 const CONTROL_HELP := "← →  bewegen\n↓  sanft fallen\n↑ / W / X  drehen\nZ  gegen den Uhrzeigersinn\nLeertaste  hart fallen\nC / Shift  halten\nESC / P  Pause\nR  neu starten"
+
+## What the violet marks on the board mean, shown next to the control reference:
+## the kick tables are only fair if the game says what they do.
+const SPIN_HELP := "Violett: Rahmen und Geisterbild zeigen den\nT-Spin, den die nächste Drehung bringt — samt\nKick und Zeilenzahl. Die Drehung selbst ist\nes, die zählt; nötig ist sie immer."
 
 
 ## On-screen controls so the game is fully playable without a keyboard.
@@ -285,6 +313,7 @@ func reset_game() -> void:
 		for x in COLS:
 			row.append(0)
 		board.append(row)
+	_recompute_row_holes()
 	queue = []
 	hold_type = -1
 	can_hold = true
@@ -425,7 +454,12 @@ func _make_piece(type: int) -> Dictionary:
 	var matrix: Array = []
 	for row in source:
 		matrix.append((row as Array).duplicate())
-	return {"type": type, "matrix": matrix, "x": int(floor(float(COLS - (source[0] as Array).size()) * 0.5)), "y": 0}
+	# Every piece comes out of the hold slot and out of the queue pointing up, so
+	# the rotation state always starts at 0.
+	return {
+		"type": type, "matrix": matrix, "state": TetrisRules.STATE_0,
+		"x": int(floor(float(COLS - (source[0] as Array).size()) * 0.5)), "y": 0,
+	}
 
 
 func _spawn_next() -> void:
@@ -437,6 +471,7 @@ func _spawn_next() -> void:
 	if _collides(piece["matrix"], piece["x"], piece["y"]):
 		piece = {}
 		_trigger_game_over()
+	_update_spin_preview()
 
 
 func _hold_piece() -> void:
@@ -455,35 +490,51 @@ func _hold_piece() -> void:
 		if _collides(piece["matrix"], piece["x"], piece["y"]):
 			piece = {}
 			_trigger_game_over()
+	_update_spin_preview()
 
 
+## Turn the piece. The Super Rotation System decides *how far* it has to be
+## shoved for the turn to work, which is what makes a T-Spin out of a wall or a
+## floor possible; the rules own the tables, the screen only moves the piece and
+## remembers the new state.
 func _rotate(clockwise: bool) -> void:
 	if piece.is_empty():
 		return
-	var rotated := _rotate_matrix(piece["matrix"], clockwise)
-	for kick in ROTATION_KICKS:
-		if not _collides(rotated, int(piece["x"]) + int(kick), piece["y"]):
-			piece["matrix"] = rotated
-			piece["x"] = int(piece["x"]) + int(kick)
-			last_move_was_rotation = true
-			return
+	var plan := TetrisRules.plan_rotation(
+		int(piece["type"]), int(piece["state"]), int(piece["x"]), int(piece["y"]),
+		piece["matrix"] as Array, clockwise, _collides)
+	if plan.is_empty():
+		return
+	piece["matrix"] = plan["matrix"]
+	piece["x"] = int(plan["x"])
+	piece["y"] = int(plan["y"])
+	piece["state"] = int(plan["state"])
+	last_move_was_rotation = true
+	_update_spin_preview()
 
 
-func _rotate_matrix(matrix: Array, clockwise: bool) -> Array:
-	var n := matrix.size()
-	var out: Array = []
-	for y in n:
-		var row: Array = []
-		for x in n:
-			row.append(1 if clockwise else 0)
-		out.append(row)
-	for y in n:
-		for x in n:
-			if clockwise:
-				out[y][x] = int((matrix[n - 1 - x] as Array)[y])
-			else:
-				out[y][x] = int((matrix[x] as Array)[n - 1 - y])
-	return out
+## The turn that would score a T-Spin with the piece where it is now, and the
+## spot it would come to rest in. Cached rather than recomputed per frame: it
+## changes only when the piece or the well does, and the board view only reads
+## it.
+func _update_spin_preview() -> void:
+	spin_preview = {}
+	if piece.is_empty() or game_over:
+		return
+	spin_preview = TetrisRules.spin_preview(
+		int(piece["type"]), int(piece["state"]), int(piece["x"]), int(piece["y"]),
+		piece["matrix"] as Array, row_holes, _filled_at, _collides)
+
+
+## Count the free cells per row once, after the well changed.
+func _recompute_row_holes() -> void:
+	row_holes.clear()
+	for y in ROWS:
+		var empty_cells := 0
+		for x in COLS:
+			if int(board[y][x]) == 0:
+				empty_cells += 1
+		row_holes.append(empty_cells)
 
 
 func _try_move_down() -> bool:
@@ -493,6 +544,7 @@ func _try_move_down() -> bool:
 		return false
 	piece["y"] = int(piece["y"]) + 1
 	last_move_was_rotation = false
+	_update_spin_preview()
 	return true
 
 
@@ -558,8 +610,13 @@ func _lock_piece() -> void:
 	piece = {}
 	last_move_was_rotation = false
 	_clear_lines(spin)
+	# The well moved, so the free cells per row are stale — and the next piece's
+	# preview counts with them.
+	_recompute_row_holes()
 	if not game_over:
 		_spawn_next()
+	else:
+		_update_spin_preview()
 
 
 func _clear_lines(spin: String = "none") -> void:
@@ -614,7 +671,7 @@ func _clear_lines(spin: String = "none") -> void:
 ## The small line over the well that names an ordinary clear.
 func _announce_clear(award: Dictionary, spin: String) -> void:
 	clear_message = str(award["message"])
-	clear_message_color = Color("facc15") if spin == "none" else Color("c084fc")
+	clear_message_color = SPIN_COLOR if spin != "none" else Color("facc15")
 	clear_flash = clampf(float(award["flash"]), 0.2, 0.7)
 	if _message_label == null:
 		return
@@ -673,11 +730,14 @@ func _toggle_pause() -> void:
 		return
 	paused = not paused
 	if paused:
+		# The control reference and the explanation of the spin marks sit side by
+		# side; both are multi-line, so the overlay gets two columns.
+		var help: Array = [SPIN_HELP] + Array(CONTROL_HELP.split("\n"))
 		_show_overlay("Pause", UiTheme.TEXT, [
 			["Fortsetzen", func() -> void: _toggle_pause()],
 			["Neu starten", func() -> void: reset_game()],
 			["◀  Lobby", func() -> void: Router.to_lobby()],
-		], [CONTROL_HELP])
+		], help)
 	else:
 		close_modals()
 	_refresh()
@@ -746,6 +806,8 @@ func _refresh() -> void:
 		_perfect_stat_label.text = str(perfect_clears) if perfect_clears > 0 else "—"
 	danger = danger_level()
 	_danger_label.text = TetrisRules.danger_text(board)
+	if _spin_hint != null:
+		_spin_hint.text = str(spin_preview["label"]) if not spin_preview.is_empty() else ""
 	if _preview_button != null:
 		_preview_button.text = "Vorschau %d" % preview_size
 
@@ -756,6 +818,7 @@ func _move_h(dir: int) -> void:
 	if not _collides(piece["matrix"], int(piece["x"]) + dir, piece["y"]):
 		piece["x"] = int(piece["x"]) + dir
 		last_move_was_rotation = false
+		_update_spin_preview()
 
 
 ## Draws the well, the settled blocks, the ghost and the active piece.
@@ -793,12 +856,14 @@ class BoardView:
 		if not screen.piece.is_empty() and not screen.game_over:
 			var color: Color = (PIECES[int(screen.piece["type"])] as Dictionary)["color"]
 			_piece(screen.piece["matrix"], int(screen.piece["x"]), screen.ghost_y(), color, true)
-			# A T that is about to score spins into a violet frame while it is
-			# still up — the player can see the opportunity before committing.
-			var spin := screen.current_spin()
-			if spin != "none":
-				var ghost := screen.ghost_y()
-				_spin_frame(Vector2(BOARD_X + float(screen.piece["x"]) * CELL, BOARD_Y + float(ghost) * CELL), Color("c084fc"))
+			# The turn that would score, in violet: the piece's own ghost says
+			# "this is where it falls", the violet one says "this is where it
+			# falls if you rotate, and then the spin counts". Without it the kick
+			# tables are invisible and a T-Spin looks like bad luck.
+			var plan := screen.spin_preview
+			if not plan.is_empty():
+				_piece(plan["matrix"], int(plan["x"]), int(plan["y"]), SPIN_COLOR, true)
+				_spin_frame(Vector2(BOARD_X + float(plan["x"]) * CELL, BOARD_Y + float(plan["y"]) * CELL), SPIN_COLOR)
 			_piece(screen.piece["matrix"], int(screen.piece["x"]), int(screen.piece["y"]), color, false)
 
 		# A clear flashes the well, briefly and in the clear's own colour.
@@ -824,7 +889,8 @@ class BoardView:
 			_preview(chain[i], Vector2(CHAIN_X, CHAIN_Y + float(i) * CHAIN_STEP), CHAIN_CELL)
 		_preview(screen.hold_type, Vector2(CHAIN_X, HOLD_Y), 22.0)
 
-	## Outlines the ghost position of a T-Spin in the T's 3×3 box.
+	## Outlines the 3×3 box of a T that would score where it lands, so the slot
+	## the player has to aim at is visible as a frame and not just as a shape.
 	func _spin_frame(at: Vector2, color: Color) -> void:
 		draw_rect(Rect2(at - Vector2.ONE, Vector2(CELL * 3.0 + 2.0, CELL * 3.0 + 2.0)), Color(color.r, color.g, color.b, 0.55), false, 2.0)
 

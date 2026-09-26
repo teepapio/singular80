@@ -8,10 +8,24 @@ extends RefCounted
 ## its timers read and the panels it builds. Own file, so this game and the
 ## shared sweep in `test_screens.gd` never edit the same lines.
 ##
+## The combination table is the exception: its rules are pure too, but a rule
+## nobody can see on the board is a rule nobody uses — so table, preview and
+## result row are checked together in one suite.
+##
 ## The screen script is never referenced statically: a static reference would
 ## pull it into `run_tests.gd`'s compile chain, which happens before the
 ## autoloads are registered, and every autoload inside the screen would then
 ## fail to resolve. `test_metro_screens.gd` avoids the same trap the same way.
+
+## The two cells the combination tests fire from: column 3, rows 4 and 5.
+## Written as `row * 8 + col`, because that is what `cell_index` does.
+const _A := 4 * 8 + 3
+const _B := 5 * 8 + 3
+## A colour no other candy on the test board wears, and a cell that shares a row
+## with one of its candies but touches none of them — so a test can tell a line
+## from a square.
+const SPARSE := 6
+const _WATCH := 0 * 8 + 2
 
 var t: TestKit
 var _router: Node
@@ -33,6 +47,8 @@ func run(kit: TestKit, tree: SceneTree) -> void:
 	await _result_summary(tree)
 	t.close_suite()
 	_moments()
+	t.close_suite()
+	await _combinations(tree)
 	t.close_suite()
 
 
@@ -237,6 +253,371 @@ func _result_summary(tree: SceneTree) -> void:
 	t.check(text.contains(CandyMatch3.star_ordinal(3)), "Das Ergebnis nennt den fehlenden Stern")
 	t.check(text.contains(Ui.format_number(int((gap as Dictionary)["missing"]))), "Die Lücke ist als Zahl da")
 	t.suite_done()
+
+
+# --- combinations ------------------------------------------------------------
+
+## Two special candies swapped into each other are worth more together than
+## apart — and the player has to be able to *see* that before paying a move.
+## The rules of the table are pure, but they only mean something next to the
+## preview on the board and the peak in the result screen, so all three live in
+## one suite.
+func _combinations(tree: SceneTree) -> void:
+	t.suite("Candy Crush — Kombinationen")
+	_table()
+	_colour_bomb()
+	await _preview(tree)
+	t.suite_done()
+
+
+## Which two special kinds form which combination.
+func _table() -> void:
+	var m := CandyMatch3
+	t.equal(m.combo_kind(m.SPECIAL_NONE, m.SPECIAL_NONE), m.COMBO_NONE, "Zwei normale Bonbons kombinieren nicht")
+	t.equal(m.combo_kind(m.SPECIAL_ROW, m.SPECIAL_NONE), m.COMBO_NONE,
+		"Ein Spezialbonbon und ein normales Bonbon kombinieren nicht")
+	t.equal(m.combo_kind(m.SPECIAL_ROW, m.SPECIAL_ROW), m.COMBO_LINES, "Zwei gleichgerichtete Streifen: Dreifachblitz")
+	t.equal(m.combo_kind(m.SPECIAL_COL, m.SPECIAL_COL), m.COMBO_LINES, "Zwei senkrechte Streifen: Dreifachblitz")
+	t.equal(m.combo_kind(m.SPECIAL_ROW, m.SPECIAL_COL), m.COMBO_STAR, "Quer zueinander: Blitzkreuz")
+	t.equal(m.combo_kind(m.SPECIAL_ROW, m.SPECIAL_WRAPPED), m.COMBO_CROSS, "Verpackt mit Streifen: Kreuzfeuer")
+	t.equal(m.combo_kind(m.SPECIAL_WRAPPED, m.SPECIAL_WRAPPED), m.COMBO_SQUARE, "Zwei Verpackte: Detonation")
+	t.equal(m.combo_kind(m.SPECIAL_BOMB, m.SPECIAL_NONE), m.COMBO_COLOUR, "Farbbombe mit Bonbon: Farbwelle")
+	t.equal(m.combo_kind(m.SPECIAL_BOMB, m.SPECIAL_ROW), m.COMBO_FUSE, "Farbbombe mit Streifen: Zündschnur")
+	t.equal(m.combo_kind(m.SPECIAL_BOMB, m.SPECIAL_WRAPPED), m.COMBO_STORM, "Farbbombe mit Verpacktem: Farbsturm")
+	t.equal(m.combo_kind(m.SPECIAL_BOMB, m.SPECIAL_BOMB), m.COMBO_BOMB, "Zwei Farbbomben: Farbflut")
+
+	# The direction of the drag cannot change what the two candies become.
+	var kinds: Array = [m.SPECIAL_ROW, m.SPECIAL_COL, m.SPECIAL_WRAPPED, m.SPECIAL_BOMB]
+	for first in kinds:
+		for second in kinds:
+			t.equal(m.combo_kind(first, second), m.combo_kind(second, first),
+				"'%s' + '%s' ist symmetrisch" % [m.special_name(first), m.special_name(second)])
+
+	# Every combination carries its own name — a player should be able to learn
+	# the table by name instead of memorising silhouettes.
+	var names := {}
+	for kind in range(m.COMBO_NONE, m.COMBO_STAR + 1):
+		var name := m.combo_name(kind)
+		if kind == m.COMBO_NONE:
+			t.equal(name, "", "Ohne Kombination gibt es keinen Namen")
+			continue
+		t.check(not name.is_empty(), "Kombination %d hat einen Namen" % kind)
+		t.check(not names.has(name), "'%s' ist nur einmal vergeben" % name)
+		names[name] = true
+	t.equal(names.size(), 8, "Jede der acht Kombinationen hat einen eigenen Namen")
+
+	# Two stripes beat one: the combination is more than the sum of its parts.
+	var board := _combo_board(m.SPECIAL_ROW, m.SPECIAL_ROW)
+	var blast := m.combo_blast(board, _A, _B)
+	var single: Array = []
+	m.blast_cells(board, _A, single, {})
+	t.check(blast.size() > single.size() * 2, "Der Dreifachblitz räumt mehr als das Doppelte eines Streifens")
+	t.equal(blast.size(), m.COLS * 3, "Drei vollständige Reihen")
+	for col in m.COLS:
+		for row in [4, 5, 6]:
+			t.check(blast.has(m.cell_index(col, row)), "Reihe %d ist dabei" % row)
+	for row in [3, 7]:
+		t.check(not blast.has(m.cell_index(0, row)), "Reihe %d bleibt stehen" % row)
+	t.check(m.combo_blast(_combo_board(m.SPECIAL_NONE, m.SPECIAL_NONE), _A, _B).is_empty(),
+		"Ohne Kombination bleibt das Brett unberührt")
+
+	# The blast is centred on the cell the player dragged *to*: the columns are
+	# the ones around `_B`, not around `_A`.
+	var vertical := _combo_board(m.SPECIAL_COL, m.SPECIAL_COL)
+	var columns := m.combo_blast(vertical, _A, _B)
+	t.equal(columns.size(), m.ROWS * 3, "Drei vollständige Spalten")
+	for row in m.ROWS:
+		for col in [2, 3, 4]:
+			t.check(columns.has(m.cell_index(col, row)), "Spalte %d ist dabei" % col)
+	for col in [1, 5]:
+		t.check(not columns.has(m.cell_index(col, 4)), "Spalte %d bleibt stehen" % col)
+
+	# Quer zueinander räumt beides: drei Reihen und drei Spalten.
+	var cross := m.combo_blast(_combo_board(m.SPECIAL_ROW, m.SPECIAL_COL), _A, _B)
+	t.equal(cross.size(), m.COLS * 3 + m.ROWS * 3 - 9, "Blitzkreuz: drei Reihen und drei Spalten")
+	t.check(cross.has(m.cell_index(2, 4)) and cross.has(m.cell_index(4, 6)), "Das Kreuz reicht in alle vier Ecken des Sprungs")
+	t.check(not cross.has(m.cell_index(1, 3)), "Was weder in einer Reihe noch Spalte liegt, bleibt")
+	# Verpackt mit Streifen ist dasselbe Kreuz — nur stärker als ein einzelnes Verpacktes.
+	var single_wrapped: Array = []
+	m.blast_cells(_combo_board(m.SPECIAL_WRAPPED, m.SPECIAL_NONE), _A, single_wrapped, {})
+	t.check(cross.size() > single_wrapped.size() * 3, "Kreuzfeuer ist mehr als dreimal ein einzelnes Verpacktes")
+
+	# Zwei Verpackte sprengen ein Fünf-mal-Fünf-Feld.
+	var square := m.combo_blast(_combo_board(m.SPECIAL_WRAPPED, m.SPECIAL_WRAPPED), _A, _B)
+	t.equal(square.size(), 25, "Die Detonation räumt 5 × 5")
+	t.check(square.has(m.cell_index(1, 3)) and square.has(m.cell_index(5, 7)), "Sie reicht zwei Felder in jede Richtung")
+	t.check(not square.has(m.cell_index(0, 2)), "Am Rand der Detonation steht noch etwas")
+
+	# Zwei Farbbomben räumen das ganze Brett.
+	t.equal(m.combo_blast(_combo_board(m.SPECIAL_BOMB, m.SPECIAL_BOMB), _A, _B).size(), m.CELL_COUNT,
+		"Die Farbflut kennt keine Grenze")
+
+
+## The three combinations the colour bomb is part of differ in what they do to
+## the partner's colour — and the difference is visible in what gets cleared.
+##
+## The colour is deliberately sparse: six candies in six different places, so a
+## test can tell "the colour went" from "the lines went" from "the squares went".
+func _colour_bomb() -> void:
+	var m := CandyMatch3
+	# Farbwelle: the colour, and nothing around it.
+	var plain := _bomb_board(m.SPECIAL_NONE)
+	var sparse := _sparse_cells(plain)
+	t.equal(sparse.size(), 6, "Die Farbe liegt sechsmal verstreut auf dem Brett")
+	var cleared := _cleared_by(plain)
+	var gone := 0
+	for cell in sparse:
+		if cleared.has(cell):
+			gone += 1
+	t.equal(gone, sparse.size(), "Die Farbwelle räumt jedes Bonbon der Farbe")
+	t.check(cleared.has(_A), "Die Farbbombe geht mit")
+	t.check(not cleared.has(_WATCH), "Die Farbwelle holt nichts aus der Nachbarschaft")
+
+	# Zündschnur: the whole colour turns striped, so it takes its lines along.
+	var fuse := _bomb_board(m.SPECIAL_ROW)
+	var fuse_sparse := _sparse_cells(fuse)
+	var fuse_cleared := _cleared_by(fuse)
+	var lines := 0
+	for cell in fuse_sparse:
+		if _row_gone(fuse_cleared, m.row_of(cell)):
+			lines += 1
+	t.equal(lines, fuse_sparse.size(), "Jede Reihe mit Farbe geht als ganze mit (%d von %d)" % [lines, fuse_sparse.size()])
+	t.check(fuse_cleared.has(_WATCH), "Die Zündschnur reicht bis ans andere Ende der Reihe")
+	t.check(_row_gone(fuse_cleared, 0), "Reihe 0 ist restlos weg")
+	t.check(not _row_gone(fuse_cleared, 2), "Reihe 2 ohne Farbe bleibt stehen")
+
+	# Farbsturm: the same colour, but every one of them explodes in its own three
+	# by three area — a wrapped partner must not be watered down to a stripe.
+	var storm := _bomb_board(m.SPECIAL_WRAPPED)
+	var storm_sparse := _sparse_cells(storm)
+	var storm_cleared := _cleared_by(storm)
+	var squares := 0
+	for cell in storm_sparse:
+		if _area_gone(storm_cleared, cell):
+			squares += 1
+	t.equal(squares, storm_sparse.size(), "Jedes Bonbon der Farbe sprengt sein eigenes 3 × 3 (%d von %d)" % [squares, storm_sparse.size()])
+	t.check(not storm_cleared.has(_WATCH), "Der Farbsturm holt nicht die ganze Reihe")
+	t.check(not _row_gone(storm_cleared, 0), "Der Farbsturm lässt die Reihe unvollständig stehen")
+	t.check(cleared.size() < storm_cleared.size() and cleared.size() < fuse_cleared.size(),
+		"Eine Farbbombe auf ein Spezialbonbon räumt mehr als die Farbwelle")
+
+
+## Every candy of the sparse colour — read *before* the move rearranges the board.
+func _sparse_cells(board: Dictionary) -> Array:
+	var out: Array = []
+	for cell in CandyMatch3.CELL_COUNT:
+		if (board["colors"] as Array)[cell] == SPARSE:
+			out.append(cell)
+	return out
+
+
+## The cells the first step of the swap `_A` → `_B` cleared.
+func _cleared_by(board: Dictionary) -> Array:
+	var outcome := CandyMatch3.try_swap(board, _A, _B, CandyMatch3.mulberry32(5), 6)
+	return (outcome["step"] as Dictionary)["cleared"]
+
+
+## Is the whole row cleared? Sparse colours leave most of a row standing, so this
+## is what tells a line from a single candy.
+func _row_gone(cleared: Array, row: int) -> bool:
+	for col in CandyMatch3.COLS:
+		if not cleared.has(CandyMatch3.cell_index(col, row)):
+			return false
+	return true
+
+
+## Is the three by three area around `cell` completely cleared?
+func _area_gone(cleared: Array, cell: int) -> bool:
+	for dr in range(-1, 2):
+		for dc in range(-1, 2):
+			var c: int = CandyMatch3.col_of(cell) + dc
+			var r: int = CandyMatch3.row_of(cell) + dr
+			if c < 0 or c >= CandyMatch3.COLS or r < 0 or r >= CandyMatch3.ROWS:
+				continue
+			if not cleared.has(CandyMatch3.cell_index(c, r)):
+				return false
+	return true
+
+
+# --- the combination on the board and in the summary -------------------------
+
+## The board has to show the blast before the move costs anything, and the
+## result screen has to name the biggest combination of the run.
+func _preview(tree: SceneTree) -> void:
+	var m := CandyMatch3
+	var screen = await _open_candy(tree)
+	if screen == null:
+		return
+	var board: Dictionary = screen.state["board"]
+	var pair := _candy_pair(board)
+	t.check(pair.x >= 0, "Das Brett hat zwei benachbarte Bonbons")
+	if pair.x < 0:
+		return
+	var a: int = pair.x
+	var b: int = pair.y
+	var moves_before: int = int(screen.state["movesLeft"])
+	_keep_level_open(screen)
+
+	# Holding a striped candy shows the three lines a second one would add.
+	(board["specials"] as Array)[a] = m.SPECIAL_ROW
+	(board["specials"] as Array)[b] = m.SPECIAL_ROW
+	screen.selected = a
+	screen._show_combo_partners(a)
+	t.equal(screen.combo_label, m.combo_name(m.COMBO_LINES), "Die Vorschau nennt die Kombination")
+	var blast := m.combo_blast(board, a, b)
+	var marked_cells := 0
+	for cell in blast:
+		if screen.combo_set.has(cell):
+			marked_cells += 1
+	t.equal(marked_cells, blast.size(), "Die Vorschau markiert jeden Einschlagsbereich")
+	t.check(screen.combo_set.size() > m.COLS, "Die Vorschau umfasst mehr als eine Reihe")
+	t.equal(int(screen.state["movesLeft"]), moves_before, "Die Vorschau kostet keinen Zug")
+	t.check(screen._toast_label.text.contains(m.combo_name(m.COMBO_LINES)), "Der Bildschirm nennt die Kombination")
+
+	# The marked candies grow, the rest of the board stays as it is.
+	var marked := -1
+	for target in screen.combo_set.keys():
+		if int(target) != a and int(target) != b and screen.pieces.has(int(target)):
+			marked = int(target)
+			break
+	t.check(marked >= 0, "Die Vorschau trifft ein Feld mit Bonbon")
+	if marked >= 0:
+		var scale_before: float = (screen.pieces[marked] as Dictionary)["scale"]
+		for i in 6:
+			screen._update_world(0.1)
+		t.check(float((screen.pieces[marked] as Dictionary)["scale"]) > scale_before,
+			"Ein getroffenes Bonbon wächst sichtbar")
+		t.check(screen._toast_label.visible, "Der Hinweis bleibt stehen")
+
+	# A plain neighbour is no partner — the board must not promise anything.
+	(board["specials"] as Array)[b] = m.SPECIAL_NONE
+	screen._show_combo_partners(a)
+	t.equal(screen.combo_set.size(), 0, "Ein normales Bonbon zeigt keine Kombination")
+	(board["specials"] as Array)[b] = m.SPECIAL_ROW
+
+	# Setting the combination off: one move, a bigger clear, and a name.
+	screen._try_swap(a, b)
+	t.equal(screen.mode, screen.MODE_BUSY, "Die Kombination sperrt das Brett wie jeder Zug")
+	t.equal(screen.combo_set.size(), 0, "Nach dem Zug ist die Vorschau weg")
+	t.equal(int(screen.state["movesLeft"]), moves_before - 1, "Die Kombination kostet einen Zug")
+	for i in 80:
+		if screen.mode != screen.MODE_BUSY:
+			break
+		screen._update_world(0.35)
+	t.equal(screen.mode, screen.MODE_SELECT, "Die Kettenreaktion endet im Auswahlmodus")
+	t.check(screen._toast_label.text.contains(m.combo_name(m.COMBO_LINES)),
+		"Der Zug meldet die Kombination zurück")
+	var peaks := m.highlights(screen.state)
+	t.equal(int(peaks["combos"]), 1, "Die Kombination zählt als Peak")
+	t.check(int(peaks["comboBest"]) >= blast.size(), "Der Peak merkt sich die Größe des Einschlags")
+	t.equal(str(peaks["comboName"]), m.combo_name(m.COMBO_LINES), "Der Peak merkt sich den Namen")
+	t.equal(int(peaks["comboMove"]), 1, "Der Peak merkt sich den Zug")
+
+	# The result screen tells the story: one row for the best combination.
+	var moment_row := {}
+	for moment in m.run_moments(screen.state):
+		if str((moment as Dictionary)["label"]).begins_with("Kombination:"):
+			moment_row = moment
+	t.check(not moment_row.is_empty(), "Das Ergebnis nennt die Kombination")
+	if not moment_row.is_empty():
+		t.equal(int(moment_row["value"]), int(peaks["comboBest"]), "Die Zeile nennt die Bonbonszahl")
+		t.equal(int(moment_row["move"]), 1, "Die Zeile nennt ihren Zug")
+
+	# Undo takes the peak with it — a combination the player takes back is not
+	# their best one.
+	screen._undo()
+	t.equal(int(m.highlights(screen.state)["combos"]), 0, "Nach Undo zählt keine Kombination")
+	t.equal(int(m.highlights(screen.state)["comboBest"]), 0, "Nach Undo ist der Einschlag zurückgenommen")
+	var gone := true
+	for moment in m.run_moments(screen.state):
+		if str((moment as Dictionary)["label"]).begins_with("Kombination:"):
+			gone = false
+	t.check(gone, "Nach Undo nennt das Ergebnis keine Kombination")
+
+	# The board a player gets may have holes and blockers in it. The preview and
+	# the move have to work on every layout, not only on the one the test
+	# happened to start with.
+	for key in ["crystals:8", "halloween:21", "gems:40"]:
+		var parts := str(key).split(":")
+		screen._start_level(m.level_for(parts[0], int(parts[1])))
+		_keep_level_open(screen)
+		var other: Dictionary = screen.state["board"]
+		var spot := _candy_pair(other)
+		if spot.x < 0:
+			t.check(false, "Level %s hat zwei benachbarte Bonbons" % key)
+			continue
+		(other["specials"] as Array)[spot.x] = m.SPECIAL_WRAPPED
+		(other["specials"] as Array)[spot.y] = m.SPECIAL_COL
+		screen._show_combo_partners(spot.x)
+		t.equal(screen.combo_label, m.combo_name(m.COMBO_CROSS), "Kreuzfeuer auf Level %s" % key)
+		t.check(screen.combo_set.size() > m.COLS, "Die Vorschau auf %s ist breit genug" % key)
+		screen._try_swap(spot.x, spot.y)
+		for i in 80:
+			if screen.mode != screen.MODE_BUSY:
+				break
+			screen._update_world(0.35)
+		t.equal(screen.mode, screen.MODE_SELECT, "Auf %s läuft die Kombination aus" % key)
+		t.check(not m.has_any_match(other), "Das Brett von %s ist danach ruhig" % key)
+		var empty := 0
+		for cell in m.open_cells(other):
+			if (other["colors"] as Array)[cell] == m.NO_CANDY:
+				empty += 1
+		t.equal(empty, 0, "Auf %s bleibt nach dem großen Einschlag kein Feld leer" % key)
+		t.equal(int(m.highlights(screen.state)["comboMove"]), 1, "Auf %s ist es der erste Zug" % key)
+
+
+## Puts the score goal of the running level out of reach. One combination clears
+## a third of the board, and a level that ended here would take the screen away
+## from the test in the middle of the measurement.
+func _keep_level_open(screen) -> void:
+	for goal in (screen.state["level"]["goals"] as Array):
+		if str((goal as Dictionary)["kind"]) == "score":
+			(goal as Dictionary)["target"] = 10000000
+
+
+## A board with a pattern that never matches, so a test can place exactly the
+## two candies it needs.
+func _clean_board() -> Dictionary:
+	var board := CandyMatch3.create_board(CandyMatch3.LAYOUT_FULL)
+	var colors: Array = board["colors"]
+	for row in CandyMatch3.ROWS:
+		for col in CandyMatch3.COLS:
+			colors[CandyMatch3.cell_index(col, row)] = (col + row * 2) % 6
+	return board
+
+
+func _combo_board(special_a: int, special_b: int) -> Dictionary:
+	var board := _clean_board()
+	(board["specials"] as Array)[_A] = special_a
+	(board["specials"] as Array)[_B] = special_b
+	return board
+
+
+## The same board with one colour (SPARSE) on six scattered candies, a colour
+## bomb on `_A` and `partner` on `_B`. Scattered means: no colour candy stands
+## next to another, so a test can see exactly how far a combination reaches.
+func _bomb_board(partner: int) -> Dictionary:
+	var board := _clean_board()
+	var colors: Array = board["colors"]
+	for cell in [CandyMatch3.cell_index(0, 0), CandyMatch3.cell_index(7, 1),
+			CandyMatch3.cell_index(1, 4), CandyMatch3.cell_index(6, 5),
+			CandyMatch3.cell_index(3, 7), _B]:
+		colors[cell] = SPARSE
+	(board["specials"] as Array)[_A] = CandyMatch3.SPECIAL_BOMB
+	(board["specials"] as Array)[_B] = partner
+	return board
+
+
+## Two neighbouring cells that both hold a candy — the screen plays a real
+## generated level, so the test has to look instead of assuming.
+func _candy_pair(board: Dictionary) -> Vector2i:
+	for row in CandyMatch3.ROWS - 1:
+		for col in CandyMatch3.COLS:
+			var a := CandyMatch3.cell_index(col, row)
+			var b := CandyMatch3.cell_index(col, row + 1)
+			if CandyMatch3.has_candy(board, a) and CandyMatch3.has_candy(board, b):
+				return Vector2i(a, b)
+	return Vector2i(-1, -1)
 
 
 # --- helpers -----------------------------------------------------------------

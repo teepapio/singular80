@@ -13,6 +13,12 @@ extends RefCounted
 ## makes a huge level count cheap: 6 worlds × {@link LEVELS_PER_WORLD} levels.
 ## The random source is an explicit seeded generator, so the same key always
 ## produces the same level — on every device and in the tests.
+##
+## Two special candies that are swapped into each other are worth more together
+## than apart; which combination that is follows from the two kinds alone
+## ({@link combo_kind}) and the blast always runs through the cell the player
+## dragged to ({@link combo_blast}). The screen shows that blast on the board
+## while a special is selected, so the table can be read instead of guessed.
 
 # --- board geometry ---------------------------------------------------------
 const COLS := 8
@@ -549,78 +555,157 @@ static func resolve_step(board: Dictionary, rng: Rng, options: Dictionary = {}) 
 	}
 
 
-# --- swaps ------------------------------------------------------------------
+# --- combinations ------------------------------------------------------------
 
-## Cells a special-to-special combo clears directly, or an empty array for a
-## normal swap.
-static func swap_combo(board: Dictionary, a: int, b: int) -> Array:
+## Two special candies swapped into each other are worth more together than
+## apart. Which combination that is follows from the two kinds alone, and the
+## blast always runs through the cell the player dragged to — the pair on screen
+## is the pair that goes off.
+const COMBO_NONE := 0
+## Two colour bombs: the whole board.
+const COMBO_BOMB := 1
+## Colour bomb + plain candy: every candy of that colour.
+const COMBO_COLOUR := 2
+## Colour bomb + striped: the whole colour turns striped and goes off.
+const COMBO_FUSE := 3
+## Colour bomb + wrapped: the whole colour turns wrapped and goes off.
+const COMBO_STORM := 4
+## Wrapped + wrapped: a five by five detonation.
+const COMBO_SQUARE := 5
+## Wrapped + striped: three rows and three columns.
+const COMBO_CROSS := 6
+## Two stripes of the same kind: three lines of that direction.
+const COMBO_LINES := 7
+## A row stripe and a column stripe: three rows *and* three columns.
+const COMBO_STAR := 8
+
+
+## The combination two special kinds form, or {@link COMBO_NONE} when they form
+## none — a special swapped with a plain candy is an ordinary match, and two
+## specials always combine.
+static func combo_kind(special_a: int, special_b: int) -> int:
+	var has_bomb: bool = special_a == SPECIAL_BOMB or special_b == SPECIAL_BOMB
+	if has_bomb:
+		if special_a == SPECIAL_BOMB and special_b == SPECIAL_BOMB:
+			return COMBO_BOMB
+		if special_a == SPECIAL_WRAPPED or special_b == SPECIAL_WRAPPED:
+			return COMBO_STORM
+		if is_striped(special_a) or is_striped(special_b):
+			return COMBO_FUSE
+		return COMBO_COLOUR
+	if special_a == SPECIAL_WRAPPED and special_b == SPECIAL_WRAPPED:
+		return COMBO_SQUARE
+	if special_a == SPECIAL_WRAPPED or special_b == SPECIAL_WRAPPED:
+		return COMBO_CROSS
+	if is_striped(special_a) and is_striped(special_b):
+		return COMBO_LINES if special_a == special_b else COMBO_STAR
+	return COMBO_NONE
+
+
+## Every combination has its own name, because a player should be able to learn
+## the table by name instead of memorising silhouettes.
+static func combo_name(kind: int) -> String:
+	match kind:
+		COMBO_BOMB:
+			return "Farbflut"
+		COMBO_COLOUR:
+			return "Farbwelle"
+		COMBO_FUSE:
+			return "Zündschnur"
+		COMBO_STORM:
+			return "Farbsturm"
+		COMBO_SQUARE:
+			return "Detonation"
+		COMBO_CROSS:
+			return "Kreuzfeuer"
+		COMBO_LINES:
+			return "Dreifachblitz"
+		COMBO_STAR:
+			return "Blitzkreuz"
+		_:
+			return ""
+
+
+## The `width` full lines through `cell` — its row for a horizontal stripe, its
+## column for a vertical one. `width` 1 is a single stripe, 3 the combination
+## that also takes the neighbouring line on each side.
+static func _line_cells(cell: int, row_lines: bool, width: int) -> Array:
+	var out: Array = []
+	var col := col_of(cell)
+	var row := row_of(cell)
+	var reach := int(width / 2)
+	for offset in range(-reach, reach + 1):
+		if row_lines:
+			var r := row + offset
+			if r < 0 or r >= ROWS:
+				continue
+			for c in COLS:
+				out.append(cell_index(c, r))
+			continue
+		var c := col + offset
+		if c < 0 or c >= COLS:
+			continue
+		for r in ROWS:
+			out.append(cell_index(c, r))
+	return out
+
+
+## The square of `radius` cells around `cell`, clipped to the board.
+static func _area_cells(cell: int, radius: int) -> Array:
+	var out: Array = []
+	var col := col_of(cell)
+	var row := row_of(cell)
+	for dr in range(-radius, radius + 1):
+		for dc in range(-radius, radius + 1):
+			var c := col + dc
+			var r := row + dr
+			if c < 0 or c >= COLS or r < 0 or r >= ROWS:
+				continue
+			out.append(cell_index(c, r))
+	return out
+
+
+## The cells the combination of the special candies at `a` and `b` clears, or an
+## empty array when they form none. The blast is centred on `b`, so call it with
+## the cell the player dragged *to* as `b` — and before the swap, to see it.
+static func combo_blast(board: Dictionary, a: int, b: int) -> Array:
 	var specials: Array = board["specials"]
 	var colors: Array = board["colors"]
-	var special_a: int = specials[a]
-	var special_b: int = specials[b]
-	if special_a == SPECIAL_NONE and special_b == SPECIAL_NONE:
+	var kind := combo_kind(specials[a], specials[b])
+	if kind == COMBO_NONE:
 		return Array()
-
-	var col := col_of(b)
-	var row := row_of(b)
 	var blast: Array = []
 	var seen := {}
-	var row_cells := func() -> Array:
-		var out: Array = []
-		for c in COLS:
-			out.append(cell_index(c, row))
-		return out
-	var col_cells := func() -> Array:
-		var out: Array = []
-		for r in ROWS:
-			out.append(cell_index(col, r))
-		return out
-	var area := func(radius: int) -> Array:
-		var out: Array = []
-		for dr in range(-radius, radius + 1):
-			for dc in range(-radius, radius + 1):
-				var c := col + dc
-				var r := row + dr
-				if c < 0 or c >= COLS or r < 0 or r >= ROWS:
-					continue
-				out.append(cell_index(c, r))
-		return out
-
-	if special_a == SPECIAL_BOMB and special_b == SPECIAL_BOMB:
-		for cell in CELL_COUNT:
-			_add_unique(blast, seen, cell)
-		return blast
-	if special_a == SPECIAL_BOMB or special_b == SPECIAL_BOMB:
-		# Bomb + plain candy: everything of that colour goes. Bomb + striped or
-		# wrapped is handled by the caller, which first turns the colour around.
-		var other := b if special_a == SPECIAL_BOMB else a
-		if is_striped(int(specials[other])) or int(specials[other]) == SPECIAL_WRAPPED:
-			return Array()
-		var color: int = int(colors[other])
-		for cell in CELL_COUNT:
-			if int(colors[cell]) == color:
+	match kind:
+		COMBO_BOMB:
+			for cell in CELL_COUNT:
 				_add_unique(blast, seen, cell)
-		_add_unique(blast, seen, a if special_a == SPECIAL_BOMB else b)
-		return blast
-	if special_a == SPECIAL_WRAPPED and special_b == SPECIAL_WRAPPED:
-		for cell in area.call(2):
-			_add_unique(blast, seen, cell)
-		return blast
-	if (special_a == SPECIAL_WRAPPED and is_striped(special_b)) or (special_b == SPECIAL_WRAPPED and is_striped(special_a)):
-		for cell in area.call(1):
-			_add_unique(blast, seen, cell)
-		for cell in row_cells.call():
-			_add_unique(blast, seen, cell)
-		for cell in col_cells.call():
-			_add_unique(blast, seen, cell)
-		return blast
-	if is_striped(special_a) and is_striped(special_b):
-		for cell in row_cells.call():
-			_add_unique(blast, seen, cell)
-		for cell in col_cells.call():
-			_add_unique(blast, seen, cell)
-		return blast
-	return Array()
+		COMBO_COLOUR, COMBO_FUSE, COMBO_STORM:
+			# The partner's colour decides. The bomb itself always goes with it,
+			# whatever colour of its own it wears.
+			var partner: int = b if specials[a] == SPECIAL_BOMB else a
+			var color: int = int(colors[partner])
+			for cell in CELL_COUNT:
+				if int(colors[cell]) == color:
+					_add_unique(blast, seen, cell)
+			_add_unique(blast, seen, a if specials[a] == SPECIAL_BOMB else b)
+		COMBO_SQUARE:
+			for cell in _area_cells(b, 2):
+				_add_unique(blast, seen, cell)
+		COMBO_CROSS, COMBO_STAR:
+			for cell in _line_cells(b, true, 3):
+				_add_unique(blast, seen, cell)
+			for cell in _line_cells(b, false, 3):
+				_add_unique(blast, seen, cell)
+		COMBO_LINES:
+			# Both stripes point the same way, so the lines run the way they do.
+			var row_lines: bool = specials[a] == SPECIAL_ROW or specials[b] == SPECIAL_ROW
+			for cell in _line_cells(b, row_lines, 3):
+				_add_unique(blast, seen, cell)
+	return blast
+
+
+# --- swaps ------------------------------------------------------------------
 
 
 static func swap_cells(board: Dictionary, a: int, b: int) -> void:
@@ -668,7 +753,7 @@ static func matches_at(board: Dictionary, cell: int) -> bool:
 
 
 ## The move the player tried. Returns `{}` when the swap is illegal (the board is
-## left untouched). Otherwise `{step, cells}`.
+## left untouched). Otherwise `{step, cells, combo}`.
 static func try_swap(board: Dictionary, a: int, b: int, rng: Rng, color_count: int) -> Dictionary:
 	if not are_neighbours(a, b):
 		return {}
@@ -678,31 +763,25 @@ static func try_swap(board: Dictionary, a: int, b: int, rng: Rng, color_count: i
 
 	var specials: Array = board["specials"]
 	var colors: Array = board["colors"]
-	var special_a: int = specials[a]
-	var special_b: int = specials[b]
-	var blast := swap_combo(board, a, b)
+	var combo := combo_kind(specials[a], specials[b])
+	var blast := combo_blast(board, a, b)
 
 	if blast.is_empty():
 		if not matches_at(board, a) and not matches_at(board, b):
 			swap_cells(board, a, b)
 			return {}
-	elif special_a == SPECIAL_BOMB or special_b == SPECIAL_BOMB:
-		# Colour bomb + striped/wrapped: turn that whole colour into that
-		# special, then let all of them go off.
-		var bomb := a if special_a == SPECIAL_BOMB else b
-		var other := b if bomb == a else a
+	elif combo == COMBO_FUSE or combo == COMBO_STORM:
+		# The colour bomb hands its special down to the whole colour before
+		# everything goes off — a wrapped partner stays wrapped instead of
+		# being watered down to a stripe.
+		var bomb: int = a if specials[a] == SPECIAL_BOMB else b
+		var other: int = b if bomb == a else a
 		var color: int = int(colors[other])
-		var partner: int = int(specials[other])
-		var striped: int = partner if is_striped(partner) else SPECIAL_COL
-		blast = Array()
-		var seen := {}
+		var spread: int = SPECIAL_WRAPPED if combo == COMBO_STORM else int(specials[other])
 		for cell in CELL_COUNT:
-			if int(colors[cell]) != color:
+			if cell == other or int(colors[cell]) != color:
 				continue
-			if cell != other:
-				specials[cell] = striped
-			_add_unique(blast, seen, cell)
-		_add_unique(blast, seen, bomb)
+			specials[cell] = spread
 
 	var is_combo := not blast.is_empty()
 	var options := {"chain": 1, "colorCount": color_count, "blast": blast}
@@ -716,7 +795,7 @@ static func try_swap(board: Dictionary, a: int, b: int, rng: Rng, color_count: i
 	if step.is_empty():
 		swap_cells(board, a, b)
 		return {}
-	return {"step": step, "cells": [a, b]}
+	return {"step": step, "cells": [a, b], "combo": combo}
 
 
 # --- move availability ------------------------------------------------------
@@ -1135,6 +1214,21 @@ static func world_stars(levels: Dictionary, world_id: String) -> int:
 
 # --- run state --------------------------------------------------------------
 
+## The peaks of a run. A hand-built state gets these filled in, so every reader
+## can ask for a key without guarding it first.
+const DEFAULT_PEAKS: Dictionary = {
+	"moves": 0, "chain": 0, "clear": 0, "specials": 0, "step": 0, "stepMove": 0,
+	"combos": 0, "comboBest": 0, "comboName": "", "comboMove": 0,
+}
+
+
+static func _fill_peaks(peaks: Dictionary) -> Dictionary:
+	for key in DEFAULT_PEAKS:
+		if not peaks.has(key):
+			peaks[key] = DEFAULT_PEAKS[key]
+	return peaks
+
+
 ## Everything a move changes, deep-copied so an undo can restore it exactly.
 ## The run peaks belong to it: a chain the player undoes is never credited.
 static func snapshot_state(state: Dictionary) -> Dictionary:
@@ -1154,7 +1248,7 @@ static func restore_state(state: Dictionary, snapshot: Dictionary) -> void:
 	state["movesLeft"] = int(snapshot["movesLeft"])
 	state["collected"] = (snapshot["collected"] as Array).duplicate()
 	state["blockersTotal"] = int(snapshot["blockersTotal"])
-	state["highlights"] = (snapshot.get("highlights", {}) as Dictionary).duplicate(true)
+	state["highlights"] = _fill_peaks((snapshot.get("highlights", {}) as Dictionary).duplicate(true))
 
 
 ## A colour for `cell` that cannot complete a run of three (used by the start bomb).
@@ -1301,7 +1395,7 @@ static func start_level(level: Dictionary, bonus: Dictionary = {}) -> Dictionary
 		"blockersTotal": blocker_cells(board).size(),
 		"bonus": reward,
 		"rng": rng,
-		"highlights": {"moves": 0, "chain": 0, "clear": 0, "specials": 0, "step": 0, "stepMove": 0},
+		"highlights": DEFAULT_PEAKS.duplicate(true),
 	}
 
 
@@ -1362,11 +1456,26 @@ static func stars_for(state: Dictionary) -> int:
 ## The peaks of the run, created on first use so a hand-built state works too.
 ## `moves` played, `chain` longest cascade, `clear` biggest single clear,
 ## `specials` created, `step` best single step and `stepMove` the move it
-## happened in.
+## happened in. `combos` counts the combinations set off, `comboBest` the largest
+## of them, with `comboName` and `comboMove` saying which and when.
 static func highlights(state: Dictionary) -> Dictionary:
-	if not state.has("highlights"):
-		state["highlights"] = {"moves": 0, "chain": 0, "clear": 0, "specials": 0, "step": 0, "stepMove": 0}
-	return state["highlights"]
+	if not state.has("highlights") or (state["highlights"] as Dictionary).is_empty():
+		state["highlights"] = DEFAULT_PEAKS.duplicate(true)
+	return _fill_peaks(state["highlights"])
+
+
+## Notes a combination in the peaks: how many the player set off, and which one
+## cleared the most. An ordinary move passes {@link COMBO_NONE} and changes
+## nothing.
+static func note_combo(best: Dictionary, combo: int, cleared: int, move: int) -> void:
+	if combo == COMBO_NONE:
+		return
+	best["combos"] = int(best["combos"]) + 1
+	if cleared <= int(best["comboBest"]):
+		return
+	best["comboBest"] = cleared
+	best["comboName"] = combo_name(combo)
+	best["comboMove"] = move
 
 
 ## Run bookkeeping of a resolved step.
@@ -1389,10 +1498,13 @@ static func apply_step_to_state(state: Dictionary, step: Dictionary) -> void:
 
 
 ## Plays out the cascades of a move; returns every step until the board settles.
-static func continue_cascades(state: Dictionary, first: Dictionary) -> Array:
+## `combo` is the {@link combo_kind} of the swap, so the peaks can tell a
+## combination from an ordinary match.
+static func continue_cascades(state: Dictionary, first: Dictionary, combo: int = COMBO_NONE) -> Array:
 	var steps: Array = [first]
 	var best := highlights(state)
 	best["moves"] = int(best["moves"]) + 1
+	note_combo(best, combo, (first["cleared"] as Array).size(), int(best["moves"]))
 	apply_step_to_state(state, first)
 	var chain: int = int(first["chain"])
 	for i in 40:
@@ -1422,6 +1534,9 @@ static func run_moments(state: Dictionary) -> Array:
 	if int(best["clear"]) >= 4:
 		moments.append({"icon": "◼", "label": "Größter Match", "value": int(best["clear"]),
 			"unit": "Bonbons auf einmal", "move": 0})
+	if int(best["comboBest"]) > 0:
+		moments.append({"icon": "✹", "label": "Kombination: %s" % str(best["comboName"]),
+			"value": int(best["comboBest"]), "unit": "Bonbons auf einmal", "move": int(best["comboMove"])})
 	if int(best["specials"]) > 0:
 		moments.append({"icon": "◆", "label": "Spezialbonbons", "value": int(best["specials"]),
 			"unit": "gebildet", "move": 0})

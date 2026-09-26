@@ -7,7 +7,9 @@ extends RefCounted
 ## and about the reinforcement waves lives here. The headline rule is the
 ## two-shot trick — the smallest ball arms itself on the first harpoon and pops
 ## on the second — because that is the mechanic the original is known for and
-## the one a player has to be able to rely on.
+## the one a player has to be able to rely on. The second headline is the wave
+## warning: a reinforcement announces the flank it will drop over and counts
+## down before it falls, so the arrival is a decision and not an interruption.
 
 var t: TestKit
 
@@ -22,6 +24,7 @@ func run(kit: TestKit) -> void:
 	_suite(_take_hits)
 	_suite(_two_shot_trick)
 	_suite(_ball_budget)
+	_suite(_wave_warning)
 
 
 ## Runs one suite and fails it if it returned before its own `t.suite_done()`,
@@ -187,16 +190,19 @@ func _reinforcements() -> void:
 		previous = waves
 
 	# A wave that never arrives would make its level unclearable, a wave with a
-	# negative trigger would arrive on the first frame. Both are rejected.
+	# negative trigger would arrive on the first frame. Both are rejected. Being
+	# due is not the same as falling: the announcement owns the gap between the
+	# two, which is what the warning suite below pins down.
 	var wave := {"index": 0, "trigger": 5, "maxDelay": 11.0, "balls": [{"x": 0.0, "y": 15.0, "size": 3}]}
 	t.check(not Pang.wave_due(wave, 20, 0.0), "Ein volles Brett wartet auf die Welle")
 	t.check(not Pang.wave_due(wave, 6, 0.0), "Ein randvolles Brett wartet noch")
-	t.check(Pang.wave_due(wave, 5, 0.0), "Sobald das Brett dünn ist, kommt sie")
+	t.check(Pang.wave_due(wave, 5, 0.0), "Sobald das Brett dünn ist, ist sie fällig")
 	t.check(Pang.wave_due(wave, 40, 11.0), "Und spätestens nach ihrer eigenen Wartezeit")
 	t.check(Pang.wave_due(wave, 40, 99.0), "Auch bei einem dauerhaft vollen Brett")
 	t.check(not Pang.wave_due({}, 0, 99.0), "Eine leere Welle kommt nie")
 	t.check(Pang.WAVE_TRIGGER > 0, "Die Welle wartet auf ein Brett, das noch Bälle hat")
 	t.check(Pang.WAVE_MAX_DELAY > 0.0, "Die Wartezeit ist endlich")
+	t.equal(Pang.wave_stage(wave, 0, 0.0, -1.0), Pang.WAVE_WARNING, "Fällig heißt zuerst: ankündigen, nicht fallen")
 
 	var base := {"level": 1, "timeLimit": 60.0, "balls": [{"x": 0.0, "y": 8.0, "size": 2}]}
 	var with_wave := base.duplicate()
@@ -311,3 +317,244 @@ func _ball_budget() -> void:
 	# Headroom is what lets a wave drop into a board that is already splitting.
 	t.check(Pang.ORB_SAFE_CAP >= widest * 2, "Der Pool hat Reserve für eine Welle auf vollem Brett")
 	t.suite_done()
+
+
+# --- the wave warning -------------------------------------------------------
+# A reinforcement used to fall out of the ceiling with nothing but a sound and
+# a shake. It is now announced first: the flank it will arrive over lights up,
+# a countdown runs, and only then do the balls drop. The clock keeps ticking
+# while the player decides, so the warning is paid for in seconds. Three things
+# have to hold for that to be a decision rather than decoration, and each gets
+# its own block below:
+#
+#   * the batch always comes over *one* flank, so there is a safe side to run to
+#   * the timeline always runs silent → announced → falling, and never skips a
+#     step, not even when the board empties in the same frame
+#   * what the floor, the number and the HUD text promise is the same arrival
+
+## A hand-written wave, so the rules can be read without walking a level. Two
+## balls over one flank, an own `warnTime` and the usual trigger.
+func _left_wave(balls: Array = [{"x": -10.0, "y": 15.0, "size": 3}, {"x": -4.0, "y": 15.0, "size": 3}]) -> Dictionary:
+	return {"index": 0, "trigger": 5, "maxDelay": 11.0, "warnTime": 2.0, "balls": balls}
+
+
+func _wave_warning() -> void:
+	t.suite("Pang — Wellenwarnung")
+
+	_flank()
+	_timeline()
+	_alarm()
+
+	t.suite_done()
+
+
+## Where a wave arrives: always one flank, always with a safe side left.
+func _flank() -> void:
+	# The sides are arithmetic, so a retry sees the same arrival and the tests
+	# can name the side they expect.
+	for level in range(1, Pang.TOTAL_LEVELS + 1):
+		for index in maxi(1, Pang.wave_count(level)):
+			var flank := Pang.wave_flank(level, index)
+			t.check(flank == -1 or flank == 1, "Die Flanke %d/%d ist eine Seite" % [level, index])
+	# Two waves of the same level therefore come from opposite sides.
+	var two_wave := -1
+	for level in range(1, Pang.TOTAL_LEVELS + 1):
+		if Pang.wave_count(level) >= 2:
+			t.check(
+				Pang.wave_flank(level, 0) != Pang.wave_flank(level, 1),
+				"Zwei Wellen in Level %d kommen von verschiedenen Seiten" % level
+			)
+			two_wave = level
+			break
+	t.check(two_wave > 0, "Die Kampagne hat überhaupt ein Level mit zwei Wellen")
+
+	# The span each flank offers: inside the arena, mirrored, and leaving the
+	# middle free.
+	var left := Pang.flank_range(-1)
+	var right := Pang.flank_range(1)
+	t.almost(left.x, -right.y, 0.001, "Die Flanken sind spiegelbildlich")
+	t.almost(left.y, -right.x, 0.001, "…auf beiden Seiten gleich weit vom Rand")
+	t.check(left.x >= -Pang.ARENA_HALF_WIDTH and right.y <= Pang.ARENA_HALF_WIDTH, "Keine Flanke ragt aus der Arena")
+	t.check(left.y <= -Pang.WAVE_BAND_GAP and right.x >= Pang.WAVE_BAND_GAP, "Die Mitte bleibt frei")
+	t.check(Pang.WAVE_BAND_MARGIN > 0.0, "Eine Welle startet nicht an der Wand")
+
+	# The band a wave paints has to be the band its balls fall over — otherwise
+	# the warning sends the player to the wrong side of the arena.
+	for level in range(1, Pang.TOTAL_LEVELS + 1):
+		var layout := Pang.level_data(level)
+		for wave in layout["waves"]:
+			var entry: Dictionary = wave
+			var band: Vector2 = Pang.wave_band(entry)
+			for ball in entry["balls"]:
+				var spot: Dictionary = ball
+				var radius := Pang.radius_of(int(spot["size"]))
+				t.check(
+					absf(float(spot["x"]) - (band.x + band.y) * 0.5) <= (band.y - band.x) * 0.5,
+					"Das Band in Level %d umschließt seine Kugel" % level
+				)
+				t.check(
+					float(spot["x"]) - radius >= band.x - 0.001 and float(spot["x"]) + radius <= band.y + 0.001,
+					"…sogar mit ihrem Radius"
+				)
+			# The whole point of a flank: the other half of the floor stays safe,
+			# and there is a spot to run to.
+			var centre: float = (band.x + band.y) * 0.5
+			var side := Pang.wave_side(band)
+			t.check(side != 0, "Das Band in Level %d liegt auf einer Seite" % level)
+			var safe := Pang.ARENA_HALF_WIDTH - 1.0 if side < 0 else -Pang.ARENA_HALF_WIDTH + 1.0
+			t.check(not Pang.in_wave_band(entry, safe), "…und die andere Hälfte ist sicher (Level %d)" % level)
+			t.check(Pang.in_wave_band(entry, centre), "…die Mitte des Bandes gehört dazu")
+			t.check(Pang.wave_band(entry) == band, "Das Band ist reproduzierbar (Level %d)" % level)
+
+	# A wave without balls is total, not crashing: the band is then the whole
+	# arena and the label says so, because a hand-written layout may say that.
+	t.equal(Pang.wave_band({}), Vector2(-Pang.ARENA_HALF_WIDTH, Pang.ARENA_HALF_WIDTH), "Eine Welle ohne Kugeln hat das ganze Feld als Band")
+	t.equal(Pang.wave_side_label(_left_wave()), "links", "Ein Band links heißt links")
+	t.equal(Pang.wave_side_label(_left_wave([{"x": 10.0, "y": 15.0, "size": 3}])), "rechts", "…und rechts heißt rechts")
+	t.equal(Pang.wave_side_label(_left_wave([{"x": 0.0, "y": 15.0, "size": 3}])), "der Mitte", "Eine mittige Welle braucht die dritte Form")
+
+	# The level card names the side, so a player can read a level's plan before
+	# the first ball drops.
+	t.equal(Pang.wave_flanks_label(1), "", "Ein Level ohne Wellen nennt keine Seite")
+	var first_wave_level := 0
+	for level in range(1, Pang.TOTAL_LEVELS + 1):
+		if Pang.wave_count(level) > 0:
+			first_wave_level = level
+			break
+	t.check(first_wave_level >= Pang.WAVE_FIRST_LEVEL, "Der erste Level mit Welle liegt nicht vor dem Nachschub")
+	t.check(Pang.wave_flanks_label(first_wave_level) in ["links", "rechts"], "Eine einzelne Welle nennt genau eine Seite")
+	var expected: Array[String] = []
+	for index in Pang.wave_count(Pang.TOTAL_LEVELS):
+		expected.append("links" if Pang.wave_flank(Pang.TOTAL_LEVELS, index) < 0 else "rechts")
+	t.equal(Pang.wave_flanks_label(Pang.TOTAL_LEVELS), ", ".join(expected),
+		"Der letzte Level nennt seine Wellen in Ankunftsreihenfolge")
+	t.equal(expected.size(), 2, "…und das sind zwei Seiten")
+
+
+## The timeline: silent, announced, falling — and it never skips a step.
+func _timeline() -> void:
+	var wave := _left_wave()
+	var warn := Pang.wave_warn_time(wave)
+
+	# The length of the window is a balance decision: long enough to cross the
+	# arena, short enough that the clock is still ticking.
+	t.check(Pang.WAVE_WARN_TIME >= 1.5, "Die Warnung reicht zum Überqueren")
+	t.check(Pang.WAVE_WARN_TIME <= 5.0, "Aber sie kostet nicht das halbe Level")
+	t.almost(warn, 2.0, 0.001, "Die Welle trägt ihre eigene Warnzeit")
+	t.check(Pang.wave_warn_time({}) == Pang.WAVE_WARN_TIME, "Eine Welle ohne Angabe nimmt die Vorgabe")
+	t.check(Pang.wave_warn_time({"warnTime": -4.0}) >= 0.0, "Eine negative Warnzeit wird auf null geklemmt")
+
+	# Silent while the board is full, silent before the own wait is up.
+	t.equal(Pang.wave_stage(wave, 20, 0.0, -1.0), Pang.WAVE_PENDING, "Ein volles Brett hat keinen Nachschub im Blick")
+	t.equal(Pang.wave_stage(wave, 6, 0.0, -1.0), Pang.WAVE_PENDING, "Ein randvolles Brett ebenso wenig")
+	t.check(not Pang.wave_due(wave, 6, 0.0), "…weil die Welle noch nicht fällig ist")
+	# Due the moment the board thins out — that is the moment the warning starts.
+	t.equal(Pang.wave_stage(wave, 5, 0.0, -1.0), Pang.WAVE_WARNING, "Ein dünnenes Brett kündigt sie sofort an")
+	t.equal(Pang.wave_stage(wave, 0, 0.0, -1.0), Pang.WAVE_WARNING, "Auch ein leeres Brett")
+	t.equal(Pang.wave_stage(wave, 40, 11.0, -1.0), Pang.WAVE_WARNING, "Und spätestens nach ihrer eigenen Wartezeit")
+	t.check(Pang.wave_due(wave, 40, 11.0), "…weil die Welle dann fällig ist")
+
+	# The warning runs its whole window before anything falls.
+	t.equal(Pang.wave_stage(wave, 0, 0.0, 0.0), Pang.WAVE_WARNING, "Im ersten Frame der Warnung fällt noch nichts")
+	t.equal(Pang.wave_stage(wave, 0, 0.0, warn * 0.5), Pang.WAVE_WARNING, "…und in der Hälfte auch nicht")
+	t.equal(Pang.wave_stage(wave, 0, 0.0, warn), Pang.WAVE_FALLING, "Erst am Ende fällt der Nachschub")
+	t.equal(Pang.wave_stage(wave, 0, 0.0, warn + 10.0), Pang.WAVE_FALLING, "Danach bleibt er fällig")
+	t.equal(Pang.wave_stage(wave, 99, 99.0, -1.0), Pang.WAVE_WARNING, "Auch ein volles Brett kann sie nicht mehr aufhalten")
+	# What decides the moment is the wave's own window, not the constant — so a
+	# level that wants a different beat can have one.
+	var quick := wave.duplicate()
+	quick["warnTime"] = warn * 0.25
+	t.equal(Pang.wave_stage(quick, 0, 0.0, warn * 0.5), Pang.WAVE_FALLING, "Eine kürzer angekündigte Welle fällt früher")
+	t.equal(Pang.wave_stage(wave, 0, 0.0, warn * 0.5), Pang.WAVE_WARNING, "…eine länger angekündigte eben nicht")
+
+	# A wave with no balls never falls, and an empty timeline never starts.
+	t.equal(Pang.wave_stage({}, 0, 0.0, -1.0), Pang.WAVE_PENDING, "Eine leere Welle bleibt still")
+	t.equal(Pang.wave_stage({}, 0, 0.0, 99.0), Pang.WAVE_PENDING, "…und fällt auch nicht, wenn die Zeit läuft")
+
+	# Progress: 0 while silent, 1 at the end, and never outside 0..1.
+	t.almost(Pang.wave_progress(wave, -1.0), 0.0, 0.001, "Ohne Warnung gibt es keinen Fortschritt")
+	t.almost(Pang.wave_progress(wave, 0.0), 0.0, 0.001, "Am Anfang der Warnung auch nicht")
+	t.almost(Pang.wave_progress(wave, warn), 1.0, 0.001, "Am Ende ist sie voll")
+	t.almost(Pang.wave_progress(wave, warn * 0.5), 0.5, 0.001, "In der Mitte halb")
+	t.check(Pang.wave_progress(wave, 99.0) <= 1.0, "Fortschritt läuft nicht über eins hinaus")
+
+	# The countdown every layer prints.
+	t.equal(Pang.wave_eta(wave, 20, 0.0, -1.0), -1.0, "Ohne Warnung gibt es keine Restzeit")
+	t.almost(Pang.wave_eta(wave, 0, 0.0, 0.0), warn, 0.001, "Am Anfang steht die ganze Warnzeit")
+	t.almost(Pang.wave_eta(wave, 0, 0.0, warn * 0.5), warn * 0.5, 0.001, "…und läuft von dort herunter")
+	t.equal(Pang.wave_eta(wave, 0, 0.0, warn), 0.0, "Beim Fallen ist keine Zeit mehr übrig")
+	t.check(Pang.wave_eta(wave, 0, 0.0, warn + 5.0) >= 0.0, "Und nie eine negative")
+
+	# The whole thing has to fit into the level: a wave that is announced on the
+	# very last second would be a warning nobody can use.
+	for level in range(1, Pang.TOTAL_LEVELS + 1):
+		var config := Pang.level_config(level)
+		if int(config["waves"]) > 0:
+			t.check(
+				float(config["timeLimit"]) > Pang.WAVE_MAX_DELAY + Pang.WAVE_WARN_TIME,
+				"Level %d lässt Platz für die ganze Warnung" % level
+			)
+
+
+## What the player reads: the HUD line, the marker and the knight all have to
+## describe the same arrival.
+func _alarm() -> void:
+	var wave := _left_wave()
+	var warn := Pang.wave_warn_time(wave)
+
+	# Nothing while the wave is still silent — a warning that cries wolf is
+	# worse than no warning.
+	t.equal(Pang.wave_alert(wave, -1.0), "", "Stille Wellen schweigen im HUD")
+	t.equal(Pang.wave_alert({}, 0.0), "", "Und eine leere Welle erst recht")
+	t.check(Pang.wave_alert(wave, 0.0).length() > 0, "Angekündigte Wellen schreiben es hin")
+	t.check(Pang.wave_alert(wave, 0.0).contains("links"), "…und sagen, von welcher Seite")
+
+	# The number in the text is the number the countdown shows.
+	for step in 5:
+		var waited: float = warn * float(step) / 4.0
+		var text := Pang.wave_alert(wave, waited)
+		var eta := Pang.wave_eta(wave, 0, 0.0, waited)
+		t.check(text.contains("%.1f" % eta), "Der Text nennt die Restzeit (Schritt %d)" % step)
+		t.check(text.contains("noch"), "…und sagt, dass es eine Restzeit ist (Schritt %d)" % step)
+
+	# The band is a real place the player can be told to leave, so the rules
+	# have to be able to answer both directions.
+	t.check(Pang.in_wave_band(wave, -7.0), "Ein Punkt im Band gehört zum Band")
+	t.check(not Pang.in_wave_band(wave, 0.0), "Die Mitte ist außerhalb")
+	t.check(not Pang.in_wave_band(wave, Pang.ARENA_HALF_WIDTH - 0.5), "…und die gegenüberliegende Wand auch")
+	t.check(Pang.WAVE_BAND_GROW > 0.0, "Das Band wächst im Countdown, damit der Boden mitredet")
+
+	# A wave whose band leaves no safe side, or that lies about its warning, is
+	# rejected — the same way an unplayable layout is.
+	var base := {"level": 1, "timeLimit": 60.0, "balls": [{"x": 0.0, "y": 8.0, "size": 2}]}
+	var wide := base.duplicate()
+	wide["waves"] = [{
+		"trigger": 5, "maxDelay": 11.0, "warnTime": 2.0,
+		"balls": [{"x": -14.0, "y": 15.0, "size": 3}, {"x": 14.0, "y": 15.0, "size": 3}],
+	}]
+	t.check(Pang.validate_level(wide).size() > 0, "Eine Welle ohne sicheren Platz wird erkannt")
+	var thin := base.duplicate()
+	# A band that leaves a strip a knight could not stand in is just as useless.
+	thin["waves"] = [{
+		"trigger": 5, "maxDelay": 11.0, "warnTime": 2.0,
+		"balls": [{"x": -12.0, "y": 15.0, "size": 3}, {"x": 12.0, "y": 15.0, "size": 3}],
+	}]
+	t.check(Pang.validate_level(thin).size() > 0, "Ein zu schmales Band wird erkannt")
+	t.check(Pang.WAVE_SAFE_MIN > Pang.PLAYER_HALF_WIDTH * 2.0, "Der sichere Platz ist breiter als der Spieler")
+	var too_soon := base.duplicate()
+	too_soon["waves"] = [{"trigger": 5, "maxDelay": 11.0, "warnTime": -1.0, "balls": [{"x": -8.0, "y": 15.0, "size": 3}]}]
+	t.check(Pang.validate_level(too_soon).size() > 0, "Eine Welle mit negativer Warnzeit wird erkannt")
+	var announced := base.duplicate()
+	announced["waves"] = [wave]
+	t.equal(Pang.validate_level(announced).size(), 0, "Eine sauber angekündigte Welle ist spielbar")
+	# A wave that hangs in the middle is unusual but legal: both sides are free,
+	# so the player only has to pick one.
+	var centred := base.duplicate()
+	centred["waves"] = [{"trigger": 5, "maxDelay": 11.0, "warnTime": 2.0, "balls": [{"x": 0.0, "y": 15.0, "size": 3}]}]
+	t.equal(Pang.validate_level(centred).size(), 0, "Eine mittige Welle ist ebenfalls spielbar")
+
+	# The layout carries the warning, so the screen and the tests read the number
+	# the level was built with.
+	for level in range(1, Pang.TOTAL_LEVELS + 1):
+		for wave_entry in Pang.level_data(level)["waves"]:
+			t.equal(Pang.wave_warn_time(wave_entry), Pang.WAVE_WARN_TIME, "Das Layout nennt seine Warnzeit (Level %d)" % level)

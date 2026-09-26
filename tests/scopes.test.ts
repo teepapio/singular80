@@ -31,6 +31,21 @@ describe('Manifest-Brücke', () => {
     expect(loadManifest().status).toBe('ok');
   });
 
+  /**
+   * The manifest's own self-check, run as a test.
+   *
+   * `node scripts/scopes.mjs list` reports these problems and exits 1, but
+   * nothing in `npm test` called it — so six new suites and one unloaded test
+   * file sat in the tree with a green test run. The failure this guards is
+   * quiet by nature: a suite nobody registered simply does not run in a scoped
+   * run, and the agent that wrote it believes it is covered.
+   */
+  it('ist konsistent — jede Suite hängt an einem Scope, jede Testdatei am Runner', () => {
+    const manifest = scopeManifest();
+    expect(manifest.status, 'das Manifest ließ sich nicht lesen').toBe('ok');
+    expect(manifest.problems).toEqual([]);
+  });
+
   it('liefert jeden Scope mit seinem zuständigen Agenten', () => {
     const manifest = scopeManifest();
     expect(manifest.status).toBe('ok');

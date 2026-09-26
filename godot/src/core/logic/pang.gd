@@ -13,6 +13,12 @@ extends RefCounted
 ## middle of the campaign on — reinforcement waves that drop in while the level
 ## is still running. Both are decided here, so the level select, the ball
 ## budget and the screen all count the same balls.
+##
+## A wave is announced before it lands: it always arrives over one flank of the
+## arena, the warning paints that flank and counts down, and only then do the
+## balls fall. That turns the arrival from an interruption into a decision, and
+## the whole timeline — silent, announced, falling — is one pure call
+## (`wave_stage`) that the screen only has to keep a number for.
 
 # --- arena ------------------------------------------------------------------
 # World units. X runs across the arena, Y is up, Z is the (shallow) depth axis
@@ -184,12 +190,49 @@ const WAVE_FIRST_LEVEL := 9
 const WAVE_MAX := 2
 const WAVE_BALLS_START := 2
 const WAVE_BALLS_END := 4
-## Live balls at which the next wave drops in. Waiting for a thin board is what
-## makes the arrival a beat instead of an interruption.
+## Live balls at which the next wave is announced. Waiting for a thin board is
+## what makes the arrival a beat instead of an interruption.
 const WAVE_TRIGGER := 5
 ## …and a wave never waits longer than this, so the reinforcements always come
 ## and a level can never be finished before it has shown up.
 const WAVE_MAX_DELAY := 11.0
+
+# --- the warning ------------------------------------------------------------
+# A wave that lands without notice is an interruption; one that is announced is
+# a decision. `WAVE_TRIGGER`/`WAVE_MAX_DELAY` say *when* a wave is due, the
+# warning is the beat that follows: the band it will arrive over lights up, a
+# countdown runs, and only then does the batch fall. The clock keeps ticking
+# while the player decides, so the warning is paid for in seconds — that is the
+# whole cost.
+#
+# A batch never spreads over the whole arena. It arrives over one flank, which
+# is what turns "something is coming" into a question the player can answer:
+# finish the ball in front of you and eat the drop where you stand, or cross
+# the arena and take it from the safe side.
+
+## The three stages a due wave walks through. `WAVE_PENDING` is silent,
+## `WAVE_WARNING` is announced and counting down, `WAVE_FALLING` is the frame
+## the batch is put on the board.
+const WAVE_PENDING := "pending"
+const WAVE_WARNING := "warning"
+const WAVE_FALLING := "falling"
+
+## How long the warning runs before the batch drops. Long enough to cross the
+## arena, short enough that the clock is still ticking while the player looks
+## for a safe side.
+const WAVE_WARN_TIME := 3.0
+
+## The empty stretch a batch leaves at the middle line, so the two flanks read
+## as two places instead of one wide one.
+const WAVE_BAND_GAP := 1.6
+## How far a batch stays from the side wall.
+const WAVE_BAND_MARGIN := 2.0
+## The narrowest strip of floor a band may leave, so a warning always has a
+## place it can send the player to: more than a knight with a little elbow room.
+const WAVE_SAFE_MIN := 2.5
+## The band is painted this much wider per second of the warning, so the floor
+## itself says how long is left instead of only the number in the HUD.
+const WAVE_BAND_GROW := 1.4
 
 # --- lookups ----------------------------------------------------------------
 
@@ -346,6 +389,92 @@ static func reinforcement_size(base_size: int) -> int:
 	return clampi(int(base_size) + 2, SIZE_LARGEST, SIZE_SMALLEST)
 
 
+## Which flank the wave `index` of `level` drops in over: -1 left, 1 right.
+## Two waves of the same level therefore come from opposite sides, so a level
+## with two of them has to be fought across the whole arena instead of from one
+## corner. The alternation is arithmetic, not random: a retry sees the same
+## arrival, and the test can name the side it expects.
+static func wave_flank(level: int, index: int) -> int:
+	return -1 if (clampi(level, 1, TOTAL_LEVELS) + maxi(0, index)) % 2 == 0 else 1
+
+
+## The x span one flank offers, with the middle gap between the two. Kept
+## inside the arena, so no batch can start against a wall.
+static func flank_range(flank: int) -> Vector2:
+	var inner := WAVE_BAND_GAP
+	var outer := ARENA_HALF_WIDTH - WAVE_BAND_MARGIN
+	return Vector2(-outer, -inner) if flank < 0 else Vector2(inner, outer)
+
+
+## The strip of floor a wave arrives over, as (x0, x1).
+##
+## Derived from the batch itself — the ball positions and their radii — so the
+## band the warning paints can never describe a different arrival than the one
+## the player gets. A wave without balls answers with the whole arena, which
+## keeps the rule total for a hand-written layout.
+static func wave_band(wave: Dictionary) -> Vector2:
+	var balls: Array = wave.get("balls", [])
+	if balls.is_empty():
+		return Vector2(-ARENA_HALF_WIDTH, ARENA_HALF_WIDTH)
+	var lo := INF
+	var hi := -INF
+	for entry in balls:
+		var ball: Dictionary = entry
+		var radius := radius_of(int(ball.get("size", SIZE_LARGEST)))
+		var x := float(ball.get("x", 0.0))
+		lo = minf(lo, x - radius)
+		hi = maxf(hi, x + radius)
+	return Vector2(maxf(-ARENA_HALF_WIDTH, lo), minf(ARENA_HALF_WIDTH, hi))
+
+
+## Which flank a band sits in: -1 left, 1 right, 0 when it straddles the middle.
+## Only a hand-written wave can come out as 0 — the generator keeps the gap.
+static func wave_side(band: Vector2) -> int:
+	var centre := band.x + band.y
+	if centre < 0.0:
+		return -1
+	return 1 if centre > 0.0 else 0
+
+
+## "links" / "rechts" / "der Mitte" — the three German forms the HUD needs for
+## "Nachschub von …". Lives here with the band so the copy and the arrival
+## cannot drift apart.
+static func wave_side_label(wave: Dictionary) -> String:
+	match wave_side(wave_band(wave)):
+		-1:
+			return "links"
+		1:
+			return "rechts"
+		_:
+			return "der Mitte"
+
+
+## Is `x` part of the arriving band? The screen paints the band and warns the
+## knight while it stands in it — that is the decision the warning exists for,
+## and it is the one piece of spatial state the rules own.
+static func in_wave_band(wave: Dictionary, x: float) -> bool:
+	var band := wave_band(wave)
+	return x >= band.x and x <= band.y
+
+
+## "links", "rechts" or "links, rechts" — the sides a level's waves arrive
+## over, in order. The level card shows it, so a level with two waves is
+## visibly a fight across the whole arena and not from one corner. Pure
+## arithmetic on top of `wave_flank`, so the card never has to build a layout.
+static func wave_flanks_label(level: int) -> String:
+	var words: Array[String] = []
+	for index in wave_count(level):
+		words.append("links" if wave_flank(level, index) < 0 else "rechts")
+	return ", ".join(words)
+
+
+## How long this wave warns before it lands. The layout carries the number, so
+## the drawing, the HUD and the tests all read the one the level was built
+## with; the constant is only the default for a hand-written wave.
+static func wave_warn_time(wave: Dictionary) -> float:
+	return maxf(0.0, float(wave.get("warnTime", WAVE_WARN_TIME)))
+
+
 ## Every ball a level ships, opening batch, riffle and all waves together. The
 ## level select shows this, so a card never promises fewer balls than the level
 ## delivers. Walks the whole layout, so a per-frame caller should cache it.
@@ -405,12 +534,15 @@ static func level_data(level: int) -> Dictionary:
 	# and the ball budget see the same reinforcements the player gets.
 	var waves: Array[Dictionary] = []
 	for index in int(config["waves"]):
-		var batch := _place_wave(rng, wave_balls(int(config["level"]), index), reinforcement_size(size), taken)
+		var batch := _place_wave(
+			rng, wave_balls(int(config["level"]), index), reinforcement_size(size), taken, int(config["level"]), index
+		)
 		taken.append_array(batch)
 		waves.append({
 			"index": index,
 			"trigger": WAVE_TRIGGER,
 			"maxDelay": WAVE_MAX_DELAY,
+			"warnTime": WAVE_WARN_TIME,
 			"balls": batch,
 		})
 
@@ -473,53 +605,81 @@ static func _place_riffle(rng: RandomNumberGenerator, count: int, base_size: int
 	if count <= 0:
 		return out
 	var top: int = (count + 1) / 2
-	out.append_array(_place_row(rng, top, clampi(RIFFLE_SIZE, base_size, SIZE_SMALLEST), taken, CEILING_Y - 1.4))
+	var full := _full_span()
+	out.append_array(_place_row(rng, top, clampi(RIFFLE_SIZE, base_size, SIZE_SMALLEST), taken, CEILING_Y - 1.4, full))
 	# The second row is placed against the first, so the two rows cannot land on
 	# top of each other.
 	var both: Array[Dictionary] = []
 	both.append_array(taken)
 	both.append_array(out)
-	out.append_array(_place_row(rng, count - top, clampi(RIFFLE_SIZE - 1, base_size, SIZE_SMALLEST), both, CEILING_Y - 2.6))
+	out.append_array(_place_row(rng, count - top, clampi(RIFFLE_SIZE - 1, base_size, SIZE_SMALLEST), both, CEILING_Y - 2.6, full))
 	return out
 
 
-## One reinforcement batch, spread under the ceiling in a single size.
-static func _place_wave(rng: RandomNumberGenerator, count: int, size: int, taken: Array[Dictionary]) -> Array[Dictionary]:
-	return _place_row(rng, count, clampi(size, SIZE_LARGEST, SIZE_SMALLEST), taken, CEILING_Y - 1.4)
+## The x span a batch that is not tied to a flank may use. The riffle is the
+## opposite of a wave: it belongs to the opening layout, so it fills the arena.
+static func _full_span() -> Vector2:
+	return Vector2(-ARENA_HALF_WIDTH + 2.0, ARENA_HALF_WIDTH - 2.0)
 
 
-## A row of balls at `y`, each one nudged away from everything already on the
-## board. A layout that starts with two balls inside each other looks like a bug
-## and shoves the pair apart on the first frame, so the spot is checked instead
-## of hoped for; a full arena simply keeps the slot it drew.
+## One reinforcement batch, dropped in over one flank of the arena. The flank
+## is what the warning paints and what the player has to step out of, so it is
+## decided here, once, and never in the frame loop.
+static func _place_wave(
+	rng: RandomNumberGenerator, count: int, size: int, taken: Array[Dictionary], level: int, index: int
+) -> Array[Dictionary]:
+	return _place_row(
+		rng, count, clampi(size, SIZE_LARGEST, SIZE_SMALLEST), taken, CEILING_Y - 1.4, flank_range(wave_flank(level, index))
+	)
+
+
+## A row of balls at `y` between `x_range`, each one nudged away from everything
+## already on the board. A layout that starts with two balls inside each other
+## looks like a bug and shoves the pair apart on the first frame, so the spot is
+## checked instead of hoped for; a full arena simply keeps the slot it drew.
 ##
-## The search covers the whole field above the player's strip, not just the row:
-## a busy level has no free slot left under the ceiling, and a ball that starts
-## a little lower is one the player simply shoots first. The rules keep every
-## spot above `FLOOR_BAND_TOP`, so nothing ever starts on the knight.
-static func _place_row(rng: RandomNumberGenerator, count: int, size: int, taken: Array[Dictionary], y: float) -> Array[Dictionary]:
+## The search covers `x_range` over the whole field above the player's strip,
+## not just the row: a busy level has no free slot left under the ceiling, and a
+## ball that starts a little lower is one the player simply shoots first. A wave
+## passes its own flank here, so a batch never drifts across the middle into the
+## half the warning called safe. The rules keep every spot above
+## `FLOOR_BAND_TOP`, so nothing ever starts on the knight.
+static func _place_row(
+	rng: RandomNumberGenerator, count: int, size: int, taken: Array[Dictionary], y: float, x_range: Vector2
+) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	if count <= 0:
 		return out
-	var step: float = (ARENA_HALF_WIDTH * 2.0 - 4.0) / float(count)
+	# The row divides the span evenly; the retry search keeps a little more room
+	# to the walls than the row itself, so a slot is never drawn half inside one.
+	var lo: float = maxf(x_range.x, -ARENA_HALF_WIDTH + 2.0)
+	var hi: float = minf(x_range.y, ARENA_HALF_WIDTH - 2.0)
+	if hi < lo:
+		hi = lo
+	var inner_lo: float = maxf(lo, -ARENA_HALF_WIDTH + 2.6)
+	var inner_hi: float = minf(hi, ARENA_HALF_WIDTH - 2.6)
+	if inner_hi < inner_lo:
+		inner_hi = inner_lo
+	var step: float = (hi - lo) / float(count)
 	var radius := radius_of(size)
 	var lowest: float = FLOOR_BAND_TOP + radius + 0.6
 	var highest: float = CEILING_Y - radius - 0.4
 	for i in count:
 		var spot := _ball_spot(
-			-ARENA_HALF_WIDTH + 2.0 + (float(i) + 0.5) * step + rng.randf_range(-0.28, 0.28) * step,
+			lerpf(lo, hi, (float(i) + 0.5) / float(count)) + rng.randf_range(-0.28, 0.28) * step,
 			y,
 			size
 		)
 		for attempt in BATCH_PLACEMENT_TRIES:
 			if _ball_spot_free(float(spot["x"]), float(spot["y"]), radius, radius, taken, out):
 				break
-			# Somewhere else in the field, so a crowded row spreads out instead of
-			# stacking. The last attempt keeps the slot rather than looping.
+			# Somewhere else in the same span, so a crowded row spreads out
+			# instead of stacking. The last attempt keeps the slot rather than
+			# looping.
 			if attempt == BATCH_PLACEMENT_TRIES - 1:
 				break
 			spot = _ball_spot(
-				rng.randf_range(-ARENA_HALF_WIDTH + 2.6, ARENA_HALF_WIDTH - 2.6),
+				rng.randf_range(inner_lo, inner_hi),
 				rng.randf_range(lowest, highest),
 				size
 			)
@@ -612,6 +772,9 @@ static func validate_level(data: Dictionary) -> Array[String]:
 			problems.append("Eine Welle wartet auf eine negative Kugelzahl")
 		if float(entry.get("maxDelay", WAVE_MAX_DELAY)) <= 0.0:
 			problems.append("Eine Welle kommt gar nicht mehr an")
+		if float(entry.get("warnTime", WAVE_WARN_TIME)) < 0.0:
+			problems.append("Eine Welle warnt mit negativer Zeit")
+		_band_problems(entry, problems)
 		_ball_problems(batch, "Wellenkugel", problems)
 	for entry in data.get("obstacles", []):
 		var kind := str(entry.get("kind", ""))
@@ -622,6 +785,24 @@ static func validate_level(data: Dictionary) -> Array[String]:
 		if float(entry.get("y", 0.0)) - float(spec["halfHeight"]) < FLOOR_BAND_TOP - 0.2:
 			problems.append("Hindernis bei y=%.1f blockiert den Spielersockel" % float(entry.get("y", 0.0)))
 	return problems
+
+
+## Everything that would make a wave's warning a lie: a band that leaves the
+## arena, or one so wide that no strip of floor is left to run to. A warning the
+## player cannot act on is decoration, so the suite asks for a safe side on
+## every level.
+static func _band_problems(wave: Dictionary, problems: Array[String]) -> void:
+	var band := wave_band(wave)
+	if band.y <= band.x:
+		problems.append("Das Nachschubband ist leer")
+		return
+	if band.x < -ARENA_HALF_WIDTH - 0.01 or band.y > ARENA_HALF_WIDTH + 0.01:
+		problems.append("Das Nachschubband ragt aus der Arena")
+		return
+	# The wider of the two clear strips is where the player would stand.
+	var clear: float = maxf(band.x + ARENA_HALF_WIDTH, ARENA_HALF_WIDTH - band.y)
+	if clear < WAVE_SAFE_MIN:
+		problems.append("Eine Welle lässt keinen sicheren Platz — das Band ist zu breit")
 
 
 static func _ball_problems(balls: Array, what: String, problems: Array[String]) -> void:
@@ -697,16 +878,69 @@ static func shot_cost(layout: Dictionary) -> int:
 	return shots
 
 
-## True when the next reinforcement has to drop in: as soon as the board has
-## thinned out to the wave's trigger, and in any case once its own wait is up.
+## True when the next reinforcement is *due*: as soon as the board has thinned
+## out to the wave's trigger, and in any case once its own wait is up.
+##
 ## The first half is what makes the arrival a beat, the second half is what
-## keeps a level from being finished before it has shown up.
+## keeps a level from being finished before it has shown up. Since a due wave is
+## announced first (`wave_stage`), this is the moment the warning *starts*, not
+## the frame the balls fall.
 static func wave_due(wave: Dictionary, live_balls: int, elapsed: float) -> bool:
 	if wave.is_empty():
 		return false
 	if live_balls <= int(wave.get("trigger", WAVE_TRIGGER)):
 		return true
 	return elapsed >= float(wave.get("maxDelay", WAVE_MAX_DELAY))
+
+
+# --- the announcement -------------------------------------------------------
+# `wave_due` answers *whether*, `wave_stage` answers *where in its timeline* a
+# wave is. `warned` is the one number the screen has to keep — how long the
+# warning has been running, `-1.0` while the wave is still silent — because the
+# rules themselves hold no state.
+
+## Where a pending wave stands. `WAVE_PENDING` is silent, `WAVE_WARNING` is
+## announced and counting, `WAVE_FALLING` is the frame the batch goes on the
+## board. The warning cannot be skipped: a wave that is due the moment the
+## board empties still walks its whole window, so the player always gets to see
+## where the batch lands.
+static func wave_stage(wave: Dictionary, live_balls: int, elapsed: float, warned: float) -> String:
+	if wave.is_empty():
+		return WAVE_PENDING
+	if warned < 0.0:
+		return WAVE_WARNING if wave_due(wave, live_balls, elapsed) else WAVE_PENDING
+	return WAVE_WARNING if warned < wave_warn_time(wave) else WAVE_FALLING
+
+
+## 0 while the wave is silent, then it climbs to 1 over the warning window. The
+## band, the countdown and the alarm all read this one number, so "how long have
+## I got" has exactly one answer in the code.
+static func wave_progress(wave: Dictionary, warned: float) -> float:
+	if warned < 0.0:
+		return 0.0
+	return clampf(warned / maxf(0.001, wave_warn_time(wave)), 0.0, 1.0)
+
+
+## Seconds until the batch lands: `-1.0` while the wave is still silent, `0.0`
+## once it is falling, so a caller can print the same number in every stage.
+static func wave_eta(wave: Dictionary, live_balls: int, elapsed: float, warned: float) -> float:
+	match wave_stage(wave, live_balls, elapsed, warned):
+		WAVE_PENDING:
+			return -1.0
+		WAVE_WARNING:
+			return maxf(0.0, wave_warn_time(wave) - warned)
+		_:
+			return 0.0
+
+
+## The one line the HUD puts on the floor while a wave is announced: the side
+## it comes from and the time left. The number is the same `wave_eta` returns,
+## so the text can never promise a different arrival than the player gets.
+## Empty while the wave is still silent.
+static func wave_alert(wave: Dictionary, warned: float) -> String:
+	if wave.is_empty() or warned < 0.0:
+		return ""
+	return "Nachschub von %s — noch %.1f s" % [wave_side_label(wave), maxf(0.0, wave_warn_time(wave) - warned)]
 
 
 # --- scoring ----------------------------------------------------------------

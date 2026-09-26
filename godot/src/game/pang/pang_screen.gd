@@ -42,6 +42,12 @@ const STATE_CLEARED := "cleared"
 const STATE_LOST := "lost"
 const STATE_PAUSED := "paused"
 
+## Colour of the wave warning. Pink, because nothing else on the floor is, and
+## it is also the colour of the reinforcement chip in the corner.
+const WAVE_ALERT := Color("f472b6")
+## The knight's own colour, so the warning tint can be taken back off again.
+const PLAYER_TINT := Color("dbe4f0")
+
 ## Backdrop moods, cycled per level by `Pang.level_data().background`.
 const THEMES: Array[Dictionary] = [
 	{"fog": "0b1a2f", "wall": "16324f", "floor": "1d3b52", "sun": "ffe9c4", "fill": "4f7dff", "ambient": "6f9ad6"},
@@ -81,12 +87,19 @@ var speed_mult := 1.0
 # A level ships its balls in two batches: the opening layout and the waves that
 # drop in while it runs. The rules decide both (`Pang.level_data`), the screen
 # only counts down to the next one and puts it on the board.
+#
+# A wave is announced before it lands: `Pang.wave_stage` runs the timeline
+# silent → announced → falling, and the screen draws the flank the batch will
+# arrive over plus a countdown. The only piece of state it owns is `wave_warned`
+# — how long the warning has been running, `-1.0` while the wave is silent.
 
 var waves: Array = []
 var waves_left := 0
 var wave_index := 0
 var waves_total := 0
 var wave_clock := 0.0
+## Warning clock of the wave in `wave_index`; `-1.0` means "not announced yet".
+var wave_warned := -1.0
 var layout_total := 0
 
 var player_x := 0.0
@@ -137,6 +150,19 @@ var _balls_label: Label
 var _balls_shown := -1
 var _balls_shown_waves := -1
 var _hook_label: Label
+## The wave warning in the top-left column and the countdown over the arriving
+## flank. Both are formatted only when this step moves on, so the frame loop
+## writes no text while the wave creeps.
+var _alert_label: Label
+## Tenths of a second since the last rebuild of both warning texts; `-1` means
+## "no wave is announced".
+var _alert_step := -1
+## The flank marker of the arriving wave: a painted strip on the floor, the
+## countdown above it and the tint on the knight.
+var _wave_band: MeshInstance3D
+var _wave_band_material: StandardMaterial3D
+var _wave_count: Label3D
+var _player_alert := false
 var _effect_box: VBoxContainer
 var _overlay: Control
 var _pause_held := false
@@ -150,6 +176,7 @@ func _ready_world() -> void:
 	_build_scenery()
 	_build_player()
 	_build_pools()
+	_build_wave_marker()
 	_build_particles()
 	_build_ui()
 	_start_level()
@@ -252,7 +279,7 @@ func _build_player() -> void:
 	player = Node3D.new()
 	add_child(player)
 
-	player_mesh = WorldScreen.mesh("rpg/knight", Color("dbe4f0"), 0.95)
+	player_mesh = WorldScreen.mesh("rpg/knight", PLAYER_TINT, 0.95)
 	if player_mesh == null:
 		var box := MeshInstance3D.new()
 		var box_mesh := BoxMesh.new()
@@ -370,6 +397,40 @@ func _bubble_material(color: Color) -> StandardMaterial3D:
 	return material
 
 
+## The two nodes the wave warning owns: a strip on the floor that covers the
+## flank the batch is about to fall over, and the countdown floating above it.
+## Both are built once and hidden between waves — the warning is a pulse, not a
+## permanent piece of furniture.
+func _build_wave_marker() -> void:
+	_wave_band = MeshInstance3D.new()
+	var strip := BoxMesh.new()
+	strip.size = Vector3(1.0, 0.16, 2.6)
+	_wave_band.mesh = strip
+	_wave_band_material = StandardMaterial3D.new()
+	_wave_band_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_wave_band_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_wave_band_material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	_wave_band_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_wave_band.material_override = _wave_band_material
+	_wave_band.visible = false
+	_wave_band.position.z = PLAYER_Z - 0.3
+	add_child(_wave_band)
+
+	_wave_count = Label3D.new()
+	_wave_count.font = Ui.font_bold()
+	_wave_count.font_size = 40
+	_wave_count.pixel_size = 0.0055
+	_wave_count.outline_size = 12
+	_wave_count.outline_modulate = Color(0.02, 0.03, 0.06, 0.9)
+	_wave_count.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_wave_count.no_depth_test = true
+	_wave_count.fixed_size = true
+	_wave_count.modulate = WAVE_ALERT
+	_wave_count.position.z = ORB_Z + 0.8
+	_wave_count.visible = false
+	add_child(_wave_count)
+
+
 func _spark_material() -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -422,6 +483,10 @@ func _build_ui() -> void:
 	_lives_label = _value(column, "Leben", "3", Color("f87171"))
 	_balls_label = _value(column, "Kugeln", "0", Color("a3e635"))
 	_hook_label = _value(column, "Haken", "0/1", Color("e2e8f0"))
+	# The wave warning sits under the counters: it is the only line in the HUD
+	# that changes on its own, and it changes only while a wave is announced.
+	_alert_label = Ui.label("", 15, WAVE_ALERT, true)
+	column.add_child(_alert_label)
 
 	_time_bar = Ui.bar(Color("38bdf8"), 14.0)
 	_time_bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
@@ -497,6 +562,7 @@ func _start_level() -> void:
 	waves_left = waves_total
 	wave_index = 0
 	wave_clock = 0.0
+	wave_warned = -1.0
 	layout_total = Pang.total_balls(layout)
 	score = 0
 	balls_popped = 0
@@ -542,6 +608,7 @@ func _release_all() -> void:
 		slot["node"].visible = false
 	balls_left = 0
 	active_harpoons = 0
+	_hide_wave_marker()
 	for child in _effect_box.get_children():
 		child.queue_free()
 
@@ -669,6 +736,9 @@ func _update_world(delta: float) -> void:
 		# Let the balls keep drifting behind the overlay instead of freezing
 		# mid-air, which looks like a crash rather than a pause.
 		_tick_balls(dt * 0.3)
+		# A pending wave no longer counts down while the level is over, and its
+		# band must not glow through the overlay.
+		_hide_wave_marker()
 
 	_tick_particles(dt)
 	_tick_labels(dt)
@@ -696,18 +766,49 @@ func _tick_countdown(dt: float) -> void:
 		_lose("Die Zeit ist um")
 
 
-## The reinforcement. `Pang.wave_due` owns the rule — a wave arrives as soon as
-## the board has thinned out, and at the latest when its own wait is up — so
-## this only has to count the wait and put the batch on the board.
+## The reinforcement, in three stages. `Pang.wave_stage` owns the whole
+## timeline — a due wave is announced, the warning runs its course, and only
+## then does the batch fall — so this function only keeps the one number the
+## rules cannot keep themselves, `wave_warned`, and puts the batch on the board
+## when the rules say it is due.
 func _tick_waves(dt: float) -> void:
 	if waves_left <= 0:
+		_hide_wave_marker()
 		return
 	# A frozen level waits for the reinforcements too, otherwise they would drop
 	# into a board that is standing still.
 	if not Pang.is_frozen(freeze):
 		wave_clock += dt
-	if not Pang.wave_due(waves[wave_index], balls_left, wave_clock):
+		if wave_warned >= 0.0:
+			wave_warned += dt
+	match Pang.wave_stage(waves[wave_index], balls_left, wave_clock, wave_warned):
+		Pang.WAVE_PENDING:
+			pass
+		Pang.WAVE_WARNING:
+			_announce_wave()
+		Pang.WAVE_FALLING:
+			_drop_wave()
+			return
+	_update_wave_marker()
+
+
+## The frame the wave becomes visible. The arrival turns from an interruption
+## into a decision here: the flank lights up, a countdown starts, the knight
+## warns while it stands in the band — and the clock keeps running, so the
+## player pays for looking for a safe side.
+func _announce_wave() -> void:
+	if wave_warned >= 0.0:
 		return
+	wave_warned = 0.0
+	var wave: Dictionary = waves[wave_index]
+	# A falling alarm tone. None of the named effects means "something is
+	# about to arrive above you", and this one cannot be mistaken for a shot.
+	Sfx.tone(760.0, 0.12, "square", -22.0, 240.0)
+	notify("Nachschub kündigt sich an — %s!" % Pang.wave_side_label(wave), 2.0)
+
+
+## Puts the announced batch on the board and hands the arena back to the player.
+func _drop_wave() -> void:
 	var wave: Dictionary = waves[wave_index]
 	var batch: Array = wave.get("balls", [])
 	for ball in batch:
@@ -715,14 +816,75 @@ func _tick_waves(dt: float) -> void:
 	wave_index += 1
 	waves_left -= 1
 	wave_clock = 0.0
+	wave_warned = -1.0
+	_hide_wave_marker()
 	# The arrival is the one moment the level interrupts itself, so it says so —
 	# on screen, in the corner list and through the floor.
-	notify("Nachschub: %d Kugeln" % batch.size())
-	_effect_chip("☄  Nachschub!  %s" % ("Noch " + Pang.wave_label(waves_left) if waves_left > 0 else "Letzte Welle"), Color("f472b6"), 2.4)
-	# A falling alarm tone. None of the named effects means "something just
-	# arrived above you", and this one cannot be mistaken for a shot.
-	Sfx.tone(760.0, 0.12, "square", -22.0, 240.0)
+	notify("Nachschub: %d Kugeln von %s" % [batch.size(), Pang.wave_side_label(wave)], 2.0)
+	_effect_chip("☄  Nachschub!  %s" % ("Noch " + Pang.wave_label(waves_left) if waves_left > 0 else "Letzte Welle"), WAVE_ALERT, 2.4)
+	Sfx.tone(520.0, 0.18, "saw", -20.0, 160.0)
 	shake = maxf(shake, 0.18)
+
+
+## Paints the flank the batch will arrive over, the countdown above it and the
+## warning on the knight. All three read the same `wave_progress`, so "how long
+## have I got" has one answer on the screen as well as in the rules.
+func _update_wave_marker() -> void:
+	if wave_warned < 0.0:
+		_hide_wave_marker()
+		return
+	var wave: Dictionary = waves[wave_index]
+	var progress := Pang.wave_progress(wave, wave_warned)
+	var band := Pang.wave_band(wave)
+	# The strip widens as the wave gets closer, so the floor itself carries the
+	# countdown and not just the number floating over it.
+	var half: float = (band.y - band.x) * 0.5 + progress * Pang.WAVE_BAND_GROW
+	var centre: float = (band.x + band.y) * 0.5
+	_wave_band.visible = true
+	_wave_band.position = Vector3(centre, Pang.FLOOR_Y + 0.08, PLAYER_Z - 0.3)
+	_wave_band.scale = Vector3(maxf(0.1, half * 2.0), 1.0, 1.0)
+	_wave_band_material.albedo_color = Color(WAVE_ALERT.r, WAVE_ALERT.g, WAVE_ALERT.b, 0.16 + 0.34 * progress)
+	_wave_count.visible = true
+	_wave_count.position = Vector3(centre, Pang.FLOOR_Y + 4.6, ORB_Z + 0.8)
+	# Both texts are built in the rules, so the copy and the arrival cannot drift
+	# apart — and they are only formatted when a tenth of a second has passed, so
+	# the frame loop allocates nothing while the wave creeps.
+	var step := int(progress * 20.0)
+	if step != _alert_step:
+		_alert_step = step
+		_wave_count.text = "%.1f" % maxf(0.0, Pang.wave_eta(wave, balls_left, wave_clock, wave_warned))
+		_wave_count.modulate.a = 0.55 + 0.45 * progress
+		_alert_label.text = Pang.wave_alert(wave, wave_warned)
+	# The knight warns while it stands in the band, which is the decision the
+	# whole warning exists for: leave the flank, or clear fast and eat the drop.
+	var inside := Pang.in_wave_band(wave, player_x)
+	if inside != _player_alert:
+		_player_alert = inside
+		_tint_player(WAVE_ALERT if inside else PLAYER_TINT, 0.5 if inside else 0.0)
+
+
+## `WorldScreen.tint` only walks the children, so a mesh that *is* the root — the
+## procedural fallback knight, when the import is missing — has to be tinted by
+## hand. Without this the warning would be invisible on exactly the devices that
+## got no knight mesh.
+func _tint_player(color: Color, emission: float) -> void:
+	if player_mesh is GeometryInstance3D:
+		(player_mesh as GeometryInstance3D).material_override = WorldScreen.standard_material(color, emission)
+	WorldScreen.tint(player_mesh, color, emission)
+
+
+func _hide_wave_marker() -> void:
+	if _wave_band != null:
+		_wave_band.visible = false
+	if _wave_count != null:
+		_wave_count.visible = false
+	if _alert_step != -1:
+		_alert_step = -1
+		if _alert_label != null:
+			_alert_label.text = ""
+	if _player_alert:
+		_player_alert = false
+		_tint_player(PLAYER_TINT, 0.0)
 
 
 func _tick_input() -> void:

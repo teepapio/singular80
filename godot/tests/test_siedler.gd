@@ -22,6 +22,7 @@ func run(kit: TestKit) -> void:
 	_route_report()
 	_route_split()
 	_route_optimize()
+	_depot()
 	t.close_suite()
 
 
@@ -942,4 +943,231 @@ func _route_optimize() -> void:
 		if bool(node["flag"]):
 			calm_after += 1
 	t.equal(calm_after, calm_flags, "Ohne Stau setzt der Optimierer keine Fahne")
+	t.suite_done()
+
+
+# --- Lagerplatz: die endliche Vorratskammer ---------------------------------
+#
+# Das Lager war das eine Gebäude, dessen eigener Beschreibungstext eine Lüge
+# war: es versprach mehr Lagerkapazität und lieferte nur sechs Siedler. Damit
+# gab es keine Speichergrenze — eine Siedlung, die zu viel produzierte, hatte
+# nichts als einen größeren Haufen, und die Straße vor dem Burgtor füllte sich
+# ohne jede Erklärung.
+#
+# Diese Suite prüft die drei Zusagen der neuen Regel: das Lager erweitert die
+# Kammer wirklich, eine volle Kammer weist Lieferungen ab und *zählt* sie je
+# Ware, und der Ratgeber sagt anschließend, was blockiert wird und welcher
+# Erzeuger den Platz frisst. Dazu die Sicherung, ohne die das Ganze nicht
+# spielbar wäre: Bauholz, Stein, Nahrung und Werkzeug nimmt die Burg immer an.
+
+## Überlädt die Vorratskammer mit `good`, ohne die Startware anzufassen. So ist
+## der Zustand unabhängig davon, wie voll eine frische Siedlung zufällig ist.
+func _flood(siedler: Siedler, good: String, amount: int) -> void:
+	siedler.store[good] = amount
+
+
+## Die Waren, die die Burg *nie* blockiert: Bauholz und Stein bezahlen die
+## Siedlung, Nahrung sättigt sie, ein Werkzeug ist die Voraussetzung für beides.
+## Sie zählen nicht gegen die Lagerplätze.
+func _free_goods() -> Array[String]:
+	var out: Array[String] = ["planks", "stone"]
+	for food in Siedler.FOODS:
+		out.append(food)
+	for tool in Siedler.TOOLS:
+		out.append(tool)
+	return out
+
+
+## Überlädt die Vorratskammer mit einer *Lagerware* und zahlt aus, was die
+## Siedlung zum Bauen braucht: So entsteht eine volle Burg, in der trotzdem
+## weitergebaut werden kann.
+func _spent_out(siedler: Siedler, good: String, amount: int) -> void:
+	_flood(siedler, good, amount)
+	for free_good in _free_goods():
+		siedler.store[free_good] = 0
+
+
+## Füllt die Kammer bis unters Dach. Baumstämme sind die Lagerware, die in
+## `_trading_siedler` tatsächlich ankommt: Sie wachsen auf jedem Wald, den der
+## Holzfäller findet, und werden von der Burg auch dann angenommen, wenn sie
+## eigentlich zum Schreiner weitergehen.
+func _fill_depot(siedler: Siedler) -> void:
+	for good in Siedler.GOODS:
+		siedler.store[good] = 0
+	siedler.store["logs"] = siedler.store_capacity()
+
+
+func _depot() -> void:
+	t.suite("Siedler — Ratgeber: Lagerplatz")
+
+	# Das Lager sagt, was es bringt. Der Text steht in den Stammdaten, also
+	# muss die Zahl dort und in der Regel zusammenpassen — sonst erzählt der
+	# Inspektor etwas anderes als das Spiel tut.
+	t.check(str(Siedler.spec_of("warehouse")["desc"]).contains(str(Siedler.WAREHOUSE_STORE)),
+		"Der Beschreibungstext des Lagers nennt die Lagerplätze, die es bringt")
+
+	# Ohne Lager hat die Burg ihre Grundkapazität — und die ist endlich.
+	var fresh := _siedler()
+	t.equal(fresh.store_capacity(), Siedler.STORE_CAP, "Ohne Lager bleibt die Kapazität der Burg")
+	var used := 0
+	for good in Siedler.GOODS:
+		if _free_goods().has(good):
+			continue
+		used += int(fresh.store.get(good, 0))
+	t.equal(fresh.store_used(), used, "Die belegten Plätze sind die Lagerware der Burg")
+	t.check(fresh.store_used() < fresh.store_capacity(),
+		"Und das Startpaket passt noch hinein — sonst startet die Siedlung schon kaputt")
+	t.check(not bool(fresh.store_report()["full"]), "Eine frische Burg meldet sich nicht als voll")
+
+	# Der Lagerplatz wächst mit jedem *fertigen* Lager. Ein Bauplatz hat noch
+	# keine Plätze, und das Lager eines Rivalen zählt nicht.
+	var grow := _siedler()
+	var plot := _cell_near(grow, "grass", 4)
+	if plot >= 0 and grow.place_building("warehouse", plot):
+		t.equal(grow.store_capacity(), Siedler.STORE_CAP,
+			"Ein Lager im Bau erweitert die Kammer noch nicht")
+		for building in grow.buildings:
+			if str(building["kind"]) == "warehouse":
+				building["state"] = "done"
+		t.equal(grow.store_capacity(), Siedler.STORE_CAP + Siedler.WAREHOUSE_STORE,
+			"Ein fertiges Lager räumt %d Plätze ein" % Siedler.WAREHOUSE_STORE)
+	else:
+		t.fail("Der Testaufbau fand kein Feld für ein Lager")
+	for building in grow.buildings:
+		if str(building["owner"]) == "rival" and str(building["kind"]) != "castle":
+			building["kind"] = "warehouse"
+			building["state"] = "done"
+	t.equal(grow.store_capacity(), Siedler.STORE_CAP + Siedler.WAREHOUSE_STORE,
+		"Das Lager eines Rivalen zählt nicht mit")
+
+	# Die Ausnahme, ohne die sich die Siedlung selbst zustellt: eine volle
+	# Kammer nimmt Bauholz, Stein, Nahrung und Werkzeug trotzdem an. Sonst
+	# könnte der Spieler gegen die volle Burg nichts tun — er könnte nicht
+	# einmal das Lager bauen, das die Burg wieder weitet.
+	var jam := _trading_siedler()
+	_fill_depot(jam)
+	for free_good in _free_goods():
+		jam.store[free_good] = 0
+	t.check(jam.store_used() >= jam.store_capacity(), "Die Kammer ist randvoll")
+	t.check(bool(jam.store_report()["full"]), "Und meldet sich als voll")
+	t.equal(int(jam.store_report()["room"]), 0, "Ohne freien Platz")
+	for good in _free_goods():
+		t.check(jam.can_store(good), "„%s“ passt trotzdem noch hinein" % Siedler.good_name(good))
+	t.check(not jam.can_store("logs"), "Lagerware dagegen nicht")
+	t.check(not jam.can_store("grain"), "Und Korn erst recht nicht")
+
+	# Eine volle Kammer weist ab — und zählt, *was*. Ohne diese Zahl stünde da
+	# nur „Lager voll", und der Spieler müsste selbst erraten, welche Ware es
+	# ist. Der Holzfäller liefert hier Stämme, und die passen nicht mehr hinein.
+	var siedler := _trading_siedler()
+	_fill_depot(siedler)
+	_run(siedler, 30.0)
+	var report := siedler.store_report()
+	t.check(int(report["refused_total"]) > 0, "Die Burg hat Lieferungen abgewiesen")
+	t.check(int((report["refused"] as Dictionary).get("logs", 0)) > 0,
+		"Und zwar die Baumstämme, die über die Straße kommen")
+	t.check(str(report["top"]) in (report["refused"] as Dictionary),
+		"Der Bericht nennt eine Ware, die tatsächlich abgewiesen wurde")
+	t.equal(int(siedler.store.get("logs", 0)), siedler.store_capacity(),
+		"Kein Stamm kam hinein")
+	var refused_before := int(report["refused_total"])
+	_run(siedler, 30.0)
+	t.check(int(siedler.store_report()["refused_total"]) > refused_before,
+		"Und solange die Kammer voll ist, weist sie weiter ab — der Verlust läuft")
+
+	# Der Ratgeber nennt es, und er nennt einen Griff.
+	var entry := _with_code(siedler.bottlenecks(), "storeFull")
+	t.check(not entry.is_empty(), "Der Ratgeber meldet die volle Vorratskammer")
+	if not entry.is_empty():
+		t.equal(str(entry["title"]), "Lager voll: %d von %d Plätzen" % [
+			int(report["used"]), int(report["capacity"]),
+		], "Der Titel nennt genau die belegten Plätze — nicht einen Anteil, der über 100 % läge")
+		t.check(str(entry["detail"]).contains(Siedler.good_name("logs")),
+			"Der Text nennt die abgewiesene Ware")
+		t.check(str(entry["detail"]).contains("immer an"),
+			"Und sagt, was die Burg trotzdem annimmt")
+		t.check(str(entry["detail"]).contains("Lager"), "Und erklärt den Griff")
+		t.equal(str(entry["fix"]), "build:warehouse", "Der Griff ist ein Lager")
+		t.equal(int(entry["building"]), siedler.castle_id, "Der Rat zeigt auf die Burg")
+		t.equal(int(entry["cell"]), int(siedler.buildings[siedler.castle_id]["cell"]),
+			"Sowie auf ihr Feld")
+
+	# Und der Griff wirkt: ein Lager macht Platz, danach kommt die Ware wieder an.
+	var shed := _finish(siedler, "warehouse", _cell_near(siedler, "grass", 4))
+	t.check(not shed.is_empty(), "Das Lager steht")
+	if not shed.is_empty():
+		t.equal(siedler.store_capacity(), Siedler.STORE_CAP + Siedler.WAREHOUSE_STORE,
+			"Und die Kammer ist um %d Plätze gewachsen" % Siedler.WAREHOUSE_STORE)
+		t.check(not bool(siedler.store_report()["full"]), "Die Kammer hat wieder Platz")
+		t.check(_with_code(siedler.bottlenecks(), "storeFull").is_empty(),
+			"Und der Rat ist erledigt")
+		var logs_before := int(siedler.store.get("logs", 0))
+		var refused_now := int(siedler.store_report()["refused_total"])
+		_run(siedler, 30.0)
+		t.check(int(siedler.store.get("logs", 0)) > logs_before,
+			"Die Stämme kommen wieder an")
+		t.equal(int(siedler.store_report()["refused_total"]), refused_now,
+			"Und die Burg weist nichts mehr ab — der Verlust ist behoben")
+
+	# Der Platzfresser ist die eigentliche Nachricht: an ihm kann der Spieler
+	# etwas ändern, ohne ein zweites Lager zu bauen. Und niemand verbraucht
+	# Korn in einer Siedlung ohne Mühle und Stall — genau das muss der Rat
+	# sagen, sonst baut der Spieler den falschen zweiten Erzeuger.
+	var wasted := _trading_siedler()
+	wasted.store["grain"] = Siedler.STORE_CAP - 200
+	wasted.store["logs"] = 200
+	t.check(wasted.orphan_goods().has("grain"),
+		"Ohne Mühle und Stall verbraucht hier niemand Korn")
+	_run(wasted, 30.0)
+	var spoil := _with_code(wasted.bottlenecks(), "storeFull")
+	t.check(not spoil.is_empty(), "Auch hier nennt der Ratgeber die volle Kammer")
+	if not spoil.is_empty():
+		t.check(str(spoil["detail"]).contains("Korn"),
+			"Der Rat nennt den größten Platzfresser")
+		t.check(str(spoil["detail"]).contains("niemand"),
+			"Und sagt, dass ihn niemand braucht")
+	t.equal(str(wasted.store_report()["filler"]), "grain", "Der Bericht führt Korn als Platzfresser")
+
+	# Eine randvolle Kammer allein ist noch kein Rat: erst wenn wirklich etwas
+	# abgewiesen wurde, lohnt der Hinweis. Sonst steht der Satz da, während
+	# gar nichts passiert, und der Spieler lernt ihn nicht mehr zu lesen.
+	var quiet := _trading_siedler()
+	_fill_depot(quiet)
+	t.equal(int(quiet.store_report()["refused_total"]), 0, "Es wurde noch nichts abgewiesen")
+	t.check(_with_code(quiet.bottlenecks(), "storeFull").is_empty(),
+		"Der Ratgeber schweigt, solange nichts blockiert wird")
+
+	# Die volle Kammer wiegt schwerer als ein Stau an einer Fahne: sie ist
+	# dessen Ursache, und sie blockiert die ganze Kammer statt einer Strecke.
+	var both := _trading_siedler()
+	_fill_depot(both)
+	_run(both, 30.0)
+	for node in both.nodes:
+		if bool(node["flag"]):
+			for i in Siedler.JAM_LIMIT + 2:
+				(node["queue"] as Array).append("logs")
+			break
+	var list := both.bottlenecks()
+	t.equal(_count_code(list, "storeFull"), 1, "Die volle Kammer steht genau einmal in der Liste")
+	t.equal(_count_code(list, "congestion"), 1, "Der Stau steht auch drin")
+	if _count_code(list, "congestion") == 1 and _count_code(list, "storeFull") == 1:
+		var jam_at := -1
+		var depot_at := -1
+		for i in list.size():
+			if str(list[i]["code"]) == "congestion":
+				jam_at = i
+			if str(list[i]["code"]) == "storeFull":
+				depot_at = i
+		t.check(depot_at < jam_at, "Die volle Kammer steht vor dem Stau")
+
+	# Und die Zusicherung, die das Ganze spielbar hält: eine volle Kammer ist
+	# kein Todesfall. Bauholz kommt weiter an, also kann der Spieler das Lager
+	# bauen, das die Kammer wieder öffnet.
+	var broke := _trading_siedler()
+	_spent_out(broke, "logs", Siedler.STORE_CAP)
+	t.check(bool(broke.store_report()["full"]), "Die Kammer ist trotzdem voll")
+	t.check(broke.can_store("planks"), "Eine volle Kammer nimmt trotzdem Bauholz an")
+	t.check(broke.can_store("stone"), "Und Stein")
+	_run(broke, 40.0)
+	t.check(int(broke.store.get("planks", 0)) > 0, "Die Siedlung kann also noch weiterbauen")
 	t.suite_done()

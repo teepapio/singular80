@@ -29,6 +29,14 @@ extends RefCounted
 ## congesting, roads report their throughput, and the *Ratgeber* turns all of it
 ## into one ranked answer — which building is starved of which good, and what
 ## the player should do about it.
+##
+## The one piece the original had and this tribute silently lacked: **a finite
+## depot.** The castle's store holds a limited number of places, a Lager
+## (warehouse) really enlarges it, and when it is full the castle *refuses*
+## deliveries — counted per good, so the Ratgeber can name what is being turned
+## away and which producer is eating the space. Without that, a settlement that
+## produced too much simply grew a bigger pile, and the depot was a building you
+## built for six settlers and nothing else.
 
 # --- goods ------------------------------------------------------------------
 
@@ -105,7 +113,7 @@ const SPECS: Array[Dictionary] = [
 		"kind": "warehouse", "name": "Lager", "icon": "⌂", "cost": {"planks": 6, "stone": 0},
 		"tool": "", "workers": 0, "inputs": {}, "outputs": {}, "cycle": 1.0,
 		"requires": "grass", "harvest": "", "hungry": false, "territory": 0,
-		"desc": "Erhöht die Siedler-Obergrenze um 6 und vergrößert die Lagerkapazität der Burg.",
+		"desc": "Erhöht die Siedler-Obergrenze um 6 und räumt 200 Lagerplätze in der Burg. Ohne Lager ist die Vorratskammer irgendwann voll, und eine volle Burg nimmt keine Lieferung mehr an.",
 	},
 	{
 		"kind": "woodcutter", "name": "Holzfäller", "icon": "⚔", "cost": {"planks": 2, "stone": 0},
@@ -235,7 +243,14 @@ const MESH_BY_KIND := {
 
 const CASTLE_SERFS := 10
 const WAREHOUSE_SERFS := 6
-const STORE_CAP := 400
+## Lagerplätze der Burg, ohne ein einziges Lager. Endlich, denn eine
+## grenzenlose Vorratskammer macht das Lager wertlos — und das Lager ist das
+## erste Gebäude, das der Spieler *bewusst* über das Notwendige hinaus baut.
+## Ein Platz ist ein Stück eines Gutes; weiter zählt die Kammer nicht.
+const STORE_CAP := 600
+## Lagerplätze, die ein fertiges Lager zusätzlich einlagert. Es gibt außerdem
+## `WAREHOUSE_SERFS` weitere Siedler.
+const WAREHOUSE_STORE := 200
 ## Flags are dropped at this spacing, which is what sets a road's throughput.
 const FLAG_SPACING := 5
 const IDEAL_SEGMENT := 7.0
@@ -306,6 +321,11 @@ var _routes_dirty: bool = true
 var _traffic := PackedInt32Array()
 ## Laufende Summe der Zähler, damit `measured_carriers()` O(1) bleibt.
 var _traffic_total: int = 0
+## Abgewiesene Lieferungen je Ware, Index wie in `GOODS`. Ein Zähler je Umschlag
+## und keiner pro Bild: der Eintrag wird nur gebraucht, wenn die Burg etwas
+## ablehnt, und das ist selten.
+var _refused := PackedInt32Array()
+var _refused_total: int = 0
 var _rng := RandomNumberGenerator.new()
 
 
@@ -554,6 +574,7 @@ func setup(seed_value_: int = 0, size: int = 46) -> void:
 	_routes.clear()
 	_routes_dirty = true
 	_reset_traffic()
+	_reset_refusals()
 
 	var center := _nearest_grass(cell_index(map_size / 2, map_size / 2))
 	place_castle(center, "player")
@@ -2220,6 +2241,146 @@ func _move_serfs(delta: float) -> void:
 			serf["state"] = "work"
 
 
+# --- Lager und Vorratskammer ------------------------------------------------
+#
+# Die Burg ist die Vorratskammer der Siedlung: was über die Straße hereinkommt,
+# landet hier, und von hier aus bekommen die Werkstätten ihre Betriebsstoffe.
+# Zwei Dinge machten daraus vorher eine Sackgasse ohne Wort:
+#
+#  - Der Platz war grenzenlos. Damit war das Lager wertlos, obwohl es in
+#    seinem eigenen Beschreibungstext behauptet, die Lagerkapazität zu
+#    vergrößern.
+#  - Der Platz war auch nie der Grund für einen Stau. Die Träger stellten ihre
+#    Ware ab, die Burg nahm alles an, und der Spieler sah nur, dass die Straße
+#    vor dem Tor voll war.
+#
+# `store_report()` ist die eine Zusammenfassung, die Bildschirm und Ratgeber
+# beide lesen: belegte Plätze, was abgewiesen wurde, was vor dem Tor liegt und
+# welcher Erzeuger den Platz frisst.
+
+## Fertige Lagerhäuser des Spielers. Ein Bauplatz hat noch keine Plätze, und das
+## Lager eines Rivalen zählt nicht.
+func warehouse_count() -> int:
+	var total := 0
+	for building in buildings:
+		if str(building["owner"]) == "player" and str(building["kind"]) == "warehouse" \
+				and str(building["state"]) == "done":
+			total += 1
+	return total
+
+
+## Die Lagerplätze der Burg.
+func store_capacity() -> int:
+	return STORE_CAP + WAREHOUSE_STORE * warehouse_count()
+
+
+## Passt diese Ware noch in die Burg?
+##
+## Zwei Regeln, und beide sind nötig. Die erste ist der Platz: ist die Kammer
+## voll, nimmt sie nichts mehr an — außer sie ist gar nicht voll. Die zweite
+## ist die Ausnahme, ohne die sich die Siedlung selbst zustellt: Bauholz, Stein,
+## Nahrung und Werkzeug nimmt die Burg **immer**. Sie sind das, woraus die
+## Siedlung bezahlt und gearbeitet wird, und sie zählen deshalb gar nicht erst
+## gegen die Lagerplätze: ein Block davor hieße, dass der Spieler die Burg mit
+## einem Lager öffnen sollte, das er nicht bezahlen kann.
+func can_store(good: String) -> bool:
+	if _is_free_good(good):
+		return true
+	return store_used() < store_capacity()
+
+
+## Die Waren, die die Burg nie blockiert: sie sind Vorrat der Siedlung, nicht
+## Lagerware. Die Liste ist eine Liste von *Kriterien*, keine von Waren — sonst
+## müsste ein neues Werkzeug an zwei Stellen nachgetragen werden.
+func _is_free_good(good: String) -> bool:
+	return good == "planks" or good == "stone" or is_food_good(good) or is_tool_good(good)
+
+
+## Belegte Lagerplätze: jedes Stück einer Lagerware ein Platz. Die freien Waren
+## aus `can_store` zählen nicht mit — sonst wäre die Kammer sofort überbucht
+## und ihre Zahl wertlos.
+func store_used() -> int:
+	var total := 0
+	for good in GOODS:
+		if _is_free_good(good):
+			continue
+		total += int(store.get(good, 0))
+	return total
+
+
+## Zählt eine Abweisung. Sie ist die einzige Spur, die dem Spieler sagt, *was*
+## an der Burg ankommt und nicht hineinpasst — ohne sie stünde da nur eine volle
+## Kammer, und er müsste selbst erraten, welche Ware es ist.
+func _refuse(good: String) -> void:
+	var index := GOODS.find(good)
+	if index < 0:
+		return
+	if _refused.size() < GOODS.size():
+		_refused.resize(GOODS.size())
+		_refused.fill(0)
+	_refused[index] = int(_refused[index]) + 1
+	_refused_total += 1
+
+
+## Alles, was Bildschirm und Ratgeber über die Vorratskammer wissen müssen:
+## `capacity`, `used`, `room`, `full`, `stuck` (an der Burg wartende Waren),
+## `refused` (Ware → Anzahl), `refused_total`, `top` (am häufigsten abgewiesene
+## Ware) und `filler` (der größte Platzfresser).
+func store_report() -> Dictionary:
+	var used := store_used()
+	var capacity := store_capacity()
+	var refused: Dictionary = {}
+	for i in GOODS.size():
+		var count := int(_refused[i]) if i < _refused.size() else 0
+		if count > 0:
+			refused[GOODS[i]] = count
+	var filler := ""
+	var filler_amount := 0
+	for good in GOODS:
+		var amount := int(store.get(good, 0))
+		if amount > filler_amount:
+			filler_amount = amount
+			filler = good
+	return {
+		"capacity": capacity,
+		"used": used,
+		"room": maxi(0, capacity - used),
+		"full": used >= capacity,
+		"stuck": _castle_queue(),
+		"refused": refused,
+		"refused_total": _refused_total,
+		"top": hottest_name(refused),
+		"filler": filler,
+	}
+
+
+## Waren, die gerade vor dem Burgtor liegen, weil die Kammer sie nicht mehr
+## nimmt. Das ist der Stau, den der Spieler sieht; `refused` sagt zusätzlich,
+## wie oft die Burg sie zurückgewiesen hat — die Warteschlange wächst auch beim
+## Umladen, denn eine abgewiesene Ware geht wieder auf den Träger.
+func _castle_queue() -> int:
+	if castle_id < 0 or castle_id >= buildings.size():
+		return 0
+	var node_id: int = buildings[castle_id]["node"]
+	if node_id < 0 or node_id >= nodes.size():
+		return 0
+	return (nodes[node_id]["queue"] as Array).size()
+
+
+## Das Feld der Burg, `-1` wenn es keine gibt.
+func _castle_cell() -> int:
+	if castle_id < 0 or castle_id >= buildings.size():
+		return -1
+	return int(buildings[castle_id]["cell"])
+
+
+## Eine Änderung an der Kammer macht auch die Abweisungszählung wertlos: sie
+## gehörte zu einer Lage, die es nicht mehr gibt.
+func _reset_refusals() -> void:
+	_refused.clear()
+	_refused_total = 0
+
+
 # --- food -------------------------------------------------------------------
 
 func food_pieces() -> int:
@@ -2316,10 +2477,15 @@ func _deliver(carrier: Dictionary, node: Dictionary) -> void:
 				delivered_total += 1
 			return
 		if str(building["kind"]) == "castle" and str(building["owner"]) == "player":
-			if int(store.get(good, 0)) < STORE_CAP:
+			if can_store(good):
 				stock_add(store, good, 1)
 				delivered_total += 1
 				return
+			# Die Kammer ist voll. Die Ware bleibt vor dem Tor liegen und wird
+			# gezählt — genau daran erkennt der Ratgeber später, *was* blockiert
+			# wird. Vorher fuhr die Ware hier im Kreis, ohne dass irgendetwas
+			# davon sichtbar gewesen wäre.
+			_refuse(good)
 	# Nothing here wants it — it waits and will be carried on.
 	(node["queue"] as Array).append(good)
 
@@ -2514,6 +2680,13 @@ func bottlenecks() -> Array[Dictionary]:
 	var jam := _worst_jam()
 	if jam >= 0:
 		out.append(_jam_entry(jam))
+	# Eine volle Vorratskammer ist kein Stillstand, aber ein Stau vor dem Tor:
+	# die Träger bringen die Ware bis zur Burg, und die Burg nimmt sie nicht.
+	# Sie zählt erst, wenn wirklich etwas abgewiesen wurde — eine randvolle
+	# Kammer allein ist noch kein Problem, nur eine noch nicht spürbare.
+	var store := store_report()
+	if bool(store["full"]) and int(store["refused_total"]) > 0:
+		out.append(_store_entry(store))
 
 	out.sort_custom(_more_urgent)
 	return out
@@ -2722,6 +2895,68 @@ func _worst_jam() -> int:
 			worst_count = count
 			worst = int(node["cell"])
 	return worst
+
+
+## Die Vorratskammer ist voll. Im Original stand diese Zahl nur im Bauplan;
+## hier ist sie ein Rat mit einem Griff. Er sagt auch, *welche* Ware den Platz
+## frisst — und ob überhaupt jemand sie braucht, denn das ist der Griff, der
+## ohne neues Gebäude auskommt.
+##
+## Der Satz nennt bewusst keine laufenden Zähler: die Karte wird nur dann neu
+## gebaut, wenn sich der *Grund* ändert — eine Zahl, die still weiterzählt,
+## wäre einen Herzschlag später falsch. Die laufenden Zahlen stehen in der
+## Kopfzeile und im Inspektor, wo sie bei jedem Bild aktualisiert werden.
+func _store_entry(report: Dictionary) -> Dictionary:
+	var used := int(report["used"])
+	var capacity := int(report["capacity"])
+	var names: Array[String] = []
+	for item in _top_refusals(report["refused"] as Dictionary, 2):
+		names.append("„%s“" % good_name(str(item["good"])))
+	# Der Platzfresser ist die eigentliche Nachricht: an *ihm* kann der Spieler
+	# etwas ändern, ohne ein zweites Lager zu bauen.
+	var filler := str(report["filler"])
+	var detail := "Die Burg nimmt keine Lagerware mehr an: %d von %d Plätzen belegt. Abgewiesen: %s." % [
+		used, capacity, ", ".join(names),
+	]
+	if filler != "":
+		detail += " Der größte Platzfresser ist „%s“ (%d Stück)" % [
+			good_name(filler), int(store.get(filler, 0)),
+		]
+		if orphan_goods().has(filler):
+			detail += ", und niemand auf der Karte verbraucht sie — höre auf, mehr davon zu bauen."
+		else:
+			detail += "."
+	if _has_kind("warehouse"):
+		detail += " Jedes weitere Lager gäbe %d Plätze." % WAREHOUSE_STORE
+	else:
+		detail += " Ein Lager gäbe %d weitere Plätze und %d Siedler." % [
+			WAREHOUSE_STORE, WAREHOUSE_SERFS,
+		]
+	detail += " Bauholz, Stein, Nahrung und Werkzeug nimmt die Burg immer an."
+	# Wie viele Waren blockiert werden, entscheidet über die Dringlichkeit: eine
+	# Kammer, in der nur das Korn fehlt, ist eine andere als eine, in der
+	# überhaupt nichts mehr ankommt.
+	var entry := _entry(
+		SEV_WARNING, "storeFull", "Lager voll: %d von %d Plätzen" % [used, capacity],
+		detail, str(report["top"]), castle_id, _castle_cell(),
+		maxi(1, (report["refused"] as Dictionary).size()),
+	)
+	entry["fix"] = "build:warehouse"
+	return entry
+
+
+## Die meistabgewiesenen Waren, absteigend nach Zahl, damit der Rat die
+## wichtigste nennt und nicht die, die im Warenkatalog zufällig zuerst steht.
+func _top_refusals(refused: Dictionary, limit: int = 2) -> Array:
+	var list: Array = []
+	for good in refused:
+		list.append({"good": good, "count": int(refused[good])})
+	list.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if int(a["count"]) != int(b["count"]):
+			return int(a["count"]) > int(b["count"])
+		return str(a["good"]) < str(b["good"])
+	)
+	return list.slice(0, maxi(1, limit))
 
 
 ## Verteilt eine Stillstandsgruppe auf die passenden Einträge. Der Grund einer
