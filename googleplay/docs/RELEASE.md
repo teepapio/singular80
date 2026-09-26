@@ -104,6 +104,68 @@ Installationsgröße zum Problem wird (Tester mit wenig Speicher), die
 Verzeichnisse aus dem Export nehmen — dann zeigt die Galerie nur ein Mesh pro
 Modell. Das ist eine Produktentscheidung, keine Play-Pflicht.
 
+## Das schlanke APK (ohne med/ und high/)
+
+`npm run build:apk` baut eine zweite, kleinere Variante: dieselbe App, aber ohne
+die beiden reicheren Mesh-Stufen. Spielstand, HiScores und Cloud sind identisch
+— es fehlen nur Dateien.
+
+```bash
+cd googleplay
+npm run build:apk                 # → ../build/singular80-leicht.apk
+adb install -r ../build/singular80-leicht.apk
+```
+
+**Warum ein Preset und kein Löschen der Ordner:** `AssetRegistry` und zwei
+Tests vergleichen die Mesh-Ordner mit der Registry, und in diesem Baum arbeitet
+ein zweiter Agent. Ein `exclude_filter` auf *einer* Exportvariante lässt das
+Projekt unangetastet.
+
+Ausschluss (im Preset `Android (Leicht)`): zwei Wege, beide gemessen
+
+| Weg | Wirkung | Risiko |
+|---|---|---|
+| `exclude_filter=…, assets/meshes/med/*, assets/meshes/high/*` | Export filtert die Stufen heraus: 0/155 med, 0/155 high im Paket | keins — der Baum wird nicht angefasst |
+| `.gdignore` in `med/` und `high/` | Editor sieht die Ordner nicht, Exporter packt sie nicht | mutiert den versionierten Baum; ein `SIGKILL` lässt ihn dauerhaft dünn |
+
+`build-apk-slim.mjs` nutzt derzeit `.gdignore` mit `finally` +
+SIGINT/SIGTERM-Handler, einer Eintrittsprüfung auf liegengebliebene Marker und
+dem Wächter `tests/lightApk.test.ts`. Der `exclude_filter` braucht diese
+Vorkehrungen nicht — er ist die robustere Wahl, falls sich der Baum
+irgendwann nicht mehr ändert.
+
+### Gemessen, nicht angenommen
+
+Geprüft wird Datei für Datei. Ein importiertes Mesh liegt als
+`assets/.godot/imported/<name>.glb-<md5>.scn` im Paket, und `<name>` ist in
+allen drei Stufen identisch — ein namensbasierter Vergleich wäre grün, obwohl
+die Stufen mitdriften. Verglichen werden deshalb die **md5-Summen** aus den
+`.import`-Dateien:
+
+| APK | low | med | high |
+|---|---|---|---|
+| schlank | 155/155 | **0/155** | **0/155** |
+| `singular80.apk` (voll) | 155/155 | 155/155 | 155/155 |
+
+Was im schlanken Build verändert ist:
+
+| | voll | schlank |
+|---|---|---|
+| Größe (gemessen) | 129,3 MB | **73,3 MB** (−56 MB, −43 %) |
+| Low-Poly-Meshes | 155 | 155 |
+| Galerie | drei Detailstufen | nur „Low Poly" |
+| `lod.json` | ja | ja (nur die Low-Zahlen sind sichtbar) |
+| Signatur | Debug-Key | Debug-Key — `adb install -r` aktualisiert über die bestehende Installation |
+
+Die Galerie beschriftet die tatsächlich gezeigte Stufe. Früher stand dort die
+gewählte Stufe samt Dreieckszahl, also „Mittel — 1.000 Dreiecke" über einem
+200er-Mesh, wenn `med/` fehlt. Jetzt fällt sie pro Mesh auf die nächstfeinere
+vorhandene Stufe zurück und schreibt das dazu.
+
+**Für Play ist das nicht gedacht:** Dort gilt die AAB-Pflicht, und die AAB
+enthält bewusst alle drei Stufen (77,5 MB sind unkritisch). Der schlanke Build
+ist für Sideloading, Geräte mit wenig Speicher und für Tester ohne Download.
+
 ## 32-Bit-Geräte
 
 `config/app.json` → `android.architectures` ist auf `arm64-v8a` gesetzt.
@@ -120,11 +182,20 @@ installieren. Für den closed test mit aktuellen Telefonen unproblematisch.
 * Signatur gültig (jarsigner), optional gegen `PLAY_KEYSTORE_SHA256`
 * Manifest als Spiel deklariert (`isGame`/`appCategory=game`)
 
-Das Manifest liest das Skript aus der Gradle-Zwischendatei
-`godot/android/build/build/intermediates/bundle_manifest/…/AndroidManifest.xml`
-desselben Builds, weil das Manifest im AAB binäres Protobuf ist. Mit einem
-vollständigen `bundletool-all.jar` in `build/tools/` wird stattdessen das
-Bundle selbst gelesen.
+Das Manifest im AAB ist binäres Protobuf. Gelesen wird es auf zwei Wegen:
+
+1. mit `bundletool dump manifest` — dafür muss die **vollständige**
+   `bundletool-all-<version>.jar` (nicht die Bibliotheksvariante) in
+   `build/tools/` liegen,
+2. sonst aus dem Gradle-Merge **desselben Builds**
+   (`godot/android/build/build/intermediates/…/AndroidManifest.xml`).
+
+Variante 2 ist eine Falle: das Manifest auf der Platte gehört zu *einem*
+Export. Nach `npm run build:apk` ist es das des APK-Builds, und eine Prüfung
+damit würde die falsche Datei bestätigen. Deshalb akzeptiert das Skript nur ein
+Manifest, das höchstens zwei Minuten vor dem AAB geschrieben wurde — sonst
+verweigert es die Freigabe mit dem Hinweis, das AAB neu zu bauen. Das ist
+Absicht: lieber „nicht prüfbar“ als „geprüft“ für etwas anderes.
 
 ## Rollout
 

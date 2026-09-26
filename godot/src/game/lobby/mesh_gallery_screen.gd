@@ -411,7 +411,11 @@ func _rebuild_meshes() -> void:
 			continue
 		sign.text = AssetRegistry.display_name(key)
 		sign.modulate = AssetRegistry.color_of(key)
-		var node := WorldScreen.mesh(AssetRegistry.tier_path_of(key, tier), AssetRegistry.color_of(key))
+		# Fehlt die gewählte Stufe für dieses einzelne Mesh, nimmt er die
+		# nächstfeinere, die es gibt — sonst stünde hier ein Low-Poly-Mesh unter
+		# der Aufschrift „Hoch“.
+		var use_tier := AssetRegistry.best_available(key, tier)
+		var node := WorldScreen.mesh(AssetRegistry.tier_path_of(key, use_tier), AssetRegistry.color_of(key))
 		if node == null:
 			node = WorldScreen.mesh(key, AssetRegistry.color_of(key))
 		if node != null:
@@ -472,8 +476,29 @@ static func _placed(box: AABB, xform: Transform3D) -> AABB:
 	return out
 
 
+## True when at least one mesh of the current collection actually ships this
+## detail level. In the full build that is every level; in a build without
+## `med/` and `high/` (the slim APK) it is only `low` — and a level that is not
+## there must not be offered, because the gallery would then show the low-poly
+## mesh under the heading „Mittel“.
+func _tier_in_collection(tier_id: String) -> bool:
+	for key in visible_keys():
+		if AssetRegistry.tier_exists(key, tier_id):
+			return true
+	return false
+
+
 func _refresh_panel() -> void:
 	var keys := visible_keys()
+	# Ist die gewählte Stufe in diesem Build gar nicht vorhanden, fällt sie auf
+	# die nächstfeinere vorhandene zurück — sonst zeigt die Galerie überall die
+	# Low-Fassung, beschriftet mit einer anderen.
+	if not _tier_in_collection(tier):
+		for candidate in AssetRegistry.TIERS:
+			if AssetRegistry.TIERS.find(candidate) > AssetRegistry.TIERS.find(tier):
+				if _tier_in_collection(candidate):
+					tier = candidate
+					break
 	if _page_label != null:
 		_page_label.text = "Seite %d / %d" % [page_index + 1, maxi(1, page_count())]
 	if _tier_label != null:
@@ -484,7 +509,8 @@ func _refresh_panel() -> void:
 		var count := MeshGallery.mark_count(_marks())
 		_marks_label.text = "Vorgemerkt: %d" % count
 	for i in _tier_buttons.size():
-		var enabled := AssetRegistry.TIERS[i] == tier
+		var tier_id: String = AssetRegistry.TIERS[i]
+		var enabled := tier_id == tier
 		Ui.with_disabled(_tier_buttons[i], not enabled)
 	for i in _group_buttons.size():
 		if i < _group_ids.size():
@@ -506,8 +532,14 @@ func _refresh_info() -> void:
 		return
 	_mark_button.disabled = false
 	_info_name.text = "%s  %s" % [AssetRegistry.group_of(key).substr(0, 1).to_upper(), AssetRegistry.display_name(key)]
+	# Beschriftung und Dreieckszahl gehören zur Stufe, die wirklich steht — sonst
+	# behauptet ein schlanker Build „1.000 Dreiecke“ über einem 200er-Mesh.
+	var shown := AssetRegistry.best_available(key, tier)
+	var shown_label := str(AssetRegistry.TIER_LABELS[shown])
+	if shown != tier:
+		shown_label += " (statt %s)" % str(AssetRegistry.TIER_LABELS[tier])
 	_info_meta.text = "%s   ·   %s   ·   %s Dreiecke   ·   %s" % [
-		key, str(AssetRegistry.TIER_LABELS[tier]), AssetRegistry.tri_text(key, tier),
+		key, shown_label, AssetRegistry.tri_text(key, shown),
 		"Vorgemerkt" if MeshGallery.is_marked(_marks(), key) else "nicht vorgemerkt",
 	]
 	var note := MeshGallery.mark_note(_marks(), key)

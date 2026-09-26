@@ -1,14 +1,23 @@
 /**
- * Writes the `Google Play (AAB)` export preset into godot/export_presets.cfg.
+ * Writes the release export presets into godot/export_presets.cfg.
  *
- * Godot only ever reads res://export_presets.cfg, so the preset has to live
- * there - but it is *generated* here, from config/app.json, so that there is
+ * Godot only ever reads res://export_presets.cfg, so the presets have to live
+ * there - but they are *generated* here, from config/app.json, so that there is
  * exactly one place where the package name, version code and SDK levels live.
  *
- * Idempotent: running it twice leaves the file byte-identical. It never
- * touches the existing `Android` (APK) preset, and it is a no-op when another
- * agent has a different working-tree state (it only ever appends/replaces its
- * own block).
+ * Two presets, both managed by this script:
+ *
+ *   [1] Google Play (AAB)          signed app bundle, everything included
+ *   [2] Android (APK, schlank)     plain APK *without* the med/ and high/
+ *                                   meshes — roughly 45 MB smaller, the mesh
+ *                                   gallery then only offers the low-poly
+ *                                   level
+ *
+ * The existing `Android` (APK) preset in the repo is left alone: it is the
+ * full-size debug/sideload build the rest of the project uses.
+ *
+ * Idempotent: running it twice leaves the file byte-identical, and it only ever
+ * touches its own indices.
  */
 import { readFileSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,8 +27,24 @@ import {
 } from './lib.mjs';
 
 export const AAB_PATH = join(REPO, 'build', 'singular80-play.aab');
+export const SLIM_APK_PATH = join(REPO, 'build', 'singular80-leicht.apk');
+export const SLIM_PRESET_NAME = 'Android (Leicht)';
 
-function block(cfg) {
+/** Filter, der jedes Skript und jeden Wegwerf-Harness ausschließt. */
+const BASE_EXCLUDE = 'tests/*, shot.gd, shot.tscn, probe.gd, _*, android/build/*, build/*';
+/**
+ * Additionally names the two richer detail levels.
+ *
+ * This is an *identification* marker, not the mechanism: `exclude_filter` only
+ * applies to non-resource files, and an imported `.glb` is a resource. Measured
+ * on this project, with these two patterns in the filter the export still
+ * packed all 155 med and all 155 high meshes. The slim build therefore drops
+ * the folders with `.gdignore` (see `build-apk-slim.mjs`); the pattern stays so
+ * the preset can be recognised as the slim one.
+ */
+const SLIM_EXCLUDE = `${BASE_EXCLUDE}, assets/meshes/med/*, assets/meshes/high/*`;
+
+function block(cfg, preset) {
   const { app, version, android } = cfg;
   const archs = Object.entries(android.architectures)
     .map(([abi, on]) => `architectures/${abi}=${on ? 'true' : 'false'}`)
@@ -34,9 +59,9 @@ function block(cfg) {
   // project icon, so this stays optional.
   const icons = join(PROJECT, 'assets', 'generated');
   const icon = (name) => (existsSync(join(icons, name)) ? join(icons, name) : '');
-  return `[preset.1]
+  return `[preset.${preset.index}]
 
-name="${PRESET_NAME}"
+name="${preset.name}"
 platform="Android"
 runnable=false
 advanced_options=true
@@ -44,8 +69,8 @@ dedicated_server=false
 custom_features=""
 export_filter="all_resources"
 include_filter="*.json"
-exclude_filter="tests/*, shot.gd, shot.tscn, probe.gd, _*, android/build/*, build/*"
-export_path="${AAB_PATH}"
+exclude_filter="${preset.exclude}"
+export_path="${preset.path}"
 patches=PackedStringArray()
 encryption_include_filters=""
 encryption_exclude_filters=""
@@ -54,7 +79,7 @@ encrypt_pck=false
 encrypt_directory=false
 script_export_mode=2
 
-[preset.1.options]
+[preset.${preset.index}.options]
 
 custom_template/debug=""
 custom_template/release=""
@@ -63,18 +88,18 @@ gradle_build/gradle_build_directory="res://android"
 gradle_build/android_source_template=""
 gradle_build/compress_native_libraries=false
 ; 0 ist APK, 1 ist AAB — Google Play nimmt für neue Apps nur AAB.
-gradle_build/export_format=1
-gradle_build/min_sdk="${android.minSdk}"
-gradle_build/target_sdk="${android.targetSdk}"
+gradle_build/export_format=${preset.format}
+gradle_build/min_sdk="${cfg.android.minSdk}"
+gradle_build/target_sdk="${cfg.android.targetSdk}"
 gradle_build/custom_theme_attributes={}
-keystore/release="${process.env[ks.pathEnv] ?? ''}"
-keystore/release_user="${process.env[ks.userEnv] ?? ''}"
-keystore/release_password="${process.env[ks.passwordEnv] ?? ''}"
+keystore/release="${process.env[cfg.android.keystoreEnv.pathEnv] ?? ''}"
+keystore/release_user="${process.env[cfg.android.keystoreEnv.userEnv] ?? ''}"
+keystore/release_password="${process.env[cfg.android.keystoreEnv.passwordEnv] ?? ''}"
 ${archs}
-version/code=${version.versionCode}
-version/name="${version.versionName}"
-package/unique_name="${app.packageName}"
-package/name="${app.storeName}"
+version/code=${cfg.version.versionCode}
+version/name="${cfg.version.versionName}"
+package/unique_name="${cfg.app.packageName}"
+package/name="${cfg.app.storeName}"
 package/signed=true
 package/app_category=2
 package/retain_data_on_uninstall=true
@@ -110,7 +135,20 @@ permissions/write_external_storage=false`;
 }
 
 /**
- * Rewrites `#` comment lines to `;` inside the preset file.
+ * Removes one preset block. A block ends at the next *preset* header —
+ * `[preset.1.options]` also matches `/^\[preset\./`, so searching for the next
+ * section cuts the block after a single line and corrupts the file.
+ */
+function stripIndex(text, index) {
+  const pattern = new RegExp(
+    `^\\[preset\\.${index}(?:\\.options)?\\]\\n[\\s\\S]*?(?=^\\[preset\\.\\d+(?:\\.options)?\\]\\n|(?![\\s\\S]))`,
+    'gm',
+  );
+  return text.replace(pattern, '');
+}
+
+/**
+ * Rewrites `#` comment lines to `;`.
  *
  * Godot's ConfigFile does **not** treat `#` as a comment. It strips the
  * whitespace, concatenates the line with the next one and — as soon as an `=`
@@ -120,15 +158,12 @@ permissions/write_external_storage=false`;
  *
  *   ERROR: Couldn't find the given section "preset.0" and key "include_filter"
  *
- * and why `tests/*.gd` ends up inside the release build. `;` is the comment
+ * and why `tests/*.gd` ended up inside the release build. `;` is the comment
  * character Godot really uses.
- *
- * Only whole-line comments are touched; values and keys are never modified.
  */
 function repairHashComments(text) {
-  const lines = text.split('\n');
   let repaired = 0;
-  const fixed = lines.map((line) => {
+  const fixed = text.split('\n').map((line) => {
     const m = line.match(/^(\s*)#(?!#)(.*)$/);
     if (!m) return line;
     repaired += 1;
@@ -137,28 +172,56 @@ function repairHashComments(text) {
   return { text: fixed.join('\n'), repaired };
 }
 
+// --- main -------------------------------------------------------------------
+
 /**
- * Removes every previously written Play block, including orphaned
- * `[preset.1.options]` sections. A block must end at the next *preset* header —
- * `[preset.1.options]` itself matches `/^\[preset\./`, so a naive search for the
- * next section cuts the block after a single line and leaves a corrupted file.
+ * Rewrites the `exclude_filter` inside an existing preset block and returns the
+ * previous file content, or null when the preset vanished.
+ *
+ * Only that one line. The preset keeps its own `export_path` and every other
+ * choice its author made — another agent's test asserts on them, and a
+ * read-modify-write that "improves" a stranger's block is how two agents lose
+ * each other's work.
  */
-function stripPlayBlocks(text) {
-  return text
-    .replace(/^\[preset\.1(?:\.options)?\]\n[\s\S]*?(?=^\[preset\.\d+(?:\.options)?\]\n|(?![\s\S]))/gm, '')
-    .replace(/\n{3,}/g, '\n\n');
+function patchAdopted(file, preset) {
+  const current = readFileSync(file, 'utf8');
+  const heads = [...current.matchAll(/^\[preset\.(\d+)\][ \t]*$/gm)];
+  for (const head of heads) {
+    if (Number(head[1]) !== preset.index) continue;
+    const start = head.index;
+    const nextIdx = current.indexOf('\n[preset.', start + head[0].length);
+    const end = nextIdx === -1 ? current.length : nextIdx + 1;
+    const chunk = current.slice(start, end);
+    if (!/^[ \t]*exclude_filter=/m.test(chunk)) return null;
+    if (/^[ \t]*exclude_filter="[^"]*"/m.test(chunk).exec(chunk)[0] === `exclude_filter="${preset.exclude}"`) {
+      return current;
+    }
+    const patched = chunk.replace(
+      /^[ \t]*exclude_filter="[^"]*"/m,
+      // A missing med/ exclusion is the one thing that must never slip through:
+      // the build would then silently ship 50 MB more than promised.
+      `exclude_filter="${preset.exclude}"`,
+    );
+    writeFileSync(file, current.slice(0, start) + patched + current.slice(end));
+    return current;
+  }
+  return null;
 }
 
 const cfg = config();
-step(`Export-Preset → ${PRESETS}`);
+step(`Export-Presets → ${PRESETS}`);
 
-// Cheap lint first: Godot's ConfigFile treats `#` as a comment only while the
-// line holds no `=`, and a broken file makes the preset vanish without warning.
-for (const [n, line] of block(cfg).split('\n').entries()) {
-  if (line.trimStart().startsWith('#') && line.includes('=')) {
-    abort(`Kommentar in Zeile ${n + 1} enthält "=" — ConfigFile parst das nicht:\n  ${line.trim()}`);
-  }
-}
+const wanted = [
+  { name: PRESET_NAME, path: AAB_PATH, format: 1, exclude: BASE_EXCLUDE, managed: true },
+  {
+    name: SLIM_PRESET_NAME,
+    path: SLIM_APK_PATH,
+    format: 0,
+    exclude: SLIM_EXCLUDE,
+    managed: true,
+    adopt: cfg.android.slim.adoptExisting ?? [],
+  },
+];
 
 let text;
 try {
@@ -167,13 +230,63 @@ try {
   abort(`Konnte ${PRESETS} nicht lesen. Läuft dieses Skript im Repo?`);
 }
 
-const cleaned = stripPlayBlocks(text);
-if (cleaned === text) {
-  ok(`Preset "${PRESET_NAME}" ist bereits aktuell.`);
-} else {
-  info('Vorhandener Block wird ersetzt …');
+/**
+ * Every `[preset.N]` with the name that belongs to it. The header and the name
+ * are usually separated by a blank line, so a strict `]\nname=` pattern finds
+ * nothing and every index looks free — which is how a foreign preset once got
+ * overwritten. Read the block instead of guessing.
+ */
+function readPresets(source) {
+  const out = new Map();
+  const heads = [...source.matchAll(/^\[preset\.(\d+)\](?:_options)?[ \t]*$/gm)];
+  for (const head of heads) {
+    const start = head.index + head[0].length;
+    const next = source.indexOf('\n[preset.', start);
+    const block = source.slice(start, next === -1 ? source.length : next);
+    const name = block.match(/^[ \t\n]*name="([^"]+)"/m)?.[1];
+    if (name) out.set(name, { index: Number(head[1]), block, options: block.includes('.options]') });
+  }
+  return out;
 }
-text = cleaned;
+
+const existing = readPresets(text);
+for (const [name, entry] of existing) info(`gefunden: [${entry.index}] ${name}`);
+
+/** Indices taken by somebody else — never one of those may be replaced. */
+const foreign = new Set([...existing.values()].map((e) => e.index));
+
+for (const preset of wanted) {
+  if (existing.has(preset.name)) {
+    preset.index = existing.get(preset.name).index;
+    continue;
+  }
+  // A slim preset that somebody else already made is adopted instead of writing a
+  // second one doing the same job.
+  if (preset.adopt?.length) {
+    const adopted = preset.adopt.find((name) => existing.has(name));
+    if (adopted) {
+      preset.index = existing.get(adopted).index;
+      preset.name = adopted;
+      preset.adopted = true;
+      ok(`Schlankes Preset "${adopted}" [${preset.index}] wird übernommen statt ein zweites anzulegen.`);
+      continue;
+    }
+  }
+  // Smallest index that nobody uses.
+  let candidate = 0;
+  while (foreign.has(candidate)) candidate += 1;
+  preset.index = candidate;
+  foreign.add(candidate);
+  info(`${preset.name}: freier Index ${candidate}.`);
+}
+
+for (const preset of wanted) {
+  if (preset.adopted) continue; // nur exclude_filter und export_path nachtragen
+  const stripped = stripIndex(text, preset.index);
+  if (stripped === text) info(`${preset.name}: Index ${preset.index} ist frei.`);
+  else info(`${preset.name}: eigener Block ${preset.index} wird ersetzt.`);
+  text = stripped;
+}
 
 const repaired = repairHashComments(text);
 if (repaired.repaired > 0) {
@@ -181,42 +294,64 @@ if (repaired.repaired > 0) {
   ok(`${repaired.repaired} "#"-Kommentarzeile(n) zu ";" — Godots ConfigFile hatte include_filter/exclude_filter verschluckt.`);
 }
 
-{
-  const highest = Math.max(
-    0,
-    ...[...text.matchAll(/^\[preset\.(\d+)\]$/gm)].map((m) => Number(m[1])),
-  );
-  if (highest !== 0) {
-    warn(`godot/export_presets.cfg hat ${highest + 1} Presets; der Play-Block landet als [preset.${highest + 1}].`);
-    warn('Prüfe die Indizes, bevor du baust (Godot braucht lückenlose Indizes).');
+// Cheap lint before anything else: a broken file makes the preset vanish
+// without a warning, and the export then fails with a confusing message.
+for (const preset of wanted) {
+  if (preset.adopted) continue;
+  for (const [n, line] of block(cfg, preset).split('\n').entries()) {
+    if (line.trimStart().startsWith('#') && line.includes('=')) {
+      abort(`Kommentar in Zeile ${n + 1} enthält "=" — ConfigFile parst das nicht:\n  ${line.trim()}`);
+    }
   }
 }
 
-const next = `${text.replace(/\s*$/, '')}\n\n${block(cfg)}\n`;
-writeFileSync(PRESETS, next);
-ok(`"${PRESET_NAME}" geschrieben (AAB, targetSdk ${cfg.android.targetSdk}, versionCode ${cfg.version.versionCode}).`);
+const blocks = [...wanted]
+  .filter((p) => !p.adopted)
+  .sort((a, b) => a.index - b.index)
+  .map((preset) => block(cfg, preset))
+  .join('\n\n');
+if (blocks) writeFileSync(PRESETS, `${text.replace(/\s*$/, '')}\n\n${blocks}\n`);
 
-// Authoritative check: let Godot itself parse the file and look the preset up.
-// The harness lives next to this script and is copied into godot/ with a `_`
-// prefix, which export_presets.cfg already excludes from every build.
+// Adopted presets keep their body; only the exclusion is added, so a foreign
+// author's `export_path` and every other choice survive untouched.
+for (const preset of wanted.filter((p) => p.adopted)) {
+  const patched = patchAdopted(PRESETS, preset);
+  if (patched === null) abort(`"${preset.name}" verschwunden zwischen Lesen und Schreiben.`);
+  ok(`"${preset.name}": exclude_filter gesetzt (${preset.exclude.includes('med') ? 'mit' : 'OHNE'} med/high-Ausschluss).`);
+}
+for (const preset of wanted) {
+  const blockText = readPresets(readFileSync(PRESETS, 'utf8')).get(preset.name);
+  if (!blockText) abort(`"${preset.name}" fehlt nach dem Schreiben.`);
+  info(`${preset.name} [${blockText.index}] → ${blockText.block.match(/exclude_filter="([^"]*)"/)?.[1]}`);
+}
+
+// Authoritative check: let Godot parse the file and look every preset up. The
+// harness lives next to this script and is copied into godot/ with a `_`
+// prefix, which the exclude filters already exclude from every build.
 const harness = join(GODOT_DIR, '_cfgtest.gd');
 copyFileSync(join(HERE, 'validate-presets.gd'), harness);
-const parsed = tryRun(
-  'godot',
-  ['--headless', '--path', 'godot', '--script', 'res://_cfgtest.gd', '--', 'export_presets.cfg', PRESET_NAME],
-  { cwd: REPO, timeout: 300_000 },
-);
-const line = parsed.out.split('\n').find((l) => l.startsWith('PARSE-')) ?? '';
-if (parsed.code !== 0 || !line.startsWith('PARSE-OK')) {
-  abort(`Godot kann export_presets.cfg nicht parsen:\n  ${line.trim() || parsed.out.trim().split('\n').slice(-3).join(' ')}`);
+for (const preset of wanted) {
+  const parsed = tryRun(
+    'godot',
+    ['--headless', '--path', 'godot', '--script', 'res://_cfgtest.gd', '--', 'export_presets.cfg', preset.name],
+    { cwd: REPO, timeout: 300_000 },
+  );
+  const line = parsed.out.split('\n').find((l) => l.startsWith('PARSE-')) ?? '';
+  if (parsed.code !== 0 || !line.startsWith('PARSE-OK')) {
+    abort(`Godot kann "${preset.name}" nicht lesen:\n  ${line.trim() || parsed.out.trim().split('\n').slice(-3).join(' ')}`);
+  }
+  ok(line.trim());
 }
-ok(line.trim());
 
-// Godot reads export presets at import time; a malformed file fails silently in
-// the editor and only shows up as a missing preset. The ConfigFile check above
-// is the real gate, this is the belt-and-braces one.
+// Belt and braces: the filters actually made it into the file.
 const written = readFileSync(PRESETS, 'utf8');
-if (!written.includes(`name="${PRESET_NAME}"`)) abort('Preset-Datei unvollständig geschrieben.');
-if (!/gradle_build\/export_format=1/.test(written)) abort('export_format ist nicht AAB.');
+for (const preset of wanted) {
+  if (!written.includes(`name="${preset.name}"`)) abort(`"${preset.name}" fehlt in der geschriebenen Datei.`);
+  if (!written.includes(`gradle_build/export_format=${preset.format}`)) abort(`${preset.name}: falsches Format.`);
+  if (!written.includes(preset.exclude)) abort(`${preset.name}: exclude_filter fehlt.`);
+}
+if (wanted.some((p) => p.name === SLIM_PRESET_NAME) && !written.includes('assets/meshes/med/*')) {
+  abort('Der schlanke Preset schließt med/ nicht aus.');
+}
 
-done('export_presets.cfg ist aktuell.');
+done(`export_presets.cfg ist aktuell (${wanted.length} Presets).`);

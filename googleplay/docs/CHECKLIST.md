@@ -15,6 +15,7 @@ können.
 | Signierter AAB-Build | ✅ erledigt (77,5 MB, targetSdk 36, Paketname korrekt) |
 | AAB-Verifikation | ✅ erledigt |
 | Store-Icon + Feature Graphic | ✅ erledigt, von `npm run assets` erzeugt |
+| Schlankes APK ohne med/high | ✅ 73,3 MB statt 129,3 MB, `npm run build:apk` |
 | Store-Texte en/de | ✅ Entwurf, von `npm run preflight` geprüft |
 | Rechtstexte | ⚠️ Entwurf mit Platzhaltern |
 | Screenshots | ❌ headless nicht renderbar, Import-Modus bereit |
@@ -101,13 +102,15 @@ npm run release    # preflight + build + verify
 
 1. **Screenshots** — headless nicht renderbar. Auf einem Gerät aufnehmen und
    mit `--import` normalisieren. Siehe `docs/LISTING.md`.
-2. **Meldefunktion für Vorschläge** — Play verlangt einen Meldeweg in der App.
-   Vorschlag: im closed test ausliefern, aber nicht aktiv, und vor dem
-   öffentlichen Launch ergänzen. Siehe `legal/moderation.md`.
-3. **Zustimmungstext im Vorschlagsdialog** — muss auf die Nutzungsbedingungen
-   verweisen, bevor ein Vorschlag gesendet wird.
-4. **32-Bit-Geräte** — arm64-only schließt alte Android-7/8-Handys aus.
-5. **Godot 4.7** — ein Upgrade von 4.5.1 bringt natives API 36 und aktuelle
+2. **Meldefunktion für Vorschläge** — ist jetzt drin: `ReportDialog` hängt an
+   der Laufzeile des Hauptmenüs, der Vorschlagsdialog verlangt Zustimmung zu
+   den Nutzungsbedingungen. Offen bleibt, die Adressen in `app_legal.gd` zu
+   füllen und — wenn Meldungen nicht per Mail, sondern per API laufen sollen —
+   einen Endpunkt im Backend nachzuziehen. Siehe `legal/moderation.md`.
+3. **32-Bit-Geräte** — arm64-only schließt alte Android-7/8-Handys aus.
+4. **Godot 4.7** — ein Upgrade von 4.5.1 bringt natives API 36 und aktuelle
    Engine-Fixes, bringt aber Breaking Changes. Eigenes Vorhaben.
-6. **Rechtstexte prüfen lassen** — besonders Impressum und Datenschutz, wenn
+5. **Rechtstexte prüfen lassen** — besonders Impressum und Datenschutz, wenn
    in DE/AT/CH veröffentlicht wird.
+6. **Zweiter Agent in diesem Baum** — siehe README, Abschnitt „Ein Baum, zwei
+   Agenten". `export_presets.cfg` nicht parallel schreiben lassen.

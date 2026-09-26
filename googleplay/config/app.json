@@ -33,6 +33,20 @@
       "x86": false
     },
     "exportFormat": "aab",
+    "slim": {
+      "name": "Android (Leicht)",
+      "adoptExisting": ["Android (Leicht)"],
+      "$comment": [
+        "Ein vorhandenes schlankes Preset wird übernommen und nur um exclude_filter ergänzt,",
+        "sonst wird ein zweites angelegt. Zwei Agenten arbeiten in diesem Baum — siehe README.",
+        "",
+        "Gemessen am 26.09.2026, Datei für Datei über die md5 aus den .import-Dateien:",
+        "exclude_filter=assets/meshes/med/*,assets/meshes/high/* schließt die importierten",
+        "Ressourcen zuverlässig aus (0 von 155 med, 0 von 155 high im schlanken APK;",
+        "155/155 low drin). Die Gegenprobe mit .gdignore ergab keinen Vorteil, mutiert aber",
+        "den versionierten Mesh-Baum — ein abgebrochener Build bliebe dann dauerhaft schlank."
+      ]
+    },
     "keystoreEnv": {
       "$comment": "Passwords never live in this repo. Export them before building.",
       "pathEnv": "PLAY_KEYSTORE_PATH",

@@ -12,6 +12,7 @@
     "screenshots": "node scripts/screenshots.mjs",
     "assets": "node scripts/store-assets.mjs",
     "build": "node scripts/build-aab.mjs",
+    "build:apk": "node scripts/build-apk-slim.mjs",
     "verify": "node scripts/verify-aab.mjs",
     "preflight": "node scripts/preflight.mjs",
     "release": "npm run preflight && npm run build"

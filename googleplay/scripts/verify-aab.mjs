@@ -83,13 +83,30 @@ if (jar && existsSync(jar)) {
 if (!manifest) {
   const merged = findMergedManifest();
   if (merged) {
-    manifest = readFileSync(merged, 'utf8');
-    ok(`Manifest gelesen (Gradle-Merge dieses Builds): ${merged.replace(`${GODOT_DIR}/`, 'godot/')}`);
-    if (statSync(merged).mtimeMs < statSync(aabPath).mtimeMs - 60_000) {
-      warn('Gemergtes Manifest ist älter als das AAB — `npm run build` neu laufen lassen.');
+    const age = (statSync(aabPath).mtimeMs - statSync(merged).mtimeMs) / 1000;
+    // The merged manifest is a *build artefact of one export*. A different
+    // build (e.g. the slim APK) leaves a newer one behind, and reading that
+    // would check the wrong file — a green result for a manifest that was never
+    // in this bundle. Only accept one from the same build: written shortly
+    // before the bundle and not a minute after it.
+    if (age < -30 || age > 120) {
+      abort(
+        `Kein Manifest aus diesem Build gefunden.\n` +
+          `  Jüngstes: ${merged.replace(`${GODOT_DIR}/`, 'godot/')}\n` +
+          `  (${age < 0 ? `${(-age).toFixed(0)} s nach` : `${age.toFixed(0)} s vor`} dem AAB — das ist ein anderer Build)\n` +
+          '  Das Manifest im AAB ist binäres Protobuf und lässt sich nur mit\n' +
+          '  bundletool lesen. Also: `npm run build` neu laufen lassen, oder die\n' +
+          '  vollständige bundletool-all.jar nach googleplay/build/tools/ legen.',
+      );
     }
+    manifest = readFileSync(merged, 'utf8');
+    ok(`Manifest gelesen (Gradle-Merge aus demselben Build): ${merged.replace(`${GODOT_DIR}/`, 'godot/')}`);
   } else {
-    warn('Kein Manifest gefunden — targetSdk, Version und Permissions bitte manuell prüfen.');
+    abort(
+      'Kein Manifest gefunden — weder bundletool noch ein Gradle-Merge.\n' +
+        '  `npm run build` erzeugt beides; ohne Manifest lässt sich targetSdk\n' +
+        '  nicht prüfen, und genau daran lehnt Play neue Apps ab.',
+    );
   }
 }
 

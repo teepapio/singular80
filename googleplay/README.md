@@ -48,6 +48,28 @@ Zwei Dinge, die man wissen sollte:
   Dummy-Renderer, der keine Frames zeichnet. Auf dieser Maschine geht es
   nicht; `npm run screenshots -- --import <Ordner>` normalisiert stattdessen
   echte Aufnahmen vom Gerät.
+* **`npm run build:apk`** baut die schlanke Variante ohne die reicheren
+  Mesh-Stufen (~45 MB weniger), mit demselben Debug-Key — also
+  `adb install -r` über die bestehende Installation.
+
+## Ein Baum, zwei Agenten
+
+`AGENTS.md` warnt, dass der Runner einen zweiten Agenten in dasselbe Verzeichnis
+startet. Das ist hier sichtbar: `godot/export_presets.cfg` trägt inzwischen ein
+zweites schlankes Preset, das nicht von mir stammt.
+
+Deshalb ist `scripts/install-export-preset.mjs` **kooperativ** statt eigensinnig:
+
+* Es liest alle vorhandenen Presets samt Namen und Index,
+* es ersetzt **ausschließlich Blöcke mit eigenem Namen**,
+* es belegt nie einen Index, den jemand anderes benutzt,
+* findet es ein vorhandenes schlankes Preset (`config/app.json` →
+  `android.slim.adoptExisting`), ergänzt es dieses um `exclude_filter` und
+  `export_path`, statt ein zweites anzulegen.
+
+Wer hier zwei Agenten parallel fährt, sollte `export_presets.cfg` nicht von
+beiden gleichzeitig schreiben lassen — nötig ist der Lese-Schreib-Zyklus, aber
+eine Kollision kann trotzdem eine Änderung verschlucken.
 
 ## Die drei harten Blöcke
 
