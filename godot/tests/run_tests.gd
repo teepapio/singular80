@@ -89,21 +89,6 @@ func _run() -> void:
 	# added later is picked up here without editing this runner.
 	if _wants_class("res://tests/test_metro.gd", only):
 		TestMetro.new().run(kit)
-	if _wants_class("res://tests/test_siedler.gd", only):
-		# By path, like the suites below: `--script` mode does not refresh the
-		# global class cache, so a class added today is unknown until the next
-		# `godot:import`.
-		var siedler_suite: GDScript = load("res://tests/test_siedler.gd")
-		if siedler_suite != null:
-			siedler_suite.new().run(kit)
-	if _wants_class("res://tests/test_dame.gd", only):
-		# By path, like the suites below: `--script` mode does not refresh the
-		# global class cache, so a class added today would not resolve by name.
-		var dame_suite: GDScript = load("res://tests/test_dame.gd")
-		if dame_suite != null:
-			await dame_suite.new().run(kit, self)
-	if _wants_class("res://tests/test_dragonflight.gd", only):
-		TestDragonFlight.new().run(kit)
 	if _wants_class("res://tests/test_metro3d.gd", only):
 		# By path, like the screen suites below: a class added since the last
 		# editor start is not in the global class cache, and a static name
@@ -112,8 +97,37 @@ func _run() -> void:
 		await metro3d.new().run(kit, self)
 	if _wants_class("res://tests/test_crystal3d.gd", only):
 		await TestCrystal3d.new().run(kit, self)
+	if _wants_class("res://tests/test_dame.gd", only):
+		# By path, like the suites below: `--script` mode does not refresh the
+		# global class cache, so a class added today would not resolve by name.
+		var dame_suite: GDScript = load("res://tests/test_dame.gd")
+		if dame_suite != null:
+			await dame_suite.new().run(kit, self)
+	if _wants_class("res://tests/test_dragonflight.gd", only):
+		TestDragonFlight.new().run(kit)
 	if _wants_class("res://tests/test_candy_match3.gd", only):
 		TestCandyMatch3.new().run(kit)
+	if _wants_class("res://tests/test_candy3d.gd", only):
+		# By path, like the screen suites around it: `--script` mode does not
+		# refresh the global class cache, so a class added today is unknown
+		# until the next `godot:import`. The autoloads are registered by then.
+		var candy_suite: GDScript = load("res://tests/test_candy3d.gd")
+		if candy_suite != null:
+			await candy_suite.new().run(kit, self)
+	if _wants_class("res://tests/test_merge3d.gd", only):
+		# Loaded by path, not by class name: `--script` mode does not refresh the
+		# global class cache, so a class added today is unknown until the next
+		# `godot:import`. `test_metro_screens.gd` hits the same wall.
+		var merge_suite: GDScript = load("res://tests/test_merge3d.gd")
+		if merge_suite != null:
+			await merge_suite.new().run(kit, self)
+	if _wants_class("res://tests/test_2048.gd", only):
+		# By path, like the suites below: `--script` mode does not refresh the
+		# global class cache, so a class added today is unknown until the next
+		# `godot:import`.
+		var suite_2048: GDScript = load("res://tests/test_2048.gd")
+		if suite_2048 != null:
+			await suite_2048.new().run(kit, self)
 	if _wants_class("res://tests/test_freecell.gd", only):
 		# By path, like the suites around it: `--script` mode does not refresh
 		# the global class cache, so a class added today would not resolve.
@@ -121,27 +135,33 @@ func _run() -> void:
 		if freecell_suite != null:
 			freecell_suite.new().run(kit)
 			await freecell_suite.ScreenChecks.new().run(kit, self)
-	if _wants_class("res://tests/test_arena.gd", only):
-		TestArena.new().run(kit)
+	if _wants_class("res://tests/test_horserunner.gd", only):
+		# By path: a class added since the last editor start is not in the
+		# global class cache, and a static name would not resolve.
+		var horserunner: GDScript = load("res://tests/test_horserunner.gd")
+		horserunner.new().run(kit)
 	if _wants_class("res://tests/test_poker.gd", only):
 		# By path, like the suites above: `--script` mode does not refresh the
 		# global class cache, so a class added today is unknown.
 		var poker_suite: GDScript = load("res://tests/test_poker.gd")
 		if poker_suite != null:
 			poker_suite.new().run(kit)
+	if _wants_class("res://tests/test_arena.gd", only):
+		TestArena.new().run(kit)
 	if _wants_class("res://tests/test_pang.gd", only):
 		TestPang.new().run(kit)
-	if _wants_class("res://tests/test_horserunner.gd", only):
-		# By path: a class added since the last editor start is not in the
-		# global class cache, and a static name would not resolve.
-		var horserunner: GDScript = load("res://tests/test_horserunner.gd")
-		horserunner.new().run(kit)
 	if _wants_class("res://tests/test_dragonrpg.gd", only):
 		# By path, like the suites above: `--script` mode does not refresh the
 		# global class cache, so a class added today is unknown.
 		var dragonrpg_suite: GDScript = load("res://tests/test_dragonrpg.gd")
 		if dragonrpg_suite != null:
 			dragonrpg_suite.new().run(kit)
+	if _wants_class("res://tests/test_siedler.gd", only):
+		# By path, like the suites above: `--script` mode does not refresh the
+		# global class cache, so a class added today is unknown.
+		var siedler_suite: GDScript = load("res://tests/test_siedler.gd")
+		if siedler_suite != null:
+			siedler_suite.new().run(kit)
 	if _wants_class("res://tests/test_improvements.gd", only):
 		TestImprovements.new().run(kit)
 	if _wants_class("res://tests/test_metro_screens.gd", only):
