@@ -6,9 +6,18 @@ extends RefCounted
 ## `slide` returns the resulting board plus a detailed plan of how every tile
 ## moved, which the scene turns into animations. `merged` guarantees a tile
 ## that was just created by a merge cannot merge again on the same move.
+##
+## The tile that follows the next move is decided one move early and lives on
+## the board as a *ghost* (`plan_tile`, `slide_pending`, `can_move_pending`).
+## The ghost is a normal tile for the slide — it moves, it merges and its points
+## count — and with that move it becomes permanent. That is what turns a board
+## game of luck into one move of planning: the player can set up the ghost's
+## merge instead of hoping for the right spawn.
 
 const SIZE := 4
 const WIN_VALUE := 2048
+## Classic odds: a ghost is a 2 nine times out of ten.
+const FOUR_CHANCE := 0.1
 
 const UP := "up"
 const DOWN := "down"
@@ -137,6 +146,17 @@ static func highest_value(board: Array) -> int:
 	return best
 
 
+## How many cells are taken. The ghost is not counted — it is a promise, not a
+## tile, and the board is one move behind the player's plan.
+static func count_tiles(board: Array) -> int:
+	var count := 0
+	for row in board:
+		for value in row:
+			if int(value) != 0:
+				count += 1
+	return count
+
+
 static func has_value(board: Array, value: int) -> bool:
 	for row in board:
 		for cell in row:
@@ -145,19 +165,89 @@ static func has_value(board: Array, value: int) -> bool:
 	return false
 
 
-## Place a new 2 (90%) or 4 (10%) on a random empty cell. Mutates `board`.
-static func add_random_tile(board: Array) -> Variant:
-	var empty: Array = []
+## Every free cell as a Vector2i, in reading order.
+static func empty_cells(board: Array) -> Array:
+	var out: Array = []
 	for r in SIZE:
 		for c in SIZE:
 			if at(board, r, c) == 0:
-				empty.append(Vector2i(r, c))
+				out.append(Vector2i(r, c))
+	return out
+
+
+## Places a new 2 (90%) or 4 (10%) on a random empty cell. Mutates `board`.
+static func add_random_tile(board: Array) -> Variant:
+	var empty := empty_cells(board)
 	if empty.is_empty():
 		return null
 	var slot: Vector2i = empty[randi() % empty.size()]
 	var value := 2 if randf() < 0.9 else 4
 	set_at(board, slot.x, slot.y, value)
 	return {"row": slot.x, "col": slot.y, "value": value}
+
+
+# --- the ghost tile ---------------------------------------------------------
+
+## Picks the tile the next move will add: which cell, and how big.
+##
+## The caller owns the generator, so a run is reproducible from its seed — which
+## is also what makes this testable. An empty dictionary means the board is full
+## and the next move brings nothing.
+static func plan_tile(board: Array, rng: RandomNumberGenerator) -> Dictionary:
+	var empty := empty_cells(board)
+	if empty.is_empty():
+		return {}
+	var slot: Vector2i = empty[rng.randi_range(0, empty.size() - 1)]
+	var value := 4 if rng.randf() < FOUR_CHANCE else 2
+	return {"row": slot.x, "col": slot.y, "value": value}
+
+
+## Opening position: one real tile plus the ghost the player sees first.
+##
+## One real tile and one ghost is the classic two-tile start. Dealing two real
+## tiles *and* a ghost would hand out one tile more than 2048 does for the whole
+## run — a preview must not be a free tile.
+static func opening(board: Array, rng: RandomNumberGenerator) -> Dictionary:
+	var first := plan_tile(board, rng)
+	if first.is_empty():
+		return {}
+	set_at(board, int(first["row"]), int(first["col"]), int(first["value"]))
+	return plan_tile(board, rng)
+
+
+## The board as the player sees it: `board` with the ghost laid on top.
+##
+## A ghost that no longer fits (an out-of-date snapshot, a board that was
+## restored under it) is ignored rather than allowed to eat a real tile.
+static func stage_ghost(board: Array, pending: Dictionary) -> Array:
+	var staged := clone_board(board)
+	if pending.is_empty():
+		return staged
+	var row := int(pending["row"])
+	var col := int(pending["col"])
+	if at(staged, row, col) != 0:
+		return staged
+	set_at(staged, row, col, int(pending["value"]))
+	return staged
+
+
+## Slides the board including the ghost and reports the same plan as `slide`.
+##
+## The returned `values` already contain the ghost as a real tile; the caller
+## plans the next one. As everywhere in 2048, `moved == false` means the plan is
+## to be discarded — a ghost that neither moves nor merges is not a move.
+static func slide_pending(board: Array, dir: String, pending: Dictionary) -> Dictionary:
+	return slide(stage_ghost(board, pending), dir)
+
+
+## True while a move exists — ghost included.
+##
+## Not the same question as `can_move(board)`: the ghost is a real tile for the
+## slide, so it brings its own merges — and it can also be the stone that blocks
+## the last legal move. Whoever asks has to ask about the board the player sees,
+## otherwise a game can dead-end without the dialog ever appearing.
+static func can_move_pending(board: Array, pending: Dictionary) -> bool:
+	return can_move(stage_ghost(board, pending))
 
 
 ## Applies a move and spawns a tile in one call.

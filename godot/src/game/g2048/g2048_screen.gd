@@ -1,7 +1,13 @@
 class_name Game2048Screen
 extends Screen
-## 2048 — sliding tile puzzle with undo, keyboard, gamepad and swipe input.
+## 2048 — sliding tile puzzle with a one-move preview, undo, keyboard, gamepad
+## and swipe input.
 ## Port of `scenes/Game2048Scene.ts`.
+##
+## The tile that follows the next move is already on the board, drawn with a
+## dashed frame. It rides along with the slide like any other tile and becomes
+## permanent with that move, so the player plans one step ahead instead of
+## reacting to a spawn. Rules and the ghost live in `Twenty48`.
 
 const TILE := 118.0
 const GAP := 14.0
@@ -11,6 +17,9 @@ const BOARD_X := 150.0
 const BOARD_Y := 108.0
 const MOVE_TIME := 0.11
 const SWIPE_MIN := 28.0
+## Centre of the ghost tile in the score panel, mirroring the one on the board.
+const NEXT_CENTER := Vector2(975, 396)
+const NEXT_SIZE := 68.0
 
 const STYLES := {
 	2: {"bg": Color("eee4da"), "fg": Color("776e65")},
@@ -31,16 +40,21 @@ var board: Array = []
 var score := 0
 var highscore := 0
 var best := 2
+## The tile the next move adds, already visible on the board. Empty when the
+## board is too full to promise one.
+var pending: Dictionary = {}
 var history: Dictionary = {}
 var won := false
 var keep_playing := false
 
 var _view: BoardView
+var _next_view: NextView
 var _score_label: Label
 var _highscore_label: Label
 var _best_label: Label
 var _drag_start := Vector2.ZERO
 var _dragging := false
+var _rng := RandomNumberGenerator.new()
 
 
 func _ready_game() -> void:
@@ -72,13 +86,33 @@ func _build_ui() -> void:
 	panel.size = Vector2(420, BOARD_SIZE + 20.0)
 	layer.add_child(panel)
 
-	_score_label = _stat(layer, Vector2(870, 166), "PUNKTE", "0")
-	_highscore_label = _stat(layer, Vector2(1075, 166), "HIGHSCORE", "0")
-	_best_label = _stat(layer, Vector2(970, 264), "GRÖSSTE KACHEL", "2")
+	_score_label = _stat(layer, Vector2(860, 168), "PUNKTE", "0")
+	_highscore_label = _stat(layer, Vector2(1090, 168), "HIGHSCORE", "0")
+	_best_label = _stat(layer, Vector2(975, 268), "GRÖSSTE KACHEL", "2")
+	# The ghost tile is drawn by the board view; these are its labels.
+	var next_caption := Ui.label("NÄCHSTE KACHEL", 14, UiTheme.TEXT_DIM)
+	next_caption.position = NEXT_CENTER + Vector2(-100, -80)
+	next_caption.size = Vector2(200, 22)
+	next_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	layer.add_child(next_caption)
+	var next_note := Ui.label("zieht beim nächsten Zug mit und wird dann endgültig", 12, UiTheme.ACCENT)
+	next_note.position = Vector2(790, NEXT_CENTER.y + 46.0)
+	next_note.size = Vector2(360, 20)
+	next_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	layer.add_child(next_note)
 
-	var controls := Ui.label("← ↑ → ↓   verschieben\nW A S D   verschieben\nWischen   (Touch)\nU / Z     rückgängig\nR         neu starten\nESC       Pause", 15, Color("cbd5e1"))
-	controls.position = Vector2(792, 316)
-	controls.size = Vector2(360, 180)
+	# Its own control, because the board view is painted *under* the panel — the
+	# preview has to be a sibling that comes after it.
+	_next_view = NextView.new()
+	_next_view.screen = self
+	_next_view.position = NEXT_CENTER - Vector2(NEXT_SIZE, NEXT_SIZE) * 0.5
+	_next_view.size = Vector2(NEXT_SIZE, NEXT_SIZE)
+	layer.add_child(_next_view)
+
+	# Controls live under the board, where the panel used to waste the width.
+	var controls := Ui.label("← ↑ → ↓  ·  W A S D  ·  Wischen   verschieben\nU / Z   rückgängig        R   neu starten        ESC   Pause", 13, Color("94a3b8"))
+	controls.position = Vector2(146, 658)
+	controls.size = Vector2(560, 46)
 	layer.add_child(controls)
 
 	_place(layer, "Neu starten", Vector2(970, 512), func() -> void: reset_game())
@@ -115,8 +149,8 @@ func reset_game() -> void:
 	history = {}
 	highscore = Game.highscore(Game.HS_2048)
 	close_modals()
-	Twenty48.add_random_tile(board)
-	Twenty48.add_random_tile(board)
+	_rng.randomize()
+	pending = Twenty48.opening(board, _rng)
 	_refresh()
 
 
@@ -141,6 +175,9 @@ func _process(delta: float) -> void:
 		_move(Twenty48.UP)
 	elif Input.is_action_just_pressed("move_down"):
 		_move(Twenty48.DOWN)
+	# Not only after a move: the ghost can be the tile that blocks the last one,
+	# so a player can reach a dead board without ever completing a move.
+	_check_end()
 	_refresh()
 
 
@@ -149,20 +186,31 @@ func _modal_open() -> bool:
 
 
 func _move(dir: String) -> void:
-	var plan := Twenty48.slide(board, dir)
+	var plan := Twenty48.slide_pending(board, dir, pending)
 	if not bool(plan["moved"]):
 		return
-	history = {"values": Twenty48.clone_board(board), "score": score}
+	history = {"values": Twenty48.clone_board(board), "score": score, "pending": pending.duplicate(true)}
 	board = plan["values"]
 	score += int(plan["gained"])
-	var spawn: Variant = Twenty48.add_random_tile(board)
+	pending = Twenty48.plan_tile(board, _rng)
 	best = maxi(best, Twenty48.highest_value(board))
 	Sfx.hit()
+	_check_end()
+	_refresh()
+
+
+## Win and loss are decided about the board the player is *looking at* — the
+## tiles plus the ghost — because that is the position they have to move in.
+func _check_end() -> void:
+	if _modal_open():
+		return
+	# `won` only silences the win dialog, not the loss one: after "keep playing"
+	# the run has to be able to end.
 	if not won and Twenty48.has_value(board, Twenty48.WIN_VALUE):
 		_on_win()
-	elif not Twenty48.can_move(board):
+		return
+	if not Twenty48.can_move_pending(board, pending):
 		_on_game_over()
-	_refresh()
 
 
 func undo() -> void:
@@ -170,6 +218,7 @@ func undo() -> void:
 		return
 	board = history["values"]
 	score = int(history["score"])
+	pending = history["pending"]
 	history = {}
 	Sfx.kill()
 	_refresh()
@@ -231,6 +280,8 @@ func _toggle_pause() -> void:
 
 func _refresh() -> void:
 	_view.queue_redraw()
+	if _next_view != null:
+		_next_view.queue_redraw()
 	if _score_label == null:
 		return
 	_score_label.text = Ui.format_number(score)
@@ -269,7 +320,48 @@ func _swipe(delta: Vector2) -> void:
 		_move(Twenty48.DOWN if delta.y > 0.0 else Twenty48.UP)
 
 
-## Draws the well and every tile, including the two freshly spawned ones.
+## Dashed frame with a translucent fill and a value the player can read at a
+## glance — it is the number they have to plan around. Shared by the ghost on the
+## board and its twin in the score panel.
+static func ghost_tile(view: CanvasItem, rect: Rect2, value: int) -> void:
+	var style: Dictionary = STYLES.get(value, SUPER) if STYLES.has(value) else SUPER
+	view.draw_rect(rect, Color(style["bg"], 0.8))
+	dashed(view, rect.grow(-2.0), UiTheme.ACCENT, 3.0, 12.0)
+	centred_text(view, rect, str(value), 40, style["fg"])
+
+
+## Frame as dashes. A ghost must be unmistakable at a glance — a player who
+## merges the wrong tile loses a turn.
+static func dashed(view: CanvasItem, rect: Rect2, color: Color, width: float, dash: float) -> void:
+	var x := rect.position.x
+	var y := rect.position.y
+	var w := rect.size.x
+	var h := rect.size.y
+	var offset := 0.0
+	while offset < w:
+		var run: float = minf(dash, w - offset)
+		view.draw_rect(Rect2(x + offset, y, run, width), color)
+		view.draw_rect(Rect2(x + offset, y + h - width, run, width), color)
+		offset += dash * 2.0
+	offset = 0.0
+	while offset < h:
+		var run: float = minf(dash, h - offset)
+		view.draw_rect(Rect2(x, y + offset, width, run), color)
+		view.draw_rect(Rect2(x + w - width, y + offset, width, run), color)
+		offset += dash * 2.0
+
+
+## One line of bold text, centred in a rect.
+static func centred_text(view: CanvasItem, rect: Rect2, text: String, size: int, color: Color) -> void:
+	var font := Ui.font_bold()
+	if font == null:
+		return
+	var metrics := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size)
+	view.draw_string(font, rect.position + Vector2((rect.size.x - metrics.x) * 0.5, (rect.size.y + float(size) * 0.72) * 0.5),
+			text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
+
+
+## Draws the well and every tile, including the ghost that lands with the next move.
 class BoardView:
 	extends Control
 	var screen: Game2048Screen
@@ -292,6 +384,21 @@ class BoardView:
 				if value == 0:
 					continue
 				_tile(origin + Vector2(float(c) * PITCH + GAP, float(r) * PITCH + GAP), value)
+		_ghost(origin)
+
+
+	## The tile that lands after the next move, drawn on the board where it will
+	## sit: dashed frame, translucent, so it never reads as a settled tile.
+	func _ghost(origin: Vector2) -> void:
+		var tile: Dictionary = screen.pending
+		if tile.is_empty():
+			return
+		var row := int(tile["row"])
+		var col := int(tile["col"])
+		if Twenty48.at(screen.board, row, col) != 0:
+			return
+		Game2048Screen.ghost_tile(self, Rect2(origin + Vector2(float(col) * PITCH + GAP, float(row) * PITCH + GAP),
+				Vector2(TILE, TILE)), int(tile["value"]))
 
 
 	func _tile(pos: Vector2, value: int) -> void:
@@ -311,3 +418,22 @@ class BoardView:
 		var metrics := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size)
 		draw_string(font, pos + Vector2((TILE - metrics.x) * 0.5, (TILE + float(size) * 0.72) * 0.5), text,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, size, style["fg"])
+
+
+## The ghost tile next to the score, so its size is readable while the eye is on
+## the numbers. Its own control, because it has to be painted over the panel.
+class NextView:
+	extends Control
+	var screen: Game2048Screen
+
+	func _draw() -> void:
+		if screen == null:
+			return
+		var rect := Rect2(Vector2.ZERO, size)
+		var tile: Dictionary = screen.pending
+		if tile.is_empty():
+			# A full board promises nothing — say so instead of showing a stale tile.
+			Game2048Screen.dashed(self, rect, UiTheme.TEXT_DIM, 3.0, 12.0)
+			Game2048Screen.centred_text(self, rect, "—", 40, UiTheme.TEXT_DIM)
+			return
+		Game2048Screen.ghost_tile(self, rect, int(tile["value"]))
