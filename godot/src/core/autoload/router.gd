@@ -10,6 +10,8 @@ signal screen_changed(screen_id: String)
 
 const SCREEN_SCRIPTS := {
 	"lobby": "res://src/game/lobby/lobby3d_screen.gd",
+	"mesh_gallery": "res://src/game/lobby/mesh_gallery_screen.gd",
+	"mesh_review": "res://src/game/lobby/mesh_review_screen.gd",
 	"lobby_list": "res://src/game/lobby/lobby_list_screen.gd",
 	"main_menu": "res://src/game/arena/main_menu_screen.gd",
 	"arena": "res://src/game/arena/arena_screen.gd",
@@ -26,6 +28,14 @@ const SCREEN_SCRIPTS := {
 	"merge3d_halloween": "res://src/game/merge3d/merge3d_screen.gd",
 	"horserunner": "res://src/game/horse_runner/horse_runner_screen.gd",
 	"dragonrpg": "res://src/game/dragon_rpg/dragon_rpg_screen.gd",
+	"dragonflight": "res://src/game/dragon_flight/hangar_screen.gd",
+	"dragonflight_run": "res://src/game/dragon_flight/dragon_flight_screen.gd",
+	"dragonflight_hatchery": "res://src/game/dragon_flight/hatchery_screen.gd",
+	"metro3d": "res://src/game/metro/metro_screen.gd",
+	"pang_menu": "res://src/game/pang/pang_menu_screen.gd",
+	"pang": "res://src/game/pang/pang_screen.gd",
+	"siedler": "res://src/game/siedler/siedler_screen.gd",
+	"candy3d": "res://src/game/candy_match3/candy_match3_screen.gd",
 }
 
 ## Set for one frame after a switch so games can react to the change.

@@ -34,6 +34,8 @@ func run(kit: TestKit, scene_tree: SceneTree) -> void:
 	t.close_suite()
 	await _tetris_accepts_moves()
 	t.close_suite()
+	await _mesh_gallery_flow()
+	t.close_suite()
 	await _suggest_dialog_posts()
 	t.close_suite()
 	await _suggest_dialog_closes()
@@ -269,6 +271,97 @@ func _content_values() -> void:
 		t.check(float(def.get("duration", 0.0)) >= 0.0, "Modus '%s' hat eine gültige Dauer (0 = endlos)" % str(def.get("id", "?")))
 		for key in ["enemyHpMult", "enemySpeedMult", "spawnRateMult"]:
 			t.check(float(def.get(key, 0.0)) > 0.0, "Modus '%s' hat %s" % [str(def.get("id", "?")), key])
+	t.suite_done()
+
+
+## Walks the whole gallery loop the way a player does: mark a mesh, write a
+## note, land on the review screen with a finished draft, and submit it offline.
+func _mesh_gallery_flow() -> void:
+	t.suite("Mesh-Galerie")
+	MeshGallery.set_marks(MeshGallery.clear_marks())
+
+	router.go_to("mesh_gallery")
+	await tree.create_timer(0.4).timeout
+	var gallery = router.current_screen
+	t.check(gallery != null, "Die Galerie öffnet")
+	if gallery == null:
+		return
+	var group_ids: Array[String] = []
+	for group in AssetRegistry.GROUPS:
+		group_ids.append(str(group["id"]))
+	t.check(str(gallery.group_id) in group_ids, "Die Galerie startet in einer bekannten Sammlung")
+	t.check(AssetRegistry.keys_in_group(str(gallery.group_id)).size() > 0,
+		"Die Startsammlung hat Meshes")
+	t.equal(str(gallery.tier), "low", "Die Galerie startet in der Fassung, die die Spiele benutzen")
+	t.equal(MeshGallery.mark_count(MeshGallery.shared_marks()), 0, "Die Merkliste startet leer")
+
+	# Every tier loads and every pedestal on the first page is filled.
+	for tier_id in AssetRegistry.TIERS:
+		gallery._set_tier(tier_id)
+		t.equal(str(gallery.tier), tier_id, "Stufe '%s' lässt sich einschalten" % tier_id)
+		t.check(gallery.visible_keys().size() > 0, "Stufe '%s' zeigt Meshes" % tier_id)
+	gallery._set_tier("low")
+
+	var keys: Array = gallery.visible_keys()
+	t.equal(keys.size(), mini(MeshGallery.ARC_SIZE, AssetRegistry.keys_in_group(str(gallery.group_id)).size()),
+		"Die erste Seite ist gefüllt")
+	for key in keys:
+		t.check(AssetRegistry.exists(str(key)), "Sockel '%s' zeigt ein gebündeltes Mesh" % str(key))
+
+	# Vormerken wie der Spieler es tut: an einen Sockel stellen und E drücken.
+	gallery.active_pedestal = 0
+	gallery._toggle_mark()
+	t.check(MeshGallery.is_marked(MeshGallery.shared_marks(), str(gallery.visible_keys()[0])),
+		"Das Mesh steht in der geteilten Merkliste")
+	t.equal(MeshGallery.mark_count(MeshGallery.shared_marks()), 1, "Das erste Mesh ist vorgemerkt")
+	gallery._toggle_mark()
+	t.equal(MeshGallery.mark_count(MeshGallery.shared_marks()), 0, "Und wieder abgewählt")
+	gallery.active_pedestal = 0
+	gallery._toggle_mark()
+
+	# Die Notiz landet in der Merkliste …
+	gallery._refresh()
+	t.check(not str(gallery._info_name.text).is_empty(), "Die Infokarte nennt das Mesh")
+	t.check(not str(gallery._info_meta.text).is_empty(), "Die Infokarte nennt Stufe und Dreieckzahl")
+
+	# … und der Review-Screen macht daraus einen fertigen Text.
+	router.go_to("mesh_review")
+	await tree.create_timer(0.4).timeout
+	var review = router.current_screen
+	t.check(review != null, "Die Review-Seite öffnet")
+	if review == null:
+		return
+	t.check(not str(review._draft.text).is_empty(), "Der Vorschlag ist vorausgefüllt")
+	t.check(str(review._draft.text).contains(str(keys[0])), "Der Vorschlag nennt das Mesh")
+	t.check(review._submit_button.disabled == false, "Absenden ist möglich")
+
+	# Eine Notiz fließt in den Text ein.
+	var before := str(review._draft.text)
+	MeshGallery.set_marks(MeshGallery.set_note(MeshGallery.shared_marks(), str(keys[0]), "Flügel zu kantig"))
+	review._rebuild()
+	t.check(str(review._draft.text).contains("Flügel zu kantig"), "Die Notiz steht im Vorschlag")
+	t.check(str(review._draft.text) != before, "Der Vorschlag hat sich geändert")
+
+	# Absenden ohne Server landet in der Offline-Warteschlange.
+	api._queue.clear()
+	review._submit()
+	await tree.create_timer(0.4).timeout
+	t.equal(api._queue.size(), 1, "Der Vorschlag ist in der Offline-Warteschlange")
+	if api._queue.size() == 1:
+		t.check(str((api._queue[0] as Dictionary)["text"]).contains("Mesh-Galerie"),
+			"Der Vorschlag trägt seine Herkunft mit sich")
+	api._queue.clear()
+	# Offline ist nur in die Warteschlange gesendet: die Liste bleibt, damit der
+	# Spieler den Text noch kopieren kann.
+	t.equal(MeshGallery.mark_count(MeshGallery.shared_marks()), 1,
+		"Nach dem Offline-Senden bleibt die Liste erhalten")
+	MeshGallery.set_marks(MeshGallery.clear_marks())
+	t.equal(MeshGallery.mark_count(MeshGallery.shared_marks()), 0, "„Liste leeren“ leert sie")
+
+	await tree.create_timer(0.6).timeout
+	MeshGallery.set_marks(MeshGallery.clear_marks())
+	router.go_to("lobby")
+	await tree.create_timer(0.3).timeout
 	t.suite_done()
 
 

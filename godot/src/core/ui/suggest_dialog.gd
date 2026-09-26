@@ -11,16 +11,18 @@ const MAX_LENGTH := 2000
 static var _layer: CanvasLayer = null
 
 
-static func open(parent: Control) -> void:
+## `context` overrides the automatic label. Leave it empty to use the game the
+## player is currently in; the mesh gallery passes its own, more precise one.
+static func open(parent: Control, context: String = "") -> void:
 	if _layer != null and is_instance_valid(_layer):
 		return
-	_build(parent.get_tree())
+	_build(parent.get_tree(), context)
 
 
-static func open_world(parent: Node3D) -> void:
+static func open_world(parent: Node3D, context: String = "") -> void:
 	if _layer != null and is_instance_valid(_layer):
 		return
-	_build(parent.get_tree())
+	_build(parent.get_tree(), context)
 
 
 ## True while the suggestion overlay is on screen.
@@ -34,7 +36,7 @@ static func close() -> void:
 	_layer = null
 
 
-static func _build(tree: SceneTree) -> void:
+static func _build(tree: SceneTree, context: String = "") -> void:
 	_layer = CanvasLayer.new()
 	_layer.layer = 128
 	tree.root.add_child(_layer)
@@ -59,6 +61,15 @@ static func _build(tree: SceneTree) -> void:
 	panel.add_child(column)
 
 	column.add_child(Ui.title("Vorschlag einreichen", 32, UiTheme.ACCENT))
+
+	# The origin is filled in from the active screen, so the player only has to
+	# write *what* should change, never where.
+	var source := context.strip_edges()
+	if source == "":
+		source = SuggestionContext.for_screen(Router.current_id)
+	var origin := Ui.label("Aus: %s" % source, 16, UiTheme.ACCENT, true)
+	column.add_child(origin)
+
 	var hint := Ui.label(
 		"Neue Inhalte, Mechaniken, Balance oder Bugs — alles landet gesammelt auf dem Dashboard und wird dort priorisiert. Umsetzungen erscheinen direkt im Spiel.",
 		16, UiTheme.TEXT_DIM)
@@ -108,7 +119,7 @@ static func _build(tree: SceneTree) -> void:
 		send.disabled = true
 		send.text = "Sende …"
 		var author := name_edit.text.strip_edges().substr(0, 60)
-		var view := await Api.submit_suggestion(text, author if author != "" else "Anonym")
+		var view := await Api.submit_suggestion(text, author if author != "" else "Anonym", source)
 		if view.is_empty():
 			status.add_theme_color_override("font_color", UiTheme.WARNING)
 			status.text = "Gespeichert, aber noch nicht an den Server geschickt. Die Idee wird gesendet, sobald du wieder online bist."

@@ -15,6 +15,11 @@ const PEDESTAL_ORBIT := 3.6
 const PEDESTAL_TRIGGER := 2.5
 const MINIMAP_WORLD_RADIUS := LOBBY_WALK_RADIUS + 6.0
 
+## The mesh gallery sits between the hub and the plaza ring, on the axis the
+## player enters through, so it is the first thing they meet.
+const GALLERY_DISTANCE := 13.0
+const GALLERY_TRIGGER := 3.0
+
 
 ## One plaza per category, evenly distributed on a ring. The first plaza sits
 ## at the "north" side of the hub so the camera sees a plaza straight ahead.
@@ -55,6 +60,17 @@ static func clamp_to_lobby(x: float, z: float, radius: float = LOBBY_WALK_RADIUS
 		return Vector2(x, z)
 	var scale := radius / length
 	return Vector2(x * scale, z * scale)
+
+
+## World position of the mesh gallery portal, opposite the first plaza.
+static func gallery_position() -> Vector2:
+	var layout := zone_layout()
+	if layout.is_empty():
+		return Vector2(0.0, -GALLERY_DISTANCE)
+	var first: Dictionary = layout[0]
+	var angle := atan2(float(first["z"]), float(first["x"]))
+	# A quarter turn away from the first plaza: clearly separate, still central.
+	return Vector2(cos(angle + PI * 0.5), sin(angle + PI * 0.5)) * GALLERY_DISTANCE
 
 
 static func distance_sq(ax: float, az: float, bx: float, bz: float) -> float:

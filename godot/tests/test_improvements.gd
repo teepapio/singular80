@@ -19,6 +19,10 @@ func run(kit: TestKit) -> void:
 	_suite(_arena_waves)
 	_suite(_arena_chains)
 	_suite(_loot_rarity)
+	_suite(_suggestion_context)
+	_suite(_lod_tiers)
+	_suite(_gallery_layout)
+	_suite(_gallery_marks)
 
 
 ## Runs one suite and fails it if it returned before its own `t.suite_done()`,
@@ -396,3 +400,241 @@ func _loot_rarity() -> void:
 	t.check(DragonRpg.luck_for({"boss": false, "tier": 5}) <= 0.4, "Normale Drachen überschreiten die Obergrenze nicht")
 	t.check(DragonRpg.luck_for({"boss": false, "tier": 9}) <= 0.4, "Auch ein sehr hoher Drachen bleibt gedeckelt")
 	t.suite_done()
+
+
+# --- Vorschläge tragen ihre Herkunft mit ------------------------------------
+
+func _suggestion_context() -> void:
+	t.suite("Vorschlag — Herkunft")
+
+	# Jedes Spiel liefert seinen deutschen Namen, nicht seine technische ID.
+	t.equal(SuggestionContext.for_screen("arena"), "Singular 80", "Die Arena kennt ihren Namen")
+	t.equal(SuggestionContext.for_screen("tetris"), "Tetris", "Tetris kennt seinen Namen")
+	t.equal(SuggestionContext.for_screen("mesh_gallery"), "Mesh-Galerie", "Die Galerie hat einen eigenen Namen")
+	t.equal(SuggestionContext.for_screen("lobby"), "Lobby", "Die Lobby heißt Lobby")
+	t.equal(SuggestionContext.for_screen(""), "Spiel", "Ohne Bildschirm bleibt eine neutrale Angabe")
+	t.equal(SuggestionContext.for_screen("gibtesnicht"), "gibtesnicht", "Ein unbekannter Bildschirm zählt durch")
+	t.check(SuggestionContext.for_screen("dragonrpg").contains("Drachen"), "Das Drachen-RPG liefert seinen Namen")
+
+	# Eine Spiel-ID funktioniert genauso wie ein Bildschirm.
+	t.equal(SuggestionContext.resolve("tetris"), "Tetris", "Eine Spiel-ID wird aufgelöst")
+	t.equal(SuggestionContext.resolve("Mesh-Galerie"), "Mesh-Galerie", "Ein freier Text bleibt stehen")
+	t.equal(SuggestionContext.resolve(""), "Spiel", "Leer bedeutet neutral")
+	t.check(SuggestionContext.resolve("Mesh-Galerie · Drachen").contains("Drachen"), "Ein längerer Kontext bleibt erhalten")
+	t.check(SuggestionContext.resolve("x".repeat(200)).length() <= SuggestionContext.MAX_PREFIX,
+		"Ein zu langer Kontext wird gekürzt")
+
+	# Der Kontext landet vor dem Text, damit ihn niemand tippen muss.
+	t.equal(SuggestionContext.compose("tetris", "Bitte T-Spins belohnen"),
+		"Tetris: Bitte T-Spins belohnen", "Der Spielname steht vor dem Vorschlag")
+	t.equal(SuggestionContext.compose("mesh_gallery", "Die Flügel sind zu eckig"),
+		"Mesh-Galerie: Die Flügel sind zu eckig", "Die Galerie steht vor dem Vorschlag")
+	t.equal(SuggestionContext.compose("tetris", "  Bitte Ghost-Piece  "),
+		"Tetris: Bitte Ghost-Piece", "Leerraum am Textende fällt weg")
+	t.equal(SuggestionContext.compose("", "Nur ein Gedanke"), "Nur ein Gedanke",
+		"Ohne Kontext wird der Text nicht verändert")
+
+	# Eine Offline-Warteschlange darf den Text nicht doppelt präfixen.
+	var once := SuggestionContext.compose("tetris", "Held sauberer zeichnen")
+	t.equal(SuggestionContext.compose("tetris", once), once, "Der zweyte Durchlauf ändert nichts")
+	t.check(once.begins_with("Tetris: "), "Der Vorschlag behält seine Herkunft")
+
+	# Der Kontext darf dem 2000-Zeichen-Limit nicht zum Opfer fallen.
+	var long_text := "y".repeat(1900)
+	t.check(SuggestionContext.compose("lobby", long_text).length() < 2000,
+		"Ein langer Vorschlag bleibt unter der Grenze")
+
+
+# --- Detailstufen -----------------------------------------------------------
+
+func _lod_tiers() -> void:
+	t.suite("Mesh — Detailstufen")
+
+	t.equal(AssetRegistry.TIERS, ["low", "med", "high"] as Array[String], "Es gibt drei Stufen")
+	t.equal(str(AssetRegistry.TIER_LABELS["low"]), "Low Poly", "Die niedrigste Stufe ist Low Poly")
+	t.equal(str(AssetRegistry.TIER_LABELS["med"]), "Mittel", "Die mittlere Stufe heißt Mittel")
+	t.equal(str(AssetRegistry.TIER_LABELS["high"]), "Hoch", "Die hohe Stufe heißt Hoch")
+	t.equal(int(AssetRegistry.TIER_BUDGET["med"]), 1000, "Mittel zielt auf 1 000 Dreiecke")
+	t.equal(int(AssetRegistry.TIER_BUDGET["high"]), 10000, "Hoch zielt auf 10 000 Dreiecke")
+
+	t.check(AssetRegistry.tier_path_of("rpg/knight", "low") == AssetRegistry.path_of("rpg/knight"),
+		"Low liegt im Mesh-Wurzelordner")
+	t.check(AssetRegistry.tier_path_of("rpg/knight", "med").contains("/med/"),
+		"Mittel liegt im med-Ordner")
+	t.check(AssetRegistry.tier_path_of("rpg/knight", "high").contains("/high/"),
+		"Hoch liegt im high-Ordner")
+	t.check(AssetRegistry.tier_path_of("rpg/knight", "").ends_with("rpg/knight.glb"),
+		"Eine leere Stufe zählt als Low")
+
+	# Jedes Mesh, das wirklich auf der Platte liegt, hat mindestens die Fassung,
+	# die die Spiele benutzen. (Der Registry-Test in `test_logic.gd` meldet sich,
+	# wenn ein Mesh im Verzeichnis fehlt — hier geht es nur um die Stufen.)
+	var present: Array[String] = []
+	for key in AssetRegistry.KEYS:
+		if AssetRegistry.tier_exists(key, "low"):
+			present.append(key)
+	t.check(present.size() > 0, "Es gibt importierte Meshes")
+	for key in present:
+		t.check(AssetRegistry.tier_exists(key, "low"), "Low-Fassung von '%s' ist nutzbar" % key)
+	t.equal(AssetRegistry.tiers_missing("low").size(), 0, "Keine Low-Fassung fehlt")
+	t.equal(AssetRegistry.best_available("rpg/knight", "low"), "low", "Ohne Generator bleibt Low")
+
+	# Die gemessenen Dreieckzahlen sind da und liegen im Budget.
+	var counts := AssetRegistry.tri_counts()
+	t.check(counts.size() > 0, "Die Dreieckzahlen wurden gemessen")
+	var checked := 0
+	var med_low := 0
+	var high_low := 0
+	for key in AssetRegistry.KEYS:
+		var low := AssetRegistry.tri_count(key, "low")
+		var med := AssetRegistry.tri_count(key, "med")
+		var high := AssetRegistry.tri_count(key, "high")
+		if low < 0 or med < 0 or high < 0:
+			continue
+		checked += 1
+		if med < low:
+			med_low += 1
+		if high < med:
+			high_low += 1
+	t.check(checked > 0, "Mindestens ein Mesh hat gemessene Zahlen")
+	t.equal(med_low, 0, "Mittel ist nie grober als Low")
+	t.equal(high_low, 0, "Hoch ist nie grober als Mittel")
+	t.check(AssetRegistry.tri_text("rpg/knight", "low") != "—", "Die Zahl wird als Text geliefert")
+	t.equal(AssetRegistry.tri_text("gibtesnicht", "low"), "—", "Unbekanntes ergibt einen Gedankenstrich")
+
+
+# --- Galerie: Anordnung -----------------------------------------------------
+
+func _gallery_layout() -> void:
+	t.suite("Mesh-Galerie — Anordnung")
+
+	t.equal(MeshGallery.key_at(["a", "b"], 0), "a", "Der erste Sockel trägt das erste Mesh")
+	t.equal(MeshGallery.key_at(["a", "b"], 1), "b", "Der zweite Sockel trägt das zweite Mesh")
+	t.equal(MeshGallery.key_at(["a"], 5), "", "Hinter dem Ende ist nichts")
+	t.equal(MeshGallery.key_at([], 0), "", "Eine leere Sammlung hat nichts")
+
+	# Der Ring muss geschlossen sein und darf keine zwei Sockel überlappen.
+	var first := MeshGallery.pedestal_position(0)
+	var last := MeshGallery.pedestal_position(MeshGallery.ARC_SIZE - 1)
+	var gap := Vector2(first.x, first.z).distance_to(Vector2(last.x, last.z))
+	t.almost(gap, MeshGallery.RING_RADIUS * 2.0 * sin(PI / float(MeshGallery.ARC_SIZE)), 0.001,
+		"Der erste und der letzte Sockel grenzen aneinander")
+	for i in MeshGallery.ARC_SIZE:
+		var position := MeshGallery.pedestal_position(i)
+		t.almost(Vector2(position.x, position.z).length(), MeshGallery.RING_RADIUS, 0.001,
+			"Sockel %d liegt auf dem Ring" % i)
+		for j in range(i):
+			t.check(position.distance_to(MeshGallery.pedestal_position(j)) > 2.0,
+				"Sockel %d und %d überlappen nicht" % [i, j])
+
+	# „Welcher Sockel ist vor mir" hängt an der Nähe, nicht an der Reihenfolge.
+	var keys: Array[String] = []
+	for i in MeshGallery.ARC_SIZE:
+		keys.append("k%d" % i)
+	t.equal(MeshGallery.nearest_pedestal(keys, MeshGallery.pedestal_position(0)), 0,
+		"Auf dem Sockel 0 ist Sockel 0 der nächste")
+	t.equal(MeshGallery.nearest_pedestal(keys, MeshGallery.pedestal_position(5)), 5,
+		"Auf dem Sockel 5 ist Sockel 5 der nächste")
+	t.equal(MeshGallery.nearest_pedestal(keys, MeshGallery.CENTER), -1,
+		"In der Mitte ist kein Sockel nah genug")
+	t.equal(MeshGallery.nearest_pedestal([], MeshGallery.pedestal_position(0)), -1,
+		"Ohne Meshes gibt es keinen Sockel")
+
+	# Eine Seite fasst genau ARC_SIZE Meshes, der Rest kommt auf die nächste.
+	t.equal(MeshGallery.page_size(5), 5, "Eine kleine Sammlung passt auf eine Seite")
+	t.equal(MeshGallery.page_size(MeshGallery.ARC_SIZE), MeshGallery.ARC_SIZE,
+		"Genau ein Ring passt auf eine Seite")
+	t.equal(MeshGallery.page_size(MeshGallery.ARC_SIZE + 1), MeshGallery.ARC_SIZE,
+		"Ein Mesh zu viel wandert auf die nächste Seite")
+	t.equal(MeshGallery.pages_for(0), 1, "Eine leere Sammlung hat trotzdem eine Seite")
+	t.equal(MeshGallery.pages_for(5), 1, "Fünf Meshes passen auf eine Seite")
+	t.equal(MeshGallery.pages_for(MeshGallery.ARC_SIZE), 1, "Ein Ring ist eine Seite")
+	t.equal(MeshGallery.pages_for(MeshGallery.ARC_SIZE + 1), 2, "Ein Ring plus eins sind zwei Seiten")
+	t.equal(MeshGallery.pages_for(MeshGallery.ARC_SIZE * 3), 3, "Drei Ringe sind drei Seiten")
+
+	var many: Array[String] = []
+	for i in MeshGallery.ARC_SIZE * 2 + 5:
+		many.append("k%d" % i)
+	t.equal(MeshGallery.page(many, 0).size(), MeshGallery.ARC_SIZE, "Die erste Seite ist voll")
+	t.equal(MeshGallery.page(many, 1).size(), MeshGallery.ARC_SIZE, "Die zweite Seite ist voll")
+	t.equal(MeshGallery.page(many, 2).size(), 5, "Die letzte Seite trägt den Rest")
+	t.equal(MeshGallery.page(many, 0)[0], "k0", "Die Seiten sind lückenlos")
+	t.equal(MeshGallery.page(many, 1)[0], "k%d" % MeshGallery.ARC_SIZE, "Die zweite Seite schließt an")
+	t.equal(MeshGallery.page(many, 5).size(), 0, "Hinter der letzten Seite ist nichts")
+	t.equal(MeshGallery.page([], 0).size(), 0, "Eine leere Sammlung hat keine Seite")
+	t.equal(MeshGallery.page(["a", "b"], 0).size(), 2, "Eine kleine Sammlung zeigt alles")
+
+
+# --- Galerie: Merkliste und Vorschlag ---------------------------------------
+
+func _gallery_marks() -> void:
+	t.suite("Mesh-Galerie — Merkliste")
+
+	var marks := MeshGallery.new_marks()
+	t.equal(MeshGallery.mark_count(marks), 0, "Die Liste startet leer")
+	t.equal(MeshGallery.draft(marks), "", "Ohne Marken gibt es keinen Vorschlagstext")
+	t.equal(MeshGallery.mark_count(MeshGallery.shared_marks()), MeshGallery.mark_count(MeshGallery.shared_marks()),
+		"Die geteilte Liste ist stabil")
+
+	var key := AssetRegistry.KEYS[0]
+	marks = MeshGallery.mark(marks, key, "Kanten zu hart")
+	t.equal(MeshGallery.mark_count(marks), 1, "Ein Mesh kommt auf die Liste")
+	t.check(MeshGallery.is_marked(marks, key), "Das Mesh gilt als vorgemerkt")
+	t.equal(MeshGallery.mark_note(marks, key), "Kanten zu hart", "Die Notiz bleibt erhalten")
+	t.check(MeshGallery.draft(marks).contains(key), "Der Vorschlag nennt den Mesh-Schlüssel")
+	t.check(MeshGallery.draft(marks).contains("Kanten zu hart"), "Der Vorschlag enthält die Notiz")
+
+	# Ein zweites Vormerken ändert die Liste nicht.
+	marks = MeshGallery.mark(marks, key, "Noch schärfer")
+	t.equal(MeshGallery.mark_count(marks), 1, "Doppelt vormerken zählt einmal")
+	t.equal(MeshGallery.mark_note(marks, key), "Noch schärfer", "Die zweite Notiz gewinnt")
+
+	t.check(not MeshGallery.is_marked(marks, "gibtesnicht"), "Fremde Keys gelten nie als vorgemerkt")
+	t.equal(MeshGallery.mark_count(MeshGallery.mark(marks, "gibtesnicht")), 1, "Ein unbekannter Key wird ignoriert")
+	t.equal(MeshGallery.mark_count(MeshGallery.mark(marks, "")), 1, "Leere Keys werden ignoriert")
+
+	# An-/Aus-Schalten.
+	var on := MeshGallery.toggle(marks, AssetRegistry.KEYS[1])
+	t.equal(bool(on["marked"]), true, "Ein neues Mesh lässt sich vormerken")
+	t.equal(MeshGallery.mark_count(on["marks"]), 2, "Die Liste hat jetzt zwei Meshes")
+	var off := MeshGallery.toggle(on["marks"], AssetRegistry.KEYS[1])
+	t.equal(bool(off["marked"]), false, "Ein vorgemerktes Mesh lässt sich wieder abwählen")
+	t.equal(MeshGallery.mark_count(off["marks"]), 1, "Die Liste hat wieder ein Mesh")
+	t.equal(MeshGallery.mark_note(off["marks"], AssetRegistry.KEYS[1]), "", "Ein abgewähltes Mesh verliert die Notiz")
+
+	# Notizen und Stufen nur für vorgemerkte Meshes.
+	marks = MeshGallery.set_note(marks, key, "Flügel fehlen")
+	t.equal(MeshGallery.mark_note(marks, key), "Flügel fehlen", "Eine Notiz lässt sich später ändern")
+	t.equal(MeshGallery.mark_note(MeshGallery.set_note(marks, "gibtesnicht", "x"), "gibtesnicht"), "",
+		"Fremde Keys bekommen keine Notiz")
+	t.equal(MeshGallery.mark_count(MeshGallery.set_note(marks, "gibtesnicht", "x")), 1, "Die Liste bleibt klein")
+
+	marks = MeshGallery.set_tier(marks, key, "high")
+	t.equal(str((marks["entries"] as Dictionary)[key]["tier"]), "high", "Die Detailstufe wird gemerkt")
+	t.equal(MeshGallery.mark_count(MeshGallery.set_tier(marks, "gibtesnicht", "high")), 1,
+		"Die Stufe gilt nur für vorgemerkte Meshes")
+	t.equal(str((MeshGallery.set_tier(marks, key, "quatsch")["entries"] as Dictionary)[key]["tier"]), "low",
+		"Eine unbekannte Stufe fällt auf Low zurück")
+
+	# Der fertige Text nennt jede Stufe so, wie sie angeschaut wurde.
+	var draft := MeshGallery.draft(marks)
+	t.check(draft.contains("Hoch"), "Der Vorschlag nennt die angeschaute Detailstufe")
+	t.check(draft.contains(AssetRegistry.display_name(key)), "Der Vorschlag nennt den deutschen Namen")
+
+	# Mehrere Meshes ergeben einen Block mit je einem Eintrag; ein Mesh mit
+	# Notiz braucht zwei Zeilen.
+	marks = MeshGallery.mark(marks, AssetRegistry.KEYS[1], "zu dunkel")
+	var multi := MeshGallery.draft(marks)
+	t.check(multi.contains(AssetRegistry.KEYS[0]), "Der erste Eintrag steht im Text")
+	t.check(multi.contains(AssetRegistry.KEYS[1]), "Der zweite Eintrag steht im Text")
+	t.check(multi.contains("zu dunkel"), "Die zweite Notiz steht im Text")
+	t.equal(multi.count("\n"), 4, "Kopf, ein Mesh ohne und ein Mesh mit Notiz")
+
+	# Leeren klappt alles weg.
+	t.equal(MeshGallery.mark_count(MeshGallery.clear_marks()), 0, "Leeren leert die Liste")
+	t.equal(MeshGallery.draft(MeshGallery.clear_marks()), "", "Nach dem Leeren gibt es keinen Text")
+
+	t.equal(MeshGallery.context(), "Mesh-Galerie", "Die Galerie nennt sich selbst als Herkunft")
+	t.check(MeshGallery.tier_caption("low").contains("Low Poly"), "Die Low-Stufe wird erklärt")
+	t.check(MeshGallery.tier_caption("med").contains("1.000"), "Das Ziel der mittleren Stufe steht dabei")
+	t.check(MeshGallery.tier_caption("high").contains("10.000"), "Das Ziel der hohen Stufe steht dabei")

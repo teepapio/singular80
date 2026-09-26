@@ -42,8 +42,10 @@ func get_content() -> Variant:
 
 ## Submits a player suggestion. Returns the parsed view, or `{}` when the
 ## backend is unreachable (the suggestion is queued for the next attempt).
-func submit_suggestion(text: String, author: String) -> Dictionary:
-	var body := {"text": text, "author": author, "source": "game"}
+## `context` names the screen or area the idea came from; it is prepended to the
+## text so the dashboard can group ideas without the author having to say it.
+func submit_suggestion(text: String, author: String, context: String = "") -> Dictionary:
+	var body := {"text": SuggestionContext.compose(context, text), "author": author, "source": "game"}
 	if not Game.has_server():
 		_queue.append(body)
 		suggestion_failed.emit("Offline — Vorschlag lokal gespeichert.")

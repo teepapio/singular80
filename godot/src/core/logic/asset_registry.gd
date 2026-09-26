@@ -15,6 +15,19 @@ const MESH_DIR := "res://assets/meshes"
 
 ## Every bundled mesh key, alphabetically.
 const KEYS: Array[String] = [
+	"candy/bonbon",
+	"candy/chocolate",
+	"candy/daisy",
+	"candy/gift",
+	"candy/gumdrop",
+	"candy/heart",
+	"candy/jellybean",
+	"candy/lily",
+	"candy/lolly",
+	"candy/lotus",
+	"candy/rose",
+	"candy/sunflower",
+	"candy/tulip",
 	"crystal",
 	"crystal1",
 	"crystal2",
@@ -22,6 +35,26 @@ const KEYS: Array[String] = [
 	"crystal4",
 	"crystal5",
 	"fence",
+	"flight/ballista",
+	"flight/cloud",
+	"flight/cloud_storm",
+	"flight/dragon_cloud",
+	"flight/dragon_solar",
+	"flight/dragon_tide",
+	"flight/dragon_void",
+	"flight/egg",
+	"flight/egg_crystal",
+	"flight/egg_large",
+	"flight/fireball",
+	"flight/golem",
+	"flight/harpy",
+	"flight/imp",
+	"flight/island",
+	"flight/nest",
+	"flight/pedestal",
+	"flight/roost",
+	"flight/totem",
+	"flight/wyvern",
 	"halloween_candy",
 	"halloween_ghost_pumpkin",
 	"halloween_mini_pumpkin",
@@ -29,7 +62,27 @@ const KEYS: Array[String] = [
 	"halloween_seed",
 	"horse",
 	"log",
+	"metro/bridge",
+	"metro/car",
+	"metro/house",
+	"metro/interchange",
+	"metro/loco",
+	"metro/park",
+	"metro/passenger",
+	"metro/station",
+	"metro/tower",
+	"metro/transfer_ring",
+	"metro/tunnel_portal",
 	"ornament",
+	"pang/anchor",
+	"pang/beam",
+	"pang/bomb",
+	"pang/cage",
+	"pang/glue",
+	"pang/harpoon",
+	"pang/orb",
+	"pang/orb_crystal",
+	"pang/watch",
 	"pumpkin",
 	"rock",
 	"rpg/amulet",
@@ -86,6 +139,33 @@ const KEYS: Array[String] = [
 	"rpg/stone_pillar",
 	"rpg/sword",
 	"rpg/torch",
+	"siedler/bakery",
+	"siedler/blacksmith",
+	"siedler/castle",
+	"siedler/coal_mine",
+	"siedler/coal_node",
+	"siedler/construction",
+	"siedler/farm",
+	"siedler/fishery",
+	"siedler/flag",
+	"siedler/fish_spot",
+	"siedler/forester",
+	"siedler/gold_mine",
+	"siedler/gold_node",
+	"siedler/iron_mine",
+	"siedler/iron_node",
+	"siedler/knight",
+	"siedler/oak",
+	"siedler/quarry",
+	"siedler/sawmill",
+	"siedler/settler",
+	"siedler/smelter",
+	"siedler/stone_node",
+	"siedler/toolsmith",
+	"siedler/warehouse",
+	"siedler/watchtower",
+	"siedler/windmill",
+	"siedler/woodcutter",
 	"ship",
 	"tree",
 	"xmas_bauble",
@@ -99,10 +179,34 @@ const KEYS: Array[String] = [
 const GROUPS: Array[Dictionary] = [
 	{"id": "helden", "name": "Helden & Waffen", "icon": "⚔", "color": Color("94a3b8")},
 	{"id": "drachen", "name": "Drachen", "icon": "☄", "color": Color("f472b6")},
+	{"id": "metro", "name": "Stadt & Metro", "icon": "▣", "color": Color("38bdf8")},
 	{"id": "sammeln", "name": "Beute & Ausrüstung", "icon": "◆", "color": Color("fbbf24")},
 	{"id": "natur", "name": "Natur", "icon": "❦", "color": Color("4ade80")},
 	{"id": "ruinen", "name": "Ruinen & Props", "icon": "▣", "color": Color("a78bfa")},
+	{"id": "zucht", "name": "Zucht & Eier", "icon": "✦", "color": Color("f472b6")},
+	{"id": "gegner", "name": "Gegner", "icon": "◉", "color": Color("f87171")},
+	{"id": "pang", "name": "Pang-Objekte", "icon": "⇈", "color": Color("fbbf24")},
 	{"id": "merge", "name": "Merge- & Kristallstufen", "icon": "✦", "color": Color("38bdf8")},
+	{"id": "siedler", "name": "Siedler-Dorf", "icon": "⌂", "color": Color("84cc16")},
+	{"id": "candy", "name": "Candy-Crush-Steine", "icon": "✦", "color": Color("f472b6")},
+]
+
+## Breeding props of the hatchery.
+const ZUCHT_KEYS: Array[String] = [
+	"flight/egg", "flight/egg_large", "flight/egg_crystal",
+	"flight/nest", "flight/pedestal", "flight/roost",
+]
+
+## Flying and ground enemies of the dragon-flight game.
+const GEGNER_KEYS: Array[String] = [
+	"flight/wyvern", "flight/imp", "flight/harpy", "flight/ballista", "flight/golem",
+]
+
+## Orbs, harpoon, obstacles and power-up props of the Pang clone.
+const PANG_KEYS: Array[String] = [
+	"pang/orb", "pang/orb_crystal", "pang/harpoon",
+	"pang/beam", "pang/cage",
+	"pang/bomb", "pang/watch", "pang/glue", "pang/anchor",
 ]
 
 const MERGE_KEYS: Array[String] = [
@@ -110,6 +214,14 @@ const MERGE_KEYS: Array[String] = [
 	"ornament", "pumpkin",
 	"xmas_pinecone", "xmas_candy_cane", "xmas_bauble", "xmas_gingerbread_star", "xmas_star",
 	"halloween_seed", "halloween_candy", "halloween_mini_pumpkin", "halloween_pumpkin", "halloween_ghost_pumpkin",
+]
+
+## Board pieces of the match-3 (candy + flower world plus one Xmas prop).
+const CANDY_KEYS: Array[String] = [
+	"candy/bonbon", "candy/lolly", "candy/jellybean",
+	"candy/gumdrop", "candy/chocolate", "candy/heart",
+	"candy/rose", "candy/tulip", "candy/sunflower",
+	"candy/daisy", "candy/lily", "candy/lotus", "candy/gift",
 ]
 
 const NATURE_KEYS: Array[String] = [
@@ -130,15 +242,115 @@ const RUIN_KEYS: Array[String] = [
 	"rpg/rock_small", "rpg/rock_large", "rock", "log", "fence",
 ]
 
+## Buildings, rolling stock and infrastructure of the metro game.
+const METRO_KEYS: Array[String] = [
+	"metro/station", "metro/interchange", "metro/transfer_ring", "metro/loco",
+	"metro/car", "metro/bridge", "metro/tunnel_portal", "metro/house",
+	"metro/tower", "metro/park", "metro/passenger",
+]
+
+## Castle, production buildings, road flags, settlers and deposits of the
+## Siedler game.
+const SIEDLER_KEYS: Array[String] = [
+	"siedler/castle", "siedler/warehouse", "siedler/construction", "siedler/flag",
+	"siedler/settler", "siedler/knight",
+	"siedler/woodcutter", "siedler/forester", "siedler/sawmill", "siedler/quarry",
+	"siedler/farm", "siedler/windmill", "siedler/bakery", "siedler/fishery",
+	"siedler/coal_mine", "siedler/iron_mine", "siedler/gold_mine", "siedler/smelter",
+	"siedler/toolsmith", "siedler/blacksmith", "siedler/watchtower",
+	"siedler/oak", "siedler/stone_node", "siedler/coal_node", "siedler/iron_node",
+	"siedler/gold_node", "siedler/fish_spot",
+]
+
+
+# --- detail levels ----------------------------------------------------------
+#
+# Every mesh ships in three resolutions. `low` is the one the games use (a few
+# hundred triangles, so the APK and every mobile GPU stay happy); `med` and
+# `high` are generated from the same geometry by
+# `scripts/blender/generate_lod_meshes.py` and exist for the mesh gallery, where
+# you can compare a silhouette against a properly detailed version.
+#
+# Only the low tier is in the registry's `KEYS`; the richer tiers are derived, so
+# adding a mesh automatically gives it all three levels.
+
+const TIERS: Array[String] = ["low", "med", "high"]
+
+## What the gallery calls the tiers, plus the triangle budget each one aims for.
+const TIER_LABELS := {
+	"low": "Low Poly",
+	"med": "Mittel",
+	"high": "Hoch",
+}
+
+const TIER_BUDGET := {"low": 0, "med": 1000, "high": 10000}
+
+## Written by the Blender LOD generator; `{"<key>": {"low": n, "med": n, "high": n}}`.
+const LOD_STATS := "%s/lod.json" % MESH_DIR
+
+static var _tri_cache: Dictionary = {}
+static var _tri_cache_loaded := false
+
 
 ## `res://` path of a mesh.
 static func path_of(key: String) -> String:
 	return "%s/%s.glb" % [MESH_DIR, key]
 
 
+## `res://` path of one detail level. The low tier lives in the mesh root, the
+## generated tiers in their own folders.
+static func tier_path_of(key: String, tier: String) -> String:
+	if tier == "low" or tier == "":
+		return path_of(key)
+	return "%s/%s/%s.glb" % [MESH_DIR, tier, key]
+
+
 ## True when the mesh is bundled and imported.
 static func exists(key: String) -> bool:
 	return ResourceLoader.exists(path_of(key))
+
+
+## True when one detail level is available. A key always has `low`; the richer
+## tiers only exist once the generator has run.
+static func tier_exists(key: String, tier: String) -> bool:
+	return ResourceLoader.exists(tier_path_of(key, tier))
+
+
+## The finest level that is actually present, never finer than `tier`.
+static func best_available(key: String, tier: String) -> String:
+	for candidate in TIERS:
+		if TIERS.find(candidate) < TIERS.find(tier) and tier_exists(key, candidate):
+			return candidate
+	return "low"
+
+
+## Measured triangle counts per key, read once from the generator's stats file.
+static func tri_counts() -> Dictionary:
+	if _tri_cache_loaded:
+		return _tri_cache
+	_tri_cache_loaded = true
+	_tri_cache = {}
+	if not FileAccess.file_exists(LOD_STATS):
+		return _tri_cache
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(LOD_STATS))
+	if parsed is Dictionary:
+		for key in parsed:
+			_tri_cache[str(key)] = (parsed as Dictionary)[key]
+	return _tri_cache
+
+
+## Triangle count of one level, or -1 when the generator has not run.
+static func tri_count(key: String, tier: String) -> int:
+	var entry: Variant = tri_counts().get(key)
+	if not (entry is Dictionary):
+		return -1
+	return int((entry as Dictionary).get(tier, -1))
+
+
+## `1.240 Dreiecke`, or an em dash when the count is unknown.
+static func tri_text(key: String, tier: String) -> String:
+	var count := tri_count(key, tier)
+	return "—" if count < 0 else Ui.format_number(count)
 
 
 ## German display name for a key, derived from the file name.
@@ -152,10 +364,22 @@ static func display_name(key: String) -> String:
 
 ## Which gallery section a key belongs to.
 static func group_of(key: String) -> String:
-	if key.begins_with("rpg/dragon_"):
+	if key.begins_with("rpg/dragon_") or key.begins_with("flight/dragon_"):
 		return "drachen"
+	if key in ZUCHT_KEYS:
+		return "zucht"
+	if key in METRO_KEYS:
+		return "metro"
+	if key in SIEDLER_KEYS:
+		return "siedler"
+	if key in GEGNER_KEYS:
+		return "gegner"
+	if key in PANG_KEYS:
+		return "pang"
 	if key in ["rpg/knight", "horse", "rpg/sword", "rpg/greatsword", "rpg/dagger", "rpg/axe", "rpg/staff", "rpg/bow", "ship"]:
 		return "helden"
+	if key in CANDY_KEYS:
+		return "candy"
 	if key in MERGE_KEYS:
 		return "merge"
 	if key in NATURE_KEYS:
@@ -164,6 +388,9 @@ static func group_of(key: String) -> String:
 		return "sammeln"
 	if key in RUIN_KEYS:
 		return "ruinen"
+	# Everything else in the flight pack is sky scenery (clouds, islands, totems).
+	if key.begins_with("flight/"):
+		return "natur"
 	return "helden"
 
 
@@ -204,7 +431,8 @@ static func unlisted() -> Array[String]:
 	return out
 
 
-## Every `.glb` key found in the mesh folder.
+## Every `.glb` key found in the mesh folder, ignoring the generated tier
+## folders — those mirror the low tier and are not separate meshes.
 static func _on_disk() -> Array[String]:
 	var out: Array[String] = []
 	var dir := DirAccess.open(MESH_DIR)
@@ -214,7 +442,7 @@ static func _on_disk() -> Array[String]:
 	var name := dir.get_next()
 	while name != "":
 		if dir.current_is_dir():
-			if not name.begins_with("."):
+			if not name.begins_with(".") and not (name in TIERS):
 				out.append_array(_sub_keys(name))
 		elif name.ends_with(".glb"):
 			out.append(name.substr(0, name.length() - 4))
@@ -236,4 +464,15 @@ static func _sub_keys(folder: String) -> Array[String]:
 			out.append("%s/%s" % [folder, name.substr(0, name.length() - 4)])
 		name = dir.get_next()
 	dir.list_dir_end()
+	return out
+
+
+## Keys whose richer tiers are missing, `[]` once the generator has run.
+static func tiers_missing(tier: String) -> Array[String]:
+	var out: Array[String] = []
+	if tier == "low" or not (tier in TIERS):
+		return out
+	for key in KEYS:
+		if not tier_exists(key, tier):
+			out.append(key)
 	return out

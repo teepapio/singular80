@@ -42,6 +42,7 @@ func _on_data(_payload: Dictionary) -> void:
 
 func _process(delta: float) -> void:
 	elapsed += delta
+	_fade_notify(delta)
 	_update_world(delta)
 
 
@@ -140,6 +141,39 @@ func hide_loading() -> void:
 		_loading_label.visible = false
 
 
+## Shows a transient message across the lower third of the screen.
+##
+## Named `notify` rather than `show_toast` so a 3D game that already has a toast
+## of its own does not shadow the base method.
+var _notify_label: Label
+var _notify_time := 0.0
+
+
+func notify(text: String, seconds: float = 2.2) -> void:
+	if _notify_label == null:
+		_notify_label = Ui.label("", 22, UiTheme.TEXT, true)
+		_notify_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+		_notify_label.offset_left = 0
+		_notify_label.offset_right = 0
+		_notify_label.offset_top = -190
+		_notify_label.offset_bottom = -150
+		_notify_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_notify_label.add_theme_constant_override("outline_size", 8)
+		_notify_label.add_theme_color_override("font_outline_color", Color("020617"))
+		_notify_label.modulate.a = 0.0
+		hud_root.add_child(_notify_label)
+	_notify_label.text = text
+	_notify_label.modulate.a = 1.0
+	_notify_time = seconds
+
+
+func _fade_notify(delta: float) -> void:
+	if _notify_time <= 0.0 or _notify_label == null:
+		return
+	_notify_time = maxf(0.0, _notify_time - delta)
+	_notify_label.modulate.a = clampf(_notify_time * 2.5, 0.0, 1.0)
+
+
 ## Camera that trails a target from a fixed offset — the pattern every 3D game
 ## uses, with the height/distance in world units.
 func follow_camera(target: Vector3, height: float, distance: float, lerp_speed: float = 6.0, delta: float = 0.016) -> void:
@@ -229,7 +263,9 @@ static func standard_material(color: Color, emission: float = 0.0) -> StandardMa
 ## Loads one of the bundled Blender meshes, scaled and tinted. Returns `null`
 ## when the import failed so callers can fall back to a primitive.
 static func mesh(key: String, color: Color = Color.WHITE, scale: float = 1.0, emission: float = 0.0) -> Node3D:
-	var path := "res://assets/meshes/%s.glb" % key
+	# A key that already carries a path (the gallery's LOD tiers) is used as is,
+	# so no caller has to know how the folders are laid out.
+	var path := key if key.begins_with("res://") else "res://assets/meshes/%s.glb" % key
 	if not ResourceLoader.exists(path):
 		return null
 	var packed: PackedScene = load(path)

@@ -46,6 +46,10 @@ var pedestals: Array[Dictionary] = []
 var active_zone: Dictionary = {}
 var active_pedestal: Dictionary = {}
 var transitioning := false
+var gallery_portal: Node3D
+var gallery_label: Label3D
+var gallery_ring: MeshInstance3D
+var _gallery_near := false
 
 var _stick: VirtualStick
 var _map: Minimap
@@ -75,6 +79,7 @@ func _ready_world() -> void:
 	zones = Lobby.zone_layout()
 	_build_zones()
 	_build_scenery()
+	_build_gallery_portal()
 	_build_player()
 	_build_hud_panels()
 	camera.position = Vector3(pos.x, CAMERA_HEIGHT, pos.z + CAMERA_DISTANCE)
@@ -287,6 +292,70 @@ func _build_scenery() -> void:
 		add_child(pillar)
 
 
+## The way into the mesh gallery: a lit ring with a floating crystal. Standing
+## in it and pressing the interact button (or the on-screen button) opens the
+## gallery, where every bundled mesh can be inspected and marked for rework.
+func _build_gallery_portal() -> void:
+	var spot := Lobby.gallery_position()
+	gallery_portal = Node3D.new()
+	gallery_portal.position = Vector3(spot.x, 0.0, spot.y)
+	add_child(gallery_portal)
+
+	var disc := MeshInstance3D.new()
+	var disc_mesh := CylinderMesh.new()
+	disc_mesh.top_radius = 2.2
+	disc_mesh.bottom_radius = 2.4
+	disc_mesh.height = 0.25
+	disc_mesh.radial_segments = 24
+	disc.mesh = disc_mesh
+	disc.material_override = WorldScreen.standard_material(Color("0b1220"), 0.4)
+	disc.position.y = 0.12
+	gallery_portal.add_child(disc)
+
+	gallery_ring = MeshInstance3D.new()
+	var ring_torus := TorusMesh.new()
+	ring_torus.inner_radius = 2.1
+	ring_torus.outer_radius = 2.45
+	ring_torus.rings = 28
+	gallery_ring.mesh = ring_torus
+	gallery_ring.material_override = WorldScreen.standard_material(Color("38bdf8"), 1.8)
+	gallery_ring.position.y = 0.3
+	gallery_portal.add_child(gallery_ring)
+
+	var crystal := mesh_or_null("crystal", Color("38bdf8"), 1.5)
+	if crystal == null:
+		crystal = mesh_or_null("rpg/crystal_cluster", Color("38bdf8"), 1.2)
+	if crystal != null:
+		crystal.position = Vector3(0, 2.2, 0)
+		gallery_portal.add_child(crystal)
+
+	var light := OmniLight3D.new()
+	light.light_color = Color("38bdf8")
+	light.light_energy = 18.0
+	light.omni_range = 22.0
+	light.position = Vector3(0, 2.6, 0)
+	gallery_portal.add_child(light)
+
+	gallery_label = Label3D.new()
+	gallery_label.text = "◈  MESH-GALERIE"
+	gallery_label.font_size = 60
+	gallery_label.outline_size = 16
+	gallery_label.outline_modulate = Color("020617")
+	gallery_label.modulate = Color("7dd3fc")
+	gallery_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	gallery_label.position = Vector3(0, 4.2, 0)
+	gallery_portal.add_child(gallery_label)
+
+	for i in 3:
+		var angle := TAU * float(i) / 3.0
+		var post := mesh_or_null("rpg/rune_stone", Color("475569"), 1.0)
+		if post == null:
+			continue
+		post.position = Vector3(cos(angle) * 3.3, 0.0, sin(angle) * 3.3)
+		post.rotation.y = angle
+		gallery_portal.add_child(post)
+
+
 func _build_player() -> void:
 	player = Node3D.new()
 	var knight := mesh_or_null("rpg/knight", Color("cbd5e1"), 1.0)
@@ -319,6 +388,14 @@ func _build_hud_panels() -> void:
 	list_button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	list_button.position = Vector2(_stick.size.x + 40.0, -52.0)
 	hud_root.add_child(list_button)
+
+	var gallery_button := Ui.button("◈ Galerie", Vector2(150, 40), UiTheme.PANEL_LIGHT, func() -> void:
+		Sfx.select()
+		Router.go_to("mesh_gallery")
+	)
+	gallery_button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	gallery_button.position = Vector2(_stick.size.x + 40.0, -100.0)
+	hud_root.add_child(gallery_button)
 
 	_map = Minimap.new()
 	_map.screen = self
@@ -388,9 +465,19 @@ func _update_world(delta: float) -> void:
 	_refresh_near(nearest)
 
 	var interact_now := Input.is_action_pressed("interact")
-	if interact_now and not _interact_held and not nearest.is_empty():
-		_start(nearest["game"])
+	if interact_now and not _interact_held:
+		if not nearest.is_empty():
+			_start(nearest["game"])
+		elif _gallery_near:
+			Router.go_to("mesh_gallery")
 	_interact_held = interact_now
+
+	_gallery_near = _at_gallery(pos)
+	if gallery_ring != null:
+		gallery_ring.rotation.y += delta * 1.2
+		gallery_ring.scale = Vector3.ONE * (1.06 if _gallery_near else 1.0)
+	if gallery_label != null:
+		gallery_label.modulate = Color("facc15") if _gallery_near else Color("7dd3fc")
 
 	player.position = Vector3(pos.x, sin(elapsed * 3.0) * 0.05, pos.z)
 	player.rotation.y = facing
@@ -422,6 +509,12 @@ func _zone_at(p: Vector3) -> Dictionary:
 		if Lobby.distance_sq(p.x, p.z, float(zone["x"]), float(zone["z"])) <= Lobby.ZONE_RADIUS * Lobby.ZONE_RADIUS:
 			return zone
 	return {}
+
+
+## True while the player stands in the gallery portal.
+func _at_gallery(p: Vector3) -> bool:
+	var spot := Lobby.gallery_position()
+	return Lobby.distance_sq(p.x, p.z, spot.x, spot.y) <= Lobby.GALLERY_TRIGGER * Lobby.GALLERY_TRIGGER
 
 
 func _nearest_pedestal(p: Vector3) -> Dictionary:
