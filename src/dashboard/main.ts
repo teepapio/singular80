@@ -1,5 +1,24 @@
 import './style.css';
-import type { BusEvent, RunEvent, RunRecord, RunView, SuggestionView } from '../shared/types';
+import type {
+  BusEvent,
+  QueueState,
+  RunEvent,
+  RunRecord,
+  RunView,
+  ScopeAudit,
+  ScopeManifest,
+  SuggestionView,
+} from '../shared/types';
+import {
+  attemptLabel,
+  describeQueue,
+  formatCountdown,
+  groupScopes,
+  manifestHeadline,
+  outcomeBadge,
+  scopeLabel,
+  scopeWarning,
+} from './queueControls';
 import { describeRunActivity, formatDuration, lastEventTimestamp, needsRunCleanup } from './runActivity';
 
 type Tab = 'queue' | 'new' | 'top' | 'cluster' | 'done';
@@ -13,6 +32,12 @@ interface DashboardState {
   lastActivityAt: number | null;
   /** Whether the server still tracks a live process for the active run. */
   activeRunAlive: boolean | null;
+  /** Pause state, policy and pending runs as the server reports them. */
+  queue: QueueState | null;
+  /** Scope layout the runner depends on (from scripts/scopes.mjs). */
+  manifest: ScopeManifest | null;
+  /** Which files a run touched relative to its declared scope. */
+  audit: ScopeAudit | null;
   tab: Tab;
   category: string | null;
   search: string;
@@ -29,6 +54,9 @@ const state: DashboardState = {
   runEvents: [],
   lastActivityAt: null,
   activeRunAlive: null,
+  queue: null,
+  manifest: null,
+  audit: null,
   tab: 'queue',
   category: null,
   search: '',
@@ -239,6 +267,7 @@ function renderCard(s: SuggestionView, children: number[]): string {
         <span>👍 ${s.votes} Stimmen</span>
         ${s.discordMessageId ? '<span title="an Discord gesendet">📨 Discord</span>' : ''}
         ${run && run.status !== 'running' ? `<span>🤖 ${run.status}${commit}</span>` : ''}
+        ${run?.scope ? `<span title="Scope aus scripts/scopes.mjs">📁 ${escapeHtml(scopeLabel(run, state.manifest))}</span>` : ''}
         ${!isClusterCanonical ? `<span>gehört zu Cluster #${s.canonicalId}</span>` : ''}
         ${hasChildren ? `<span>Aufgeteilt in ${children.length} Einzelaufträge: ${children.map((id) => `#${id}`).join(', ')}</span>` : ''}
       </div>
@@ -279,7 +308,7 @@ function renderCard(s: SuggestionView, children: number[]): string {
                 <div>Malus: −${s.breakdown.penalty}</div>
               </div>
               ${s.clusterIds.length > 1 ? `<div style="margin-top:8px"><strong>Cluster:</strong> ${s.clusterIds.map((id) => `#${id}`).join(', ')}</div>` : ''}
-              ${run ? `<div style="margin-top:8px"><strong>Letzter Run:</strong> ${run.id} · ${run.status} · ${run.cost != null ? `$${run.cost.toFixed(4)}` : 'Kosten unbekannt'}${run.tokensInput != null ? ` · ${run.tokensInput}/${run.tokensOutput} Tokens` : ''}</div>` : ''}
+              ${run ? `<div style="margin-top:8px"><strong>Letzter Run:</strong> ${run.id} · ${run.status} · ${run.cost != null ? `$${run.cost.toFixed(4)}` : 'Kosten unbekannt'}${run.tokensInput != null ? ` · ${run.tokensInput}/${run.tokensOutput} Tokens` : ''}${attemptLabel(run) ? ` · ${attemptLabel(run)}` : ''}</div>` : ''}
               <div style="margin-top:8px"><strong>Quelle:</strong> ${escapeHtml(s.source)} · erstellt ${new Date(s.createdAt).toLocaleString('de-DE')}</div>
             </div>`
           : ''
@@ -309,6 +338,8 @@ function renderRuns(): void {
   const runningCount = state.runs.filter((r) => r.status === 'running').length;
   const queued = state.runs.filter((r) => r.status === 'queued').slice(0, 20);
 
+  renderQueueState();
+
   let html = '';
   // A server restart can leave several runs marked as "running" at once. Surface
   // that clearly and offer a one-click cleanup instead of silently showing the
@@ -327,18 +358,24 @@ function renderRuns(): void {
       connected: state.connected,
       alive: state.activeRunAlive ?? undefined,
     });
-    const elapsed = running.startedAt ? formatDuration(Date.now() - running.startedAt) : null;
     const lines = state.runEvents
       .slice(-400)
       .map((event) => `<div class="line ${event.kind}">${escapeHtml(event.text)}</div>`)
       .join('');
+    const warning = scopeWarning(state.audit);
     html += `
       <div class="run-card activity-${activity.level}" id="active-run-card">
         <div class="run-title">
           <span>🤖 Vorschlag #${running.suggestionId}</span>
           <span>${state.activeRunAlive === false ? '⚠ Prozess weg' : '⚙ läuft'}</span>
         </div>
-        <div class="run-sub">${escapeHtml(running.id)}${elapsed ? ` · läuft seit ${elapsed}` : ''}</div>
+        <div class="run-sub" id="run-budget">${escapeHtml(runBudgetLine(running))}</div>
+        <div class="run-sub">📁 ${escapeHtml(scopeLabel(running, state.manifest))}</div>
+        ${
+          warning
+            ? `<div class="run-warning" title="Der Run hat Dateien außerhalb seines Scopes angefasst">⚠ ${escapeHtml(warning)}</div>`
+            : ''
+        }
         <div class="run-activity ${activity.level}" id="run-activity" title="Zeit seit der letzten Ausgabe von OpenCode">
           ${escapeHtml(activity.label)}
         </div>
@@ -365,19 +402,22 @@ function renderRuns(): void {
       </div>
     `;
     html += queued
-      .map(
-        (run) => `
+      .map((run) => {
+        const badge = attemptLabel(run);
+        const wait =
+          run.notBefore && run.notBefore > Date.now() ? ` · startet in ${formatCountdown(run.notBefore - Date.now())}` : '';
+        return `
       <div class="run-card">
         <div class="run-title">
-          <span>#${run.suggestionId}</span>
+          <span>#${run.suggestionId}${badge ? ` · ${escapeHtml(badge)}` : ''}</span>
           <span>wartet</span>
         </div>
-        <div class="run-sub">${escapeHtml(run.id)}</div>
+        <div class="run-sub">${escapeHtml(run.id)}${escapeHtml(wait)}</div>
         <div class="card-actions">
           <button data-action="cancel-run" data-run="${run.id}">⏹ Entfernen</button>
         </div>
-      </div>`,
-      )
+      </div>`;
+      })
       .join('');
   }
 
@@ -386,33 +426,150 @@ function renderRuns(): void {
   if (consoleEl) consoleEl.scrollTop = consoleEl.scrollHeight;
   updateRunActivity();
 
+  $('#run-history').innerHTML = renderRunHistory();
+  renderScopes();
+}
+
+/** Pause chip plus the policy that is currently in force. */
+function renderQueueState(): void {
+  const container = $('#queue-state');
+  const button = $('#toggle-pause') as HTMLButtonElement | null;
+  if (!state.queue) {
+    container.innerHTML = '<span class="chip muted">Queue unbekannt</span>';
+    if (button) button.disabled = true;
+    return;
+  }
+  if (button) {
+    button.disabled = false;
+    button.textContent = state.queue.paused ? '▶' : '⏸';
+    button.title = state.queue.paused
+      ? 'Warteschlange fortsetzen'
+      : 'Warteschlange anhalten — der laufende Run läuft weiter';
+  }
+  const summary = describeQueue(state.queue, Date.now());
+  container.innerHTML = `
+    <span class="chip ${summary.paused ? 'paused' : 'active'}">${escapeHtml(summary.label)}</span>
+    <span class="policy" id="queue-policy">${escapeHtml(summary.policyLabel)}</span>
+    <span class="policy" id="queue-waiting">${summary.waiting} wartend${summary.startsIn ? ` · ${escapeHtml(summary.startsIn)}` : ''}</span>
+  `;
+}
+
+/**
+ * Ticks the countdown of a pending backoff without rebuilding the panel. Only
+ * the text node changes, so a queued run does not re-render every second.
+ */
+function updateQueueCountdown(): void {
+  const el = document.getElementById('queue-waiting');
+  if (!el || !state.queue) return;
+  const summary = describeQueue(state.queue, Date.now());
+  el.textContent = `${summary.waiting} wartend${summary.startsIn ? ` · ${summary.startsIn}` : ''}`;
+}
+
+/** Finished runs: why they ended, which attempt, and which scope they touched. */
+function renderRunHistory(): string {
   const history = state.runs
     .filter((r) => r.status !== 'running' && r.status !== 'queued')
     .slice(0, 8)
-    .map(
-      (run) => `
+    .map((run) => {
+      const badge = outcomeBadge(run);
+      const attempt = attemptLabel(run);
+      const audit = run.id === state.audit?.runId ? state.audit : parseStoredAudit(run);
+      const warning = scopeWarning(audit);
+      return `
       <div class="run-card">
         <div class="run-title">
-          <span>#${run.suggestionId}</span>
-          <span>${
-            run.status === 'succeeded' ? '✅' : run.status === 'cancelled' ? '⏹' : '⚠️'
-          } ${run.status}</span>
+          <span>#${run.suggestionId}${attempt ? ` · ${escapeHtml(attempt)}` : ''}</span>
+          <span>${badge ? `${badge.icon} ${escapeHtml(badge.label)}` : escapeHtml(run.status)}</span>
         </div>
         <div class="run-sub">
           ${escapeHtml(run.id)}${run.commitHash ? ` · <code>${escapeHtml(run.commitHash)}</code>` : ''}
           ${run.cost != null ? ` · $${run.cost.toFixed(4)}` : ''}
           ${run.finishedAt ? ` · ${timeAgo(run.finishedAt)}` : ''}
         </div>
+        <div class="run-sub">📁 ${escapeHtml(scopeLabel(run, state.manifest))}${
+          run.retryOf ? ` · ↻ wiederholt ${escapeHtml(run.retryOf)}` : ''
+        }</div>
+        ${warning ? `<div class="run-warning">⚠ ${escapeHtml(warning)}</div>` : ''}
+        <div class="card-actions">
+          ${
+            run.status === 'failed' || run.status === 'cancelled'
+              ? `<button data-action="retry-run" data-run="${run.id}">↻ Wiederholen</button>`
+              : ''
+          }
+        </div>
+      </div>`;
+    })
+    .join('');
+  return history || '<p class="run-sub" style="margin-top:10px">Noch keine Runs.</p>';
+}
+
+/** The scope layout, grouped by owning agent, with the active run highlighted. */
+function renderScopes(): void {
+  const list = $('#scope-list');
+  if (!list) return;
+  $('#scope-headline').textContent = manifestHeadline(state.manifest);
+  if (!state.manifest || state.manifest.scopes.length === 0) {
+    list.innerHTML = '<p class="run-sub">Keine Scopes geladen.</p>';
+    return;
+  }
+  const active = state.activeRun?.scopes ?? [];
+  list.innerHTML = groupScopes(state.manifest.scopes)
+    .map(
+      (group) => `
+      <div class="scope-group">
+        <div class="scope-agent">${escapeHtml(group.agent)} · ${group.scopes.length}</div>
+        ${group.scopes
+          .map(
+            (scope) => `
+          <div class="scope-row ${active.includes(scope.id) ? 'current' : ''}">
+            <span class="scope-id">${escapeHtml(scope.id)}</span>
+            <span class="scope-label">${escapeHtml(scope.label)}</span>
+            <span class="scope-meta" title="${escapeHtml(scope.own.join('\n'))}">${scope.own.length} eigene${
+              scope.suites.length ? ` · ${scope.suites.length} Suiten` : ''
+            }</span>
+          </div>`,
+          )
+          .join('')}
       </div>`,
     )
     .join('');
-  $('#run-history').innerHTML = history || '<p class="run-sub" style="margin-top:10px">Noch keine Runs.</p>';
+}
+
+/** Reads the audit that the runner stored with the run. */
+function parseStoredAudit(run: RunRecord): ScopeAudit | null {
+  if (!run.scopeIssues) return null;
+  try {
+    const stored = JSON.parse(run.scopeIssues) as Partial<ScopeAudit>;
+    return {
+      runId: run.id,
+      scopes: run.scopes,
+      agent: null,
+      ok: (stored.violations?.length ?? 0) === 0,
+      violations: stored.violations ?? [],
+      shared: stored.shared ?? [],
+      unclaimed: stored.unclaimed ?? [],
+      notes: stored.notes ?? [],
+      checked: stored.checked ?? 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** One line with run id, runtime and the remaining hard-timeout budget. */
+function runBudgetLine(run: RunRecord): string {
+  const elapsed = run.startedAt ? `läuft seit ${formatDuration(Date.now() - run.startedAt)}` : 'startet gerade';
+  if (run.timeoutMs <= 0 || !run.startedAt) return `${run.id} · ${elapsed} · ohne Zeitlimit`;
+  const left = Math.max(0, run.startedAt + run.timeoutMs - Date.now());
+  return `${run.id} · ${elapsed} · Restzeit ${formatCountdown(left)} von ${formatCountdown(run.timeoutMs)}`;
 }
 
 /** Refreshes the live "last output" indicator without rebuilding the whole panel. */
 function updateRunActivity(): void {
   const el = document.getElementById('run-activity');
+  const budget = document.getElementById('run-budget');
   const running = state.activeRun && state.activeRun.status === 'running' ? state.activeRun : null;
+  if (budget && running) budget.textContent = runBudgetLine(running);
   if (!el || !running) return;
   const activity = describeRunActivity({
     lastActivityAt: state.lastActivityAt,
@@ -478,6 +635,7 @@ async function loadRuns(): Promise<void> {
     state.runEvents = [];
     state.lastActivityAt = null;
     state.activeRunAlive = null;
+    state.audit = null;
     return;
   }
   // A fresh run starts with an empty console and activity clock.
@@ -485,6 +643,7 @@ async function loadRuns(): Promise<void> {
     state.runEvents = [];
     state.lastActivityAt = null;
     state.activeRunAlive = null;
+    state.audit = null;
   }
   // Populate/refresh the console from the server, so an already running run shows
   // its progress (and last-output time) even when SSE events were missed.
@@ -493,10 +652,58 @@ async function loadRuns(): Promise<void> {
     if (state.activeRun?.id === running.id) {
       state.runEvents = view.events;
       state.activeRunAlive = view.alive;
+      state.audit = view.scopeAudit;
       markActivity(lastEventTimestamp(view.events) ?? view.startedAt ?? undefined);
     }
   } catch {
     /* run view is best-effort */
+  }
+}
+
+async function loadQueue(): Promise<void> {
+  try {
+    state.queue = await api<QueueState & { runnerEnabled: boolean }>('/api/runner');
+  } catch {
+    state.queue = null;
+  }
+}
+
+async function loadManifest(): Promise<void> {
+  try {
+    state.manifest = await api<ScopeManifest>('/api/scopes');
+  } catch {
+    state.manifest = null;
+  }
+}
+
+/** Pauses or resumes the queue. The running run keeps its process either way. */
+async function togglePause(): Promise<void> {
+  if (!state.queue) return;
+  const paused = !state.queue.paused;
+  try {
+    const next = await api<QueueState>('/api/runner/pause', {
+      method: 'POST',
+      body: JSON.stringify({ paused }),
+    });
+    state.queue = next;
+    toast(paused ? 'Warteschlange pausiert — der laufende Run läuft weiter.' : 'Warteschlange läuft weiter.', 'success');
+    await refreshAll();
+  } catch (err) {
+    toast((err as Error).message, 'error');
+  }
+}
+
+/** Starts another attempt of a finished run. */
+async function retryRun(runId: string): Promise<void> {
+  try {
+    const result = await api<{ run: RunRecord }>(`/api/runs/${runId}/retry`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    toast(`Neuer Versuch für #${result.run.suggestionId} in der Warteschlange`, 'success');
+    await refreshAll();
+  } catch (err) {
+    toast((err as Error).message, 'error');
   }
 }
 
@@ -507,6 +714,9 @@ async function loadSettings(): Promise<void> {
     extraInstructions: string;
     autoApprove: boolean;
     autoApproveScore: number;
+    runTimeoutMinutes: number;
+    retryLimit: number;
+    retryBackoffSeconds: number;
     webhookConfigured: boolean;
     envWebhook: boolean;
   }>('/api/settings');
@@ -518,6 +728,9 @@ async function loadSettings(): Promise<void> {
   ($('#setting-instructions') as HTMLTextAreaElement).value = settings.extraInstructions;
   ($('#setting-autoapprove') as HTMLInputElement).checked = settings.autoApprove;
   ($('#setting-autoscore') as HTMLInputElement).value = String(settings.autoApproveScore);
+  ($('#setting-timeout') as HTMLInputElement).value = String(settings.runTimeoutMinutes);
+  ($('#setting-retries') as HTMLInputElement).value = String(settings.retryLimit);
+  ($('#setting-backoff') as HTMLInputElement).value = String(settings.retryBackoffSeconds);
   $('#webhook-state').textContent = settings.webhookConfigured
     ? settings.envWebhook
       ? 'Webhook kommt aus .env'
@@ -527,7 +740,7 @@ async function loadSettings(): Promise<void> {
 
 async function refreshAll(): Promise<void> {
   try {
-    await Promise.all([loadSuggestions(), loadRuns()]);
+    await Promise.all([loadSuggestions(), loadRuns(), loadQueue(), loadManifest()]);
     render();
     void maybeAutoReconcile();
   } catch (err) {
@@ -622,8 +835,11 @@ async function act(action: string, id: number, runId?: string): Promise<void> {
       });
       toast(`Run für #${id} in die Warteschlange gestellt`, 'success');
     } else if (action === 'cancel-run' && runId) {
-      await api(`/api/runs/${runId}/cancel`, { method: 'POST' });
+      await api(`/api/runs/${runId}/cancel`, { method: 'POST', body: JSON.stringify({}) });
       toast('Run abgebrochen');
+    } else if (action === 'retry-run' && runId) {
+      await retryRun(runId);
+      return;
     } else if (action === 'details') {
       if (state.expanded.has(id)) state.expanded.delete(id);
       else state.expanded.add(id);
@@ -714,6 +930,10 @@ function connectEvents(): void {
       state.lastActivityAt = null;
       state.activeRunAlive = null;
       void refreshAll();
+    } else if (event.type === 'queue:state') {
+      state.queue = event.state;
+      renderQueueState();
+      renderRuns();
     }
   };
 }
@@ -753,6 +973,12 @@ function setupUi(): void {
     if (!button) return;
     void act('cancel-run', 0, button.dataset.run);
   });
+  $('#run-history').addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest('button[data-action="retry-run"]') as HTMLButtonElement | null;
+    if (!button?.dataset.run) return;
+    void retryRun(button.dataset.run);
+  });
+  $('#toggle-pause').addEventListener('click', () => void togglePause());
   $('#cleanup-runs').addEventListener('click', () => void reconcileRuns());
   $('#refresh-runs').addEventListener('click', () => void refreshAll());
   $('#reload-content').addEventListener('click', async () => {
@@ -775,6 +1001,9 @@ function setupUi(): void {
       extraInstructions: ($('#setting-instructions') as HTMLTextAreaElement).value,
       autoApprove: ($('#setting-autoapprove') as HTMLInputElement).checked,
       autoApproveScore: Number(($('#setting-autoscore') as HTMLInputElement).value) || 0,
+      runTimeoutMinutes: Number(($('#setting-timeout') as HTMLInputElement).value) || 0,
+      retryLimit: Number(($('#setting-retries') as HTMLInputElement).value) || 0,
+      retryBackoffSeconds: Number(($('#setting-backoff') as HTMLInputElement).value) || 0,
     };
     const webhook = ($('#setting-webhook') as HTMLInputElement).value.trim();
     if (webhook) body.discordWebhook = webhook;
@@ -853,6 +1082,7 @@ async function main(): Promise<void> {
   // Keep the "last output" indicator ticking while a run is active.
   setInterval(() => {
     if (state.activeRun?.status === 'running') updateRunActivity();
+    updateQueueCountdown();
   }, ACTIVITY_TICK_MS);
   // Re-check quiet/interrupted runs against the API so a stuck run is detected
   // even when the stream stalls silently.

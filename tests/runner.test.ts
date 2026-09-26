@@ -1,5 +1,64 @@
 import { describe, expect, it } from 'vitest';
-import { mapOpencodeEvent } from '../server/runner';
+import { buildPrompt, formatBudget, mapOpencodeEvent } from '../server/runner';
+import { DEFAULT_SETTINGS } from '../server/db';
+import type { Suggestion } from '../src/shared/types';
+
+describe('formatBudget', () => {
+  it('schreibt Minuten und Sekunden lesbar', () => {
+    expect(formatBudget(2_700_000)).toBe('45 min');
+    expect(formatBudget(30_000)).toBe('30 s');
+    expect(formatBudget(1.5 * 60_000)).toBe('1.5 min');
+  });
+
+  it('sagt es, wenn es kein Zeitlimit gibt', () => {
+    expect(formatBudget(0)).toBe('unbegrenzt');
+  });
+});
+
+describe('buildPrompt', () => {
+  const suggestion: Suggestion = {
+    id: 42,
+    text: 'Mehr Bälle',
+    author: 'Spielerin',
+    source: 'game',
+    category: 'mechanics',
+    status: 'approved',
+    votes: 3,
+    canonicalId: null,
+    createdAt: 0,
+    updatedAt: 0,
+    discordMessageId: null,
+    runId: null,
+  };
+
+  it('nennt den Scope, damit der Agent seinen Besitz kennt', () => {
+    const prompt = buildPrompt(suggestion, [suggestion], DEFAULT_SETTINGS, '/repo', ['tetris']);
+    expect(prompt).toContain('SCOPE: tetris');
+    expect(prompt).toContain('scripts/scopes.mjs');
+    expect(prompt).toContain('Vorschlag #42');
+  });
+
+  it('verbietet `git add -A` und nennt den eigenen Index', () => {
+    const prompt = buildPrompt(suggestion, [suggestion], DEFAULT_SETTINGS, '/repo', ['tetris']);
+    expect(prompt).toContain('"git add -A" ist verboten');
+    expect(prompt).toContain('GIT_INDEX_FILE');
+    expect(prompt).toContain('feat(suggestion-42)');
+  });
+
+  it('weist auf den zweiten Versuch hin', () => {
+    expect(buildPrompt(suggestion, [suggestion], DEFAULT_SETTINGS, '/repo', ['tetris'], 2)).toContain(
+      'WIEDERHOLUNGSVERSUCH 2',
+    );
+    expect(buildPrompt(suggestion, [suggestion], DEFAULT_SETTINGS, '/repo', ['tetris'], 1)).not.toContain(
+      'WIEDERHOLUNGSVERSUCH',
+    );
+  });
+
+  it('nennt Geschwister desselben Clusters', () => {
+    const sibling = { ...suggestion, id: 43, text: 'Noch mehr Bälle' };
+    expect(buildPrompt(suggestion, [suggestion, sibling], DEFAULT_SETTINGS, '/repo')).toContain('#43: Noch mehr Bälle');
+  });
+});
 
 describe('mapOpencodeEvent', () => {
   it('übersetzt Text-Events', () => {

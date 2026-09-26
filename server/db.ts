@@ -9,7 +9,21 @@ export const DEFAULT_SETTINGS: Settings = {
   extraInstructions: '',
   autoApprove: false,
   autoApproveScore: 25,
+  // 45 minutes: long enough for a godot import plus the scoped test run, short
+  // enough that a hung agent does not block the queue over a weekend.
+  runTimeoutMinutes: 45,
+  retryLimit: 1,
+  retryBackoffSeconds: 30,
 };
+
+/** Upper bounds for the runner policy, so one bad request cannot stop every run. */
+export const SETTINGS_BOUNDS = {
+  runTimeoutMinutes: { min: 0, max: 1440 },
+  retryLimit: { min: 0, max: 5 },
+  retryBackoffSeconds: { min: 0, max: 3600 },
+} as const;
+
+export type PolicyKey = keyof typeof SETTINGS_BOUNDS;
 
 interface SuggestionRow {
   id: number;
@@ -43,6 +57,14 @@ interface RunRow {
   started_at: number | null;
   finished_at: number | null;
   log_path: string;
+  attempt: number | null;
+  max_attempts: number | null;
+  retry_of: string | null;
+  not_before: number | null;
+  timeout_ms: number | null;
+  scope: string | null;
+  note: string | null;
+  scope_issues: string | null;
 }
 
 function rowToSuggestion(row: SuggestionRow): Suggestion {
@@ -64,6 +86,10 @@ function rowToSuggestion(row: SuggestionRow): Suggestion {
 }
 
 function rowToRun(row: RunRow): RunRecord {
+  const scopes = (row.scope ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   return {
     id: row.id,
     suggestionId: row.suggestion_id,
@@ -80,6 +106,15 @@ function rowToRun(row: RunRow): RunRecord {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     logPath: row.log_path,
+    attempt: row.attempt ?? 1,
+    maxAttempts: row.max_attempts ?? 1,
+    retryOf: row.retry_of ?? null,
+    notBefore: row.not_before ?? null,
+    timeoutMs: row.timeout_ms ?? 0,
+    scopes,
+    scope: scopes[0] ?? null,
+    note: row.note ?? null,
+    scopeIssues: row.scope_issues ?? null,
   };
 }
 
@@ -137,7 +172,15 @@ export class Store {
         created_at INTEGER NOT NULL,
         started_at INTEGER,
         finished_at INTEGER,
-        log_path TEXT NOT NULL
+        log_path TEXT NOT NULL,
+        attempt INTEGER NOT NULL DEFAULT 1,
+        max_attempts INTEGER NOT NULL DEFAULT 1,
+        retry_of TEXT,
+        not_before INTEGER,
+        timeout_ms INTEGER NOT NULL DEFAULT 0,
+        scope TEXT,
+        note TEXT,
+        scope_issues TEXT
       );
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
@@ -155,6 +198,27 @@ export class Store {
       this.db.exec('ALTER TABLE suggestions ADD COLUMN parent_id INTEGER');
     } catch {
       /* column already exists */
+    }
+    // Runner policy: retry attempts, hard timeout, scope bookkeeping. Every
+    // column is additive and nullable/defaulted, so an old database keeps
+    // working and old runs simply read back as "first attempt, no timeout".
+    for (const ddl of [
+      'ALTER TABLE runs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1',
+      'ALTER TABLE runs ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 1',
+      'ALTER TABLE runs ADD COLUMN retry_of TEXT',
+      'ALTER TABLE runs ADD COLUMN not_before INTEGER',
+      'ALTER TABLE runs ADD COLUMN timeout_ms INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE runs ADD COLUMN scope TEXT',
+      'ALTER TABLE runs ADD COLUMN note TEXT',
+      'ALTER TABLE runs ADD COLUMN scope_issues TEXT',
+    ]) {
+      try {
+        this.db.exec(ddl);
+      } catch (err) {
+        // Only "duplicate column" is acceptable here; anything else means the
+        // database is broken and the caller has to see it.
+        if (!/duplicate column name/i.test((err as Error).message)) throw err;
+      }
     }
   }
 
@@ -235,8 +299,8 @@ export class Store {
   createRun(run: RunRecord) {
     this.db
       .prepare(
-        `INSERT INTO runs (id, suggestion_id, status, session_id, prompt, exit_code, cost, tokens_input, tokens_output, commit_hash, result_summary, created_at, started_at, finished_at, log_path)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO runs (id, suggestion_id, status, session_id, prompt, exit_code, cost, tokens_input, tokens_output, commit_hash, result_summary, created_at, started_at, finished_at, log_path, attempt, max_attempts, retry_of, not_before, timeout_ms, scope, note, scope_issues)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -254,13 +318,21 @@ export class Store {
         run.startedAt,
         run.finishedAt,
         run.logPath,
+        run.attempt,
+        run.maxAttempts,
+        run.retryOf,
+        run.notBefore,
+        run.timeoutMs,
+        run.scopes.join(','),
+        run.note,
+        run.scopeIssues,
       );
   }
 
   updateRun(run: RunRecord) {
     this.db
       .prepare(
-        `UPDATE runs SET status = ?, session_id = ?, exit_code = ?, cost = ?, tokens_input = ?, tokens_output = ?, commit_hash = ?, result_summary = ?, started_at = ?, finished_at = ?
+        `UPDATE runs SET status = ?, session_id = ?, exit_code = ?, cost = ?, tokens_input = ?, tokens_output = ?, commit_hash = ?, result_summary = ?, started_at = ?, finished_at = ?, attempt = ?, max_attempts = ?, retry_of = ?, not_before = ?, timeout_ms = ?, scope = ?, note = ?, scope_issues = ?
          WHERE id = ?`,
       )
       .run(
@@ -274,6 +346,14 @@ export class Store {
         run.resultSummary,
         run.startedAt,
         run.finishedAt,
+        run.attempt,
+        run.maxAttempts,
+        run.retryOf,
+        run.notBefore,
+        run.timeoutMs,
+        run.scopes.join(','),
+        run.note,
+        run.scopeIssues,
         run.id,
       );
   }
@@ -305,7 +385,43 @@ export class Store {
       autoApproveScore: raw.autoApproveScore
         ? Number(raw.autoApproveScore)
         : DEFAULT_SETTINGS.autoApproveScore,
+      runTimeoutMinutes: numberSetting(
+        raw.runTimeoutMinutes,
+        DEFAULT_SETTINGS.runTimeoutMinutes,
+        SETTINGS_BOUNDS.runTimeoutMinutes,
+      ),
+      retryLimit: numberSetting(
+        raw.retryLimit,
+        DEFAULT_SETTINGS.retryLimit,
+        SETTINGS_BOUNDS.retryLimit,
+      ),
+      retryBackoffSeconds: numberSetting(
+        raw.retryBackoffSeconds,
+        DEFAULT_SETTINGS.retryBackoffSeconds,
+        SETTINGS_BOUNDS.retryBackoffSeconds,
+      ),
     };
+  }
+
+  /**
+   * The pause flag lives in the settings table and not in the runner's memory:
+   * the queue is rebuilt from the database after a restart, and an operator who
+   * paused the queue before a deploy expects it to still be paused afterwards.
+   */
+  getQueuePaused(): boolean {
+    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get('queuePaused') as
+      | { value: string }
+      | undefined;
+    return row?.value === 'true';
+  }
+
+  setQueuePaused(paused: boolean): boolean {
+    this.db
+      .prepare(
+        'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      )
+      .run('queuePaused', paused ? 'true' : 'false');
+    return paused;
   }
 
   saveSettings(patch: Partial<Settings>): Settings {
@@ -314,8 +430,28 @@ export class Store {
     );
     for (const [key, value] of Object.entries(patch)) {
       if (value === undefined) continue;
-      stmt.run(key, String(value));
+      // Policy numbers are clamped on the way in: one bad request must not be
+      // able to disable the timeout or create an endless retry loop.
+      const bounds = SETTINGS_BOUNDS[key as PolicyKey];
+      const stored = bounds && typeof value === 'number' ? clamp(value, bounds.min, bounds.max) : value;
+      stmt.run(key, String(stored));
     }
     return this.getSettings();
   }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function numberSetting(
+  raw: string | undefined,
+  fallback: number,
+  bounds: { min: number; max: number },
+): number {
+  if (raw === undefined) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return clamp(parsed, bounds.min, bounds.max);
 }

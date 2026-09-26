@@ -81,6 +81,15 @@ function setupInterruptedRun(
     startedAt,
     finishedAt: null,
     logPath,
+    attempt: 1,
+    maxAttempts: 1,
+    retryOf: null,
+    notBefore: null,
+    timeoutMs: 0,
+    scopes: [],
+    scope: null,
+    note: null,
+    scopeIssues: null,
   };
   store.createRun(run);
   store.setSuggestionRun(suggestion.id, run.id);
@@ -175,6 +184,15 @@ describe('Runner.reconcileNow (Dashboard-Aufräumaktion)', () => {
       startedAt: Date.now() + 1_000_000_000,
       finishedAt: null,
       logPath,
+      attempt: 1,
+      maxAttempts: 1,
+      retryOf: null,
+      notBefore: null,
+      timeoutMs: 0,
+      scopes: [],
+      scope: null,
+      note: null,
+      scopeIssues: null,
     });
     return { store, runner, id, suggestionId: suggestion.id };
   }

@@ -3,12 +3,13 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
-import type { BusEvent, Suggestion, SuggestionStatus, SuggestionView } from '../src/shared/types';
+import type { BusEvent, RunRecord, Suggestion, SuggestionStatus, SuggestionView } from '../src/shared/types';
 import { classify, decorate, findCanonical, scoreSuggestion, sortSuggestions, type SortMode } from '../src/shared/sorting';
 import { ContentStore } from './content';
 import { Store } from './db';
 import * as discord from './discord';
 import { findOpencodeBinary, Runner } from './runner';
+import { scopeForSuggestion, scopeManifest } from './scopes';
 import { normalizeTasks, splitIntoTasks } from './split';
 
 export interface AppOptions {
@@ -55,6 +56,7 @@ export function createApp(options: AppOptions): FastifyInstance {
             if (view) emit({ type: 'suggestion:updated', suggestion: view });
           },
           onEvent: (runId, event) => emit({ type: 'run:log', runId, event }),
+          onQueueState: (state) => emit({ type: 'queue:state', state }),
           onFinished: (run) => {
             emit({ type: 'run:finished', run });
             const suggestion = store.getSuggestion(run.suggestionId);
@@ -296,6 +298,78 @@ export function createApp(options: AppOptions): FastifyInstance {
     return { fixed };
   });
 
+  // Queue control: what the operator needs to steer the runner, and what the
+  // dashboard needs to draw the panel. Works with a disabled runner too, so the
+  // page has one shape to render.
+  app.get('/api/runner', async () => {
+    if (!runner) {
+      const settings = store.getSettings();
+      return {
+        runnerEnabled: false,
+        paused: false,
+        activeRun: null,
+        queue: [] as RunRecord[],
+        policy: {
+          timeoutMinutes: settings.runTimeoutMinutes,
+          retryLimit: settings.retryLimit,
+          retryBackoffSeconds: settings.retryBackoffSeconds,
+        },
+      };
+    }
+    return { runnerEnabled: true, ...runner.queueState() };
+  });
+
+  app.post('/api/runner/pause', async (req, reply) => {
+    if (!runner) return reply.code(503).send({ error: 'Runner ist deaktiviert' });
+    const body = (req.body ?? {}) as { paused?: unknown };
+    if (typeof body.paused !== 'boolean') {
+      return reply.code(400).send({ error: 'paused muss true oder false sein' });
+    }
+    const paused = runner.setPaused(body.paused);
+    return { ...runner.queueState(), paused };
+  });
+
+  // The scope layout the runner depends on. Read straight from the manifest, so
+  // the dashboard can never disagree with `scopes.mjs check`.
+  app.get('/api/scopes', async () => scopeManifest());
+
+  // Which scope(s) a suggestion maps to, before anything is started.
+  app.get('/api/suggestions/:id/scope', async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    const suggestion = store.getSuggestion(id);
+    if (!suggestion) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
+    const all = store.listSuggestions();
+    const canonical = suggestion.canonicalId ?? suggestion.id;
+    const cluster = all.filter((s) => (s.canonicalId ?? s.id) === canonical);
+    return { suggestion: viewOf(id)!, scope: scopeForSuggestion(suggestion, cluster) };
+  });
+
+  // What a run actually touched compared to the scope it declared.
+  app.get('/api/runs/:id/scope', async (req, reply) => {
+    if (!runner) return reply.code(503).send({ error: 'Runner ist deaktiviert' });
+    const id = (req.params as { id: string }).id;
+    const audit = runner.auditScopeOf(id);
+    if (!audit) return reply.code(404).send({ error: 'Run nicht gefunden' });
+    return audit;
+  });
+
+  // Manual retry. The automatic one follows the policy in the settings; this is
+  // for the case where an operator looks at a failed run and disagrees.
+  app.post('/api/runs/:id/retry', async (req, reply) => {
+    if (!runner) return reply.code(503).send({ error: 'Runner ist deaktiviert' });
+    const id = (req.params as { id: string }).id;
+    const body = (req.body ?? {}) as { force?: unknown };
+    const result = runner.retry(id, { force: body.force === true });
+    if (!result.ok) {
+      const status = /nicht gefunden/.test(result.error ?? '') ? 404 : 409;
+      return reply.code(status).send({ error: result.error });
+    }
+    const run = result.run!;
+    const view = viewOf(run.suggestionId);
+    if (view) emit({ type: 'suggestion:updated', suggestion: view });
+    return { ok: true, run };
+  });
+
   app.get('/api/settings', async () => {
     const settings = store.getSettings();
     return {
@@ -314,6 +388,15 @@ export function createApp(options: AppOptions): FastifyInstance {
     if (typeof body.extraInstructions === 'string') patch.extraInstructions = body.extraInstructions;
     if (typeof body.autoApprove === 'boolean') patch.autoApprove = body.autoApprove;
     if (typeof body.autoApproveScore === 'number') patch.autoApproveScore = body.autoApproveScore;
+    // Runner policy. The store clamps these to its bounds, so a typo cannot
+    // disable the timeout or ask for a thousand retries.
+    for (const key of ['runTimeoutMinutes', 'retryLimit', 'retryBackoffSeconds'] as const) {
+      const value = body[key];
+      if (typeof value === 'number' && Number.isFinite(value)) patch[key] = value;
+      else if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
+        patch[key] = Number(value);
+      }
+    }
     const settings = store.saveSettings(patch);
     return {
       ...settings,
@@ -374,6 +457,12 @@ export function createApp(options: AppOptions): FastifyInstance {
         .send('Dev-Modus: Spieldashboard unter http://localhost:5173 (Vite). API läuft hier.'),
     );
   }
+
+  app.addHook('onClose', async () => {
+    // Only the timers: a run that is still going must survive the server, that
+    // is what the PID registry and the adoption in `recover()` are for.
+    runner?.dispose();
+  });
 
   app.setErrorHandler((error: Error & { statusCode?: number }, _req, reply) => {
     reply.code(error.statusCode ?? 500).send({ error: error.message });

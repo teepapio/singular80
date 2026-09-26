@@ -48,12 +48,19 @@
         <div class="panel-header">
           <h2>OpenCode Runs</h2>
           <div class="panel-header-actions">
+            <button id="toggle-pause" class="ghost small" title="Warteschlange anhalten bzw. fortsetzen">⏸</button>
             <button id="cleanup-runs" class="ghost small" title="Runs aufräumen, deren Prozess nicht mehr läuft">🧹</button>
             <button id="refresh-runs" class="ghost small" title="Aktualisieren">⟳</button>
           </div>
         </div>
+        <div id="queue-state" class="queue-state"></div>
         <div id="active-run" class="active-run"></div>
         <div id="run-history" class="run-history"></div>
+        <details id="scope-panel" class="scope-panel">
+          <summary>Scopes &amp; Agenten</summary>
+          <p id="scope-headline" class="run-sub"></p>
+          <div id="scope-list" class="scope-list"></div>
+        </details>
       </aside>
     </main>
 
@@ -75,6 +82,22 @@
           Auto-Genehmigung ab Score
           <input id="setting-autoscore" type="number" min="0" max="200" step="1" class="number" />
         </label>
+        <h3>Runner</h3>
+        <label class="row">
+          Zeitlimit je Run (Minuten, 0 = aus)
+          <input id="setting-timeout" type="number" min="0" max="1440" step="1" class="number" />
+        </label>
+        <label class="row">
+          Wiederholungen bei Fehlschlag (0 = keine)
+          <input id="setting-retries" type="number" min="0" max="5" step="1" class="number" />
+        </label>
+        <label class="row">
+          Wartezeit vor der ersten Wiederholung (Sekunden)
+          <input id="setting-backoff" type="number" min="0" max="3600" step="5" class="number" />
+        </label>
+        <small class="run-sub">Nach Ablauf des Zeitlimits wird der Prozess beendet und der Run als fehlgeschlagen
+          vermerkt. Eine Wiederholung ist ein eigener Run in der Historie — es entsteht dadurch kein zweiter
+          Commit für denselben Vorschlag.</small>
         <div class="settings-actions">
           <button type="button" id="test-webhook" class="ghost">Testnachricht senden</button>
           <button type="button" id="save-settings" class="primary">Speichern</button>

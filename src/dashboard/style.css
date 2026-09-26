@@ -644,6 +644,109 @@ textarea {
   font-weight: 700;
 }
 
+/* Queue state: pause chip plus the policy actually in force. */
+.queue-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.queue-state .chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.queue-state .chip.active {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.queue-state .chip.paused {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+
+.queue-state .chip.muted {
+  color: var(--muted);
+}
+
+.queue-state .policy {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* Scope layout, collapsed by default — it is reference, not news. */
+.scope-panel {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: var(--panel-2);
+  font-size: 12px;
+}
+
+.scope-panel > summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.scope-panel > summary::marker {
+  color: var(--muted);
+}
+
+.scope-list {
+  max-height: 280px;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+
+.scope-group + .scope-group {
+  margin-top: 10px;
+}
+
+.scope-agent {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.scope-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.scope-row.current {
+  background: rgba(56, 189, 248, 0.14);
+  outline: 1px solid rgba(56, 189, 248, 0.4);
+}
+
+.scope-id {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  min-width: 130px;
+  color: #7dd3fc;
+}
+
+.scope-label {
+  flex: 1;
+  color: var(--text);
+}
+
+.scope-meta {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .empty {
   text-align: center;
   color: var(--muted);

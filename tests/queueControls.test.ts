@@ -1,0 +1,215 @@
+import { describe, expect, it } from 'vitest';
+import {
+  attemptLabel,
+  describePolicy,
+  describeQueue,
+  formatCountdown,
+  groupScopes,
+  manifestHeadline,
+  outcomeBadge,
+  scopeLabel,
+  scopeWarning,
+} from '../src/dashboard/queueControls';
+import type { QueueState, RunRecord, RunnerPolicy, ScopeAudit, ScopeManifest } from '../src/shared/types';
+
+function run(overrides: Partial<RunRecord> = {}): RunRecord {
+  return {
+    id: 'run_1',
+    suggestionId: 7,
+    status: 'failed',
+    sessionId: null,
+    prompt: '',
+    exitCode: 1,
+    cost: null,
+    tokensInput: null,
+    tokensOutput: null,
+    commitHash: null,
+    resultSummary: '',
+    createdAt: 0,
+    startedAt: 0,
+    finishedAt: 0,
+    logPath: '/tmp/x.jsonl',
+    attempt: 1,
+    maxAttempts: 1,
+    retryOf: null,
+    notBefore: null,
+    timeoutMs: 0,
+    scopes: [],
+    scope: null,
+    note: 'exit 1',
+    scopeIssues: null,
+    ...overrides,
+  };
+}
+
+const policy: RunnerPolicy = { timeoutMinutes: 45, retryLimit: 1, retryBackoffSeconds: 30 };
+
+function queue(overrides: Partial<QueueState> = {}): QueueState {
+  return { paused: false, policy, activeRun: null, queue: [], ...overrides };
+}
+
+describe('formatCountdown', () => {
+  it('bleibt unter einer Minute in Sekunden', () => {
+    expect(formatCountdown(25_000)).toBe('25 s');
+  });
+
+  it('wechselt zu Minuten', () => {
+    expect(formatCountdown(125_000)).toBe('2 min 5 s');
+    expect(formatCountdown(120_000)).toBe('2 min');
+  });
+
+  it('behandelt Stunden', () => {
+    expect(formatCountdown(3_720_000)).toBe('1 h 2 min');
+  });
+});
+
+describe('describePolicy', () => {
+  it('nennt Zeitlimit, Wiederholungen und Wartezeit', () => {
+    expect(describePolicy(policy)).toBe('Zeitlimit 45 min · 1× Wiederholung · 30 s Wartezeit');
+  });
+
+  it('sagt es, wenn etwas aus ist', () => {
+    expect(describePolicy({ timeoutMinutes: 0, retryLimit: 0, retryBackoffSeconds: 30 })).toBe(
+      'kein Zeitlimit · keine Wiederholung',
+    );
+  });
+});
+
+describe('describeQueue', () => {
+  it('meldet Pause und Warteschlange', () => {
+    const summary = describeQueue(queue({ paused: true, queue: [run(), run()] }), 0);
+    expect(summary.paused).toBe(true);
+    expect(summary.label).toContain('pausiert');
+    expect(summary.waiting).toBe(2);
+  });
+
+  it('nennt den Startzeitpunkt eines Backoff', () => {
+    const summary = describeQueue(queue({ queue: [run({ notBefore: 130_000 })] }), 100_000);
+    expect(summary.startsIn).toBe('nächster Start in 30 s');
+  });
+
+  it('schweigt über den Backoff, wenn keiner wartet', () => {
+    expect(describeQueue(queue({ queue: [run({ notBefore: 10 })] }), 100).startsIn).toBeNull();
+  });
+});
+
+describe('attemptLabel', () => {
+  it('zeigt den Versuch nur ab dem zweiten', () => {
+    expect(attemptLabel(run())).toBeNull();
+    expect(attemptLabel(run({ attempt: 2, maxAttempts: 3 }))).toBe('Versuch 2/3');
+  });
+});
+
+describe('outcomeBadge', () => {
+  it('macht eine Zeitüberschreitung zum Fehler, auch wenn der Agent noch etwas sagte', () => {
+    const badge = outcomeBadge(
+      run({ status: 'failed', note: 'Zeitüberschreitung nach 45 min — Prozess beendet', timeoutMs: 2_700_000 }),
+    );
+    expect(badge?.icon).toBe('⏱');
+    expect(badge?.label).toBe('Zeitüberschreitung');
+    expect(badge?.kind).toBe('error');
+    expect(badge?.title).toContain('45 min');
+  });
+
+  it('zeigt Erfolg und Abbruch', () => {
+    expect(outcomeBadge(run({ status: 'succeeded', note: 'ok' }))?.kind).toBe('ok');
+    expect(outcomeBadge(run({ status: 'cancelled' }))?.icon).toBe('⏹');
+  });
+
+  it('schweigt über einen laufenden Run', () => {
+    expect(outcomeBadge(run({ status: 'running', note: null }))).toBeNull();
+    expect(outcomeBadge(run({ status: 'queued', note: null }))).toBeNull();
+  });
+});
+
+describe('scopeWarning', () => {
+  const audit = (overrides: Partial<ScopeAudit>): ScopeAudit => ({
+    runId: 'run_1',
+    scopes: ['tetris'],
+    agent: 'game',
+    ok: true,
+    violations: [],
+    shared: [],
+    unclaimed: [],
+    notes: [],
+    checked: 0,
+    ...overrides,
+  });
+
+  it('nennt zuerst einen Verstoß', () => {
+    const text = scopeWarning(
+      audit({ ok: false, violations: ['godot/src/core/logic/asset_registry.gd → gehört „meshes“', 'zweite.md'] }),
+    );
+    expect(text).toContain('Außerhalb des Scopes');
+    expect(text).toContain('asset_registry.gd');
+    expect(text).toContain('(+1)');
+  });
+
+  it('meldet geteilte Dateien und Hinweise', () => {
+    expect(scopeWarning(audit({ shared: ['godot/src/core/logic/game_registry.gd'] }))).toContain('Geteilte Datei');
+    expect(scopeWarning(audit({ notes: ['`git add` ohne Dateiliste'] }))).toContain('git add');
+    expect(scopeWarning(audit({ unclaimed: ['notizen.md'] }))).toContain('außerhalb jedes Scopes');
+  });
+
+  it('schweigt bei einem sauberen Run', () => {
+    expect(scopeWarning(audit({ checked: 4 }))).toBeNull();
+    expect(scopeWarning(null)).toBeNull();
+  });
+});
+
+describe('groupScopes', () => {
+  it('gruppiert nach Agent und sortiert die Gruppen', () => {
+    const scope = (id: string, agent: string) => ({
+      id,
+      agent,
+      label: id,
+      own: [],
+      shared: [],
+      suites: [],
+      screens: [],
+      aliasOf: null,
+    });
+    const groups = groupScopes([scope('tetris', 'game'), scope('dashboard', 'dashboard'), scope('pang', 'game')]);
+    expect(groups.map((g) => g.agent)).toEqual(['dashboard', 'game']);
+    expect(groups[1].scopes.map((s) => s.id)).toEqual(['tetris', 'pang']);
+  });
+});
+
+describe('scopeLabel', () => {
+  const manifest = {
+    status: 'ok',
+    error: null,
+    sharedFiles: [],
+    problems: [],
+    scopes: [{ id: 'tetris', agent: 'game', label: 'Spiel tetris', own: [], shared: [], suites: [], screens: [], aliasOf: null }],
+  } as ScopeManifest;
+
+  it('nutzt das Label aus dem Manifest', () => {
+    expect(scopeLabel(run({ scopes: ['tetris'], scope: 'tetris' }), manifest)).toBe('Spiel tetris');
+  });
+
+  it('fällt auf die ID zurück und sagt es ohne Scope', () => {
+    expect(scopeLabel(run({ scopes: ['tetris'] }), null)).toBe('tetris');
+    expect(scopeLabel(run(), manifest)).toBe('kein Scope bekannt');
+  });
+});
+
+describe('manifestHeadline', () => {
+  it('meldet ein konsistentes Manifest', () => {
+    const manifest = {
+      status: 'ok',
+      error: null,
+      sharedFiles: [],
+      problems: [],
+      scopes: Array.from({ length: 4 }, (_, i) => ({ id: `s${i}`, agent: i === 0 ? 'game' : 'build' })),
+    } as unknown as ScopeManifest;
+    expect(manifestHeadline(manifest)).toBe('4 Scopes, davon 1 Spiel-Scopes · Manifest ist konsistent.');
+  });
+
+  it('meldet Probleme und einen fehlenden Zugriff', () => {
+    const broken = { status: 'ok', error: null, sharedFiles: [], problems: ['Suite X gehört zu keinem Scope'] } as unknown as ScopeManifest;
+    expect(manifestHeadline(broken)).toContain('1 Manifest-Problem(e)');
+    const missing = { status: 'unavailable', error: 'ENOENT', sharedFiles: [], problems: [], scopes: [] } as ScopeManifest;
+    expect(manifestHeadline(missing)).toContain('nicht lesbar');
+  });
+});
