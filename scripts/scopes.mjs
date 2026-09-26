@@ -23,7 +23,14 @@ import { execFileSync } from 'node:child_process';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Every game agent touches these. Listing them keeps the guard honest. */
+/**
+ * Every game agent touches these. Listing them keeps the guard honest.
+ *
+ * The central test files are here rather than in a game's `own`: a game agent
+ * does write rules tests, and hiding that would make the manifest wrong rather
+ * than make the collision go away. It gets its own `godot/tests/test_<id>.gd`
+ * instead, which nobody else claims.
+ */
 export const SHARED_FILES = [
   'godot/src/core/logic/asset_registry.gd',
   'godot/src/core/logic/game_registry.gd',
@@ -33,6 +40,7 @@ export const SHARED_FILES = [
   'godot/tests/run_tests.gd',
   'godot/tests/test_logic.gd',
   'godot/tests/test_screens.gd',
+  'godot/tests/test_improvements.gd',
   'package.json',
   'opencode.json',
   'AGENTS.md',
@@ -202,9 +210,13 @@ const staticScopes = {
   },
   tests: {
     agent: 'build',
-    label: 'Testinfrastruktur',
-    own: ['godot/tests/**', 'vitest.config.ts', 'tsconfig.json', 'tests/**'],
-    shared: ['package.json', 'godot/tests/run_tests.gd'],
+    label: 'Test-Harness',
+    // Only the harness itself. `godot/tests/test_<spiel>.gd` belongs to the
+    // game of that name, so a game agent can add regression tests without two
+    // games ever appending to the same file.
+    own: ['godot/tests/test_kit.gd', 'vitest.config.ts', 'tsconfig.json', 'tests/**'],
+    shared: ['package.json', 'godot/tests/run_tests.gd', 'godot/tests/test_logic.gd',
+      'godot/tests/test_screens.gd', 'godot/tests/test_improvements.gd'],
   },
   core: {
     agent: 'build',
@@ -248,7 +260,13 @@ export function buildScopes() {
     const dir = dirs.get(base) ?? [...dirs.values()].find((d) => d === base.replace('-', ''))
       ?? [...dirs.values()].find((d) => d.startsWith(base.split('-')[0]));
     if (!dir) continue;
-    const own = [`godot/src/game/${dir}/**`, ...(GAME_LOGIC[base] ?? GAME_LOGIC[dir] ?? [])];
+    // A game agent also gets a private test file of its own. That is where new
+    // regression tests go, so two games never append to the same suite file.
+    const own = [
+      `godot/src/game/${dir}/**`,
+      `godot/tests/test_${base}.gd`,
+      ...(GAME_LOGIC[base] ?? GAME_LOGIC[dir] ?? []),
+    ];
     scopes.set(base, {
       agent: 'game',
       label: `Spiel ${base}`,
@@ -318,16 +336,18 @@ export function validate(scopes = buildScopes()) {
     if (!scope.own.length) problems.push(`Scope '${name}' hat keine own-Globs`);
     for (const glob of scope.own) {
       if (glob.endsWith('/**')) {
+        // A directory must exist — that is the typo check.
         const dir = glob.slice(0, -3);
         if (!existsSync(join(root, dir))) problems.push(`Scope '${name}': ${dir} existiert nicht`);
-      } else if (glob.includes('*')) {
-        // Datei-Glob: mindestens ein Treffer muss existieren.
-        const rx = globToRegExp(glob);
-        const base = join(root, 'godot/src/core/logic');
-        const hit = existsSync(base) && glob.startsWith('godot/src/core/logic/');
-        if (!hit) problems.push(`Scope '${name}': ${glob} trifft nichts`);
-      } else if (!existsSync(join(root, glob))) {
-        problems.push(`Scope '${name}': ${glob} existiert nicht`);
+        continue;
+      }
+      // A named file is a *permission*, not a requirement: a game agent is
+      // expected to create `godot/tests/test_<id>.gd` the first time it needs
+      // one. Only the containing directory is checked, so a typo in the path
+      // still shows up.
+      const parent = glob.split('/').slice(0, -1).join('/');
+      if (parent && !existsSync(join(root, parent))) {
+        problems.push(`Scope '${name}': ${parent} existiert nicht (für ${glob})`);
       }
     }
   }

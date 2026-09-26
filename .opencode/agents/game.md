@@ -82,6 +82,17 @@ npm run typecheck                         # nur wenn du TypeScript anfasst
 
 Ein Lauf ohne `--scope` ist das Merge-Gate und gehört nicht in deinen Alltag.
 
+## Tests schreiben
+
+Neue Regressionstests gehören in **deine eigene** Datei
+`godot/tests/test_<deine-id>.gd`. `test_logic.gd`, `test_screens.gd` und
+`test_improvements.gd` sind geteilt — dort hineinzuschreiben ist genau die
+Kollision, die das Manifest verhindern soll.
+
+Trage deine Suite in `SCOPE_SUITES` in `scripts/scopes.mjs` ein. Fehlt der
+Eintrag, meldet `scopes.mjs list` das, und `npm run test:game -- --scope
+<deine-id>` würde deine Tests stillschweigend überspringen.
+
 ## Vor dem Commit
 
 `git add -A` ist hier verboten. Im Baum können gleichzeitig andere Agenten
