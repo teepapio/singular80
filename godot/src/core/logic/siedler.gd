@@ -26,7 +26,9 @@ extends RefCounted
 ## Deliberate improvements over the 1993 original, whose steep learning curve
 ## and invisible state were its most common criticisms: every building reports
 ## *why* it is idle, a good nobody consumes is flagged instead of silently
-## congesting, and roads report their throughput.
+## congesting, roads report their throughput, and the *Ratgeber* turns all of it
+## into one ranked answer — which building is starved of which good, and what
+## the player should do about it.
 
 # --- goods ------------------------------------------------------------------
 
@@ -297,6 +299,13 @@ var seed_value: int = 0
 
 var _routes: Dictionary = {}
 var _routes_dirty: bool = true
+## Handelswege: Zähler je Straße *und* Ware, Index `edge * GOODS.size() + Ware`.
+## Ein flaches Feld statt einer Karte voller Finder — und gefüllt wird nur, wenn
+## ein Träger wirklich etwas aufnimmt, also ein Schreibzugriff pro Umschlag
+## und keiner pro Frame.
+var _traffic := PackedInt32Array()
+## Laufende Summe der Zähler, damit `measured_carriers()` O(1) bleibt.
+var _traffic_total: int = 0
 var _rng := RandomNumberGenerator.new()
 
 
@@ -544,6 +553,7 @@ func setup(seed_value_: int = 0, size: int = 46) -> void:
 	notice_time = 0.0
 	_routes.clear()
 	_routes_dirty = true
+	_reset_traffic()
 
 	var center := _nearest_grass(cell_index(map_size / 2, map_size / 2))
 	place_castle(center, "player")
@@ -888,6 +898,9 @@ static func carrier_count_for(length: float, priority: int) -> int:
 ## carrier; everything the player actually walks on is a road, and only a road
 ## scales its carrier count with length and priority.
 const LINK_LENGTH := 1.7
+## How close a flag has to be to a road to split it. Shared by the finger and
+## by the optimiser, so both always cut the road they were looking at.
+const FLAG_NEAR := 3.2
 
 
 ## Builds a road between two cells. The route is a breadth-first search, so it
@@ -1035,6 +1048,9 @@ func _add_edge(a: int, b: int, kind: String) -> Dictionary:
 	edges.append(edge)
 	nodes[a]["edges"].append(edge["id"])
 	nodes[b]["edges"].append(edge["id"])
+	# Neue Kante, neue Ids: die Verkehrsmessung beginnt von vorn, sonst hinge
+	# eine Zahl an einer Straße, die es nicht mehr gibt.
+	_reset_traffic()
 	_routes_dirty = true
 	return edge
 
@@ -1062,6 +1078,8 @@ func _link_if_needed(a: int, b: int) -> Dictionary:
 
 ## Adds one more flag on an existing road, raising that segment's throughput.
 func add_flag(cell: int) -> bool:
+	if cell < 0 or cell >= cells.size():
+		return false
 	var map_cell: Dictionary = cells[cell]
 	if int(map_cell["building"]) >= 0 or str(map_cell["res"]) == "water":
 		_notify("Hier kann keine Flagge stehen")
@@ -1069,9 +1087,22 @@ func add_flag(cell: int) -> bool:
 	if int(map_cell["flag"]) >= 0:
 		_notify("Hier steht schon eine Flagge")
 		return false
+	var edge := _nearest_road(cell, FLAG_NEAR)
+	if edge.is_empty():
+		_notify("Keine Straße in der Nähe zum Unterteilen")
+		return false
+	_split_road(edge, _ensure_flag(cell))
+	return true
+
+
+## Die Straße, die einem Feld am nächsten liegt, `{}` wenn keine in `radius`.
+## Der Optimierer sucht damit genauso wie der Finger des Spielers — beide
+## benutzen dieselbe Reichweite, sonst teilte der Optimierer eine andere Strecke
+## als die, die er gerade ausgewertet hat.
+func _nearest_road(cell: int, radius: float) -> Dictionary:
 	var world := cell_to_world(cell)
-	var best_edge := {}
-	var best_distance := 3.2
+	var best := {}
+	var best_distance := radius
 	for edge in edges:
 		if str(edge["kind"]) != "road":
 			continue
@@ -1082,13 +1113,15 @@ func add_flag(cell: int) -> bool:
 			).length()
 			if d < best_distance:
 				best_distance = d
-				best_edge = edge
-	if best_edge.is_empty():
-		_notify("Keine Straße in der Nähe zum Unterteilen")
-		return false
-	_split_edge(best_edge, _ensure_flag(cell))
+				best = edge
+	return best
+
+
+## Teilt eine Straße an einer Fahne in der Mitte. Getrennt von `add_flag`, weil
+## der Optimierer das Feld selbst wählt und keine Fehlermeldung braucht.
+func _split_road(edge: Dictionary, mid_node: int) -> void:
+	_split_edge(edge, mid_node)
 	_routes_dirty = true
-	return true
 
 
 ## Replaces one road with two, so the carriers are shared over a shorter walk.
@@ -1103,6 +1136,7 @@ func _split_edge(edge: Dictionary, mid_node: int) -> void:
 	edges.append(_renumbered_edge(a, mid_node, priority))
 	var second := _renumbered_edge(mid_node, b, priority)
 	edges.append(second)
+	_reset_traffic()
 
 
 ## Builds a road edge and returns it already stored (helper for `_split_edge`).
@@ -1119,6 +1153,14 @@ func set_road_priority(edge_id: int, priority: int) -> void:
 	var edge: Dictionary = edges[edge_id]
 	edge["priority"] = clampi(priority, 0, 8)
 	_rebalance(edge)
+
+
+## Priorität einer Straße, `-1` wenn es keine gibt. Der Bildschirm braucht sie
+## für die Plus- und Minus-Knöpfe der Handelsweg-Karte.
+func edge_priority(edge_id: int) -> int:
+	if edge_id < 0 or edge_id >= edges.size():
+		return -1
+	return int(edges[edge_id]["priority"])
 
 
 func _rebalance(edge: Dictionary) -> void:
@@ -1177,6 +1219,7 @@ func _remove_edge(edge_id: int) -> void:
 	edges.remove_at(edge_id)
 	for i in edges.size():
 		edges[i]["id"] = i
+	_reset_traffic()
 
 
 # --- routing ----------------------------------------------------------------
@@ -1260,6 +1303,513 @@ func stuck_goods() -> int:
 	for node in nodes:
 		count += (node["queue"] as Array).size()
 	return count
+
+
+# --- Handelswege optimieren --------------------------------------------------
+#
+# Der Vorschlag „Handelsweg optimieren" ist im Kern eine Frage, die das Spiel
+# bisher nicht beantworten konnte: *welche* Straße trägt *welche* Ware. Ohne
+# diese Zahl ist jede Optimierung blind — der Spieler sieht nur, dass irgendwo
+# Ware liegt, und muss raten, woher sie kam. Erfundene Straßenprioritäten und
+# erfundene Umwege wären schlimmer als gar keine, also wird gemessen.
+#
+# `_tick_carriers` zählt jeden Umschlag je Straße und Ware. Daraus entstehen
+# zwei Dinge: ein Bericht (`trade_report`) und ein Griff
+# (`optimize_trade_routes`), der genau die zwei Stellschrauben nachjustiert,
+# die es in Siedler 1 gab — die Strecke teilen und die Priorität verschieben.
+#
+# Der Griff ist bewusst konservativ, weil eine Optimierung dem Spieler nie
+# etwas nehmen darf:
+#  - Prioritäten werden nur *erhöht*, nie gesenkt. Träger gehören zur Straße,
+#    auf der sie laufen, und werden nicht umverteilt; eine gesenkte Priorität
+#    nähme der Siedlung also nur Träger weg, ohne etwas zu gewinnen.
+#  - Eine Extra-Fahne nur dort, wo *gemessen* Ware wartet. `build_road` setzt
+#    nach dem Original alle fünf Felder eine; ohne den Stau als Bedingung würde
+#    der Optimierer jede Straße bis auf zwei Felder zerteilen. Das wäre mehr
+#    Durchsatz und ein Wald aus Fahnen, und beides ist keine Optimierung.
+#  - Höchstens `MAX_SPLITS` Fahnen pro Durchgang. Der Griff ist ein Schritt,
+#    kein Wald aus Fahnen — wer mehr will, tippt erneut und sieht den Fortschritt.
+#  - Der Griff ist wiederholbar und idempotent: zweimal tippen ändert nichts.
+
+## Ab hier lohnt eine Extra-Fahne. `build_road` setzt nach dem Original alle
+## `FLAG_SPACING` Felder eine, und darunter zu teilen hieße, die Karte mit
+## Fahnen zuzupflastern, ohne die Strecke kürzer zu machen. Der Optimierer geht
+## darunter *nur* dort, wo gemessen Ware wartet.
+const SPLIT_LENGTH := FLAG_SPACING
+## Fahnen je Optimierer-Durchgang. Der Griff soll ein Schritt sein, kein Wald.
+const MAX_SPLITS := 4
+## Erst ab so vielen gemessenen Umschlägen wird eine Priorität umgehängt. Davor
+## wäre das Raten auf ein einzelnes Träger-Los.
+const MEASURE_MIN := 12
+## Ab so vielen wartenden Waren gilt eine Strecke als verstopft. Zwei sind
+## Alltag im Spielbetrieb, vier sind ein Stau.
+const ROUTE_JAM := 4
+## Wie weit die gesuchte Extra-Fahne höchstens von der Streckenmitte entfernt
+## sein darf: ein Anteil der Länge plus ein Feld Toleranz. Sie soll die Mitte
+## treffen, nicht das Ende.
+const SPLIT_MIDDLE := 0.2
+
+
+## Wie wertvoll eine Ware für *diese* Siedlung gerade ist, 1 bis 5.
+##
+## 5 = ein fertiges Gebäude hungert danach, 4 = Nahrung (Siedler hungern
+## unabhängig vom Bauplan), 3 = irgendein Abnehmer, 2 = nur die Vorratskammer,
+## 1 = Füllgut, 0 = unbekannt.
+##
+## Das ist bewusst *nicht* die Ware, die eine Zahl am/globalen Katalog nennt,
+## sondern die, für die gerade ein Gebäude wirklich wartet. Genau dieser
+## Unterschied macht den Vorschlag glaubwürdig: Der Optimierer stuft eine
+## Straße danach ein, ob die Siedlung die Ware braucht, nicht danach, ob sie
+## sie erzeugen kann.
+func trade_value(good: String) -> int:
+	if good == "" or not GOODS.has(good):
+		return 0
+	# Nahrung zuerst: ein Minenhaus ohne Essen ist wertlos, egal was es baut.
+	if is_food_good(good):
+		return 4
+	var hungry := 0
+	var wants := 0
+	for building in buildings:
+		if str(building["owner"]) != "player" or str(building["state"]) != "done":
+			continue
+		var need := int(spec_of(str(building["kind"]))["inputs"].get(good, 0))
+		if need <= 0:
+			continue
+		wants += 1
+		if int((building["input"] as Dictionary).get(good, 0)) < need:
+			hungry += 1
+	if hungry > 0:
+		return 5
+	if wants > 0:
+		return 3
+	if good in CASTLE_SINKS:
+		return 2
+	return 1
+
+
+## Die Priorität, die eine Straße verdient, die `good` transportiert: sie folgt
+## dem Wert der Ware. `2` reicht für Füllgut, `6` für eine, auf die ein fertiges
+## Gebäude wartet. Dieselbe Leiter für jeden, damit der Bericht und der Griff
+## nie um eine Stufe streiten.
+func priority_for(good: String) -> int:
+	match trade_value(good):
+		5: return 6
+		4: return 5
+		3: return 4
+		2: return 3
+	return 2
+
+
+## Ware, die an den beiden Endpunkten einer Strecke liegt und auf einen Träger
+## wartet. Beide Enden zählen: die Strecke ist voll, sobald an *einem* nichts
+## mehr abfließt.
+func _edge_waiting(edge: Dictionary) -> int:
+	var total := 0
+	for node_id in [int(edge["a"]), int(edge["b"])]:
+		if node_id >= 0 and node_id < nodes.size():
+			total += (nodes[node_id]["queue"] as Array).size()
+	return total
+
+
+## Staut sich auf dieser Strecke Ware? Das ist die *einzige* Bedingung, unter der
+## der Optimierer eine Extra-Fahne setzt — und sie ist eine Messung, keine
+## Vermutung: gezählt wird, was tatsächlich wartet.
+func _is_jammed(edge: Dictionary) -> bool:
+	return _edge_waiting(edge) >= ROUTE_JAM
+
+
+## Wie viele Träger eine Strecke dadurch gewinnt, dass man sie teilt. Ein
+## positiver Wert heißt: die Strecke ist länger als die eigene Fahnenweite und
+## hat zu wenige Träger; `0` heißt: teilen lohnt hier nichts, und der
+## Optimierer lässt die Finger davon.
+func split_gain(edge: Dictionary) -> int:
+	if str(edge["kind"]) != "road":
+		return 0
+	var length := float(edge["length"])
+	if length <= SPLIT_LENGTH:
+		return 0
+	var priority := int(edge["priority"])
+	var before := (edge["carriers"] as Array).size()
+	# Geteilte Strecken sind jede halb so lang, und genau daraus leitet
+	# `carrier_count_for` die Trägerzahl ab.
+	var after := 0
+	for i in 2:
+		after += carrier_count_for(length * 0.5, priority)
+	return after - before
+
+
+## Das Feld neben der Streckenmitte, in dem eine Extra-Fahne das meiste
+## brächte, `-1` wenn die Strecke zu kurz ist oder das Feld belegt ist.
+##
+## Der Mittelpunkt wird bewusst *nicht* auf das Feld genau in der Mitte gelegt:
+## Liegt dort ein Haus, geht die Fahne an die nächste Lücke, denn eine Fahne
+## mitten im Haus ist keine.
+func best_split_cell(edge: Dictionary) -> int:
+	if split_gain(edge) <= 0:
+		return -1
+	var a: Dictionary = nodes[int(edge["a"])]
+	var b: Dictionary = nodes[int(edge["b"])]
+	var mid := (Vector2(float(a["x"]), float(a["z"])) + Vector2(float(b["x"]), float(b["z"]))) * 0.5
+	var best := -1
+	var best_distance := 0.0
+	for i in nodes.size():
+		var node: Dictionary = nodes[i]
+		# Nur Flaggen sind Kandidaten: bei einem Gebäude wäre eine Fahne
+		# doppelt gemünzt, das Haus ist selbst ein Verkehrsknoten.
+		if not bool(node["flag"]):
+			continue
+		var d := Vector2(float(node["x"]), float(node["z"])).distance_to(mid)
+		if d > float(edge["length"]) * SPLIT_MIDDLE + 1.0:
+			continue
+		var cell := int(node["cell"])
+		# Steht auf dem Feld wirklich *diese* Fahne? Sonst wäre es ein Feld,
+		# auf dem schon eine andere steht, und die kann man nicht doppelt setzen.
+		if cell < 0 or cell >= cells.size() or int(cells[cell]["flag"]) != int(node["id"]):
+			continue
+		if best < 0 or d < best_distance:
+			best = cell
+			best_distance = d
+	# Gibt es in der Mitte keine Fahne, wird eine neue gesetzt — dafür muss das
+	# Feld frei sein. Die engste Lücke um die Mitte herum gewinnt, und ein
+	# völlig verbautes Kreuz zwingt zum weiteren Umkreis.
+	if best < 0:
+		var centre := world_to_cell(mid.x, mid.y)
+		if centre < 0:
+			return -1
+		best = _free_cell_near(centre, 1)
+		if best < 0:
+			best = _free_cell_near(centre, 2)
+	return best
+
+
+## Das nächste freie Feld für eine Fahne, in einem kleinen Fenster um
+## `near_cell` gesucht — nicht über die ganze Karte, denn das hier läuft für
+## jede Strecke des Berichts. Nur Gras ohne Gebäude: Wasser trägt keine Fahne,
+## und ein Haus steht dort schon. Das Feld muss *nicht* flach sein — Fahnen
+## brauchen keinen Planierer.
+func _free_cell_near(near_cell: int, radius: int = 1) -> int:
+	if near_cell < 0 or near_cell >= cells.size():
+		return -1
+	var cx: int = near_cell % map_size
+	var cy: int = near_cell / map_size
+	var origin := cell_to_world(near_cell)
+	var best := -1
+	var best_distance := 2.5
+	for dy in range(-radius, radius + 1):
+		for dx in range(-radius, radius + 1):
+			var x := cx + dx
+			var y := cy + dy
+			if not in_bounds(x, y):
+				continue
+			var index := cell_index(x, y)
+			if not _flag_free(index):
+				continue
+			var d := cell_to_world(index).distance_to(origin)
+			if d < best_distance:
+				best_distance = d
+				best = index
+	return best
+
+
+## Kann auf diesem Feld eine Fahne stehen? Ein Haus ist selbst ein Knoten, und
+## Wasser trägt keinen Träger.
+func _flag_free(cell: int) -> bool:
+	if cell < 0 or cell >= cells.size():
+		return false
+	var map_cell: Dictionary = cells[cell]
+	if int(map_cell["building"]) >= 0 or int(map_cell["flag"]) >= 0:
+		return false
+	return str(map_cell["res"]) != "water"
+
+
+## Eine Änderung am Straßennetz macht die Messung wertlos: die Kanten-Ids
+## verschieben sich, und alte Zahlen würden die falschen Straßen belohnen. Also
+## fängt das Zählen danach wieder bei null an — genau das ist der Moment, in
+## dem der Spieler zum ersten Mal optimiert.
+func _reset_traffic() -> void:
+	_traffic.clear()
+	_traffic_total = 0
+
+
+## Zählt einen Umschlag auf der Kante, damit der Bericht weiß, was wo
+## entlanggeht. Wird nur aufgerufen, wenn ein Träger *etwas* aufnimmt, kostet
+## es also eine Zahl und ein Feld pro gelieferter Ware — nicht pro Frame.
+func _count_carrier(edge_id: int, good: String) -> void:
+	if good == "" or edge_id < 0 or edge_id >= edges.size():
+		return
+	var index := GOODS.find(good)
+	if index < 0:
+		return
+	# Nur wachsen: eine geschrumpfte Tabelle gehört zu einem Netz, das es nicht
+	# mehr gibt, und wird durch `_reset_traffic` ohnehin geleert.
+	var want := edges.size() * GOODS.size()
+	if _traffic.size() < want:
+		var have := _traffic.size()
+		_traffic.resize(want)
+		for i in range(have, want):
+			_traffic[i] = 0
+	var slot := edge_id * GOODS.size() + index
+	if slot >= _traffic.size():
+		return
+	_traffic[slot] += 1
+	_traffic_total += 1
+
+
+## Zählt den Umschlag eines Trägers, der gerade etwas aufgenommen hat.
+func _note_traffic(edge: Dictionary, carrier: Dictionary) -> void:
+	_count_carrier(int(edge["id"]), str(carrier["load"]))
+
+
+## Warenumschläge seit der letzten Änderung am Straßennetz. Ohne diese Zahl ist
+## jede Empfehlung blind — deshalb ist sie auch Teil des Berichts.
+func measured_carriers() -> int:
+	return _traffic_total
+
+
+## Der genaue Verkehr einer Strecke je Ware, gemessen seit der letzten Änderung
+## am Straßennetz: `{"total": int, "counts": {Ware: Anzahl}, "best": Ware}`.
+## Leer heißt: hier ist nichts gefahren.
+##
+## Das ist die Messung hinter dem ganzen Vorschlag. Ohne sie wüsste niemand,
+## welche Straße welche Ware trägt — und eine Optimierung, die nicht weiß, was
+## sie optimiert, ist nur Raten mit einem netten Knopf.
+func edge_traffic(edge_id: int) -> Dictionary:
+	var counts: Dictionary = {}
+	var total := 0
+	if edge_id < 0 or edge_id >= edges.size():
+		return {"total": 0, "counts": counts, "best": ""}
+	var base := edge_id * GOODS.size()
+	for i in GOODS.size():
+		var slot := base + i
+		if slot >= _traffic.size():
+			break
+		var count := _traffic[slot]
+		if count <= 0:
+			continue
+		counts[GOODS[i]] = count
+		total += count
+	return {"total": total, "counts": counts, "best": hottest_name(counts)}
+
+
+## Die meistgefahrene Ware einer Strecke, `""` ohne Verkehr. Bei Gleichstand
+## gewinnt die wertvollere — trägt die Strecke beides, geht es um die
+## wichtigere, und das ist auch die, für die es Träger braucht.
+func hottest_name(counts: Dictionary) -> String:
+	var best := ""
+	var best_count := 0
+	for good in counts:
+		var count := int(counts[good])
+		if count > best_count or (count == best_count and trade_value(good) > trade_value(best)):
+			best_count = count
+			best = good
+	return best
+
+
+## Jede Strecke, auf der Ware unterwegs ist — der Bericht, den die Karte
+## „Handelswege" anzeigt und aus dem der Optimierer arbeitet.
+##
+## Auch die kurzen Anliegerstummel zwischen Haus und Fahne stehen drin. Sie
+## sind kein Handelsweg im eigentlichen Sinn, tragen aber die halbe Lieferung
+## einer jungen Siedlung; sie zu verschweigen hieße, dem Spieler die Zahl
+## vorenthalten, nach der er gerade fragt. Der Bericht nennt ihre Sorte, damit
+## die Karte sie als das kennzeichnet, was sie sind.
+##
+## Sortiert nach Verkehr, dann nach Länge: die volle Straße steht oben, weil
+## sie die ist, an der sich etwas ändern lässt. Jeder Eintrag trägt dieselben
+## Felder, damit der Bildschirm nie raten muss.
+func trade_report() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for edge in edges:
+		var traffic := edge_traffic(int(edge["id"]))
+		var top := str(traffic["best"])
+		if top == "":
+			continue
+		var counts: Dictionary = traffic["counts"]
+		var waiting := _edge_waiting(edge)
+		var length := float(edge["length"])
+		out.append({
+			"edge": int(edge["id"]),
+			"a": int(edge["a"]),
+			"b": int(edge["b"]),
+			"kind": str(edge["kind"]),
+			"length": length,
+			"carriers": (edge["carriers"] as Array).size(),
+			"top": top,
+			"top_count": int(counts.get(top, 0)),
+			"total": int(traffic["total"]),
+			"waiting": waiting,
+			"jammed": waiting >= ROUTE_JAM,
+			"priority": int(edge["priority"]),
+			"value": trade_value(top),
+			"gain": split_gain(edge),
+			"cell": best_split_cell(edge),
+			"throughput": edge_throughput(int(edge["id"])),
+		})
+	out.sort_custom(_busier_route)
+	return out
+
+
+## Sortierregel des Berichts: Verkehr zuerst, dann Länge. Der zweite Schlüssel
+## ist nicht Kosmetik — ohne ihn springt die Liste, sobald zwei Straßen
+## gleichauf liegen, und der Spieler verliert die Zeile, die er las.
+func _busier_route(a: Dictionary, b: Dictionary) -> bool:
+	if int(a["total"]) != int(b["total"]):
+		return int(a["total"]) > int(b["total"])
+	return float(a["length"]) > float(b["length"])
+
+
+## Was der Optimierer an dieser Strecke tun würde, als ein Satz für die Karte.
+## Reihenfolge ist die Dringlichkeit: erst der Stau, dann die zu niedrige
+## Priorität, dann der Lauf ohne Handlungsbedarf.
+##
+## Wichtig: der Satz nennt auch das *Teilen* nur, wenn Ware wartet. Er ist ein
+## Rat, kein Befehl — eine Fahne ohne Stau ist Kram, und das soll der Spieler
+## hier genauso sehen wie der Optimierer.
+func route_advice(entry: Dictionary) -> String:
+	var good := str(entry["top"])
+	var waiting := int(entry["waiting"])
+	# Ein Stummel zwischen Haus und Fahne trägt per Konstruktion genau einen
+	# Träger. Ihm eine Priorität zu raten wäre eine Lüge, also sagt der Bericht
+	# das auch so — und der Optimierer lässt ihn in Ruhe.
+	if str(entry["kind"]) == "link":
+		return "Anliegerstrecke zwischen Haus und Fahne — ein Träger, nicht teilbar."
+	if bool(entry["jammed"]):
+		var hint := "Stau: %d Waren warten an dieser Strecke." % waiting
+		if int(entry["cell"]) >= 0:
+			return "%s Eine Extra-Fahne bringt %d Träger." % [hint, int(entry["gain"])]
+		return hint
+	var want := priority_for(good)
+	if want > int(entry["priority"]):
+		return "„%s“ kommt hier an, aber Priorität %d ist zu niedrig." % [
+			good_name(good), int(entry["priority"]),
+		]
+	return "Läuft: %.0f Felder, %d Träger, Priorität %d." % [
+		float(entry["length"]), int(entry["carriers"]), int(entry["priority"]),
+	]
+
+
+## Der eine Handgriff des Vorschlags „Handelsweg optimieren".
+##
+## Er justiert die zwei Stellschrauben des Originals und sonst nichts:
+##  1. eine Extra-Fahne dort, wo gemessen Ware wartet,
+##  2. die Priorität auf die Ware heben, die diese Siedlung wirklich braucht.
+##
+## Beides ist monoton und wiederholbar: Prioritäten werden nur erhöht, es werden
+## höchstens `MAX_SPLITS` Fahnen gesetzt, und ein zweiter Durchgang über dieselbe
+## Lage ändert nichts mehr. Das ist der ganze Sinn der Sache — ein Griff, der
+## schadet, wäre kein Griff, sondern ein zweites Spiel.
+##
+## Der Bericht nennt jeden Handgriff einzeln, damit der Spieler nachlesen kann,
+## was die Maschine an seiner Siedlung geändert hat.
+func optimize_trade_routes() -> Array[String]:
+	var done: Array[String] = []
+	var flags := 0
+	var raised := 0
+
+	# 1. Strecken teilen, aber nur dort, wo Ware wartet. Der Stau ist die
+	#    Bedingung, nicht die Länge: `build_road` setzt nach dem Original alle
+	#    fünf Felder eine Fahne, und ohne den Stau als Maßstab würde der
+	#    Optimierer jede Straße bis auf zwei Felder zerteilen.
+	#
+	#    Nach jedem Schnitt verschieben sich die Kanten-Ids, deshalb wird jede
+	#    Strecke über ihre Endpunkte wiedergefunden — und eine Strecke ist danach
+	#    endgültig geteilt, steht also in diesem Durchgang kein zweites Mal zur Wahl.
+	for entry in trade_report():
+		if flags >= MAX_SPLITS:
+			break
+		if not bool(entry["jammed"]):
+			continue
+		var edge := _edge_between(int(entry["a"]), int(entry["b"]))
+		if edge.is_empty() or split_gain(edge) <= 0:
+			continue
+		var cell := best_split_cell(edge)
+		if cell < 0:
+			continue
+		if int(cells[cell]["flag"]) < 0 and not _ensure_flag_quiet(cell):
+			continue
+		var mid := int(cells[cell]["flag"])
+		_split_road(edge, mid)
+		flags += 1
+		var halves := carriers_of(_edge_between(int(entry["a"]), mid)) \
+			+ carriers_of(_edge_between(mid, int(entry["b"])))
+		done.append("Fahne bei (%d, %d) — die Strecke trägt jetzt %d Träger." % [
+			cell % map_size, cell / map_size, halves,
+		])
+
+	# 2. Prioritäten anheben, aber nur auf echten Straßen, nur wo wirklich Ware
+	#    fließt und nur wo es eine brauchbare Messung gibt. Vor `MEASURE_MIN`
+	#    Umschlägen wäre jede Zahl geraten, und auf einem Stummel würde eine
+	#    höhere Priorität gar nichts bewirken.
+	if measured_carriers() >= MEASURE_MIN:
+		for entry in trade_report():
+			if str(entry["kind"]) != "road":
+				continue
+			var edge := _edge_between(int(entry["a"]), int(entry["b"]))
+			if edge.is_empty():
+				continue
+			var want := priority_for(str(entry["top"]))
+			if want <= int(edge["priority"]):
+				continue
+			set_road_priority(int(edge["id"]), want)
+			raised += 1
+			done.append("Priorität %d → %d auf der Strecke mit „%s“." % [
+				int(entry["priority"]), want, good_name(str(entry["top"])),
+			])
+
+	if flags <= 0 and raised <= 0:
+		if measured_carriers() < MEASURE_MIN:
+			done.append("Noch zu wenig Verkehr gemessen — die Strecken bleiben, wie sie sind.")
+		else:
+			done.append("Nichts zu tun: die Strecken tragen schon, was sie sollen.")
+	_notify(_route_summary(flags, raised, done))
+	return done
+
+
+## Trägerzahl einer Strecke, `0` wenn es keine gibt.
+func carriers_of(edge: Dictionary) -> int:
+	if edge.is_empty():
+		return 0
+	return (edge["carriers"] as Array).size()
+
+
+## Die Kante zwischen zwei Knoten, `{}` wenn es keine gibt. Nach jedem Schnitt
+## verschieben sich die Ids, deshalb sucht der Optimierer nach Endpunkten
+## statt nach Nummer.
+func _edge_between(a: int, b: int) -> Dictionary:
+	if a < 0 or b < 0 or a >= nodes.size() or b >= nodes.size():
+		return {}
+	for edge in nodes[a]["edges"]:
+		var id := int(edge)
+		if id < 0 or id >= edges.size():
+			continue
+		var other: Dictionary = edges[id]
+		var x: int = int(other["a"])
+		var y: int = int(other["b"])
+		if (x == a and y == b) or (x == b and y == a):
+			return other
+	return {}
+
+
+## Setzt eine Fahne, ohne eine Meldung zu erzeugen — der Optimierter hat seine
+## eigene Liste, und zwei Meldungen für einen Handgriff sind eine zu viel.
+func _ensure_flag_quiet(cell: int) -> bool:
+	if cell < 0 or cell >= cells.size() or not _flag_free(cell):
+		return false
+	_ensure_flag(cell)
+	return true
+
+
+## Eine Zeile Zusammenfassung für die Meldung, damit der Spieler auch ohne die
+## Karte weiß, was passiert ist.
+func _route_summary(flags: int, raised: int, done: Array[String]) -> String:
+	if flags <= 0 and raised <= 0:
+		return done[0] if not done.is_empty() else "Die Handelswege sind in Ordnung."
+	var parts: Array[String] = []
+	if flags > 0:
+		parts.append("eine Fahne" if flags == 1 else "%d Fahnen" % flags)
+	if raised > 0:
+		parts.append("eine Priorität" if raised == 1 else "%d Prioritäten" % raised)
+	return "Handelswege optimiert: " + " und ".join(parts) + "."
 
 
 # --- ticking ----------------------------------------------------------------
@@ -1388,35 +1938,19 @@ func _tick_production(delta: float) -> void:
 			_rival_produce(building, spec, delta)
 			continue
 
-		# The tool is what actually gates labour, exactly as in the original.
-		var tool := str(spec["tool"])
-		if tool != "" and int(store.get(tool, 0)) <= 0 and str(building["tool"]) == "":
-			building["tool"] = ""
-			building["status"] = "noTool"
-			building["cycle_t"] = 0.0
-			continue
-		if int(building["workers"]) < int(spec["workers"]):
-			building["status"] = "noWorker"
-			building["cycle_t"] = 0.0
-			continue
-		if bool(spec["hungry"]) and food_pieces() <= 0:
-			building["status"] = "hungry"
-			building["cycle_t"] = 0.0
-			continue
-		if str(spec["harvest"]) != "" and int(cells[int(building["cell"])]["amount"]) <= 0:
-			building["status"] = "noResource"
-			building["cycle_t"] = 0.0
-			continue
-		if (nodes[int(building["node"])]["edges"] as Array).is_empty():
-			building["status"] = "notConnected"
-			building["cycle_t"] = 0.0
-			continue
-		if not stock_has(building["input"], spec["inputs"]):
+		# Der Stillstandsgrund wird an *einer* Stelle begründet, damit der
+		# Ratgeber nie etwas anderes melden kann als der Takt tut.
+		var reason := stall_of(building)
+		if reason == "noInput":
+			# The castle is the settlement's warehouse, so it hands out what it
+			# has: one missing delivery must not stall a whole workshop.
 			_pull_from_store(building, spec["inputs"])
-			if not stock_has(building["input"], spec["inputs"]):
-				building["status"] = "noInput"
-				building["cycle_t"] = 0.0
-				continue
+			if stock_has(building["input"], spec["inputs"]):
+				reason = ""
+		if reason != "":
+			building["status"] = reason
+			building["cycle_t"] = 0.0
+			continue
 
 		building["status"] = "ok"
 		building["cycle_t"] = float(building["cycle_t"]) + delta
@@ -1698,12 +2232,14 @@ func _tick_carriers(delta: float) -> void:
 				carrier["t"] = 0.0
 				carrier["dir"] = -1
 				_load_from(carrier, b, a)
+				_note_traffic(edge, carrier)
 				carrier["waiting"] = 0.0
 			elif float(carrier["t"]) <= 0.0:
 				carrier["t"] = 0.0
 				_deliver(carrier, a)
 				carrier["dir"] = 1
 				_load_from(carrier, a, b)
+				_note_traffic(edge, carrier)
 				carrier["waiting"] = 0.0
 
 			# An empty carrier dawdles at the flag before setting off again.
@@ -1787,6 +2323,434 @@ func _load_from(carrier: Dictionary, from: Dictionary, to: Dictionary) -> void:
 
 func _priority_of(good: String) -> int:
 	return int(good_priority.get(good, 1))
+
+
+# --- Ratgeber: was bremst die Siedlung? --------------------------------------
+#
+# Das Original kritisierten vor allem zwei Dinge: die steile Lernkurve und den
+# unsichtbaren Zustand. Der Zustand ist inzwischen sichtbar — jedes Gebäude
+# kennt sein `status`. Was fehlte, war die *Gesamt*antwort: welcher Engpass die
+# ganze Siedlung bremst, welche Ware genau fehlt und was der Spieler dagegen
+# tun soll. Genau das liefert diese Sektion: eine Rangliste, ein Satz pro
+# Ursache, mit einer Maschine, die den nächsten sinnvollen Griff nennt.
+#
+# Zwei Regeln, die den Ratgeber glaubwürdig machen:
+#  - `stall_of` ist die *einzige* Stelle, die einen Stillstand begründet. Der
+#    Takt und der Ratgeber fragen dieselbe Frage, also kann die Empfehlung nie
+#    dem widersprechen, was der Bildschirm gerade zeichnet.
+#  - Jeder Eintrag trägt dieselben Felder, damit der Bildschirm nie raten muss.
+
+## Wie schwer ein Stillstand wiegt. Der Bildschirm färbt den obersten Eintrag
+## rot, orange oder ruhig — "die Wirtschaft ist kaputt" und "ein Gebäude
+## pausiert" sollen sich unterscheiden.
+const SEV_HINT := 1
+const SEV_WARNING := 2
+const SEV_CRITICAL := 3
+
+## Wie viele Waren an einer Fahne liegen dürfen, bevor der Ratgeber eine
+## zusätzliche Fahne vorschlägt. Zwei sind Alltag im Spielbetrieb, fünf sind
+## ein Stau.
+const JAM_LIMIT := 4
+
+## Das Gebäude, das `good` herstellt — die Antwort auf "was baue ich?", wenn
+## eine Werkstatt leer ausgeht. Alle neun Werkzeuge kommen aus der Schlosserei.
+static func producer_of(good: String) -> String:
+	for spec in SPECS:
+		if int(spec["outputs"].get(good, 0)) > 0:
+			return str(spec["kind"])
+	if good in TOOLS:
+		return "toolsmith"
+	return ""
+
+
+## Das Erste, das `building` am Arbeiten hindert, `""` wenn es läuft. Die
+## Reihenfolge ist die des Taktes: fehlt einem Gebäude sowohl das Werkzeug
+## als auch der Siedler, meldet es das Werkzeug — denn das kann der Spieler
+## tatsächlich beschaffen. Bauplätze und bewusst angehaltene Gebäude sind
+## keine Stillstände, sondern Absicht.
+func stall_of(building: Dictionary) -> String:
+	if str(building["state"]) != "done" or bool(building["halted"]):
+		return ""
+	if str(building["owner"]) == "rival":
+		return ""
+	var spec := spec_of(str(building["kind"]))
+	if int(spec["workers"]) == 0:
+		return ""
+	# Das Werkzeug sperrt die Arbeit, ganz wie im Original.
+	var tool := str(spec["tool"])
+	if tool != "" and str(building["tool"]) == "" and int(store.get(tool, 0)) <= 0:
+		return "noTool"
+	if int(building["workers"]) < int(spec["workers"]):
+		return "noWorker"
+	if bool(spec["hungry"]) and food_pieces() <= 0:
+		return "hungry"
+	if str(spec["harvest"]) != "" and int(cells[int(building["cell"])]["amount"]) <= 0:
+		return "noResource"
+	if (nodes[int(building["node"])]["edges"] as Array).is_empty():
+		return "notConnected"
+	# Die Burg ist die Vorratskammer und gibt Betriebsstoffe direkt aus, also
+	# zählt ihr Lager mit — sonst widerspräche der Ratgeber dem Takt, der den
+	# Stoff noch im selben Schritt nachzieht.
+	if _missing_input(building) != "":
+		return "noInput"
+	return ""
+
+
+## Welcher Rohstoff `building` fehlt — die größte Lücke zuerst, denn
+## "Kohle fehlt" muss *eine* Ware nennen, sonst ist es keine Handlung.
+## Die Burg zählt mit: sie gibt Betriebsstoffe direkt aus.
+func _missing_input(building: Dictionary) -> String:
+	var need: Dictionary = spec_of(str(building["kind"]))["inputs"]
+	var held: Dictionary = building["input"]
+	var worst := ""
+	var worst_gap := 0
+	for good in GOODS:
+		var want := int(need.get(good, 0))
+		if want <= 0:
+			continue
+		var gap := want - int(held.get(good, 0)) - int(store.get(good, 0))
+		if gap > worst_gap:
+			worst_gap = gap
+			worst = good
+	return worst
+
+
+## Jeder Grund, aus dem die Siedlung nicht auf voller Leistung läuft — der
+## dringendste zuerst. *Ein* Eintrag pro Ursache, nicht pro Gebäude: sonst
+## steht fünfmal derselbe Satz in der Leiste, und der Spieler sieht nicht,
+## dass ein einzelnes fehlendes Kohlefeld fünf Werkstätten lahmlegt.
+## Eine leere Liste heißt: jedes Gebäude arbeitet.
+func bottlenecks() -> Array[Dictionary]:
+	var groups: Dictionary = {}
+	var keys: Array[String] = []
+	var starving := false
+
+	for building in buildings:
+		if str(building["owner"]) != "player":
+			continue
+		var reason := stall_of(building)
+		if reason == "":
+			continue
+		if reason == "hungry":
+			# Eine leere Vorratskammer ist *ein* Problem, nicht eines pro
+			# hungernden Bergmann — sonst besteht die halbe Zeile aus "Hunger".
+			starving = true
+			continue
+		var good := ""
+		if reason == "noTool":
+			good = str(spec_of(str(building["kind"]))["tool"])
+		elif reason == "noInput":
+			good = _missing_input(building)
+		var key := reason if good == "" else "%s:%s" % [reason, good]
+		if not groups.has(key):
+			groups[key] = {"code": reason, "good": good, "ids": [], "kinds": []}
+			keys.append(key)
+		var group: Dictionary = groups[key]
+		(group["ids"] as Array).append(int(building["id"]))
+		(group["kinds"] as Array).append(str(spec_of(str(building["kind"]))["name"]))
+
+	var out: Array[Dictionary] = []
+	if starving or (food_pieces() <= 0 and hungry_serfs() > 0):
+		out.append(_food_entry())
+	for key in keys:
+		var group: Dictionary = groups[key]
+		out.append(_stall_entry(
+			str(group["code"]), str(group["good"]), group["ids"], group["kinds"]
+		))
+	# Eine Burg, die nichts mehr bezahlen kann, ist die eigentliche Sackgasse:
+	# Sie blockiert *jeden* Ausweg, den die Liste oben vorschlägt. Sie zählt
+	# aber nur, wenn überhaupt etwas stillsteht — eine ärmere, glückliche
+	# Siedlung hat keinen Engpass.
+	if not out.is_empty() and not _can_build_anything():
+		out.append(_no_build_entry(out))
+	# Ware, die sich an einer Fahne stapelt, heißt: die Straße ist länger als
+	# ihre Trägerzahl verkraftet. Genau die Mechanik des Originals.
+	var jam := _worst_jam()
+	if jam >= 0:
+		out.append(_jam_entry(jam))
+
+	out.sort_custom(_more_urgent)
+	return out
+
+
+## Der eine dringendste Punkt, `{}` wenn nichts ansteht.
+func top_bottleneck() -> Dictionary:
+	var list := bottlenecks()
+	return list[0] if not list.is_empty() else {}
+
+
+## Dringendste zuerst, danach der Grund, der die meisten Gebäude lahmlegt, und
+## zuletzt eine feste Reihenfolge — sonst springt die Karte zwischen zwei
+## gleich schlimmen Ursachen hin und her.
+func _more_urgent(a: Dictionary, b: Dictionary) -> bool:
+	if int(a["severity"]) != int(b["severity"]):
+		return int(a["severity"]) > int(b["severity"])
+	if int(a["count"]) != int(b["count"]):
+		return int(a["count"]) > int(b["count"])
+	return str(a["code"]) < str(b["code"])
+
+
+## Jeder Eintrag trägt dieselben Felder: `severity`, `code`, `title`, `detail`,
+## `good`, `building` (anzuspringen), `cell` (anzufunken) und `count`.
+func _entry(severity: int, code: String, title: String, detail: String, good: String,
+		building_id: int = -1, cell: int = -1, count: int = 1) -> Dictionary:
+	return {
+		"severity": severity, "code": code, "title": title, "detail": detail,
+		"good": good, "building": building_id, "cell": cell, "count": count,
+	}
+
+
+## Die Werkzeuglücke. Die Schlosserei ist der Grund, weshalb das Original
+## anfangs so undurchschaubar war: erst Eisen, dann ein Werkzeug, dann die
+## nächste Maschine. Der Ratgeber sagt genau das.
+func _tool_entry(good: String, ids: Array, kinds: Array) -> Dictionary:
+	var forge := _has_kind("toolsmith")
+	var fix := "Die Schlosserei schmiedet jedes Werkzeug aus 1 Eisen + 1 Baumstamm."
+	if not forge:
+		fix = "Baue eine Schlosserei — sie schmiedet jedes Werkzeug aus 1 Eisen + 1 Baumstamm."
+	var entry := _entry(
+		SEV_WARNING, "noTool", "Werkzeug fehlt: „%s“" % good_name(good),
+		"Still: %s. %s" % [_list_text(kinds), fix], good, _first_id(ids), _cell_of(ids), ids.size()
+	)
+	entry["fix"] = "queueTool" if forge else "build:toolsmith"
+	return entry
+
+
+## Die Rohstofflücke — die häufigste und für einen Anfänger die teuerste.
+## Der Ratgeber nennt die Ware *und* das Gebäude, das sie herstellt.
+func _input_entry(good: String, ids: Array, kinds: Array) -> Dictionary:
+	var kind := producer_of(good)
+	var name := str(spec_of(kind)["name"]) if kind != "" else good_name(good)
+	var fix := ""
+	if kind == "":
+		fix = "Auf der Karte kann niemand %s herstellen." % good_name(good)
+	elif not _has_kind(kind):
+		fix = "Baue eine „%s“ und schließe sie an die Straße an." % name
+		if not _can_pay(kind):
+			# Sonst tippt der Spieler auf den Vorschlag und bekommt nur
+			# "Zu wenig Bauholz" — der Ratgeber soll den Grund selbst nennen.
+			fix += " Dafür fehlt der Burg noch Bauholz (%d) bzw. Stein (%d)." % [
+				maxi(0, int(spec_of(kind)["cost"]["planks"]) - int(store.get("planks", 0))),
+				maxi(0, int(spec_of(kind)["cost"]["stone"]) - int(store.get("stone", 0))),
+			]
+	elif _is_stalled(kind):
+		fix = "Die „%s“ steht selbst still — behebe zuerst ihren Grund." % name
+	else:
+		fix = "Die „%s“ liefert, aber die Ware kommt nicht an: auf der Strecke fehlen Fahnen." % name
+	var entry := _entry(
+		SEV_WARNING, "noInput", "Es fehlt: %s" % good_name(good),
+		"Still: %s. %s" % [_list_text(kinds), fix], good, _first_id(ids), _cell_of(ids), ids.size()
+	)
+	if kind != "" and not _has_kind(kind):
+		entry["fix"] = "build:%s" % kind
+	elif kind != "" and _is_stalled(kind):
+		entry["fix"] = "select:%d" % _first_id_of_kind(kind)
+	return entry
+
+
+func _link_entry(ids: Array, kinds: Array) -> Dictionary:
+	var entry := _entry(
+		SEV_WARNING, "notConnected", "Nicht angeschlossen: „%s“" % str(kinds[0]),
+		"Ohne Straße liefert „%s“ nichts. Baue eine Straße von der Burg bis hierher." % str(kinds[0]),
+		"", _first_id(ids), _cell_of(ids), ids.size()
+	)
+	entry["fix"] = "road:%d" % _first_id(ids)
+	return entry
+
+
+## Kein freier Siedler. Das ist die einzige Ursache, die sich von selbst
+## auflöst — deshalb der niedrigste Grad, aber ein Bauplatz-Lager hilft.
+func _worker_entry(ids: Array, kinds: Array) -> Dictionary:
+	var entry := _entry(
+		SEV_HINT, "noWorker", "Keine Siedler frei",
+		"Still: %s. Baue ein Lager für 6 weitere Siedler, oder warte die laufenden Arbeiten ab." % _list_text(kinds),
+		"", _first_id(ids), _cell_of(ids), ids.size()
+	)
+	entry["fix"] = "build:warehouse"
+	return entry
+
+
+## Die Ader ist leer. Ein neuer Platz ist nötig — genau deshalb nennt der
+## Ratgeber das Gebäude, das man wiederholen soll.
+func _resource_entry(ids: Array, kinds: Array, kind: String) -> Dictionary:
+	var res := str(RES_NAMES.get(str(spec_of(kind)["requires"]), ""))
+	var entry := _entry(
+		SEV_WARNING, "noResource", "Lagerstätte leer: %s" % res,
+		"Still: %s. Die Ader ist erschöpft — setze eine neue „%s“ auf eine andere Stelle." % [
+			_list_text(kinds), str(spec_of(kind)["name"]),
+		],
+		"", _first_id(ids), _cell_of(ids), ids.size()
+	)
+	entry["fix"] = "build:%s" % kind
+	return entry
+
+
+## Die Vorratskammer ist leer. Höchster Grad: Minen, Schweine und Jäger
+## stehen still, und jeder Siedler hungert.
+func _food_entry() -> Dictionary:
+	var entry := _entry(
+		SEV_CRITICAL, "noFood", "Die Siedler hungern",
+		"Nahrung: 0. Minen und Vieh stehen still, jeder Siedler verliert Kraft. Baue eine Farm und eine Bäckerei — oder eine Fischerhütte an offenes Wasser.",
+		"bread", -1, -1, maxi(1, hungry_serfs())
+	)
+	entry["fix"] = "book:food"
+	return entry
+
+
+## Die Burg kann nichts mehr bezahlen. Das ist der Moment, in dem ein neuer
+## Spieler stecken bleibt: das Bauholz ist ausgegeben, der Schreiner steht
+## still, und niemand sagt, dass *das* der Grund ist. Höchster Grad, denn es
+## blockiert jeden Ausweg, den die anderen Ratschläge anbieten.
+func _no_build_entry(list: Array[Dictionary]) -> Dictionary:
+	var cheapest := _cheapest_build()
+	var fix := "Behebe zuerst den Stillstand in dieser Liste, dann weiterbauen."
+	for entry in list:
+		if str(entry["code"]) == "noInput" and str(entry["good"]) == "logs":
+			fix = "Zuerst Stämme zum Schreiner schaffen — nur daraus wird wieder Bauholz."
+			break
+	return _entry(
+		SEV_CRITICAL, "noBuild", "Die Burg kann nichts mehr bauen",
+		"Die Burg hat %d Bauholz und %d Stein; das billigste Gebäude, ein „%s“, kostet %d Bauholz. %s" % [
+			int(store.get("planks", 0)), int(store.get("stone", 0)),
+			str(spec_of(cheapest)["name"]), int(spec_of(cheapest)["cost"]["planks"]), fix,
+		],
+		"planks", -1, -1, 1
+	)
+
+
+## Kann die Burg noch irgendein Gebäude bezahlen?
+func _can_build_anything() -> bool:
+	for kind in buildable_kinds():
+		if _can_pay(kind):
+			return true
+	return false
+
+
+## Hat die Burg das Material für ein Gebäude dieser Art?
+func _can_pay(kind: String) -> bool:
+	var cost: Dictionary = spec_of(kind)["cost"]
+	return int(store.get("planks", 0)) >= int(cost["planks"]) \
+		and int(store.get("stone", 0)) >= int(cost["stone"])
+
+
+## Das billigste Gebäude, das der Spieler bauen darf.
+func _cheapest_build() -> String:
+	var best := ""
+	var best_cost := 1 << 30
+	for kind in buildable_kinds():
+		var cost := int(spec_of(kind)["cost"]["planks"])
+		if cost < best_cost:
+			best_cost = cost
+			best = kind
+	return best if best != "" else "woodcutter"
+
+
+## Ware, die sich an einer Fahne stapelt. Die Lösung ist die Erfindung des
+## Originals: die Strecke teilen, damit mehr Träger sie teilen.
+func _jam_entry(cell: int) -> Dictionary:
+	var node_id := int(cells[cell]["flag"])
+	var waiting := 0
+	if node_id >= 0 and node_id < nodes.size():
+		waiting = (nodes[node_id]["queue"] as Array).size()
+	var entry := _entry(
+		SEV_HINT, "congestion", "%d Waren stauen sich" % waiting,
+		"An der Fahne (%d, %d) wartet Ware auf einen Träger. Eine Extra-Fahne teilt die Strecke und hebt den Durchsatz." % [
+			cell % map_size, cell / map_size,
+		],
+		"", -1, cell, waiting
+	)
+	entry["fix"] = "flag:%d" % cell
+	return entry
+
+
+## Die am vollsten Fahne, -1 wenn nirgends etwas klemmt.
+func _worst_jam() -> int:
+	var worst := -1
+	var worst_count := JAM_LIMIT
+	for i in nodes.size():
+		var node: Dictionary = nodes[i]
+		if not bool(node["flag"]):
+			continue
+		var count := (node["queue"] as Array).size()
+		if count > worst_count:
+			worst_count = count
+			worst = int(node["cell"])
+	return worst
+
+
+## Verteilt eine Stillstandsgruppe auf die passenden Einträge. Der Grund einer
+## Gruppe ist derselbe, aber ein Platz kann zwei Ursachen haben (leere Ader
+## *und* keine Straße) — die zuerst gefundene gewinnt, wie im Takt auch.
+func _stall_entry(code: String, good: String, ids: Array, kinds: Array) -> Dictionary:
+	match code:
+		"noTool":
+			return _tool_entry(good, ids, kinds)
+		"noInput":
+			return _input_entry(good, ids, kinds)
+		"notConnected":
+			return _link_entry(ids, kinds)
+		"noWorker":
+			return _worker_entry(ids, kinds)
+		"noResource":
+			return _resource_entry(ids, kinds, _kind_of(ids))
+	return _entry(SEV_HINT, code, str(code), "Still: %s." % _list_text(kinds),
+		good, _first_id(ids), _cell_of(ids), ids.size())
+
+
+## Die erste Bauplatz-Id aus einer Gruppe.
+func _first_id(ids: Array) -> int:
+	return int(ids[0]) if not ids.is_empty() else -1
+
+
+## Das Feld, auf dem das erste Gebäude der Gruppe steht.
+func _cell_of(ids: Array) -> int:
+	var id := _first_id(ids)
+	if id < 0 or id >= buildings.size():
+		return -1
+	return int(buildings[id]["cell"])
+
+
+func _kind_of(ids: Array) -> String:
+	var id := _first_id(ids)
+	if id < 0 or id >= buildings.size():
+		return ""
+	return str(buildings[id]["kind"])
+
+
+func _first_id_of_kind(kind: String) -> int:
+	for building in buildings:
+		if str(building["owner"]) == "player" and str(building["kind"]) == kind:
+			return int(building["id"])
+	return -1
+
+
+## Hat der Spieler ein Gebäude dieser Art überhaupt?
+func _has_kind(kind: String) -> bool:
+	return _first_id_of_kind(kind) >= 0
+
+
+## Steht *irgendein* Gebäude dieser Art still? Dann ist der fehlende Rohstoff
+## ein Symptom, und der Ratgeber zeigt auf das eigentliche Problem.
+func _is_stalled(kind: String) -> bool:
+	for building in buildings:
+		if str(building["owner"]) == "player" and str(building["kind"]) == kind:
+			if stall_of(building) != "":
+				return true
+	return false
+
+
+## "die Schlosserei", "die Schlosserei und die Bäckerei" — ohne Artikel, weil
+## der Ratgeber Warennamen immer in Anführungszeichen setzt.
+func _list_text(kinds: Array) -> String:
+	var parts: Array[String] = []
+	for name in kinds:
+		var text := str(name)
+		if not parts.has(text):
+			parts.append(text)
+	if parts.size() == 1:
+		return "„%s“" % parts[0]
+	var last := parts[parts.size() - 1]
+	return "%s und „%s“" % ["„%s“" % ", ".join(parts.slice(0, parts.size() - 1)), last]
 
 
 # --- military ---------------------------------------------------------------

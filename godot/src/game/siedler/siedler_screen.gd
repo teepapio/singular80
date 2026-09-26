@@ -66,12 +66,34 @@ var _inspector: PanelContainer
 var _inspector_body: VBoxContainer
 var _tool_buttons: Dictionary = {}
 var _modal_layer: Control
+## Die Ratgeber-Karte unten in der Mitte: der eine Grund, aus dem die Siedlung
+## gerade steht, mit dem Knopf, der ihn behebt.
+var _advisor: PanelContainer
+var _advisor_body: VBoxContainer
+## Schlüssel des zuletzt gebauten Ratgebers, damit die Karte nicht fünfmal pro
+## Sekunde neu aufgebaut wird.
+var _advisor_key := ""
+## Der Rat, der gerade auf der Karte steht.
+var _advisor_top: Dictionary = {}
+## Feld, auf das der Ratgeber gerade zeigt, -1 wenn keins.
+var _advisor_cell := -1
+## Die Karte „Handelswege": der Bericht, welche Straße welche Ware trägt. Sie
+## ist ein Dialog und kein Dauerpanel, denn sie ändert sich mit jeder Sekunde
+## und eine springende Liste liest niemand.
+var _routes_body: VBoxContainer = null
+## Was der letzte Optimierer-Durchgang getan hat, Zeile für Zeile.
+var _routes_notes: Array[String] = []
+## So viele Strecken zeigt die Karte. Alles darüber würde die Liste aus dem
+## Bild schieben, und die längsten Strecken stehen ohnehin oben.
+const ROUTE_ROWS := 6
 
 # --- rebuild flags ----------------------------------------------------------
 var _roads_dirty := true
 var _terrain_dirty := true
 var _slow_timer := 0.0
 var _hud_timer := 0.0
+## Laufzeit des Bildschirms, damit das Quadrat des Ratgebers pulsieren kann.
+var _clock := 0.0
 var _notice_shown := ""
 var _end_shown := false
 var _frame_delta := 0.0
@@ -237,14 +259,40 @@ func _build_panels() -> void:
 
 	var help_row := Ui.hbox(6)
 	help_row.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	help_row.position = Vector2(-148, -58)
+	help_row.position = Vector2(-248, -58)
 	hud_root.add_child(help_row)
+	# Die Handelswege gehören neben die Hilfe, nicht in die Werkzeugleiste:
+	# dort stehen schon drei Werkzeuge und der Bogen, und ein fünfter Knopf
+	# würde auf dem Telefon die halbe Breite fressen.
+	help_row.add_child(Ui.button("⇄ Wege", Vector2(96, 48), UiTheme.PANEL_LIGHT, func() -> void:
+		_open_routes_sheet()
+	))
 	help_row.add_child(Ui.button("? Hilfe", Vector2(78, 48), UiTheme.PANEL_LIGHT, func() -> void:
 		_show_help()
 	))
 	help_row.add_child(Ui.button("✕", Vector2(48, 48), UiTheme.PANEL_LIGHT, func() -> void:
 		selected_building = -1
 	))
+
+	# Die Ratgeber-Karte. Sie liegt unten in der Mitte, wo nichts liegt, und
+	# nennt *einen* Grund — die ganze Liste holt der Spieler über den Knopf.
+	# Feste Anker statt `set_anchors_and_offsets_preset`: die Karte soll
+	# zentriert bleiben, wenn der Schweregrad sie wachsen lässt.
+	_advisor = Ui.panel(Color(0.031, 0.047, 0.086, 0.9), UiTheme.BORDER, 12)
+	_advisor.anchor_left = 0.5
+	_advisor.anchor_right = 0.5
+	_advisor.anchor_top = 1.0
+	_advisor.anchor_bottom = 1.0
+	_advisor.offset_left = -286.0
+	_advisor.offset_right = 286.0
+	_advisor.offset_top = -150.0
+	_advisor.offset_bottom = -14.0
+	_advisor.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_advisor.visible = false
+	hud_root.add_child(_advisor)
+	_advisor_body = Ui.vbox(3)
+	_advisor_body.custom_minimum_size = Vector2(544, 0)
+	_advisor.add_child(_advisor_body)
 
 
 # --- build sheet ------------------------------------------------------------
@@ -358,6 +406,8 @@ func _key(key: InputEventKey) -> void:
 			_set_tool(Tool.FLAG)
 		KEY_SPACE:
 			_set_speed((speed_index + 1) % SPEEDS.size())
+		KEY_W:
+			_open_routes_sheet()
 		KEY_ESCAPE:
 			if tool != Tool.SELECT or armed_kind != "":
 				_set_tool(Tool.SELECT)
@@ -550,6 +600,17 @@ func _set_speed(index: int) -> void:
 
 
 func _update_ghost() -> void:
+	# Der Ratgeber kann auf ein Feld zeigen, auf dem nichts gebaut werden soll —
+	# eine Fahne, die gestaut ist. Dann pulsiert dort ein Quadrat, damit der
+	# Spieler nicht raten muss, wohin er tippen soll.
+	if armed_kind == "" and tool == Tool.FLAG and _advisor_cell >= 0:
+		_ghost.position = siedler.cell_position(_advisor_cell, 0.06)
+		_ghost.visible = true
+		var pulse := 0.5 + 0.5 * sin(_clock * 6.0)
+		(_ghost.material_override as StandardMaterial3D).albedo_color = Color("fbbf24").lerp(
+			Color.WHITE, pulse * 0.6
+		)
+		return
 	if armed_kind == "" or hover_cell < 0:
 		_ghost.visible = false
 		return
@@ -609,10 +670,16 @@ func _update_world(delta: float) -> void:
 		_rebuild_props()
 		_rebuild_territory()
 
+	# Das blinkende Quadrat des Ratgebers pulsiert auch ohne Zeigerbewegung.
+	if armed_kind == "" and tool == Tool.FLAG and _advisor_cell >= 0:
+		_clock += delta
+		_update_ghost()
+
 	_hud_timer += delta
 	if _hud_timer > 0.2:
 		_hud_timer = 0.0
 		_update_stats()
+		_update_advisor()
 		_update_inspector()
 		_check_end()
 
@@ -1002,6 +1069,334 @@ func _update_stats() -> void:
 	_stats_label.text = "\n".join(lines)
 
 
+## Der Ratgeber. Das ist die Karte, die einem neuen Spieler die teuerste
+## Lektion des Originals erspart: nicht *irgendein* Gebäude steht still,
+## sondern *dieses* hier, und es braucht *diese* Ware — mit dem Knopf, der
+## genau das tut. Die Logik dahinter liegt in `Siedler.bottlenecks()`.
+func _update_advisor() -> void:
+	var list := siedler.bottlenecks()
+	if list.is_empty():
+		_advisor.visible = false
+		_advisor_key = ""
+		_advisor_cell = -1
+		_advisor_top = {}
+		return
+	var top: Dictionary = list[0]
+	_advisor_cell = int(top["cell"])
+	_advisor_top = top
+	# Die Karte wird nur neu gebaut, wenn der Rat sich selbst ändert. Sonst
+	# zappelt sie fünfmal pro Sekunde, und niemand liest einen Text, der
+	# zappelt.
+	var key := "%s:%s:%d" % [str(top["code"]), str(top["good"]), int(top["count"])]
+	if key == _advisor_key and _advisor.visible:
+		return
+	_advisor_key = key
+	_advisor.visible = true
+	for child in _advisor_body.get_children():
+		child.queue_free()
+
+	var color := _severity_color(int(top["severity"]))
+	_advisor_body.add_child(Ui.label(str(top["title"]), 17, color, true))
+	var detail := Ui.label(str(top["detail"]), 13, UiTheme.TEXT_DIM)
+	# Die Kartenhöhe wächst mit dem Text; ohne Umbruch liefe der Satz über den
+	# Rand hinaus.
+	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_advisor_body.add_child(detail)
+
+	var row := Ui.hbox(8)
+	_advisor_body.add_child(row)
+	if list.size() > 1:
+		row.add_child(Ui.button("▸ alle (%d)" % list.size(), Vector2(112, 40),
+			UiTheme.PANEL_LIGHT, _show_all_advice))
+	var fix := str(top.get("fix", ""))
+	var target := int(top["building"])
+	if fix != "":
+		row.add_child(Ui.button(_fix_label(fix), Vector2(232, 40),
+			UiTheme.ACCENT, _run_fix.bind(fix)))
+	row.add_child(Ui.expander())
+	if target >= 0 and target < siedler.buildings.size():
+		row.add_child(Ui.button("⌖ zeigen", Vector2(112, 40), UiTheme.PANEL_LIGHT,
+			func() -> void:
+				selected_building = target
+				Sfx.select()
+		))
+
+
+func _severity_color(severity: int) -> Color:
+	match severity:
+		Siedler.SEV_CRITICAL: return UiTheme.DANGER
+		Siedler.SEV_WARNING: return UiTheme.WARNING
+	return UiTheme.SUCCESS
+
+
+## Die Beschriftung des Knopfs, der den obersten Rat behebt.
+func _fix_label(fix: String) -> String:
+	if fix.begins_with("build:"):
+		var kind := fix.substr(6)
+		return "⌂ %s" % str(Siedler.spec_of(kind)["name"])
+	if fix == "queueTool":
+		return "⚒ einplanen"
+	if fix.begins_with("road:"):
+		return "⇢ Straße bauen"
+	if fix.begins_with("flag:"):
+		return "⚑ Fahne setzen"
+	if fix.begins_with("select:"):
+		return "⌖ zeigen"
+	if fix == "book:food":
+		return "⌂ Nahrung bauen"
+	return ""
+
+
+## Führt den Griff aus, den der Ratgeber vorschlägt. Jeder Vorschlag ist eine
+## Ein-Knopf-Griff, damit der Spieler nicht erst im Bau-Bogen suchen muss.
+func _run_fix(fix: String, target: int) -> void:
+	Sfx.select()
+	if fix.begins_with("build:"):
+		var kind := fix.substr(6)
+		armed_kind = kind
+		_set_tool(Tool.SELECT)
+		if not _can_pay(kind):
+			notify("Dafür fehlt der Burg das Baumaterial")
+			return
+		notify("%s wird gebaut — Feld antippen" % str(Siedler.spec_of(kind)["name"]))
+		return
+	if fix == "queueTool":
+		var tool_key := str(_advisor_top.get("good", ""))
+		if tool_key != "" and siedler.request_tool(tool_key):
+			notify("%s ist eingeplant" % Siedler.good_name(tool_key))
+		else:
+			notify(siedler.notice if tool_key != "" else "Werkzeug unbekannt")
+		return
+	if fix.begins_with("road:"):
+		_set_tool(Tool.ROAD)
+		road_from = int(siedler.buildings[siedler.castle_id]["cell"])
+		notify("Startfeld: die Burg — jetzt das Ziel antippen")
+		return
+	if fix.begins_with("flag:"):
+		_set_tool(Tool.FLAG)
+		notify("Fahne dort antippen, wo das Quadrat blinkt")
+		return
+	if fix.begins_with("select:"):
+		selected_building = fix.substr(7).to_int()
+		return
+	if fix == "book:food":
+		_open_build_sheet()
+		return
+	if target >= 0:
+		selected_building = target
+
+
+## Kann die Burg dieses Gebäude noch bezahlen? Sonst würde der Knopf ins Leere
+## zeigen und der Spieler wundert sich über eine rote Karte.
+func _can_pay(kind: String) -> bool:
+	var cost: Dictionary = Siedler.spec_of(kind)["cost"]
+	return int(siedler.store.get("planks", 0)) >= int(cost["planks"]) \
+		and int(siedler.store.get("stone", 0)) >= int(cost["stone"])
+
+
+## Die vollständige Liste — der Spieler soll sehen, dass es nicht *einen*
+## Engpass gibt, sondern eine Rangfolge, und selbst entscheiden dürfen.
+func _show_all_advice() -> void:
+	Sfx.select()
+	var root := _modal_root()
+	root.add_child(Ui.backdrop(0.86))
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.add_child(center)
+	var panel := Ui.panel(Color(0.043, 0.063, 0.11, 0.98), UiTheme.ACCENT, 14)
+	panel.custom_minimum_size = Vector2(640, 0)
+	center.add_child(panel)
+	var column := Ui.vbox(8)
+	panel.add_child(column)
+	column.add_child(Ui.title("Was bremst deine Siedlung?", 24, UiTheme.ACCENT))
+	var list := siedler.bottlenecks()
+	if list.is_empty():
+		column.add_child(Ui.label("Nichts — jedes Gebäude arbeitet.", 15, UiTheme.SUCCESS))
+	for entry in list:
+		var box := Ui.vbox(2)
+		column.add_child(box)
+		var head := Ui.hbox(8)
+		box.add_child(head)
+		head.add_child(Ui.label(
+			"■ %s" % str(entry["title"]), 15, _severity_color(int(entry["severity"])), true
+		))
+		if int(entry["count"]) > 1:
+			head.add_child(Ui.label("×%d" % int(entry["count"]), 13, UiTheme.TEXT_MUTED))
+		var text := Ui.label(str(entry["detail"]), 13, UiTheme.TEXT_DIM)
+		text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		text.custom_minimum_size = Vector2(600, 0)
+		box.add_child(text)
+	var close_row := CenterContainer.new()
+	close_row.add_child(Ui.button("Zurück zur Siedlung", Vector2(230, 46),
+		UiTheme.PANEL_LIGHT, func() -> void:
+			_close_modal()
+	))
+	column.add_child(close_row)
+
+
+# --- Handelswege -------------------------------------------------------------
+
+## Die Karte „Handelswege". Sie beantwortet die Frage, die der Vorschlag stellt:
+## *welche* Straße trägt *welche* Ware. Der Ratgeber sagt, welches Gebäude
+## hungert; diese Karte sagt, warum die Lieferung trotzdem zu langsam ist.
+func _open_routes_sheet() -> void:
+	Sfx.select()
+	_routes_notes = []
+	var root := _modal_root()
+	root.add_child(Ui.backdrop(0.86))
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.add_child(center)
+	var panel := Ui.panel(Color(0.043, 0.063, 0.11, 0.98), UiTheme.ACCENT, 14)
+	panel.custom_minimum_size = Vector2(700, 0)
+	center.add_child(panel)
+	var column := Ui.vbox(8)
+	panel.add_child(column)
+	column.add_child(Ui.title("Handelswege", 26, UiTheme.ACCENT))
+	var lead := Ui.label(
+		"Gezählt wird jeder Umschlag seit dem letzten Straßenbau. Die Karte misst, der Optimierer handelt.",
+		12, UiTheme.TEXT_DIM
+	)
+	lead.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lead.custom_minimum_size = Vector2(660, 0)
+	column.add_child(lead)
+	_routes_body = Ui.vbox(6)
+	column.add_child(_routes_body)
+	_rebuild_routes_sheet()
+
+	var actions := Ui.hbox(8)
+	column.add_child(actions)
+	actions.add_child(Ui.button("⇄ Optimieren", Vector2(190, 46), UiTheme.ACCENT, func() -> void:
+		_run_optimizer()
+	))
+	actions.add_child(Ui.button("↻ Neu messen", Vector2(160, 46), UiTheme.PANEL_LIGHT, func() -> void:
+		_rebuild_routes_sheet()
+	))
+	actions.add_child(Ui.expander())
+	actions.add_child(Ui.button("Zurück", Vector2(150, 46), UiTheme.PANEL_LIGHT, func() -> void:
+		_close_modal()
+	))
+
+
+## Baut den Karteninhalt neu auf. Nach einem Optimierer-Durchgang ändert sich
+## die Zahl der Strecken, also kann man die Zeilen nicht wiederverwenden.
+func _rebuild_routes_sheet() -> void:
+	if _routes_body == null or not is_instance_valid(_routes_body):
+		return
+	for child in _routes_body.get_children():
+		child.queue_free()
+	for note in _routes_notes:
+		_routes_body.add_child(_note_label("• " + note, UiTheme.SUCCESS))
+	var routes := siedler.trade_report()
+	if routes.is_empty():
+		_routes_body.add_child(Ui.label(
+			"Noch kein Verkehr gemessen. Baue eine Straße von der Burg zu einem Erzeuger und lass die Träger fahren.",
+			14, UiTheme.TEXT_DIM
+		))
+	for entry in routes.slice(0, ROUTE_ROWS):
+		_routes_body.add_child(_route_row(entry))
+	if routes.size() > ROUTE_ROWS:
+		_routes_body.add_child(Ui.label(
+			"… und %d weitere Strecken mit Verkehr." % (routes.size() - ROUTE_ROWS), 12, UiTheme.TEXT_MUTED
+		))
+	_routes_body.add_child(Ui.label(
+		"%d Umschläge gemessen · %d Strecken mit Verkehr" % [
+			siedler.measured_carriers(), routes.size(),
+		], 12, UiTheme.TEXT_MUTED
+	))
+
+
+func _note_label(text: String, color: Color) -> Label:
+	var label := Ui.label(text, 12, color)
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.custom_minimum_size = Vector2(660, 0)
+	return label
+
+
+## Eine Strecke in der Karte: was sie trägt, wie viele Träger sie hat, und der
+## eine Satz, was daran zu tun ist. Dazu dieselben zwei Griffe, die der
+## Optimierer nimmt — damit der Spieler dem Vorschlag widersprechen kann,
+## statt ihn nur hinnehmen zu müssen.
+func _route_row(entry: Dictionary) -> Control:
+	var box := Ui.vbox(2)
+	var head := Ui.hbox(8)
+	box.add_child(head)
+	var good := str(entry["top"])
+	var family := str(Siedler.GOOD_CLASS.get(good, "wood"))
+	head.add_child(Ui.label(
+		"▬ „%s“" % Siedler.good_name(good), 15,
+		Siedler.CLASS_COLORS.get(family, UiTheme.TEXT), true
+	))
+	if str(entry["kind"]) == "link":
+		# Der Stummel zwischen Haus und Fahne trägt die halbe Lieferung einer
+		# jungen Siedlung. Er steht im Bericht, aber er ist kein Handelsweg, und
+		# das soll der Spieler beim Lesen der Zeile sofort sehen.
+		head.add_child(Ui.label("Anlieger", 12, UiTheme.TEXT_MUTED))
+	head.add_child(Ui.label(
+		"%d von %d" % [int(entry["top_count"]), int(entry["total"])], 12, UiTheme.TEXT_MUTED
+	))
+	head.add_child(Ui.expander())
+	head.add_child(Ui.label("%.0f Felder · %d Träger · %.1f/min · Priorität %d" % [
+		float(entry["length"]), int(entry["carriers"]),
+		float(entry["throughput"]), int(entry["priority"]),
+	], 12, UiTheme.TEXT_DIM))
+
+	var row := Ui.hbox(6)
+	box.add_child(row)
+	var edge_id := int(entry["edge"])
+	var priority := int(entry["priority"])
+	row.add_child(Ui.button("Prio −", Vector2(84, 36), UiTheme.PANEL_LIGHT, func() -> void:
+		_road_priority(edge_id, priority - 1)
+	))
+	row.add_child(Ui.button("Prio +", Vector2(84, 36), UiTheme.PANEL_LIGHT, func() -> void:
+		_road_priority(edge_id, priority + 1)
+	))
+	var cell := int(entry["cell"])
+	if cell >= 0:
+		row.add_child(Ui.button("⚑ Strecke teilen", Vector2(160, 36), UiTheme.ACCENT, func() -> void:
+			_split_road(cell)
+		))
+	row.add_child(Ui.expander())
+	var gain := int(entry["gain"])
+	var waiting := int(entry["waiting"])
+	var value := int(entry["value"])
+	row.add_child(Ui.label(
+		"wartet %d · Wert %d · Teilen bringt %d Träger" % [waiting, value, maxi(0, gain)],
+		12, UiTheme.TEXT_MUTED
+	))
+	box.add_child(_note_label(siedler.route_advice(entry), UiTheme.WARNING))
+	return box
+
+
+func _road_priority(edge_id: int, priority: int) -> void:
+	siedler.set_road_priority(edge_id, priority)
+	_roads_dirty = true
+	Sfx.select()
+	_rebuild_routes_sheet()
+
+
+func _split_road(cell: int) -> void:
+	if siedler.add_flag(cell):
+		notify("Fahne gesetzt — mehr Träger auf dieser Straße")
+		_roads_dirty = true
+		Sfx.select()
+	else:
+		notify(siedler.notice)
+	# Eine Fahne teilt eine Straße in zwei, und die Kanten-Ids verschieben sich
+	# dabei. Die Karte liest deshalb nach jedem Griff neu.
+	_rebuild_routes_sheet()
+
+
+## Der eine Griff aus dem Vorschlag. Er kommt aus der Logik und meldet sich
+## selbst per `notice`; die Karte zeigt zusätzlich, was er getan hat.
+func _run_optimizer() -> void:
+	_routes_notes = siedler.optimize_trade_routes()
+	_roads_dirty = true
+	_slow_timer = 1.0
+	Sfx.select()
+	_rebuild_routes_sheet()
+
+
 func _tool_count() -> int:
 	var total := 0
 	for tool_key in Siedler.TOOLS:
@@ -1177,17 +1572,18 @@ func _show_help() -> void:
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.add_child(center)
 	var panel := Ui.panel(Color(0.043, 0.063, 0.11, 0.98), UiTheme.ACCENT, 14)
-	panel.custom_minimum_size = Vector2(620, 560)
+	panel.custom_minimum_size = Vector2(620, 600)
 	center.add_child(panel)
 	var column := Ui.vbox(8)
 	panel.add_child(column)
 	column.add_child(Ui.title("Siedler 3D", 28, UiTheme.ACCENT))
 	var texts := [
 		["Die Fahnen", "Jede türkise Fahne ist ein Verkehrsknoten. Zwei Fahnen trägt genau ein Träger, der eine Last schleppt und sie an der nächsten Fahne abgibt. Viele Fahnen auf derselben Straße = viele Träger = mehr Durchsatz. Zu wenige Fahnen = die Ware staut sich."],
+		["Handelswege", "„⇄ Wege“ zählt mit, welche Ware über welche Straße läuft, und nennt dir pro Strecke den nächsten Griff. „⇄ Optimieren“ macht ihn automatisch: zu lange Strecken werden in der Mitte geteilt, und die Priorität wird auf die Ware gehoben, auf die ein fertiges Gebäude wartet. Er nimmt dir nichts weg — Prioritäten steigen nur, und ein zweiter Durchgang ändert nichts mehr."],
 		["Werkzeuge sind der Schlüssel", "Ein Gebäude arbeitet nur, wenn ein Siedler mit dem richtigen Werkzeug dort steht. Die Schlosserei schmiedet aus 1 Eisen + 1 Holz. Steht eine Bäckerei still, fehlt fast immer eine Schaufel — oder das Brot."],
 		["Die Ketten", "Baum → Holzfäller (Axt) → Stämme → Schreiner (Säge) → Bauholz.\nKorn → Mühle → Mehl → Bäckerei → Brot. Minen hungern ohne Brot.\nEisenerz + Kohle → Schmelze → Eisen → Schlosserei → Werkzeuge."],
 		["Territorium & Militär", "Neue Gebäude brauchen Land, das zu deinem Territorium gehört. Ein Wachturm erweitert es, aber nur solange mindestens ein Ritter dort steht. Ritter rüstet die Schmiede aus (Schwert + Schild). Ziel: alle Rivalenburgen erobern."],
-		["Steuerung", "Antippen platziert und wählt · Ziehen verschiebt die Karte · Zwei Finger zoomen und drehen · 1/2/3 Werkzeug · Leertaste Tempo · Q/E drehen · Esc abbrechen"],
+		["Steuerung", "Antippen platziert und wählt · Ziehen verschiebt die Karte · Zwei Finger zoomen und drehen · 1/2/3 Werkzeug · Leertaste Tempo · Q/E drehen · W Handelswege · Esc abbrechen"],
 	]
 	for entry in texts:
 		column.add_child(Ui.label(str(entry[0]), 17, UiTheme.WARNING, true))

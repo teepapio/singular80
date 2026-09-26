@@ -89,6 +89,13 @@ func _run() -> void:
 	# added later is picked up here without editing this runner.
 	if _wants_class("res://tests/test_metro.gd", only):
 		TestMetro.new().run(kit)
+	if _wants_class("res://tests/test_siedler.gd", only):
+		# By path, like the suites below: `--script` mode does not refresh the
+		# global class cache, so a class added today is unknown until the next
+		# `godot:import`.
+		var siedler_suite: GDScript = load("res://tests/test_siedler.gd")
+		if siedler_suite != null:
+			siedler_suite.new().run(kit)
 	if _wants_class("res://tests/test_dame.gd", only):
 		# By path, like the suites below: `--script` mode does not refresh the
 		# global class cache, so a class added today would not resolve by name.

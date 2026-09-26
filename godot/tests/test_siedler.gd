@@ -1,0 +1,848 @@
+class_name TestSiedler
+extends RefCounted
+## Regressionstests für den Ratgeber von "Siedler 3D".
+##
+## Der Ratgeber beantwortet die Frage, die ein neues Aufbauspiel am meisten
+## kostet: *welches* Gebäude hungert an *welcher* Ware — und was dagegen zu
+## tun ist. Alles hier ist reine Logik aus `core/logic/siedler.gd`, also ohne
+## Szene prüfbar.
+
+var t: TestKit
+
+
+func run(kit: TestKit) -> void:
+	t = kit
+	_producer_lookup()
+	_stall_reason()
+	_ranking()
+	_agrees_with_tick()
+	_actions()
+	_route_measure()
+	_route_value()
+	_route_report()
+	_route_optimize()
+	t.close_suite()
+
+
+## Ein Spiel mit festem Seed, damit jede Erwartung stabil bleibt.
+func _siedler(seed_value: int = 21, size: int = 44) -> Siedler:
+	var siedler := Siedler.new()
+	siedler.setup(seed_value, size)
+	return siedler
+
+
+## Freies Feld einer Geländeart dicht an der Burg, -1 wenn keines frei ist.
+## Zwei Bedingungen filtern das Zufallspiel heraus: nur Felder im eigenen
+## Territorium und — für Bauplätze ohne Lagerstätte — nur ebener Grund, denn
+## `place_building` verweigert beides sonst und jeder Test hinge vom Gelände ab.
+## Lagerstätten (Holz, Stein, Kohle) brauchen keine ebene Fläche: `flat_only`
+## ist dort `false`.
+func _cell_near(siedler: Siedler, res: String, max_r: int = 4, flat_only: bool = true) -> int:
+	var castle_cell: int = siedler.buildings[siedler.castle_id]["cell"]
+	var cx: int = castle_cell % siedler.map_size
+	var cy: int = castle_cell / siedler.map_size
+	for r in range(1, max_r + 1):
+		for dy in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				if maxi(absi(dx), absi(dy)) != r:
+					continue
+				var x := cx + dx
+				var y := cy + dy
+				if not siedler.in_bounds(x, y):
+					continue
+				var index := siedler.cell_index(x, y)
+				var cell: Dictionary = siedler.cells[index]
+				if str(cell["res"]) != res:
+					continue
+				if int(cell["building"]) >= 0 or int(cell["flag"]) >= 0:
+					continue
+				if not siedler.in_territory(index):
+					continue
+				if flat_only and not siedler.is_flat(index):
+					continue
+				return index
+	return -1
+
+
+func _run(siedler: Siedler, seconds: float) -> void:
+	for i in int(seconds * 30.0):
+		siedler.tick(1.0 / 30.0)
+
+
+## Das erste Gebäude des Spielers dieser Art.
+func _find(siedler: Siedler, kind: String) -> Dictionary:
+	for building in siedler.buildings:
+		if str(building["owner"]) == "player" and str(building["kind"]) == kind:
+			return building
+	return {}
+
+
+## Setzt ein fertiges Gebäude, ohne Bauholz, Bauzeit und Kolonne abzuwarten —
+## der Ratgeber soll *unabhängig* von der Wartezeit antworten, sonst wäre
+## jeder Test von der Spieldauer abhängig.
+func _finish(siedler: Siedler, kind: String, cell: int) -> Dictionary:
+	if cell < 0 or not siedler.place_building(kind, cell):
+		return {}
+	var building := _find(siedler, kind)
+	if building.is_empty():
+		return {}
+	building["state"] = "done"
+	building["workers"] = int(Siedler.spec_of(kind)["workers"])
+	building["tool"] = str(Siedler.spec_of(kind)["tool"])
+	return building
+
+
+## Verbindet ein Gebäude mit der Burg.
+func _link(siedler: Siedler, building: Dictionary) -> void:
+	siedler.build_road(int(siedler.buildings[siedler.castle_id]["cell"]), int(building["cell"]))
+
+
+## Der erste Eintrag mit diesem Code, `{}` wenn keiner.
+func _with_code(list: Array[Dictionary], code: String) -> Dictionary:
+	for entry in list:
+		if str(entry["code"]) == code:
+			return entry
+	return {}
+
+
+## Wie oft ein Code in der Liste vorkommt.
+func _count_code(list: Array[Dictionary], code: String) -> int:
+	var total := 0
+	for entry in list:
+		if str(entry["code"]) == code:
+			total += 1
+	return total
+
+
+# --- Stammdaten -------------------------------------------------------------
+
+func _producer_lookup() -> void:
+	t.suite("Siedler — Ratgeber: Erzeuger")
+
+	# Die Frage "was baue ich?" hat für jede verbrauchte Ware eine Antwort.
+	t.equal(Siedler.producer_of("logs"), "woodcutter", "Stämme kommen aus dem Holzfäller")
+	t.equal(Siedler.producer_of("flour"), "windmill", "Mehl kommt aus der Windmühle")
+	t.equal(Siedler.producer_of("iron"), "smelter", "Eisen kommt aus der Schmelze")
+	t.equal(Siedler.producer_of("coal"), "coalMine", "Kohle kommt aus der Kohlemine")
+	# Alle neun Werkzeuge schmiedet die Schlosserei.
+	for tool in Siedler.TOOLS:
+		t.equal(Siedler.producer_of(tool), "toolsmith", "„%s“ kommt aus der Schlosserei" % tool)
+
+	# Jeder Rohstoff, den irgendein Gebäude verbraucht, hat einen Erzeuger —
+	# sonst müsste der Ratgeber raten.
+	for spec in Siedler.SPECS:
+		for good in (spec["inputs"] as Dictionary):
+			if int(spec["inputs"][good]) > 0:
+				t.check(Siedler.producer_of(good) != "",
+					"„%s“ für die „%s“ kann jemand herstellen" % [good, spec["name"]])
+	# Und nichts, was es nicht gibt: eine erfundene Ware hat keinen Erzeuger.
+	t.equal(Siedler.producer_of("unobtainium"), "", "Eine unbekannte Ware hat keinen Erzeuger")
+	t.suite_done()
+
+
+# --- Stillstandsgründe ------------------------------------------------------
+
+func _stall_reason() -> void:
+	t.suite("Siedler — Ratgeber: Stillstand")
+
+	# Eine frische Siedlung läuft: kein Grund, kein Rat.
+	var siedler := _siedler()
+	t.equal(siedler.bottlenecks().size(), 0, "Eine leere Siedlung hat keinen Engpass")
+	t.equal(siedler.top_bottleneck().size(), 0, "Und damit auch keinen obersten Rat")
+
+	# Ohne Straße steht ein fertiges Gebäude still — und der Ratgeber sagt
+	# *warum*, statt den Spieler selbst zählen zu lassen.
+	var sawmill := _finish(siedler, "sawmill", _cell_near(siedler, "grass", 4))
+	t.check(not sawmill.is_empty(), "Der Schreiner steht auf seinem Feld")
+	if not sawmill.is_empty():
+		t.equal(siedler.stall_of(sawmill), "notConnected", "Ohne Straße ist der Schreiner still")
+		var entry := _with_code(siedler.bottlenecks(), "notConnected")
+		t.equal(int(entry["severity"]), Siedler.SEV_WARNING, "Eine fehlende Straße wiegt schwer")
+		t.equal(int(entry["building"]), int(sawmill["id"]), "Der Rat nennt das Gebäude")
+		t.equal(int(entry["cell"]), int(sawmill["cell"]), "Und das Feld, das anzufunken ist")
+		t.equal(str(entry["fix"]), "road:%d" % int(sawmill["id"]), "Und er schlägt eine Straße vor")
+
+	# Mit Straße und Stämmen im Haus läuft er.
+	if not sawmill.is_empty():
+		_link(siedler, sawmill)
+		siedler.store["logs"] = 10
+		t.equal(siedler.stall_of(sawmill), "", "Angeschlossen und beliefert läuft der Schreiner")
+		t.equal(siedler.bottlenecks().size(), 0, "Damit ist der Engpass vom Tisch")
+
+	# Ohne Säge genau der Grund, den der Inspektor später anzeigt.
+	if not sawmill.is_empty():
+		siedler.store["saw"] = 0
+		sawmill["tool"] = ""
+		sawmill["workers"] = 0
+		t.equal(siedler.stall_of(sawmill), "noTool", "Ohne Säge fehlt das Werkzeug")
+		var entry := _with_code(siedler.bottlenecks(), "noTool")
+		t.equal(str(entry["good"]), "saw", "Der Rat nennt die Säge")
+		t.check(str(entry["title"]).contains("Säge"), "Und der Titel nennt sie mit")
+		t.equal(str(entry["fix"]), "build:toolsmith", "Ohne Schlosserei wird eine empfohlen")
+
+	# Die Kette weiter: eine Schlosserei macht aus dem Bauauftrag eine
+	# Schlosserei-Schlange — der Griff, den der Bildschirm anbietet.
+	if not sawmill.is_empty():
+		var forge := _finish(siedler, "toolsmith", _cell_near(siedler, "grass", 4))
+		if not forge.is_empty():
+			_link(siedler, forge)
+			siedler.store["iron"] = 10
+			siedler.store["logs"] = 10
+			t.equal(siedler.stall_of(forge), "", "Die Schlosserei selbst läuft")
+			var entry := _with_code(siedler.bottlenecks(), "noTool")
+			t.equal(str(entry["good"]), "saw", "Der Rat nennt weiter die Säge")
+			t.equal(str(entry["fix"]), "queueTool", "Mit Schlosserei: Werkzeug einplanen")
+			t.check(siedler.request_tool("saw"), "Der Griff nimmt das Werkzeug an")
+			t.check(siedler.tool_queue.has("saw"), "Und es steht in der Schlange")
+			# Die Schlosserei schmiedet von allein, was am lautesten fehlt — der
+			# Rat verschwindet also, sobald sie fertig ist.
+			_run(siedler, 20.0)
+			t.check(_with_code(siedler.bottlenecks(), "noTool").is_empty(),
+				"Die Schlosserei behebt den Engpass von selbst")
+
+	# Ein erschöpftes Flöz ist ein eigener Grund, kein Rohstoffmangel.
+	var pit := _siedler()
+	var mine := _finish(pit, "coalMine", _cell_near(pit, "coal", 6, false))
+	if not mine.is_empty():
+		_link(pit, mine)
+		pit.store["pickaxe"] = 4
+		pit.cells[int(mine["cell"])]["amount"] = 0
+		t.equal(pit.stall_of(mine), "noResource", "Eine leere Ader steht still")
+		var entry := _with_code(pit.bottlenecks(), "noResource")
+		t.check(str(entry["detail"]).contains("Kohle"), "Der Rat nennt die Lagerstätte")
+		t.equal(str(entry["fix"]), "build:coalMine", "Und schlägt eine neue Kohlemine vor")
+
+	# Kein freier Siedler ist der einzige Grund, der sich von selbst löst —
+	# deshalb der niedrigste Schweregrad.
+	var staff := _siedler()
+	var farm := _finish(staff, "farm", _cell_near(staff, "grass", 4))
+	if not farm.is_empty():
+		staff.build_road(int(staff.buildings[staff.castle_id]["cell"]), int(farm["cell"]))
+		staff.serfs.clear()
+		farm["workers"] = 0
+		t.equal(staff.stall_of(farm), "noWorker", "Ohne besetzten Platz steht der Betrieb still")
+		var entry := _with_code(staff.bottlenecks(), "noWorker")
+		t.equal(int(entry["severity"]), Siedler.SEV_HINT, "Fehlende Siedler sind ein sanfter Rat")
+		t.equal(str(entry["fix"]), "build:warehouse", "Der Rat schlägt ein Lager vor")
+
+	# Ein Bauplatz ist Absicht, kein Stillstand.
+	var site := _siedler()
+	var plot := _cell_near(site, "grass", 4)
+	if plot >= 0 and site.place_building("sawmill", plot):
+		var building := _find(site, "sawmill")
+		t.check(str(building["state"]) == "building" or str(building["state"]) == "levelling",
+			"Der Bauplatz ist noch nicht fertig")
+		t.equal(site.stall_of(building), "", "Ein Bauplatz zählt nicht als Stillstand")
+		t.equal(site.bottlenecks().size(), 0, "Und erzeugt keinen Rat")
+
+	# Ebenso ein bewusst angehaltenes Gebäude.
+	var halted := _siedler()
+	var mill := _finish(halted, "farm", _cell_near(halted, "grass", 4))
+	if not mill.is_empty():
+		_link(halted, mill)
+		mill["halted"] = true
+		t.equal(halted.stall_of(mill), "", "Anhalten ist eine Absicht des Spielers")
+		t.equal(halted.bottlenecks().size(), 0, "Und kein Rat")
+
+	# Rivale Betriebe gehören nicht in die Liste des Spielers.
+	var rival := _siedler()
+	for building in rival.buildings:
+		if str(building["owner"]) == "rival" and str(building["kind"]) != "castle":
+			building["workers"] = 0
+			building["tool"] = ""
+	t.check(_count_code(rival.bottlenecks(), "noWorker") == 0,
+		"Der Ratgeber urteilt nur über die eigene Siedlung")
+	t.suite_done()
+
+
+# --- Rangfolge --------------------------------------------------------------
+
+func _ranking() -> void:
+	t.suite("Siedler — Ratgeber: Rangfolge")
+
+	# Eine leere Vorratskammer schlägt alles andere.
+	var siedler := _siedler()
+	siedler.store["bread"] = 0
+	siedler.store["fish"] = 0
+	siedler.store["ham"] = 0
+	var mine := _finish(siedler, "ironMine", _cell_near(siedler, "iron", 5, false))
+	if not mine.is_empty():
+		_link(siedler, mine)
+		siedler.store["pickaxe"] = 2
+		# Ein zweiter, völlig unabhängiger Ärger: hier fehlt die Straße.
+		_finish(siedler, "bakery", _cell_near(siedler, "grass", 4))
+		var list := siedler.bottlenecks()
+		t.check(list.size() >= 2, "Zwei unabhängige Probleme ergeben zwei Ratschläge")
+		t.equal(str(list[0]["code"]), "noFood", "Der Hunger steht oben")
+		t.equal(int(list[0]["severity"]), Siedler.SEV_CRITICAL, "Und wiegt am schwersten")
+		t.check(str(list[0]["detail"]).contains("Nahrung"), "Der Rat nennt die leere Kammer")
+		t.equal(str(list[0]["fix"]), "book:food", "Und öffnet das Nahrungs-Baublatt")
+		# Ein hungernder Bergmann wird *nicht* zusätzlich als "Rohstoff fehlt"
+		# gemeldet — sonst besteht die halbe Liste aus dem selben Problem.
+		t.equal(_count_code(list, "noFood") + _count_code(list, "hungry"), 1,
+			"Hunger wird genau einmal genannt")
+		t.equal(_count_code(list, "notConnected"), 1, "Die fehlende Straße kommt trotzdem vor")
+
+	# Fünf Werkstätten ohne Kohle ergäben fünf Sätze — der Ratgeber bündelt.
+	var coal := _siedler()
+	coal.store["coal"] = 0
+	coal.store["ironOre"] = 0
+	var smelter := _finish(coal, "smelter", _cell_near(coal, "grass", 4))
+	if not smelter.is_empty():
+		_link(coal, smelter)
+		# Erz da, Kohle weg: genau der teuerste Irrtum eines Anfängers.
+		coal.store["ironOre"] = 4
+		var list := coal.bottlenecks()
+		var single := _with_code(list, "noInput")
+		t.equal(_count_code(list, "noInput"), 1, "Ein fehlender Rohstoff, ein Rat")
+		t.equal(str(single["good"]), "coal", "Und er nennt die Kohle, nicht das Erz")
+		t.check(str(single["detail"]).contains("Kohle"), "Der Text nennt sie ebenfalls")
+		t.equal(str(single["fix"]), "build:coalMine", "Der Rat schlägt die Kohlemine vor")
+
+	# Zwei *verschiedene* fehlende Rohstoffe ergeben zwei Ratschläge — die
+	# Bündelung gruppiert nach Ware, nicht nur nach Gebäude.
+	var two := _siedler()
+	two.store["logs"] = 0
+	two.store["coal"] = 0
+	two.store["ironOre"] = 0
+	var mill := _finish(two, "sawmill", _cell_near(two, "grass", 4))
+	var forge := _finish(two, "smelter", _cell_near(two, "grass", 4))
+	if not mill.is_empty() and not forge.is_empty():
+		_link(two, mill)
+		_link(two, forge)
+		var list := two.bottlenecks()
+		t.equal(_count_code(list, "noInput"), 2, "Zerstückt nach Ware: ein Rat je Rohstoff")
+		var goods: Array[String] = []
+		for entry in list:
+			if str(entry["code"]) == "noInput":
+				goods.append(str(entry["good"]))
+		t.check(goods.has("logs") and goods.has("coal"), "Beide Rohstoffe werden genannt")
+
+	# Die größte Lücke gewinnt: die Schmelze braucht Erz *und* Kohle, und der
+	# Rat nennt die Ware, von der am weitesten entfernt sie ist.
+	var gap := _siedler()
+	gap.store["coal"] = 0
+	gap.store["ironOre"] = 1
+	var oven := _finish(gap, "smelter", _cell_near(gap, "grass", 4))
+	if not oven.is_empty():
+		_link(gap, oven)
+		t.equal(str(_with_code(gap.bottlenecks(), "noInput")["good"]), "coal",
+			"Die größere Lücke wird zuerst genannt")
+
+	# Die Liste ist stabil und streng nach Schwere sortiert — sonst springt die
+	# Karte zwischen zwei gleich schlimmen Ursachen hin und her.
+	var twice := _siedler()
+	twice.store["logs"] = 0
+	var stall := _finish(twice, "sawmill", _cell_near(twice, "grass", 4))
+	if not stall.is_empty():
+		_link(twice, stall)
+		var first: Array[String] = []
+		for entry in twice.bottlenecks():
+			first.append(str(entry["code"]))
+		var second: Array[String] = []
+		for entry in twice.bottlenecks():
+			second.append(str(entry["code"]))
+		t.equal(second, first, "Zwei Aufrufe liefern dieselbe Reihenfolge")
+		var severity := Siedler.SEV_CRITICAL
+		for entry in twice.bottlenecks():
+			t.check(int(entry["severity"]) <= severity, "Schweregrade stehen absteigend")
+			severity = int(entry["severity"])
+
+	# Jeder Eintrag trägt dieselben Felder — der Bildschirm darf nie raten.
+	var sample := _siedler()
+	_finish(sample, "sawmill", _cell_near(sample, "grass", 4))
+	for entry in sample.bottlenecks():
+		for field in ["severity", "code", "title", "detail", "good", "building", "cell", "count"]:
+			t.check(entry.has(field), "Feld '%s' ist immer belegt" % field)
+		t.check(not str(entry["title"]).is_empty(), "Jeder Rat hat einen Titel")
+		t.check(not str(entry["detail"]).is_empty(), "Jeder Rat hat einen Erklärungssatz")
+
+	# Ein Stau an einer Fahne ist der Rat, der auf die Erfindung des Originals
+	# zeigt: die Strecke teilen, damit mehr Träger sie teilen.
+	var jam := _siedler()
+	var node_id := -1
+	for node in jam.nodes:
+		if bool(node["flag"]):
+			node_id = int(node["id"])
+			break
+	if node_id >= 0:
+		# Ein kleiner Rückstau ist Alltag und wird nicht gemeldet.
+		for i in Siedler.JAM_LIMIT:
+			(jam.nodes[node_id]["queue"] as Array).append("logs")
+		t.check(_with_code(jam.bottlenecks(), "congestion").is_empty(),
+			"Wenige wartende Waren sind kein Stau")
+		for i in 3:
+			(jam.nodes[node_id]["queue"] as Array).append("logs")
+		var entry := _with_code(jam.bottlenecks(), "congestion")
+		var flag_cell := int(jam.nodes[node_id]["cell"])
+		t.equal(int(entry["count"]), (jam.nodes[node_id]["queue"] as Array).size(),
+			"Der Stau nennt die Zahl der wartenden Waren")
+		t.equal(int(entry["cell"]), flag_cell, "Und die Fahne, die voll ist")
+		t.equal(str(entry["fix"]), "flag:%d" % flag_cell, "Der Rat schlägt dort eine Fahne vor")
+		t.equal(int(entry["severity"]), Siedler.SEV_HINT, "Ein Stau ist ein sanfter Rat")
+	# Der Bildschirm muss den Rat jederzeit ansteuern können.
+	if not stall.is_empty():
+		t.equal(int(_with_code(twice.bottlenecks(), "noInput")["cell"]), int(stall["cell"]),
+			"Der Rat zeigt auf das Feld, das betroffen ist")
+	t.suite_done()
+
+
+# --- Ratgeber und Takt sagen dasselbe ---------------------------------------
+
+func _agrees_with_tick() -> void:
+	t.suite("Siedler — Ratgeber: Taktgleichheit")
+
+	# Das eine Versprechen des Ratgebers: Er widerspricht nie dem Zustand, den
+	# der Bildschirm zeichnet. Also nach einem Lauf beides vergleichen.
+	var siedler := _siedler(21, 44)
+	siedler.store["planks"] = 200
+	siedler.store["stone"] = 200
+	siedler.store["coal"] = 0
+	siedler.store["ironOre"] = 0
+	var wood := _cell_near(siedler, "forest", 4, false)
+	var rock := _cell_near(siedler, "stone", 4, false)
+	var mill := _cell_near(siedler, "grass", 4)
+	if wood >= 0:
+		_finish(siedler, "woodcutter", wood)
+	if rock >= 0:
+		_finish(siedler, "quarry", rock)
+	if mill >= 0:
+		_finish(siedler, "sawmill", mill)
+	# Eine Schmelze ohne Kohle und ohne Erz: der Dauerstillstand, gegen den der
+	# Ratgeber die ganze Zeit arbeiten muss. Das Feld *jetzt* suchen — vorher
+	# hätte die Schmelze dasselbe genommen wie der Schreiner.
+	_finish(siedler, "smelter", _cell_near(siedler, "grass", 4))
+	for building in siedler.buildings:
+		if str(building["owner"]) == "player" and str(building["kind"]) != "castle":
+			_link(siedler, building)
+	siedler.store["axe"] = 2
+	siedler.store["pickaxe"] = 2
+	siedler.store["saw"] = 0
+	_run(siedler, 40.0)
+
+	# Der Takt darf durch die Umstellung auf `stall_of` nichts verloren haben.
+	t.check(siedler.produced_total > 0, "Die Siedlung produziert weiterhin")
+	t.check(siedler.delivered_total > 0, "Und die Ware kommt über die Straßen an")
+
+	var mismatches := 0
+	var stalls := 0
+	for building in siedler.buildings:
+		if str(building["owner"]) != "player":
+			continue
+		var reason := siedler.stall_of(building)
+		if reason == "":
+			continue
+		stalls += 1
+		if str(building["status"]) != reason:
+			mismatches += 1
+	t.check(stalls > 0, "Der Testaufbau enthält mindestens einen Stillstand")
+	t.equal(mismatches, 0, "Jeder Stillstand trägt denselben Grund im status")
+
+	# Und die Umgekehrte Richtung: der Takt darf keinen Grund melden, den der
+	# Ratgeber nicht kennt.
+	var known := ["noTool", "noWorker", "hungry", "noResource", "notConnected", "noInput"]
+	for building in siedler.buildings:
+		if str(building["owner"]) != "player" or str(building["state"]) != "done":
+			continue
+		t.check(known.has(str(building["status"])) or str(building["status"]) == "ok"
+			or str(building["status"]) == "halted",
+			"Status '%s' ist eine bekannte Ursache" % str(building["status"]))
+	t.suite_done()
+
+
+# --- Handlungsvorschläge ----------------------------------------------------
+
+func _actions() -> void:
+	t.suite("Siedler — Ratgeber: Handlung")
+
+	# Jeder Rat mit einem Vorschlag nennt eine Maschine, die es wirklich gibt —
+	# und die fehlende Ware, die dieser Griff beheben soll.
+	var siedler := _siedler()
+	siedler.store["coal"] = 0
+	siedler.store["ironOre"] = 0
+	var smelter := _finish(siedler, "smelter", _cell_near(siedler, "grass", 4))
+	if not smelter.is_empty():
+		_link(siedler, smelter)
+		var entry := _with_code(siedler.bottlenecks(), "noInput")
+		var fix := str(entry["fix"])
+		t.check(fix.begins_with("build:"), "Der Vorschlag ist ein Bauauftrag")
+		var kind := fix.substr(6)
+		t.check(kind in Siedler.KINDS, "„%s“ ist ein Gebäude dieses Spiels" % kind)
+		t.equal(Siedler.producer_of(str(entry["good"])), kind,
+			"Der Vorschlag erzeugt genau die fehlende Ware")
+
+	# Kann die Burg den Bauauftrag nicht bezahlen, sagt der Ratgeber das von
+	# selbst — sonst tippt der Spieler drauf und hört nur "Zu wenig Bauholz".
+	var broke := _siedler()
+	broke.store["coal"] = 0
+	broke.store["ironOre"] = 0
+	var oven := _finish(broke, "smelter", _cell_near(broke, "grass", 4))
+	if not oven.is_empty():
+		_link(broke, oven)
+		var entry := _with_code(broke.bottlenecks(), "noInput")
+		t.equal(str(entry["fix"]), "build:coalMine", "Der Rat schlägt die Kohlemine vor")
+		t.check(not str(entry["detail"]).contains("Dafür fehlt der Burg"),
+			"Die Burg kann den Bauauftrag noch bezahlen")
+		# Erst jetzt das Bauholz wegnehmen — vorher könnte die Burg ja noch bauen.
+		broke.store["planks"] = 0
+		broke.store["stone"] = 0
+		t.check(str(_with_code(broke.bottlenecks(), "noInput")["detail"]).contains("Dafür fehlt der Burg"),
+			"Nimmt der Ratgeber auch beim Bauauftrag das fehlende Bauholz ernst")
+		# Und die Burg, die nichts mehr bezahlen kann, ist selbst der Grund,
+		# warum dieser Rat nicht umsetzbar ist.
+		var wall := _with_code(broke.bottlenecks(), "noBuild")
+		t.equal(int(wall["severity"]), Siedler.SEV_CRITICAL, "Die tote Burg wiegt am schwersten")
+		t.equal(str(broke.top_bottleneck()["code"]), "noBuild", "Sie steht oben")
+		t.check(str(wall["detail"]).contains("Bauholz"), "Und nennt den leeren Bestand")
+
+	# Wer Bauparzellen hat, kann nichts mehr bauen — aber eine glückliche,
+	# ärmere Siedlung hat trotzdem keinen Engpass.
+	var poor := _siedler()
+	var dead := _finish(poor, "sawmill", _cell_near(poor, "grass", 4))
+	if not dead.is_empty():
+		_link(poor, dead)
+		t.equal(poor.bottlenecks().size(), 0, "Eine ärmere, laufende Siedlung hat keinen Engpass")
+		# Jetzt das Bauholz wegnehmen, das der Schreiner eigentlich liefert.
+		poor.store["planks"] = 0
+		poor.store["stone"] = 0
+		poor.store["logs"] = 0
+		var top := poor.top_bottleneck()
+		t.equal(str(top["code"]), "noBuild",
+			"Sobald etwas klemmt, ist die tote Burg der erste Rat")
+		t.check(str(top["detail"]).contains("Stämme"),
+			"Der Rat verweist auf den echten Engpass dahinter")
+
+	# Die Schlosserei-Schlange nimmt höchstens sechs Wünsche an — der Ratgeber
+	# darf den Spieler nicht in eine Sackgase führen.
+	var queue := _siedler()
+	for i in 12:
+		queue.request_tool("axe")
+	t.equal(queue.tool_queue.size(), 6, "Die Schlange ist begrenzt")
+	t.check(not queue.request_tool("axe"), "Und meldet, wenn sie voll ist")
+	t.suite_done()
+
+
+# --- Handelsweg optimieren ---------------------------------------------------
+#
+# Der Vorschlag „Handelsweg optimieren" baut auf einer Zahl auf, die es vorher
+# nicht gab: welche Ware über welche Straße läuft. Diese vier Suiten prüfen die
+# Kette von der Messung über den Bericht bis zum Griff — und vor allem, dass der
+# Griff dem Spieler nichts wegnimmt.
+
+## Eine Siedlung, in der wirklich Ware über die Straßen fährt: Holzfäller,
+## Steinbruch und Schreiner an der Burg, alle drei angeschlossen, dazu die
+## Werkzeuge. Ohne Verkehr wäre jede Handelsweg-Zahl null und die Tests nichts.
+##
+## Die Felder liegen bewusst *nicht* direkt am Burgtor: ein Holzfäller neben der
+## Burg erzeugt nur einen Stummel, und über einen Stummel lässt sich kein
+## Handelsweg lernen.
+func _trading_siedler(seed_value: int = 21, size: int = 44) -> Siedler:
+	var siedler := _siedler(seed_value, size)
+	siedler.store["planks"] = 200
+	siedler.store["stone"] = 200
+	siedler.store["logs"] = 0
+	var wood := _cell_far(siedler, "forest", 3, 9, false)
+	var rock := _cell_far(siedler, "stone", 3, 9, false)
+	var mill := _cell_far(siedler, "grass", 3, 7, true)
+	if wood >= 0:
+		_finish(siedler, "woodcutter", wood)
+	if rock >= 0:
+		_finish(siedler, "quarry", rock)
+	if mill >= 0:
+		_finish(siedler, "sawmill", mill)
+	for building in siedler.buildings:
+		if str(building["owner"]) == "player" and str(building["kind"]) != "castle":
+			_link(siedler, building)
+	siedler.store["axe"] = 2
+	siedler.store["pickaxe"] = 2
+	return siedler
+
+
+## Wie `_cell_near`, aber mit Mindestabstand zur Burg: die Handelsweg-Suiten
+## brauchen echte Straßen und nicht nur den Stummel zum Nachbarhaus.
+func _cell_far(siedler: Siedler, res: String, min_r: int, max_r: int, flat_only: bool) -> int:
+	var castle_cell: int = siedler.buildings[siedler.castle_id]["cell"]
+	var cx: int = castle_cell % siedler.map_size
+	var cy: int = castle_cell / siedler.map_size
+	for r in range(mini(max_r + 1, min_r), max_r + 1):
+		for dy in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				if maxi(absi(dx), absi(dy)) != r:
+					continue
+				var x := cx + dx
+				var y := cy + dy
+				if not siedler.in_bounds(x, y):
+					continue
+				var index := siedler.cell_index(x, y)
+				var cell: Dictionary = siedler.cells[index]
+				if str(cell["res"]) != res:
+					continue
+				if int(cell["building"]) >= 0 or int(cell["flag"]) >= 0:
+					continue
+				if not siedler.in_territory(index):
+					continue
+				if flat_only and not siedler.is_flat(index):
+					continue
+				return index
+	return -1
+
+
+## Die erste Strecke des Berichts, die überhaupt etwas trägt.
+func _busiest(siedler: Siedler) -> Dictionary:
+	var routes := siedler.trade_report()
+	return routes[0] if not routes.is_empty() else {}
+
+
+func _route_measure() -> void:
+	t.suite("Siedler — Handelswege: Messung")
+
+	# Ohne Verkehr ist die Messung null — und genau das ist der Ausgangszustand,
+	# den der Bericht dem Spieler auch zeigen muss.
+	var fresh := _siedler()
+	t.equal(fresh.measured_carriers(), 0, "Eine frische Siedlung hat noch keinen Verkehr gemessen")
+	t.equal(fresh.trade_report().size(), 0, "Und deshalb noch keinen Handelsweg im Bericht")
+
+	var siedler := _trading_siedler()
+	_run(siedler, 40.0)
+
+	t.check(siedler.measured_carriers() > 0, "Nach einem Lauf ist Verkehr gemessen")
+	var routes := siedler.trade_report()
+	t.check(routes.size() > 0, "Der Bericht nennt mindestens eine Strecke")
+	if routes.is_empty():
+		t.fail("Der Testaufbau hat keinen Verkehr auf die Straßen gebracht")
+		t.suite_done()
+		return
+	t.equal(siedler.measured_carriers(), _sum_traffic(siedler),
+		"Die gemeldete Summe stimmt mit den Zählern überein")
+
+	# Jeder Eintrag trägt dieselben Felder — sonst müsste der Bildschirm raten.
+	var fields := ["edge", "a", "b", "length", "carriers", "top", "top_count",
+		"total", "waiting", "jammed", "priority", "value", "gain", "cell", "throughput"]
+	var complete := true
+	for entry in routes:
+		for field in fields:
+			complete = complete and entry.has(field)
+	t.check(complete, "Jeder Eintrag trägt dieselben Felder")
+	var first: Dictionary = routes[0]
+	t.check(str(first["top"]) in Siedler.GOODS, "Die Hauptware ist eine echte Ware")
+	t.check(int(first["top_count"]) > 0, "Und sie wurde auch gezählt")
+	t.check(int(first["total"]) >= int(first["top_count"]), "Die Summe ist mindestens so groß")
+
+	# Der Bericht ist nach Verkehr sortiert: die stärkste Strecke steht oben,
+	# weil sie die ist, an der sich etwas ändern lässt.
+	var sorted := true
+	for i in range(1, routes.size()):
+		sorted = sorted and int(routes[i - 1]["total"]) >= int(routes[i]["total"])
+	t.check(sorted, "Der Bericht ist nach Verkehr sortiert")
+
+	# Ein Straßenbau verschiebt die Kanten-Ids. Die alten Zahlen wären dann
+	# falsch, also beginnt die Messung neu — das ist wichtig, weil der Spieler
+	# genau dann optimiert, wenn er gerade gebaut hat.
+	t.check(siedler.measured_carriers() > 0, "Vor dem Straßenbau ist gemessen worden")
+	var castle_cell: int = siedler.buildings[siedler.castle_id]["cell"]
+	var built := false
+	for r in range(4, 9):
+		var target := _nearest_grass(siedler, castle_cell, r)
+		if target < 0:
+			continue
+		if bool(siedler.build_road(castle_cell, target, 3)["ok"]):
+			built = true
+			break
+	if built:
+		t.equal(siedler.measured_carriers(), 0, "Nach dem Straßenbau beginnt die Messung von vorn")
+	else:
+		t.fail("Der Testaufbau konnte keine zweite Straße bauen")
+	t.suite_done()
+
+
+## Die Summe aller Zähler — der Test rechnet sie nach, statt dem Spiel zu glauben.
+func _sum_traffic(siedler: Siedler) -> int:
+	var total := 0
+	for i in siedler.edges.size():
+		total += int(siedler.edge_traffic(i)["total"])
+	return total
+
+
+## Ein freies Grasfeld im Umkreis von `near`, damit der Test einen zweiten
+## Straßenzug bauen kann, ohne vom Zufall abhängig zu sein.
+func _nearest_grass(siedler: Siedler, near: int, max_r: int = 6) -> int:
+	var cx: int = near % siedler.map_size
+	var cy: int = near / siedler.map_size
+	for r in range(2, max_r + 1):
+		for dy in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				if maxi(absi(dx), absi(dy)) != r:
+					continue
+				if not siedler.in_bounds(cx + dx, cy + dy):
+					continue
+				var index := siedler.cell_index(cx + dx, cy + dy)
+				if str(siedler.cells[index]["res"]) != "grass":
+					continue
+				if int(siedler.cells[index]["building"]) >= 0 or int(siedler.cells[index]["flag"]) >= 0:
+					continue
+				return index
+	return -1
+
+
+func _route_value() -> void:
+	t.suite("Siedler — Handelswege: Ware und Wert")
+
+	# Nahrung steht über allem: ein Minenhaus ohne Essen produziert für niemanden.
+	var siedler := _siedler()
+	t.check(siedler.trade_value("bread") >= 4, "Brot ist für die Siedlung wertvoll")
+	t.equal(siedler.trade_value(""), 0, "Eine unbekannte Ware hat keinen Wert")
+	t.equal(siedler.trade_value("gibtsnicht"), 0, "Und eine erfundene auch nicht")
+
+	# Der Wert folgt dem *gemessenen* Hunger, nicht dem Katalog: ein Gebäude,
+	# das seine Bretter schon da hat, ist kein Wartender.
+	var mill_cell := _cell_near(siedler, "grass", 4)
+	var mill := _finish(siedler, "sawmill", mill_cell)
+	if not mill.is_empty():
+		_link(siedler, mill)
+		t.equal(siedler.trade_value("logs"), 5, "Der Schreiner ohne Bauholz wartet auf Stämme")
+		# Und die Priorität folgt der Leiter, nicht dem Zufall.
+		t.equal(siedler.priority_for("logs"), 6, "Wartende Ware bekommt Priorität 6")
+		mill["input"]["logs"] = 8
+		t.equal(siedler.trade_value("logs"), 3, "Mit genug Stämmen wartet er nicht mehr")
+		t.equal(siedler.priority_for("logs"), 4, "Und die Priorität sinkt mit auf Stufe 4")
+	t.equal(siedler.priority_for("bread"), 5, "Nahrung bekommt die Stufe darüber")
+	t.equal(siedler.priority_for("nichts"), 2, "Füllgut die unterste Stufe")
+
+	# Die Leiter ist streng fallend: was wertvoller ist, kann nie eine niedrigere
+	# Priorität bekommen als das Wertlose. Geprüft wird das an der Zuordnung
+	# selbst, nicht an zwei Beispielen.
+	var steps: Array[int] = [2, 3, 4, 5, 6]
+	var monotone := true
+	for i in range(1, steps.size()):
+		monotone = monotone and steps[i] > steps[i - 1]
+	t.check(monotone, "Die Prioritätsstufen sind streng fallend")
+	var mapped := [siedler.priority_for(""), siedler.priority_for("nichts")]
+	t.check(int(mapped[0]) == int(mapped[1]), "Unbekannte Ware landet auf der untersten Stufe")
+	t.suite_done()
+
+
+func _route_report() -> void:
+	t.suite("Siedler — Handelswege: Bericht")
+
+	var siedler := _trading_siedler()
+	_run(siedler, 40.0)
+	var routes := siedler.trade_report()
+	t.check(routes.size() > 0, "Der Bericht hat etwas zu sagen")
+	if routes.is_empty():
+		t.suite_done()
+		return
+
+	# Der Rat nennt den nächsten Griff, nicht den Zustand. Ohne Stau und mit
+	# passender Priorität bleibt nur der ruhige Satz.
+	for entry in routes:
+		var advice := siedler.route_advice(entry)
+		t.check(not advice.is_empty(), "Jede Strecke bekommt einen Satz")
+		t.check(advice.contains(Siedler.good_name(str(entry["top"]))) \
+			or advice.contains("Stau") or advice.contains("Läuft"),
+			"Der Satz redet über die Ware dieser Strecke")
+		break
+
+	# Ein Stau schlägt alles: er ist der einzige Grund, den der Optimierer
+	# tatsächlich selbst behebt.
+	var busy := _busiest(siedler)
+	busy["waiting"] = Siedler.ROUTE_JAM
+	busy["jammed"] = true
+	busy["cell"] = 3
+	busy["gain"] = 4
+	t.check(siedler.route_advice(busy).begins_with("Stau"),
+		"Bei Stau nennt der Bericht zuerst den Stau")
+	busy["jammed"] = false
+	busy["priority"] = 1
+	busy["top"] = "logs"
+	t.check(siedler.route_advice(busy).contains("zu niedrig"),
+		"Ohne Stau nennt er die zu niedrige Priorität")
+	busy["priority"] = 6
+	t.check(siedler.route_advice(busy).begins_with("Läuft"),
+		"Passt die Priorität, gibt es nichts zu tun")
+
+	# Der Bericht lügt nicht: er nennt eine Strecke, die es gibt, und eine
+	# Kanten-Id, die der Spieler auch benutzen kann.
+	var first: Dictionary = routes[0]
+	t.check(int(first["edge"]) >= 0 and int(first["edge"]) < siedler.edges.size(),
+		"Die Kanten-Id zeigt auf eine echte Straße")
+	t.equal(siedler.edge_priority(int(first["edge"])), int(first["priority"]),
+		"Und die Priorität ist die, die dort wirklich steht")
+	t.suite_done()
+
+
+func _route_optimize() -> void:
+	t.suite("Siedler — Handelswege: Optimierung")
+
+	# Ohne genug Messung rührt der Optimierer die Prioritäten nicht an. Sonst
+	# hieße die erste halbe Minute Siedlung „Priorität 6" auf allem, und die
+	# Zahl wäre geraten.
+	var blind := _trading_siedler()
+	_run(blind, 3.0)
+	if blind.measured_carriers() < Siedler.MEASURE_MIN:
+		var busy := _busiest(blind)
+		if not busy.is_empty():
+			blind.set_road_priority(int(busy["edge"]), 1)
+			blind.optimize_trade_routes()
+			t.equal(blind.edge_priority(int(busy["edge"])), 1,
+				"Ohne genug Messung bleibt die Priorität, wie der Spieler sie setzte")
+
+	# Jetzt die volle Optimierung an einem Verkehrsnetz.
+	var siedler := _trading_siedler()
+	_run(siedler, 40.0)
+	t.check(siedler.measured_carriers() >= Siedler.MEASURE_MIN, "Es ist genug Verkehr gemessen")
+	var flags_before := 0
+	for node in siedler.nodes:
+		if bool(node["flag"]):
+			flags_before += 1
+
+	var first := siedler.optimize_trade_routes()
+	var flags_after := 0
+	for node in siedler.nodes:
+		if bool(node["flag"]):
+			flags_after += 1
+	t.check(first.size() > 0, "Der Optimierer meldet, was er getan hat")
+	t.check(flags_after - flags_before <= Siedler.MAX_SPLITS,
+		"Er setzt höchstens %d Fahnen je Durchgang" % Siedler.MAX_SPLITS)
+	t.check(not siedler.notice.is_empty(), "Und sagt es auch dem Spiel")
+	t.equal(siedler.trade_report().size() >= 0, true,
+		"Der Bericht lässt sich danach noch lesen")
+
+	# Prioritäten steigen nur. Das ist die Zusage, die den Griff gefahrlos macht.
+	var raised := 0
+	for entry in siedler.trade_report():
+		var want := siedler.priority_for(str(entry["top"]))
+		if int(entry["priority"]) > want:
+			raised += 1
+	t.equal(raised, 0, "Keine Straße steht am Ende über ihrer Stufe")
+
+	# Und der zweite Durchgang ist ein No-op: genau das macht den Griff
+	# wiederholbar, ohne dass der Spieler aufpassen muss.
+	var edges_before := siedler.edges.size()
+	var nodes_before := siedler.nodes.size()
+	var second := siedler.optimize_trade_routes()
+	t.equal(siedler.edges.size(), edges_before, "Der zweite Durchgang legt keine Straße an")
+	t.equal(siedler.nodes.size(), nodes_before, "Und keine Fahne")
+	t.check(second.size() > 0, "Er sagt trotzdem, was er gesehen hat")
+	var quiet := true
+	for line in second:
+		quiet = quiet and (line.contains("Nichts zu tun") or line.contains("bleiben"))
+	t.check(quiet, "Und zwar: nichts zu tun")
+
+	# Der Stau ist die einzige Bedingung für eine Extra-Fahne. Ohne Stau
+	# verändert der Optimierer die Strecke nicht — sonst wäre er ein
+	# Fahnenautomat und keine Optimierung.
+	var calm := _trading_siedler()
+	_run(calm, 40.0)
+	for node in calm.nodes:
+		(node["queue"] as Array).clear()
+	var calm_flags := 0
+	for node in calm.nodes:
+		if bool(node["flag"]):
+			calm_flags += 1
+	calm.optimize_trade_routes()
+	var calm_after := 0
+	for node in calm.nodes:
+		if bool(node["flag"]):
+			calm_after += 1
+	t.equal(calm_after, calm_flags, "Ohne Stau setzt der Optimierer keine Fahne")
+	t.suite_done()
