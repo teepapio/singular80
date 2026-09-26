@@ -137,7 +137,10 @@ const SCOPE_SUITES = {
   meshes: ['Asset-Registry', 'Mesh-Galerie', 'Mesh — Detailstufen', 'Mesh-Galerie — Anordnung',
     'Mesh-Galerie — Merkliste'],
   lobby: ['Lobby-Geometrie', 'Vorschlagsdialog'],
-  core: ['Mechaniken', 'Inventar', 'Vorschlag — Herkunft'],
+  core: ['Mechaniken', 'Inventar', 'Vorschlag — Herkunft',
+    'Vorschlags-Warteschlange', 'Vorschlags-Warteschlange — Ablage',
+    'Vorschlags-Warteschlange — Backoff', 'Vorschlags-Warteschlange — Obergrenze',
+    'Vorschlags-Warteschlange — Zustellung'],
   content: ['Content', 'Content-Integrität', 'Content-Synchronisation'],
   dashboard: [],
   tests: [],
@@ -267,11 +270,19 @@ const staticScopes = {
       'godot/src/core/logic/player_stats.gd',
       'godot/src/core/logic/item_inventory.gd',
       'godot/src/core/logic/suggestion_context.gd',
+      // Die Logikmodule bringen ihre .uid-Datei mit, sonst bliebe ein neues
+      // Skript ohne die Datei liegen, die das Repo sonst überall mitführt.
+      'godot/src/core/logic/suggestion_queue.gd',
+      'godot/src/core/logic/suggestion_queue.gd.uid',
       'godot/src/core/ui/**',
       'godot/src/core/autoload/input_setup.gd',
       'godot/src/core/autoload/api_client.gd',
       'godot/src/core/autoload/content_store.gd',
       'godot/src/core/autoload/audio_service.gd',
+      // Eigene Testdatei, wie bei den Spielen: so schreibt niemand in
+      // `test_logic.gd` hinein.
+      'godot/tests/test_core.gd',
+      'godot/tests/test_core.gd.uid',
     ],
     shared: ['godot/src/core/autoload/game_state.gd', 'godot/src/core/logic/game_registry.gd'],
   },
