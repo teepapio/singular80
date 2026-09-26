@@ -58,7 +58,9 @@ const GAME_LOGIC = {
   dame: ['godot/src/core/logic/checkers.gd'],
   '2048': ['godot/src/core/logic/twenty48.gd'],
   crystal3d: ['godot/src/core/logic/crystal_tower.gd'],
-  'merge3d-christmas': ['godot/src/core/logic/merge3d.gd'],
+  // Die Logikdatei hängt am Basis-Scope: `buildScopes` liest `GAME_LOGIC[base]`,
+  // ein Eintrag unter einem Varianten-Key würde nie gelesen.
+  merge3d: ['godot/src/core/logic/merge3d.gd'],
   dragonrpg: ['godot/src/core/logic/dragon_rpg.gd'],
   dragonflight: ['godot/src/core/logic/dragon_flight.gd'],
   horserunner: ['godot/src/core/logic/horse_runner.gd'],
@@ -299,10 +301,15 @@ export function buildScopes() {
     // regression tests go, so two games never append to the same suite file.
     // The trailing `*` also claims Godot's `test_<id>.gd.uid`, which is
     // committed like every other script and would otherwise be unownable.
+    //
+    // Each logic module brings its `.uid` sibling: the repo versions 61 of them
+    // under `godot/src/`, so a new logic file that leaves its `.uid` untracked
+    // is an inconsistency, not a detail.
+    const logic = GAME_LOGIC[base] ?? GAME_LOGIC[dir] ?? [];
     const own = [
       `godot/src/game/${dir}/**`,
       `godot/tests/test_${base}.gd*`,
-      ...(GAME_LOGIC[base] ?? GAME_LOGIC[dir] ?? []),
+      ...logic.flatMap((file) => [file, `${file}.uid`]),
     ];
     scopes.set(base, {
       agent: 'game',
