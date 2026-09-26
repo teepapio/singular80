@@ -94,11 +94,13 @@ const SCOPE_SUITES = {
     'Tetris — Vorschaukette', 'Tetris — Brettgefahr'],
   poker: ['Karten & Texas Hold\'em', 'Kartenspiele — Eingabe',
     'Poker — Persönlichkeiten', 'Poker — Tisches lesen', 'Poker — Typen-Bilanz'],
-  freecell: ['Kartenspiele — Eingabe'],
+  freecell: ['Kartenspiele — Eingabe', 'FreeCell — Folgen', 'FreeCell — Supermove-Kapazität',
+    'FreeCell — Sicherheit', 'FreeCell — Tipptext', 'FreeCell — Tippvorschlag',
+    'FreeCell — Tipp ist immer erlaubt', 'FreeCell — Sackgasse'],
   dame: ['Dame — Regeln', 'Dame — Schlagzug-Analyse', 'Dame — Ziehbare Steine', 'Dame — Tipp am Brett'],
   crystal3d: ['Crystal Tower', 'Crystal Tower — Flusskette', 'Crystal Tower — Flusspunkte',
     'Crystal Tower — Screen'],
-  merge3d: ['Merge 3D'],
+  merge3d: ['Merge 3D', 'Merge 3D — Tipp', 'Merge 3D — Tipptext und Brettdruck', 'Merge 3D — Tipp am Screen'],
   horserunner: ['Pferde-Parcours', 'Pferde-Parcours — Beinahe-Treffer', 'Pferde-Parcours — Kette'],
   dragonrpg: ['Drachen-RPG', 'Drachen-RPG — Loot-Rarität',
     'Drachen-RPG — Fluchttuning', 'Drachen-RPG — Fluchtrichtung', 'Drachen-RPG — Drachenflucht'],
@@ -115,14 +117,17 @@ const SCOPE_SUITES = {
     'Metropol 3D — Bedarfsprognose', 'Metropol 3D — Fehlende Linien',
     'Metropol 3D — Berufsverkehrs-Prognose', 'Metropol 3D — Anschluss-Marker',
   ],
-  '2048': ['2048'],
+  '2048': ['2048', '2048 — Vorschau', '2048 — Vorschau zählt mit', '2048 — Vorschau und Endgame', '2048 — Screen'],
   candy3d: [
     'Candy Crush — Reihen', 'Candy Crush — Züge', 'Candy Crush — Spezialbonbons',
     'Candy Crush — Blöcke', 'Candy Crush — Schwerkraft', 'Candy Crush — Level-Generator',
     'Candy Crush — Level', 'Candy Crush — Tageslevel', 'Candy Crush — Belohnungen',
     'Candy Crush — Undo', 'Candy Crush — Spielablauf',
   ],
-  siedler: ['Siedler — Insel', 'Siedler — Produktionsketten', 'Siedler — Fahnen und Straßen', 'Siedler — Wirtschaft'],
+  siedler: ['Siedler — Insel', 'Siedler — Produktionsketten', 'Siedler — Fahnen und Straßen',
+    'Siedler — Wirtschaft', 'Siedler — Ratgeber: Erzeuger', 'Siedler — Ratgeber: Stillstand',
+    'Siedler — Ratgeber: Rangfolge', 'Siedler — Ratgeber: Taktgleichheit',
+    'Siedler — Ratgeber: Handlung'],
   meshes: ['Asset-Registry', 'Mesh-Galerie', 'Mesh — Detailstufen', 'Mesh-Galerie — Anordnung',
     'Mesh-Galerie — Merkliste'],
   lobby: ['Lobby-Geometrie', 'Vorschlagsdialog'],
@@ -140,7 +145,9 @@ const SCOPE_SCREENS = {
   freecell: ['freecell'],
   dame: ['dame'],
   crystal3d: ['crystal3d', 'crystal3d_christmas', 'crystal3d_halloween'],
-  'merge3d-christmas': ['merge3d_christmas', 'merge3d_halloween'],
+  // Die Screen-Liste hängt am Basis-Scope: die Varianten erben sie, eine Liste
+  // unter einem Varianten-Key würde nie gelesen.
+  merge3d: ['merge3d_christmas', 'merge3d_halloween'],
   horserunner: ['horserunner'],
   dragonrpg: ['dragonrpg'],
   dragonflight: ['dragonflight', 'dragonflight_run', 'dragonflight_hatchery'],
@@ -193,6 +200,27 @@ export function gameIds() {
 }
 
 const staticScopes = {
+  tooling: {
+    agent: 'merge',
+    label: 'Werkzeuge & Manifest',
+    // Every game agent has to touch `scopes.mjs` to register its new suites,
+    // and without an owner the guard reported that to every one of them as a
+    // scope violation — a manifest that flags the step it requires is worse
+    // than no manifest.
+    //
+    // Named rather than `scripts/**`: a broad glob would overlap the meshes
+    // scope, which owns `scripts/blender/**`. The manifest has no way to
+    // subtract, so the entries are spelled out.
+    own: [
+      'scripts/scopes.mjs',
+      'scripts/test-game.mjs',
+      'scripts/sync-content.mjs',
+      'scripts/install-guard.sh',
+      'scripts/install-android-template.mjs',
+      'scripts/smoke.ts',
+    ],
+    shared: ['package.json'],
+  },
   meshes: {
     agent: 'meshes',
     label: 'Meshes & LOD-Stufen',
