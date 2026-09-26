@@ -9,6 +9,8 @@ import { ContentStore } from './content';
 import { Store } from './db';
 import * as discord from './discord';
 import { findOpencodeBinary, Runner } from './runner';
+import { CheckRunner } from './checkrunner';
+import { CHECKS_BY_ID, CHECK_SPECS } from './checks/catalogue';
 import { scopeForSuggestion, scopeManifest } from './scopes';
 import { normalizeTasks, splitIntoTasks } from './split';
 
@@ -69,6 +71,22 @@ export function createApp(options: AppOptions): FastifyInstance {
           },
         },
       });
+
+  /**
+   * The check queue exists whether or not the suggestion runner is enabled: the
+   * two answer different questions, and an operator who turned the agent off
+   * still wants to know which buttons are dead. Static checks read the
+   * repository, so they need neither `opencode` nor a device.
+   */
+  const checkRunner = new CheckRunner({
+    projectRoot: options.projectRoot,
+    store,
+    callbacks: {
+      onStarted: (check) => emit({ type: 'check:started', check }),
+      onFinished: (check) => emit({ type: 'check:finished', check }),
+      onQueueState: (state) => emit({ type: 'check:queue', state }),
+    },
+  });
 
   app.addHook('onSend', async (_req, reply, payload) => {
     reply.header('Access-Control-Allow-Origin', '*');
@@ -338,6 +356,78 @@ export function createApp(options: AppOptions): FastifyInstance {
     }
     const paused = runner.setPaused(body.paused);
     return { ...runner.queueState(), paused };
+  });
+
+  // --- deployed-version check queue -----------------------------------------
+  //
+  // A second queue next to the suggestion runner. Separate routes, separate
+  // pause, separate table: an operator can stop handing out work without losing
+  // the list of what is broken on the phone.
+  app.get('/api/checks/catalogue', async () => ({ specs: CHECK_SPECS }));
+
+  app.get('/api/checks', async () => ({
+    ...checkRunner.queueState(),
+    recent: store.listChecks(50),
+  }));
+
+  app.post('/api/checks', async (req, reply) => {
+    const body = (req.body ?? {}) as { specId?: unknown };
+    if (typeof body.specId !== 'string' || body.specId.trim() === '') {
+      return reply.code(400).send({ error: 'specId muss eine Prüfungs-ID sein' });
+    }
+    const result = checkRunner.enqueue(body.specId.trim());
+    if (result.error) return reply.code(400).send({ error: result.error });
+    emit({ type: 'check:queue', state: checkRunner.queueState() });
+    return { check: result.check };
+  });
+
+  app.get('/api/checks/:id', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const check = store.getCheck(id);
+    if (!check) return reply.code(404).send({ error: 'Prüfung nicht gefunden' });
+    return { check, spec: CHECKS_BY_ID.get(check.specId) ?? null };
+  });
+
+  app.post('/api/checks/:id/cancel', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const result = checkRunner.cancel(id);
+    if (!result.ok) {
+      const status = /nicht gefunden/.test(result.error ?? '') ? 404 : 409;
+      return reply.code(status).send({ error: result.error });
+    }
+    emit({ type: 'check:queue', state: checkRunner.queueState() });
+    return { ok: true };
+  });
+
+  /**
+   * Turns a finding into a suggestion, so a check that found something can
+   * actually become somebody's task instead of a line in a report.
+   */
+  app.post('/api/checks/:id/promote', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const result = checkRunner.promote(id);
+    if (result.error) return reply.code(409).send({ error: result.error });
+    const suggestionId = result.suggestionId!;
+    // Same treatment as a suggestion from the game: Discord hears about it, so
+    // a promoted finding is not a second-class entry in the queue.
+    const webhook = store.getSettings().discordWebhook || process.env.DISCORD_WEBHOOK_URL || '';
+    if (webhook) {
+      const sent = await discord.notifyNewSuggestion(viewOf(suggestionId)!, webhook, dashboardUrl);
+      if (sent.ok && sent.messageId) store.setSuggestionDiscordMessage(suggestionId, sent.messageId);
+    }
+    const view = viewOf(suggestionId);
+    if (view) emit({ type: 'suggestion:new', suggestion: view });
+    return { suggestionId, suggestion: view };
+  });
+
+  app.post('/api/checks/pause', async (req, reply) => {
+    const body = (req.body ?? {}) as { paused?: unknown };
+    if (typeof body.paused !== 'boolean') {
+      return reply.code(400).send({ error: 'paused muss true oder false sein' });
+    }
+    const paused = checkRunner.setPaused(body.paused);
+    emit({ type: 'check:queue', state: checkRunner.queueState() });
+    return { ...checkRunner.queueState(), paused };
   });
 
   // The scope layout the runner depends on. Read straight from the manifest, so

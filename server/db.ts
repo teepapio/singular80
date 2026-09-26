@@ -1,7 +1,14 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { RunRecord, RunStatus, Settings, Suggestion, SuggestionStatus } from '../src/shared/types';
+import type {
+  CheckRecord,
+  RunRecord,
+  RunStatus,
+  Settings,
+  Suggestion,
+  SuggestionStatus,
+} from '../src/shared/types';
 
 export const DEFAULT_SETTINGS: Settings = {
   discordWebhook: '',
@@ -84,6 +91,60 @@ function rowToSuggestion(row: SuggestionRow): Suggestion {
     runId: row.run_id,
     parentId: row.parent_id ?? null,
     clientKey: row.client_key ?? null,
+  };
+}
+
+interface CheckRow {
+  id: string;
+  spec_id: string;
+  kind: string;
+  probe: string;
+  status: string;
+  title: string;
+  scope: string | null;
+  targets: string | null;
+  limits: string | null;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  counts: string | null;
+  findings: string | null;
+  summary: string | null;
+  promoted_suggestion_id: number | null;
+  log_path: string;
+  note: string | null;
+}
+
+/** JSON columns are written by this class alone, so a parse failure is a bug, not input. */
+function parseJson<T>(raw: string | null, fallback: T): T {
+  if (raw === null) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function rowToCheck(row: CheckRow): CheckRecord {
+  return {
+    id: row.id,
+    specId: row.spec_id,
+    kind: row.kind as CheckRecord['kind'],
+    probe: row.probe as CheckRecord['probe'],
+    status: row.status as CheckRecord['status'],
+    title: row.title,
+    scope: parseJson<string[]>(row.scope, []),
+    targets: parseJson<string[]>(row.targets, []),
+    limits: parseJson<CheckRecord['limits']>(row.limits, null),
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    counts: parseJson(row.counts, { fail: 0, warn: 0, info: 0 }),
+    findings: parseJson(row.findings, []),
+    summary: row.summary ?? '',
+    promotedSuggestionId: row.promoted_suggestion_id,
+    logPath: row.log_path,
+    note: row.note,
   };
 }
 
@@ -231,6 +292,31 @@ export class Store {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+      -- The deployed-version check queue. Deliberately its own table instead of
+      -- a "kind" column on "runs": "runs" is wired to suggestions, Discord, the
+      -- dashboard and the restart recovery, and a check is not a suggestion. A
+      -- bug in one queue must not be able to take the other down.
+      CREATE TABLE IF NOT EXISTS checks (
+        id TEXT PRIMARY KEY,
+        spec_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        probe TEXT NOT NULL,
+        status TEXT NOT NULL,
+        title TEXT NOT NULL,
+        scope TEXT,
+        targets TEXT,
+        limits TEXT,
+        created_at INTEGER NOT NULL,
+        started_at INTEGER,
+        finished_at INTEGER,
+        counts TEXT,
+        findings TEXT,
+        summary TEXT,
+        promoted_suggestion_id INTEGER,
+        log_path TEXT NOT NULL,
+        note TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_checks_created ON checks(created_at);
     `);
     // Older databases predate the `result_summary` column.
     try {
@@ -460,6 +546,97 @@ export class Store {
       .prepare('SELECT * FROM runs ORDER BY created_at DESC LIMIT ?')
       .all(limit) as unknown as RunRow[];
     return rows.map(rowToRun);
+  }
+
+  // --- deployed-version check queue ------------------------------------------
+  //
+  // Kept next to the run methods but fully independent of them: the check queue
+  // must keep working when the suggestion runner is paused, and vice versa.
+
+  createCheck(check: CheckRecord) {
+    this.db
+      .prepare(
+        `INSERT INTO checks (id, spec_id, kind, probe, status, title, scope, targets, limits,
+           created_at, started_at, finished_at, counts, findings, summary,
+           promoted_suggestion_id, log_path, note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        check.id,
+        check.specId,
+        check.kind,
+        check.probe,
+        check.status,
+        check.title,
+        JSON.stringify(check.scope),
+        JSON.stringify(check.targets),
+        JSON.stringify(check.limits),
+        check.createdAt,
+        check.startedAt,
+        check.finishedAt,
+        JSON.stringify(check.counts),
+        JSON.stringify(check.findings),
+        check.summary,
+        check.promotedSuggestionId,
+        check.logPath,
+        check.note,
+      );
+  }
+
+  updateCheck(check: CheckRecord) {
+    this.db
+      .prepare(
+        `UPDATE checks SET status = ?, started_at = ?, finished_at = ?, counts = ?,
+           findings = ?, summary = ?, promoted_suggestion_id = ?, note = ?
+         WHERE id = ?`,
+      )
+      .run(
+        check.status,
+        check.startedAt,
+        check.finishedAt,
+        JSON.stringify(check.counts),
+        JSON.stringify(check.findings),
+        check.summary,
+        check.promotedSuggestionId,
+        check.note,
+        check.id,
+      );
+  }
+
+  getCheck(id: string): CheckRecord | null {
+    const row = this.db.prepare('SELECT * FROM checks WHERE id = ?').get(id) as
+      | CheckRow
+      | undefined;
+    return row ? rowToCheck(row) : null;
+  }
+
+  listChecks(limit = 50): CheckRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM checks ORDER BY created_at DESC LIMIT ?')
+      .all(limit) as unknown as CheckRow[];
+    return rows.map(rowToCheck);
+  }
+
+  /** Every check that was queued but never finished, oldest first — the restart case. */
+  listUnfinishedChecks(): CheckRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM checks WHERE status IN ('queued', 'running') ORDER BY created_at ASC")
+      .all() as unknown as CheckRow[];
+    return rows.map(rowToCheck);
+  }
+
+  getCheckQueuePaused(): boolean {
+    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get('checkQueuePaused') as
+      | { value: string }
+      | undefined;
+    return row?.value === 'true';
+  }
+
+  setCheckQueuePaused(paused: boolean): boolean {
+    this.db
+      .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run('checkQueuePaused', paused ? 'true' : 'false');
+    return paused;
   }
 
   getSettings(): Settings {

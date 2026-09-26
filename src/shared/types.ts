@@ -17,6 +17,101 @@ export type SuggestionStatus =
 
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
+/**
+ * What a deployed-version check looks at. The three kinds are the three
+ * player-visible complaints the queue exists for: a lagging game, a noisy log,
+ * and buttons that do nothing.
+ */
+export type CheckKind = 'actions' | 'logs' | 'performance';
+
+/** How a check is carried out. */
+export type CheckProbe =
+  /** Reads the source; no device, no APK. Deterministic and fast. */
+  | 'static'
+  /** Measures the installed app via adb; needs a connected device. */
+  | 'device';
+
+export type CheckStatus = 'queued' | 'running' | 'passed' | 'warned' | 'failed' | 'cancelled';
+
+export type CheckSeverity = 'info' | 'warn' | 'fail';
+
+export interface CheckFinding {
+  kind: CheckKind;
+  /** Stable machine code, e.g. `button-without-callback`. */
+  code: string;
+  severity: CheckSeverity;
+  /** Repo-relative path. */
+  file: string;
+  line: number;
+  /** Enclosing function, when the check could determine one. */
+  function?: string;
+  /** German, one sentence, says what is wrong. */
+  message: string;
+  /** What to do about it. */
+  hint?: string;
+}
+
+/** One checkable thing on a target, e.g. "buttons of the Siedler screen". */
+export interface CheckSpec {
+  id: string;
+  kind: CheckKind;
+  probe: CheckProbe;
+  /** German label for the dashboard. */
+  title: string;
+  /** What the check looks at, in one sentence. */
+  description: string;
+  /** Globs of the files a static check reads, e.g. `godot/src/game/siedler/**`. */
+  scope?: string[];
+  /** Registry ids / screen ids a device probe visits. */
+  targets?: string[];
+  /**
+   * Thresholds for a device probe, so the verdict is a number and not an
+   * impression: `minFps`, `maxFrameMs` (p95), `maxLogLinesPerSecond`,
+   * `maxMemoryMb`.
+   */
+  limits?: CheckLimits;
+}
+
+export interface CheckLimits {
+  minFps?: number;
+  maxFrameMs?: number;
+  maxLogLinesPerSecond?: number;
+  maxMemoryMb?: number;
+}
+
+export interface CheckRecord {
+  id: string;
+  specId: string;
+  kind: CheckKind;
+  probe: CheckProbe;
+  status: CheckStatus;
+  title: string;
+  /** Repo-relative globs the static pass read. */
+  scope: string[];
+  /** Registry ids / screen ids the device pass visited. */
+  targets: string[];
+  limits: CheckLimits | null;
+  createdAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  /** Number of findings per severity. */
+  counts: { fail: number; warn: number; info: number };
+  findings: CheckFinding[];
+  /** German one-paragraph result for the dashboard. */
+  summary: string;
+  /** Suggestion created from a failing check, if the operator promoted it. */
+  promotedSuggestionId: number | null;
+  logPath: string;
+  note: string | null;
+}
+
+export interface CheckQueueState {
+  paused: boolean;
+  activeCheck: CheckRecord | null;
+  queue: CheckRecord[];
+}
+
+
 export interface ScoreBreakdown {
   votes: number;
   cluster: number;
@@ -284,4 +379,7 @@ export type BusEvent =
   | { type: 'run:log'; runId: string; event: RunEvent }
   | { type: 'run:finished'; run: RunRecord }
   | { type: 'queue:state'; state: QueueState }
+  | { type: 'check:started'; check: CheckRecord }
+  | { type: 'check:finished'; check: CheckRecord }
+  | { type: 'check:queue'; state: CheckQueueState }
   | { type: 'content:reloaded' };
