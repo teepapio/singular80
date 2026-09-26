@@ -89,6 +89,8 @@ func _run() -> void:
 	# added later is picked up here without editing this runner.
 	if _wants_class("res://tests/test_metro.gd", only):
 		TestMetro.new().run(kit)
+	if _wants_class("res://tests/test_crystal3d.gd", only):
+		await TestCrystal3d.new().run(kit, self)
 	if _wants_class("res://tests/test_candy_match3.gd", only):
 		TestCandyMatch3.new().run(kit)
 	if _wants_class("res://tests/test_improvements.gd", only):

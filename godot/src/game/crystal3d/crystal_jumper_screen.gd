@@ -28,6 +28,7 @@ const MERGE_SETTLE := 0.36
 const PARTICLE_COUNT := 220
 const PARTICLE_SPREAD := 46.0
 const PARTICLE_MARGIN := 14.0
+const LABEL_POOL_SIZE := 8
 
 const PHASE_IDLE := 0
 const PHASE_GATHER := 1
@@ -55,6 +56,16 @@ var equipped_tier := 0
 var move_speed := BASE_SPEED
 var jump_speed := JUMP_SPEED
 var pickup_radius := 2.0
+
+## Flusskette: Länge, schon ausgezahlter Bonus und Zeitpunkt des letzten
+## Fundes. `run_best_flow` ist die längste Kette dieses Laufs, `best_flow` der
+## Rekord aus `Game`.
+var flow_chain := 0
+var flow_bonus := 0
+var flow_last_ms := -1.0
+var run_best_flow := 0
+var best_flow := 0
+var flow_record := false
 
 var summit_reached := false
 var summit_time := 0.0
@@ -85,11 +96,21 @@ var particle_direction := -1.0
 
 var _stick: VirtualStick
 var _score_label: Label
+var _points_label: Label
 var _floor_label: Label
 var _time_label: Label
+var _chain_label: Label
+var _chain_bar: ProgressBar
 var _bag_label: Label
 var _hint_label: Label
 var _hud_layer: Control
+var _label_pool: Array = []
+var _floating: Array = []
+## Last chain length written to the label, so colours are only touched on change.
+var _flow_shown := -1
+## Last point total written to the label.
+var _score_shown := -1
+var _record_announced := false
 
 
 func _ready_world() -> void:
@@ -97,6 +118,7 @@ func _ready_world() -> void:
 	theme = CrystalTower.theme_by_id(theme_id)
 	var prefix := str(theme["keyPrefix"])
 	equipped_tier = int(Game.get_number("%s_equipped" % prefix, 0.0))
+	best_flow = maxi(0, int(Game.get_number("%s_best_flow" % prefix, 0.0)))
 	bonus = CrystalTower.equip_bonus(equipped_tier) if equipped_tier > 0 else {
 		"speedMult": 1.0, "jumpMult": 1.0, "pickupRadius": 2.0, "extraJumps": 0,
 	}
@@ -116,6 +138,7 @@ func _ready_world() -> void:
 	_build_tower()
 	_build_particles()
 	_build_player()
+	_build_label_pool()
 	_build_ui()
 	hide_loading()
 	_refresh_bag()
@@ -381,7 +404,7 @@ func _build_ui() -> void:
 	_hud_layer.offset_left = -300
 	_hud_layer.offset_right = -16
 	_hud_layer.offset_top = 66
-	_hud_layer.offset_bottom = 196
+	_hud_layer.offset_bottom = 310
 	_hud_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud_root.add_child(_hud_layer)
 	var panel := Ui.rect(Color(0.031, 0.047, 0.086, 0.62), 12, Color(1, 1, 1, 0.08), 1)
@@ -389,8 +412,25 @@ func _build_ui() -> void:
 	_hud_layer.add_child(panel)
 
 	_score_label = _stat("Kristalle", "0", Vector2(0, 0), 60.0)
-	_floor_label = _stat("Etage", "1/%d" % int(config["floors"]), Vector2(0, 46), 60.0)
-	_time_label = _stat("Zeit", "0:00", Vector2(0, 92), 120.0)
+	_points_label = _stat("Punkte", "0", Vector2(0, 46), 120.0)
+	_floor_label = _stat("Etage", "1/%d" % int(config["floors"]), Vector2(0, 92), 60.0)
+	_time_label = _stat("Zeit", "0:00", Vector2(0, 138), 120.0)
+
+	# The chain gets its own row plus a bar that drains while it is alive: the
+	# player has to see the window closing to know the next pickup is urgent.
+	var chain_caption := Ui.label("Kette", 14, UiTheme.TEXT_DIM)
+	chain_caption.position = Vector2(0, 184)
+	chain_caption.size = Vector2(120, 22)
+	_hud_layer.add_child(chain_caption)
+	_chain_label = Ui.label("", 26, UiTheme.TEXT_DIM, true)
+	_chain_label.position = Vector2(120, 176)
+	_chain_label.size = Vector2(180, 40)
+	_hud_layer.add_child(_chain_label)
+	_chain_bar = Ui.bar(theme["accent"], 10.0)
+	_chain_bar.position = Vector2(0, 222)
+	_chain_bar.size = Vector2(300, 10)
+	_hud_layer.add_child(_chain_bar)
+	Ui.set_bar(_chain_bar, 0.0, theme["accent"])
 
 	_bag_label = Ui.label("", 15, UiTheme.TEXT_DIM)
 	_bag_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
@@ -400,7 +440,7 @@ func _build_ui() -> void:
 	_bag_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
 	hud_root.add_child(_bag_label)
 
-	_hint_label = Ui.label(str(theme["hint"]), 15, UiTheme.TEXT_DIM)
+	_hint_label = Ui.label("%s  ·  Flusskette: schnell aufeinanderfolgende Funde zahlen mehr" % str(theme["hint"]), 15, UiTheme.TEXT_DIM)
 	_hint_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	_hint_label.position = Vector2(0, -32)
 	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -421,6 +461,54 @@ func _stat(caption: String, value: String, pos: Vector2, width: float) -> Label:
 	result.size = Vector2(width, 40)
 	_hud_layer.add_child(result)
 	return result
+
+
+## Pre-allocated floating texts. A pickup writes its bonus into the air, so the
+## pool is built once instead of spawning a Label3D per crystal.
+func _build_label_pool() -> void:
+	for i in LABEL_POOL_SIZE:
+		var label := Label3D.new()
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.no_depth_test = true
+		label.fixed_size = true
+		label.outline_render_priority = 1
+		label.outline_size = 24
+		label.outline_modulate = Color("020617")
+		label.font_size = 96
+		label.visible = false
+		add_child(label)
+		_label_pool.append(label)
+
+
+## Shows `text` at `at` for `life` seconds, fading out. Reuses the oldest free
+## label when the pool is exhausted.
+func _push_label(at: Vector3, text: String, color: Color, life: float, size: float) -> void:
+	var node: Label3D = null
+	for candidate in _label_pool:
+		if not candidate.visible:
+			node = candidate
+			break
+	if node == null:
+		node = _label_pool[0]
+	node.text = text
+	node.modulate = color
+	node.font_size = int(size)
+	node.position = at
+	node.visible = true
+	_floating.append({"node": node, "life": life, "max_life": life})
+
+
+## Ages every floating label and hides the expired ones.
+func _update_floating(dt: float) -> void:
+	for i in range(_floating.size() - 1, -1, -1):
+		var entry: Dictionary = _floating[i]
+		entry["life"] = float(entry["life"]) - dt
+		var node: Label3D = entry["node"]
+		node.position += Vector3(0, dt * 1.6, 0)
+		node.modulate.a = clampf(float(entry["life"]) / maxf(0.01, float(entry["max_life"])), 0.0, 1.0)
+		if float(entry["life"]) <= 0.0:
+			node.visible = false
+			_floating.remove_at(i)
 
 
 # --- loop -------------------------------------------------------------------
@@ -476,10 +564,14 @@ func _update_world(delta: float) -> void:
 			pos = Vector3(float(respawn["x"]), float(respawn["y"]) + PLAYER_HALF_HEIGHT, float(respawn["z"]))
 			vel_y = 0.0
 			grounded = true
+			# A fall tears the chain apart; only the paid-out bonus survives.
+			flow_chain = 0
+			flow_last_ms = -1.0
 
 	ship.position = Vector3(pos.x, pos.y + sin(elapsed * 4.0) * 0.06, pos.z)
 
 	_update_crystals(dt)
+	_update_flow(dt)
 
 	altar.rotation.y += dt * 0.5
 	_update_particles(dt)
@@ -522,10 +614,63 @@ func _update_crystals(dt: float) -> void:
 			continue
 		node.queue_free()
 		crystals.remove_at(i)
-		counts[int(crystal["tier"]) - 1] = int(counts[int(crystal["tier"]) - 1]) + 1
+		var tier := int(crystal["tier"])
+		counts[tier - 1] = int(counts[tier - 1]) + 1
 		collected += 1
+		_pickup_flow(Vector3(float(crystal["x"]), y, float(crystal["z"])), tier)
 		_refresh_bag()
+
+
+## Values a pickup: continues the flow chain, pays the bonus and puts the amount
+## into the air. A single pickup has nothing to celebrate, so the text and the
+## second sound only start at a chain of two.
+func _pickup_flow(at: Vector3, tier: int) -> void:
+	flow_chain = CrystalTower.next_flow(elapsed * 1000.0, flow_last_ms, flow_chain)
+	flow_last_ms = elapsed * 1000.0
+	if flow_chain > run_best_flow:
+		run_best_flow = flow_chain
+	var bonus := CrystalTower.flow_step_bonus(flow_chain, tier)
+	flow_bonus += bonus
+	if not _record_announced and run_best_flow > best_flow and best_flow > 0:
+		_record_announced = true
+		notify("Neuer Kettenrekord: ×%d!" % run_best_flow)
+	if bonus <= 0:
 		Sfx.hit()
+		return
+	Sfx.coin()
+	_push_label(at, "+%d  ×%d" % [bonus, CrystalTower.flow_multiplier(flow_chain)], _flow_color(), 1.2, 64.0)
+
+
+## Lets the chain run out, drains the bar and writes score, chain and colour.
+## Only the bar is touched every frame; text and colours follow the chain length.
+func _update_flow(dt: float) -> void:
+	_update_floating(dt)
+	if flow_chain > 0 and CrystalTower.flow_left_ms(elapsed * 1000.0, flow_last_ms, flow_chain) <= 0.0:
+		flow_chain = 0
+	var score := CrystalTower.run_score(counts, flow_bonus)
+	if score != _score_shown:
+		_score_shown = score
+		_points_label.text = str(score)
+	if flow_chain >= 2:
+		Ui.set_bar(_chain_bar, CrystalTower.flow_ratio(elapsed * 1000.0, flow_last_ms, flow_chain), _flow_color())
+	elif _chain_bar.value > 0.0:
+		Ui.set_bar(_chain_bar, 0.0, _flow_color())
+	if flow_chain == _flow_shown:
+		return
+	_flow_shown = flow_chain
+	_chain_label.text = CrystalTower.format_flow(flow_chain)
+	_chain_label.add_theme_color_override("font_color", _flow_color())
+
+
+## Dim while no chain runs, then theme accent, green and finally gold at the cap.
+func _flow_color() -> Color:
+	if flow_chain < 2:
+		return UiTheme.TEXT_DIM
+	if flow_chain < 5:
+		return theme["accent"]
+	if flow_chain < CrystalTower.MAX_FLOW:
+		return UiTheme.SUCCESS
+	return UiTheme.WARNING
 
 
 func _update_particles(dt: float) -> void:
@@ -558,8 +703,12 @@ func _reach_summit() -> void:
 	_sync_inventory()
 
 	var prefix := str(theme["keyPrefix"])
-	var value := CrystalTower.inventory_value(counts)
+	var value := CrystalTower.run_score(counts, flow_bonus)
 	Game.submit_score("%s_highscore" % prefix, value)
+	if run_best_flow > best_flow:
+		best_flow = run_best_flow
+		flow_record = true
+		Game.set_number("%s_best_flow" % prefix, float(best_flow))
 	if summit_within_target:
 		var best_time := Game.get_number("%s_best_time" % prefix, 0.0)
 		if best_time == 0.0 or summit_time < best_time:
@@ -728,6 +877,18 @@ func _show_summit_panel() -> void:
 		column.add_child(Ui.label("Ziel geschafft! %s" % ("Level %d ist freigeschaltet." % (int(config["level"]) + 1) if int(config["level"]) < CrystalTower.MAX_LEVEL else "Du bist auf der höchsten Stufe!"), 16, Color("facc15")))
 	else:
 		column.add_child(Ui.label("Ziel verpasst (%s). Versuch es noch einmal!" % CrystalTower.format_time(float(config["targetMs"])), 16, UiTheme.WARNING))
+
+	# Was der Lauf wirklich gekostet hat: Inventar plus Flussbonus, und wie weit
+	# die längste Kette kam — der Teil, den der Spieler beim nächsten Versuch
+	# überbieten will.
+	column.add_child(Ui.label("Punkte: %d  =  Inventar %d  +  Flussbonus %d" % [
+		CrystalTower.run_score(counts, flow_bonus), CrystalTower.inventory_value(counts), flow_bonus,
+	], 18, UiTheme.TEXT, true))
+	column.add_child(Ui.label("Beste Kette: ×%d %s  ·  Rekord: ×%d" % [
+		run_best_flow, CrystalTower.flow_title(run_best_flow), best_flow,
+	], 16, UiTheme.TEXT_DIM))
+	if flow_record:
+		column.add_child(Ui.label("Neuer Kettenrekord!", 16, UiTheme.WARNING))
 
 	var grid := GridContainer.new()
 	grid.columns = 3

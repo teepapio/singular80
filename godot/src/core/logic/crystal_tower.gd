@@ -6,6 +6,15 @@ extends RefCounted
 const MAX_CRYSTAL_TIER := 5
 const MAX_LEVEL := 6
 
+## How long a "Flusskette" (flow chain) survives without a new pickup, in ms.
+const FLOW_WINDOW_MS := 3000.0
+## Upper bound of the chain: past it the count stops, the bonus keeps paying.
+const MAX_FLOW := 10
+## Names for the chain, so the counter becomes a goal instead of a number.
+const FLOW_TITLES := [
+	"", "Zug", "Doppel", "Fluss", "Strom", "Kaskade", "Wirbel", "Sturm", "Furie", "Orkan", "Singular",
+]
+
 const THEME_CLASSIC := "classic"
 const THEME_CHRISTMAS := "christmas"
 const THEME_HALLOWEEN := "halloween"
@@ -119,6 +128,11 @@ static func crystal_tier_color(theme: Dictionary, tier: int) -> Color:
 	return (theme["tierColors"] as Array)[clampi(tier, 1, MAX_CRYSTAL_TIER) - 1]
 
 
+## Score value of one crystal of the given tier.
+static func tier_value(tier: int) -> int:
+	return int(tier_info(tier)["value"])
+
+
 ## Tier a crystal found on the given floor (0 = base) gets. Higher = rarer.
 static func tier_for_floor(floor: int, floors: int) -> int:
 	if floors <= 1:
@@ -155,8 +169,66 @@ static func merge_crystals(counts: Array) -> Dictionary:
 static func inventory_value(counts: Array) -> int:
 	var value := 0
 	for i in mini(counts.size(), CRYSTAL_TIERS.size()):
-		value += maxi(0, int(counts[i])) * int((CRYSTAL_TIERS[i] as Dictionary)["value"])
+		value += maxi(0, int(counts[i])) * tier_value(i + 1)
 	return value
+
+
+# --- Flusskette -------------------------------------------------------------
+##
+## Pickups in quick succession build a chain, and every crystal of the chain is
+## worth its own value again per step. Climb without hesitating and the score
+## runs away; stand still and the chain is gone. The window is the only rule,
+## which is what makes it readable while the tower scrolls past.
+
+## Chain length after a pickup at `elapsed_ms`. A `last_ms` below zero means "no
+## pickup yet"; an elapsed window starts a fresh chain at 1.
+static func next_flow(elapsed_ms: float, last_ms: float, chain: int) -> int:
+	if chain > 0 and last_ms >= 0.0 and elapsed_ms - last_ms <= FLOW_WINDOW_MS:
+		return mini(chain + 1, MAX_FLOW)
+	return 1
+
+
+## Remaining lifetime of the chain in ms (0 = expired). A chain of one has no
+## bar: a single pickup is not a flow yet, so the HUD stays quiet until the
+## second one.
+static func flow_left_ms(elapsed_ms: float, last_ms: float, chain: int) -> float:
+	if chain < 2:
+		return 0.0
+	return clampf(FLOW_WINDOW_MS - (elapsed_ms - last_ms), 0.0, FLOW_WINDOW_MS)
+
+
+## Fill level of the chain bar, 0..1.
+static func flow_ratio(elapsed_ms: float, last_ms: float, chain: int) -> float:
+	return flow_left_ms(elapsed_ms, last_ms, chain) / FLOW_WINDOW_MS
+
+
+## Score multiplier the chain currently pays.
+static func flow_multiplier(chain: int) -> int:
+	return clampi(chain, 1, MAX_FLOW)
+
+
+## Extra points a single pickup of `tier` is worth inside `chain`.
+static func flow_step_bonus(chain: int, tier: int) -> int:
+	return (flow_multiplier(chain) - 1) * tier_value(tier)
+
+
+## Points of a finished run: inventory plus what the chains paid out.
+static func run_score(counts: Array, flow_bonus: int) -> int:
+	return inventory_value(counts) + maxi(0, flow_bonus)
+
+
+## Name of the chain, empty below a chain of 2 — one pickup is not a flow.
+static func flow_title(chain: int) -> String:
+	if chain < 2:
+		return ""
+	return str(FLOW_TITLES[clampi(chain, 0, FLOW_TITLES.size() - 1)])
+
+
+## HUD text of the chain, e.g. "×4 Wirbel". Empty while no chain runs.
+static func format_flow(chain: int) -> String:
+	if chain < 2:
+		return ""
+	return "×%d %s" % [flow_multiplier(chain), flow_title(chain)]
 
 
 ## Stat boost granted by equipping a crystal of the given tier.
