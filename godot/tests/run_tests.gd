@@ -90,7 +90,11 @@ func _run() -> void:
 	if _wants_class("res://tests/test_metro.gd", only):
 		TestMetro.new().run(kit)
 	if _wants_class("res://tests/test_dame.gd", only):
-		await TestDame.new().run(kit, self)
+		# By path, like the suites below: `--script` mode does not refresh the
+		# global class cache, so a class added today would not resolve by name.
+		var dame_suite: GDScript = load("res://tests/test_dame.gd")
+		if dame_suite != null:
+			await dame_suite.new().run(kit, self)
 	if _wants_class("res://tests/test_dragonflight.gd", only):
 		TestDragonFlight.new().run(kit)
 	if _wants_class("res://tests/test_metro3d.gd", only):
