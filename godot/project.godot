@@ -27,6 +27,7 @@ Content="*res://src/core/autoload/content_store.gd"
 Sfx="*res://src/core/autoload/audio_service.gd"
 Api="*res://src/core/autoload/api_client.gd"
 Router="*res://src/core/autoload/router.gd"
+DevFarm="*res://src/core/autoload/devfarm.gd"
 
 [display]
 
