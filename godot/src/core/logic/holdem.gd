@@ -15,6 +15,54 @@ const STREET_TURN := "turn"
 const STREET_RIVER := "river"
 const STREET_SHOWDOWN := "showdown"
 
+# --- Gegner-Persönlichkeiten -------------------------------------------------
+
+const STYLE_TIGHT := "tight"
+const STYLE_LOOSE := "loose"
+const STYLE_BLUFF := "bluff"
+
+## Reihenfolge der Typen am Tisch. Sitz 1 ist der erste KI-Gegner, danach
+## wiederholt es sich, damit auch ein sechsköpfiger Tisch lesbar bleibt.
+const STYLE_SEATS: Array = [STYLE_TIGHT, STYLE_LOOSE, STYLE_BLUFF]
+
+## Jede Persönlichkeit ist zugleich Anzeigename und Verhalten. Die Zahlen
+## speisen `choose_ai_action`, das, was der Tisch neben dem Namen zeigt, kann
+## also nicht lügen: der Stein sitzt wirklich eng, der Bluff-Typ raiset
+## wirklich mit Müll.
+##   fold_bias    auf die Fold-Schwelle addiert
+##   raise_scale  Multiplikator auf die stärkeabhängige Raise-Chance
+##   bluff        Wahrscheinlichkeit, mit einer schwachen Hand zu raisen
+##   size_scale   Multiplikator auf die Einsatzhöhe
+const STYLES := {
+	STYLE_TIGHT: {
+		"label": "Stein",
+		"hint": "spielt eng",
+		"color": "93c5fd",
+		"fold_bias": 0.20,
+		"raise_scale": 0.55,
+		"bluff": 0.0,
+		"size_scale": 0.6,
+	},
+	STYLE_LOOSE: {
+		"label": "Wild",
+		"hint": "ruft alles",
+		"color": "86efac",
+		"fold_bias": -0.16,
+		"raise_scale": 1.25,
+		"bluff": 0.10,
+		"size_scale": 1.0,
+	},
+	STYLE_BLUFF: {
+		"label": "Bluff",
+		"hint": "blufft gern",
+		"color": "fca5a5",
+		"fold_bias": -0.02,
+		"raise_scale": 1.0,
+		"bluff": 0.30,
+		"size_scale": 0.8,
+	},
+}
+
 
 class Player:
 	extends RefCounted
@@ -28,6 +76,11 @@ class Player:
 	var all_in: bool = false
 	var has_acted: bool = false
 	var last_action: String = ""
+	## Leer beim Menschen, sonst einer der STYLE_*-Werte. Überlebt jede Hand —
+	## eine Persönlichkeit wechselt nicht zwischen zwei Runden.
+	var style: String = ""
+	## Zählt die eigenen Entscheidungen: {"folds", "raises", "calls"}.
+	var tally: Dictionary = {}
 
 	func _init() -> void:
 		hole = []
@@ -170,6 +223,83 @@ static func _clamp01(value: float) -> float:
 	return clampf(value, 0.0, 1.0)
 
 
+static func has_style(style: String) -> bool:
+	return STYLES.has(style)
+
+
+## Die Zahlen eines Typs. Unbekannte (und leere) Typen fallen auf den Stein
+## zurück, damit ein Tippfehler nie das Spiel anhalten kann.
+static func style_profile(style: String) -> Dictionary:
+	return STYLES.get(style, STYLES[STYLE_TIGHT])
+
+
+## Anzeigename des Typs, leer für den Menschen.
+static func style_label(style: String) -> String:
+	return str(style_profile(style)["label"]) if has_style(style) else ""
+
+
+## Kurzcharakteristik, die dem Namen im Statusfeld steht.
+static func style_hint(style: String) -> String:
+	return str(style_profile(style)["hint"]) if has_style(style) else ""
+
+
+## Farbe des Typs als Hex-String; der Screen macht daraus ein `Color`.
+static func style_color(style: String) -> String:
+	return str(style_profile(style)["color"]) if has_style(style) else ""
+
+
+## Persönlichkeit eines Sitzplatzes: 0 ist der Mensch, 1 … 3 die KI-Gegner.
+static func style_for_seat(seat: int) -> String:
+	if seat <= 0:
+		return ""
+	return str(STYLE_SEATS[(seat - 1) % STYLE_SEATS.size()])
+
+
+## Ab welcher Stärke ein Gegner diesen Einsatz durchhält. Rein deterministisch —
+## `choose_ai_action` fragt genau diese Funktion, damit die Anzeige
+## („spielt eng“) das beschreibt, was tatsächlich rechnet.
+static func fold_threshold(style: String, to_call: int, pot: int) -> float:
+	var pot_odds: float = (float(to_call) / float(pot + to_call)) if to_call > 0 else 0.0
+	return _clamp01(0.3 + pot_odds * 0.55 + float(style_profile(style)["fold_bias"]))
+
+
+## Stärkeabhängige Raise-Chance, mit dem Multiplikator des Typs.
+static func raise_chance(style: String, strength: float) -> float:
+	var chance := 0.06
+	if strength > 0.78:
+		chance = 0.8
+	elif strength > 0.6:
+		chance = 0.45
+	elif strength > 0.45:
+		chance = 0.15
+	return _clamp01(chance * float(style_profile(style)["raise_scale"]))
+
+
+## Extra-Chance, mit einer Hand unter Mittelspiel zu raisen. Der Bluff-Typ macht
+## das, der Stein nie.
+static func bluff_chance(style: String, strength: float) -> float:
+	return float(style_profile(style)["bluff"]) if strength < 0.45 else 0.0
+
+
+## Wie stark der Typ seinen Raise dimensioniert (Vielfaches des halben Pots).
+static func raise_size(style: String, strength: float) -> float:
+	var factor := 0.5
+	if strength > 0.82:
+		factor = 1.0
+	elif strength > 0.66:
+		factor = 0.75
+	return factor * float(style_profile(style)["size_scale"])
+
+
+## Eine Zeile Legende für den Tisch, direkt aus den Profilen gebaut, damit sie
+## nicht veralten kann.
+static func legend() -> String:
+	var parts: Array = []
+	for style in STYLE_SEATS:
+		parts.append("%s = %s" % [style_label(str(style)), style_hint(str(style))])
+	return "   ·   ".join(parts)
+
+
 ## Rough pre-flop strength (0..1) based on ranks, pairs and suitedness.
 static func hole_strength(hole: Array) -> float:
 	if hole.size() < 2:
@@ -204,36 +334,27 @@ static func made_strength(cards: Array) -> float:
 	return _clamp01(base + (kicker / 14.0) * 0.05)
 
 
-## A simple, occasionally bluffing opponent.
+## A computer opponent, steered by its seat's personality. Every threshold
+## comes from the `STYLES` profiles above, so what the table shows about a seat
+## is what that seat really plays.
 static func choose_ai_action(game: HoldemGame, index: int) -> Dictionary:
 	var player: Holdem.Player = game.players[index]
 	var legal := game.legal_actions(index)
 	var to_call: int = int(legal["callAmount"])
+	var style: String = player.style
 
 	var base := hole_strength(player.hole) if game.community.is_empty() else made_strength(player.hole + game.community)
 	var strength: float = _clamp01(base + (randf() - 0.5) * 0.18)
-	var pot_odds := (float(to_call) / float(game.pot + to_call)) if to_call > 0 else 0.0
 
-	if to_call > 0 and strength < 0.3 + pot_odds * 0.55:
+	if to_call > 0 and strength < fold_threshold(style, to_call, game.pot):
 		if randf() > strength * 0.7:
 			return {"type": "fold"}
 
 	if bool(legal["canRaise"]):
 		if strength > 0.9 and randf() < 0.5:
 			return {"type": "allin"}
-		var raise_chance := 0.06
-		if strength > 0.78:
-			raise_chance = 0.8
-		elif strength > 0.6:
-			raise_chance = 0.45
-		elif strength > 0.45:
-			raise_chance = 0.15
-		if randf() < raise_chance:
-			var factor := 0.5
-			if strength > 0.82:
-				factor = 1.0
-			elif strength > 0.66:
-				factor = 0.75
+		if randf() < maxf(raise_chance(style, strength), bluff_chance(style, strength)):
+			var factor := raise_size(style, strength)
 			var raise_by: int = maxi(game.min_raise, int(round((float(game.pot) * factor) / float(game.big_blind))) * game.big_blind)
 			var target: int = mini(game.current_bet + raise_by, int(legal["maxRaiseTo"]))
 			if target < int(legal["minRaiseTo"]):
@@ -272,11 +393,15 @@ class HoldemGame:
 		small_blind = int(options.get("smallBlind", 10))
 		big_blind = int(options.get("bigBlind", 20))
 		var names: Array = options.get("names", ["Du", "Alice", "Bob", "Cara", "Dan", "Eve"])
+		var styles: Array = options.get("styles", [])
 		for i in count:
 			var player := Player.new()
 			player.name = str(names[i]) if i < names.size() else "KI %d" % i
 			player.is_human = i == 0
 			player.chips = starting_chips
+			if not player.is_human:
+				var wanted := str(styles[i]) if i < styles.size() else ""
+				player.style = wanted if Holdem.has_style(wanted) else Holdem.style_for_seat(i)
 			players.append(player)
 		reset()
 
@@ -423,12 +548,53 @@ class HoldemGame:
 			_:
 				return false
 
+		_count_action(player, kind)
 		_advance()
 		return true
+
+	## One line of the read-out: what this seat actually did, which is what makes
+	## the personality badge trustworthy instead of decorative.
+	func _count_action(player: Player, kind: String) -> void:
+		match kind:
+			"fold":
+				player.tally["folds"] = int(player.tally.get("folds", 0)) + 1
+			"raise":
+				player.tally["raises"] = int(player.tally.get("raises", 0)) + 1
+			"allin":
+				# An all-in above the current bet is an aggressive move, a short
+				# all-in is just a call that happened to empty the stack.
+				var key := "raises" if player.bet > current_bet else "calls"
+				player.tally[key] = int(player.tally.get(key, 0)) + 1
+			"call":
+				player.tally["calls"] = int(player.tally.get("calls", 0)) + 1
+
 
 	## When a player busts, top their stack back up so the table keeps playing.
 	func rebuy(index: int) -> void:
 		players[index].chips = starting_chips
+
+	## What this seat has shown so far: type, name, colour, and how often it
+	## folded, raised and called. Powers the line under each seat, which is how
+	## a personality becomes a habit a player can check.
+	func style_read(index: int) -> Dictionary:
+		var player: Player = players[index]
+		var tally: Dictionary = player.tally
+		var profile: Dictionary = Holdem.style_profile(player.style)
+		var folds := int(tally.get("folds", 0))
+		var raises := int(tally.get("raises", 0))
+		var calls := int(tally.get("calls", 0))
+		var seen := folds + raises + calls
+		return {
+			"style": player.style,
+			"label": Holdem.style_label(player.style),
+			"color": profile["color"],
+			"hint": Holdem.style_hint(player.style),
+			"seen": seen,
+			"folds": folds,
+			"raises": raises,
+			"calls": calls,
+			"fold_rate": (float(folds) / float(seen)) if seen > 0 else 0.0,
+		}
 
 	func _commit(index: int, amount: int) -> int:
 		var player: Player = players[index]

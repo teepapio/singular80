@@ -24,6 +24,17 @@ const SEATS := [
 	{"cx": 1130.0, "cardY": 250.0, "cardW": 62.0, "cardH": 88.0, "scale": 0.68, "nameY": 350.0, "statusY": 370.0, "betX": 1130.0, "betY": 226.0, "dealerX": 1228.0, "dealerY": 334.0},
 ]
 
+## Die Legende der drei Typen liegt rechts unter der Kopfzeile — der einzige
+## Streifen, der auf 1280 breit weder mit den Karten noch mit den Knöpfen
+## kollidiert.
+const LEGEND_POS := Vector2(700, 54)
+const LEGEND_SIZE := Vector2(570, 26)
+## So viele Hände bleibt die Legende stehen, bevor sie ausblendet.
+const LEGEND_HANDS := 3
+## So viele Zahlen aus der Bilanz stehen am Sitz — mehr läuft auf einem Telefon
+## über den Sitz hinaus.
+const READ_COUNTS := 2
+
 var table: Holdem.HoldemGame
 var highscore := 0
 var raise_to := 0
@@ -43,9 +54,14 @@ var _raise_button: Button
 var _allin_button: Button
 var _next_button: Button
 var _raise_label: Label
+var _legend_label: Label
+var _hands := 0
 
 
 func _ready_game() -> void:
+	# Kein `styles` im Optionen: der Motor besetzt von allein Sitz 1 mit dem
+	# Stein, Sitz 2 mit dem Wilden und Sitz 3 mit dem Bluff-Typen. Feste
+	# Reihenfolge, damit man nach ein paar Händen weiß, wer wie spielt.
 	table = Holdem.HoldemGame.new({
 		"playerCount": PLAYER_COUNT,
 		"startingChips": STARTING_CHIPS,
@@ -117,6 +133,14 @@ func _build_ui() -> void:
 	_raise_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(_raise_label)
 
+	# Legende der drei Typen. Sie verschwindet, sobald der Typ am Tisch sitzt
+	# und sein Name genug sagt.
+	_legend_label = Ui.label(Holdem.legend(), 14, Color("94a3b8"))
+	_legend_label.position = LEGEND_POS
+	_legend_label.size = LEGEND_SIZE
+	_legend_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	layer.add_child(_legend_label)
+
 	_fold_button = _action(170, 650, 150, 56, "Fold", UiTheme.PANEL_LIGHT, func() -> void: _act({"type": "fold"}))
 	_check_call_button = _action(350, 650, 210, 56, "Check", UiTheme.ACCENT, func() -> void: _human_action())
 	_adjust(480, 650, 44, 44, "−", func() -> void: _nudge_raise(-BIG_BLIND))
@@ -150,6 +174,7 @@ func _start_hand() -> void:
 	waiting_next = false
 	next_hand_timer = 0.0
 	busy = false
+	_hands += 1
 	for i in table.players.size():
 		if (table.players[i] as Holdem.Player).chips <= 0:
 			table.rebuy(i)
@@ -233,14 +258,30 @@ func _refresh() -> void:
 	_pot_label.text = "Pot: %s" % Ui.format_number(table.pot)
 	for i in PLAYER_COUNT:
 		var player: Holdem.Player = table.players[i]
-		(_name_labels[i] as Label).text = "%s  %s" % [player.name, Ui.format_number(player.chips)]
+		var read: Dictionary = table.style_read(i)
+		var style_name := str(read["label"])
+		# Der Typ steht am Namen, nicht im Statusfeld: der Status ist das, was
+		# gerade passiert, der Typ das, was dauerhaft gilt. Die Farbe des Typs
+		# macht den Tisch auf einen Blick lesbar.
+		var name_label := _name_labels[i] as Label
+		name_label.text = "%s  %s%s" % [
+			player.name,
+			Ui.format_number(player.chips),
+			("   %s" % style_name) if not style_name.is_empty() else "",
+		]
+		name_label.add_theme_color_override("font_color", UiTheme.TEXT if player.is_human else Color(str(read["color"])))
+
 		var status := player.last_action
 		if player.folded:
 			status = "Fold"
 		elif player.all_in:
 			status = "All-in"
-		(_status_labels[i] as Label).text = status
+		var status_label := _status_labels[i] as Label
+		status_label.text = status if player.is_human else _read_text(read, status)
+		status_label.add_theme_color_override("font_color", Color("7dd3fc") if player.is_human else Color(str(read["color"])))
 		(_bet_labels[i] as Label).text = ("%s" % Ui.format_number(player.bet)) if player.bet > 0 else ""
+	if _legend_label != null:
+		_legend_label.visible = _hands <= LEGEND_HANDS
 
 	var human_turn: bool = not table.hand_over and table.active_index == 0 and not busy and not waiting_next
 	var legal: Dictionary = table.legal_actions(0)
@@ -262,7 +303,34 @@ func _refresh() -> void:
 	elif human_turn:
 		_message_label.text = "Du bist am Zug"
 	else:
-		_message_label.text = "%s ist am Zug" % (table.current_player() as Holdem.Player).name
+		var actor: Holdem.Player = table.current_player()
+		var actor_read: Dictionary = table.style_read(table.active_index)
+		var cue := " (%s)" % str(actor_read["label"]) if not actor.is_human and not str(actor_read["label"]).is_empty() else ""
+		_message_label.text = "%s%s ist am Zug" % [actor.name, cue]
+
+
+## Was der Typ bisher gezeigt hat. Solange ein Sitz nichts getan hat, steht dort
+## sein Versprechen („ruft alles“); danach die Bilanz („Raise 4  ·  Fold 2“),
+## damit man die Schilder mit der Zeit an der Realität prüfen kann. Höchstens
+## zwei Zahlen — auf einem Telefon läuft die Zeile sonst über den Sitz hinaus.
+func _read_text(read: Dictionary, status: String) -> String:
+	var parts: Array = []
+	if int(read["seen"]) <= 0:
+		parts.append(str(read["hint"]))
+	else:
+		# Raises zuerst, Folds zweitens: das sind die beiden Zahlen, aus denen
+		# man ein Gegenbild liest. Calls sind nur der Rest.
+		var shown := 0
+		for entry in [["Raise", int(read["raises"])], ["Fold", int(read["folds"])], ["Call", int(read["calls"])]]:
+			if int(entry[1]) <= 0:
+				continue
+			parts.append("%s %d" % [str(entry[0]), int(entry[1])])
+			shown += 1
+			if shown == READ_COUNTS:
+				break
+	if not status.is_empty():
+		parts.append(status)
+	return "  ·  ".join(parts)
 
 
 func _pot_winner_text() -> String:

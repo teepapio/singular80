@@ -93,6 +93,12 @@ func _run() -> void:
 		await TestCrystal3d.new().run(kit, self)
 	if _wants_class("res://tests/test_candy_match3.gd", only):
 		TestCandyMatch3.new().run(kit)
+	if _wants_class("res://tests/test_poker.gd", only):
+		# By path, like the suites above: `--script` mode does not refresh the
+		# global class cache, so a class added today is unknown.
+		var poker_suite: GDScript = load("res://tests/test_poker.gd")
+		if poker_suite != null:
+			poker_suite.new().run(kit)
 	if _wants_class("res://tests/test_pang.gd", only):
 		TestPang.new().run(kit)
 	if _wants_class("res://tests/test_horserunner.gd", only):
