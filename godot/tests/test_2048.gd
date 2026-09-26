@@ -174,8 +174,10 @@ func _screen_plays(tree: SceneTree) -> void:
 	if _router == null or _screen_script == null:
 		t.suite_done()
 		return
-	_router.go_to("g2048")
-	await tree.create_timer(0.5).timeout
+	if not await t.goto(_router, tree, "g2048"):
+		t.check(false, "Der 2048-Screen wird geoeffnet")
+		t.suite_done()
+		return
 	var screen = _router.current_screen
 	if screen == null:
 		t.check(false, "Der 2048-Screen wird geoeffnet")

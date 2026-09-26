@@ -49,6 +49,36 @@ func allow(name: String) -> void:
 		_only.append(name)
 
 
+## Switches to a screen and waits exactly as long as the switch takes.
+##
+## `Router.go_to` ignores requests while a fade is still running. A fixed sleep
+## after another screen's switch is therefore a race: the request is dropped on
+## the floor and the suite quietly inspects the *previous* screen — which then
+## fails on some property it never had. This drains a running transition,
+## issues the request, then polls until the router both reports the new screen
+## and accepts requests again. The cap keeps a broken screen from hanging the
+## run, and the return value says whether it ever arrived.
+func goto(router: Node, tree: SceneTree, screen_id: String, data: Dictionary = {}, cap := 2.0) -> bool:
+	if router == null:
+		return false
+	var waited := 0.0
+	while bool(router.transitioning) and waited < cap:
+		await tree.process_frame
+		waited += 1.0 / 60.0
+	router.go_to(screen_id, data)
+	waited = 0.0
+	while waited < cap:
+		await tree.process_frame
+		waited += 1.0 / 60.0
+		# Both conditions matter: `current_id` flips as soon as the screen is in
+		# the tree, but the router only takes the next request once the fade
+		# back out has ended.
+		if str(router.current_id) == screen_id and not bool(router.transitioning):
+			await tree.process_frame
+			return true
+	return false
+
+
 func suite(name: String) -> void:
 	if not is_selected(name):
 		# The body still runs — it is pure logic and cheap — but nothing it

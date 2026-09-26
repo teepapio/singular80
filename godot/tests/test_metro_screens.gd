@@ -54,8 +54,7 @@ func _metro_meshes_are_bundled() -> void:
 func _screen_opens(tree: SceneTree) -> void:
 	t.suite("Metropol 3D — Screen")
 	_metro_meshes_are_bundled()
-	_router.go_to("metro3d")
-	await tree.create_timer(0.5).timeout
+	await t.goto(_router, tree, "metro3d")
 	var screen = _router.current_screen
 	t.check(screen != null, "Der Screen wird geoeffnet")
 	if screen == null:
@@ -173,7 +172,6 @@ func _screen_serves_passengers(tree: SceneTree) -> void:
 	t.check(metro.over, "Der Lauf ist beendet")
 	t.check(screen._modal_layer != null, "Die Abschlusskarte ist offen")
 	t.check(_game.highscore(str(_game.HS_METRO)) >= 0, "Der Bestwert ist lesbar")
-	_router.go_to("lobby")
-	await tree.create_timer(0.3).timeout
+	await t.goto(_router, tree, "lobby")
 	t.check(_router.current_id == "lobby", "Zurueck in der Lobby")
 	t.suite_done()

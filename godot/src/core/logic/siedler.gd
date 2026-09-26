@@ -925,6 +925,13 @@ func build_road(from_cell: int, to_cell: int, priority: int = 3) -> Dictionary:
 
 	# A building on a cell links directly, otherwise the cell needs a flag.
 	# Flags are dropped every FLAG_SPACING so the carriers share the walk.
+	#
+	# The counter restarts at *every* flag, also bei der aus dem Abstand. Sonst
+	# zählt er ab dort schon über der Weite weiter — und dann bekäme danach jedes
+	# weitere Feld eine Fahne, weil `since_flag >= FLAG_SPACING` dauerhaft gilt.
+	# Eine Straße wurde so zum Fahnenwald: jeder Abschnitt ein Stummel mit einem
+	# Träger, jede spätere Fahne für den Spieler wertlos. Genau das Gegenteil der
+	# Regel, die hier steht.
 	var chain: Array[int] = []
 	var since_flag := 0
 	for i in path.size():
@@ -935,7 +942,7 @@ func build_road(from_cell: int, to_cell: int, priority: int = 3) -> Dictionary:
 			var node := _node_at(cell)
 			if chain.is_empty() or chain[chain.size() - 1] != node:
 				chain.append(node)
-			since_flag = 0 if (on_building or is_end) else since_flag + 1
+			since_flag = 0
 		else:
 			since_flag += 1
 
@@ -1133,9 +1140,20 @@ func _split_edge(edge: Dictionary, mid_node: int) -> void:
 	nodes[b]["edges"].erase(edge["id"])
 	edges.erase(edge)
 	# Edge ids shifted, so re-find the survivors by their endpoints.
-	edges.append(_renumbered_edge(a, mid_node, priority))
-	var second := _renumbered_edge(mid_node, b, priority)
-	edges.append(second)
+	#
+	# `_renumbered_edge` hängt über `_add_edge` selbst an das Array. Ein zweites
+	# `edges.append` darüber hinaus — wie es hier früher stand — legte jede
+	# Hälfte doppelt an: der Takt lief über jede Kante zweimal, der Bildschirm
+	# zeichnete jede Straße zweimal, und zwei Knoten mit derselben Nummer
+	# verwirrten jede Suche nach einer Kante.
+	_renumbered_edge(a, mid_node, priority)
+	_renumbered_edge(mid_node, b, priority)
+	# Das entfernte Segment fehlt und die beiden neuen hängen am Ende: alle
+	# Ids danach sind um eins oder zwei verschoben. Ohne dieses Neunummerieren
+	# zeigte ein Knopf, der eine Straße über ihre Nummer anspricht, auf eine
+	# völlig andere — und die Handelsweg-Karte spricht jede Straße so an.
+	for i in edges.size():
+		edges[i]["id"] = i
 	_reset_traffic()
 
 
@@ -1617,26 +1635,50 @@ func hottest_name(counts: Dictionary) -> String:
 ## Sortiert nach Verkehr, dann nach Länge: die volle Straße steht oben, weil
 ## sie die ist, an der sich etwas ändern lässt. Jeder Eintrag trägt dieselben
 ## Felder, damit der Bildschirm nie raten muss.
+## Die Waren, die an den Endpunkten einer Strecke liegen und auf einen Träger
+## warten. Für eine Strecke ohne gemessenen Verkehr ist das die einzige Ware,
+## die man ihr überhaupt zuschreiben kann.
+func _queued_goods(edge: Dictionary) -> Dictionary:
+	var counts: Dictionary = {}
+	for node_id in [int(edge["a"]), int(edge["b"])]:
+		if node_id < 0 or node_id >= nodes.size():
+			continue
+		for good in nodes[node_id]["queue"]:
+			counts[good] = int(counts.get(good, 0)) + 1
+	return counts
+
+
 func trade_report() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for edge in edges:
 		var traffic := edge_traffic(int(edge["id"]))
 		var top := str(traffic["best"])
-		if top == "":
-			continue
 		var counts: Dictionary = traffic["counts"]
+		var total := int(traffic["total"])
 		var waiting := _edge_waiting(edge)
-		var length := float(edge["length"])
+		# Wer nichts gemessen bekommt, aber trotzdem Ware auf der Strecke
+		# stapeln sieht, ist genau der Fall, in dem der Bericht schweigen
+		# würde — und in dem der Spieler am dringendsten etwas braucht. Also
+		# zählt der Stau mit, und die Ware, die dort liegt, ist die Antwort auf
+		# die Frage nach dem Verkehr.
+		if top == "":
+			if waiting < ROUTE_JAM:
+				continue
+			counts = _queued_goods(edge)
+			top = hottest_name(counts)
+			if top == "":
+				continue
+			total = waiting
 		out.append({
 			"edge": int(edge["id"]),
 			"a": int(edge["a"]),
 			"b": int(edge["b"]),
 			"kind": str(edge["kind"]),
-			"length": length,
+			"length": float(edge["length"]),
 			"carriers": (edge["carriers"] as Array).size(),
 			"top": top,
 			"top_count": int(counts.get(top, 0)),
-			"total": int(traffic["total"]),
+			"total": total,
 			"waiting": waiting,
 			"jammed": waiting >= ROUTE_JAM,
 			"priority": int(edge["priority"]),
@@ -1649,10 +1691,14 @@ func trade_report() -> Array[Dictionary]:
 	return out
 
 
-## Sortierregel des Berichts: Verkehr zuerst, dann Länge. Der zweite Schlüssel
-## ist nicht Kosmetik — ohne ihn springt die Liste, sobald zwei Straßen
-## gleichauf liegen, und der Spieler verliert die Zeile, die er las.
+## Sortierregel des Berichts: erst der Stau, dann der Verkehr, dann die Länge.
+## Der Stau steht vorn, weil er der einzige Grund ist, den der Optimierer sofort
+## behebt. Die beiden anderen Schlüssel sind nicht Kosmetik — ohne sie springt
+## die Liste, sobald zwei Straßen gleichauf liegen, und der Spieler verliert die
+## Zeile, die er gerade las.
 func _busier_route(a: Dictionary, b: Dictionary) -> bool:
+	if bool(a["jammed"]) != bool(b["jammed"]):
+		return bool(a["jammed"])
 	if int(a["total"]) != int(b["total"]):
 		return int(a["total"]) > int(b["total"])
 	return float(a["length"]) > float(b["length"])

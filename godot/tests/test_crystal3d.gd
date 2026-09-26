@@ -139,8 +139,7 @@ func _flow_scoring() -> void:
 ## pay out, and the bar has to run out again.
 func _screen_flow(tree: SceneTree) -> void:
 	t.suite("Crystal Tower — Screen")
-	_router.go_to("crystal3d")
-	await tree.create_timer(0.6).timeout
+	await t.goto(_router, tree, "crystal3d")
 	var screen = _router.current_screen
 	t.check(screen != null, "Der Crystal-Screen wird geoeffnet")
 	if screen == null:

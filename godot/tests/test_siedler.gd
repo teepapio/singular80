@@ -20,6 +20,7 @@ func run(kit: TestKit) -> void:
 	_route_measure()
 	_route_value()
 	_route_report()
+	_route_split()
 	_route_optimize()
 	t.close_suite()
 
@@ -742,6 +743,16 @@ func _route_report() -> void:
 			"Der Satz redet über die Ware dieser Strecke")
 		break
 
+	# Die Reihenfolge ist eine Zusage an den Spieler: der Stau zuerst, weil er
+	# der einzige Grund ist, den der Optimierer sofort behebt, danach der
+	# Verkehr, dann die Länge. Ohne den Stau-Vorrang rutschte die Zeile, auf die
+	# der Spieler gerade tippt, beim nächsten Durchgang nach unten.
+	var jams_first := true
+	for i in range(1, routes.size()):
+		if bool(routes[i - 1]["jammed"]) and not bool(routes[i]["jammed"]):
+			jams_first = false
+	t.check(jams_first, "Jede verstopfte Strecke steht im Bericht über jeder freien")
+
 	# Ein Stau schlägt alles: er ist der einzige Grund, den der Optimierer
 	# tatsächlich selbst behebt.
 	var busy := _busiest(siedler)
@@ -768,6 +779,90 @@ func _route_report() -> void:
 	t.equal(siedler.edge_priority(int(first["edge"])), int(first["priority"]),
 		"Und die Priorität ist die, die dort wirklich steht")
 	t.suite_done()
+
+
+func _route_split() -> void:
+	t.suite("Siedler — Handelswege: Streckenteilung")
+
+	# `split_gain` ist die Zusage, die der Optimierer dem Spieler macht: eine
+	# positive Zahl heißt, das Teilen bringt Träger, `0` heißt, er lässt die
+	# Finger davon. Geprüft wird die reine Funktion, weil sie über den
+	# Kartenaufbau hinaus gilt — eine zu kurze Straße bleibt zu kurz.
+	var siedler := _siedler()
+	var short_road := {"kind": "road", "length": float(Siedler.SPLIT_LENGTH),
+		"priority": 6, "carriers": []}
+	t.equal(siedler.split_gain(short_road), 0,
+		"Eine Strecke in Fahnenweite gewinnt durch Teilen nichts")
+
+	var long_road := {"kind": "road", "length": float(Siedler.SPLIT_LENGTH) * 4.0,
+		"priority": 6, "carriers": []}
+	t.check(siedler.split_gain(long_road) > 0,
+		"Eine viermal so lange Strecke gewinnt Träger, sonst wäre das Optimieren sinnlos")
+
+	# Die Zahl ist keine Schätzung: sie ist genau die Trägerzahl der beiden
+	# Hälften minus der der ganzen Strecke.
+	t.equal(siedler.split_gain(long_road),
+		Siedler.carrier_count_for(float(Siedler.SPLIT_LENGTH) * 2.0, 6) * 2,
+		"Der Gewinn ist die Trägerzahl der beiden Hälften")
+
+	# Kein Stummel wird geteilt, egal wie lang er ist: er trägt ohnehin nur
+	# einen Träger, und zwei Hälften eines Stummels wären zwei Stummel.
+	var stub := {"kind": "flag", "length": float(Siedler.SPLIT_LENGTH) * 8.0,
+		"priority": 6, "carriers": []}
+	t.equal(siedler.split_gain(stub), 0,
+		"Kein Stummel wird geteilt, egal wie lang er ist")
+
+	# `best_split_cell` folgt `split_gain`. Wo das Teilen nichts bringt, nennt
+	# der Bericht auch kein Feld — sonst zeigte der Bildschirm einen Griff an,
+	# den der Optimierer gar nicht macht.
+	var agrees := true
+	for edge in siedler.edges:
+		if siedler.split_gain(edge) <= 0:
+			agrees = agrees and siedler.best_split_cell(edge) == -1
+	t.check(agrees, "Ohne Gewinn nennt der Bericht auch kein Feld für eine Fahne")
+
+	# Wo der Bericht ein Feld nennt, muss dort auch wirklich eine Fahne
+	# stehen können: kein Haus, denn das ist selbst ein Verkehrsknoten, und
+	# kein Wasser, denn Wasser trägt keinen Träger.
+	var trade := _trading_siedler()
+	_run(trade, 40.0)
+	var offered := -1
+	for entry in trade.trade_report():
+		if int(entry["gain"]) > 0:
+			offered = int(entry["cell"])
+			break
+	if offered >= 0:
+		t.check(offered < trade.cells.size(), "Das genannte Feld liegt auf der Karte")
+		t.check(int(trade.cells[offered]["building"]) < 0,
+			"Und trägt kein Haus")
+		t.check(str(trade.cells[offered]["res"]) != "water",
+			"Und ist kein Wasser")
+	t.suite_done()
+
+
+## Die Kanten-Ids müssen lückenlos zu ihren Array-Indizes passen, jeder Knoten
+## darf nur existierende Kanten nennen, und keine Strecke darf doppelt im Netz
+## liegen. Das ist die Invariante, an der das Teilen am ehesten rüttelt: es
+## entfernt eine Kante und hängt zwei neue an das Ende, verschiebt also alle
+## Ids dahinter — und ein Knopf, der eine Straße über ihre Nummer anspricht,
+## zeigt danach sonst auf eine völlig andere.
+func _edge_integrity(siedler: Siedler) -> bool:
+	for i in siedler.edges.size():
+		if int(siedler.edges[i]["id"]) != i:
+			return false
+	var seen := {}
+	for edge in siedler.edges:
+		var low := mini(int(edge["a"]), int(edge["b"]))
+		var high := maxi(int(edge["a"]), int(edge["b"]))
+		var pair := [low, high]
+		if seen.has(pair):
+			return false
+		seen[pair] = true
+	for node in siedler.nodes:
+		for edge_id in node["edges"]:
+			if int(edge_id) < 0 or int(edge_id) >= siedler.edges.size():
+				return false
+	return true
 
 
 func _route_optimize() -> void:
@@ -803,6 +898,8 @@ func _route_optimize() -> void:
 	t.check(first.size() > 0, "Der Optimierer meldet, was er getan hat")
 	t.check(flags_after - flags_before <= Siedler.MAX_SPLITS,
 		"Er setzt höchstens %d Fahnen je Durchgang" % Siedler.MAX_SPLITS)
+	t.check(_edge_integrity(siedler),
+		"Nach dem Optimieren zeigt jede Kanten-Id noch auf ihre Straße, ohne Doppelung")
 	t.check(not siedler.notice.is_empty(), "Und sagt es auch dem Spiel")
 	t.equal(siedler.trade_report().size() >= 0, true,
 		"Der Bericht lässt sich danach noch lesen")

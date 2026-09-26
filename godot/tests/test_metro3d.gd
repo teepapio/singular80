@@ -253,8 +253,7 @@ func _anschluss_marker(tree: SceneTree) -> void:
 	if router == null:
 		t.suite_done()
 		return
-	router.go_to("metro3d")
-	await tree.create_timer(0.5).timeout
+	await t.goto(router, tree, "metro3d")
 	var screen = router.current_screen
 	t.check(screen != null, "Der Screen wird geöffnet")
 	if screen == null:
@@ -296,7 +295,6 @@ func _anschluss_marker(tree: SceneTree) -> void:
 	t.equal(metro.stranded_total, 0, "Und niemand steht mehr ohne Anschluss da")
 	t.equal(metro.demand_text(), "", "Das HUD hat nichts mehr zu melden")
 
-	router.go_to("lobby")
-	await tree.create_timer(0.3).timeout
+	await t.goto(router, tree, "lobby")
 	t.check(router.current_id == "lobby", "Zurück in die Lobby")
 	t.suite_done()

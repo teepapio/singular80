@@ -133,7 +133,7 @@ const SCOPE_SUITES = {
     'Siedler — Ratgeber: Rangfolge', 'Siedler — Ratgeber: Taktgleichheit',
     'Siedler — Ratgeber: Handlung', 'Siedler — Handelswege: Messung',
     'Siedler — Handelswege: Bericht', 'Siedler — Handelswege: Optimierung',
-    'Siedler — Handelswege: Ware und Wert'],
+    'Siedler — Handelswege: Ware und Wert', 'Siedler — Handelswege: Streckenteilung'],
   meshes: ['Asset-Registry', 'Mesh-Galerie', 'Mesh — Detailstufen', 'Mesh-Galerie — Anordnung',
     'Mesh-Galerie — Merkliste'],
   lobby: ['Lobby-Geometrie', 'Vorschlagsdialog'],

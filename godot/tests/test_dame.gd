@@ -184,8 +184,7 @@ func _hint_at_the_board(tree: SceneTree) -> void:
 	if router == null:
 		t.check(false, "Der Router ist erreichbar")
 		return
-	router.go_to("dame")
-	await tree.create_timer(0.4).timeout
+	await t.goto(router, tree, "dame")
 	var screen = router.current_screen
 	t.check(screen != null, "Der Dame-Screen ist offen")
 	if screen == null:

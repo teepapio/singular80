@@ -430,8 +430,7 @@ class ScreenChecks:
 		_life = float(constants.get("HINT_LIFE", 5.0))
 		t.check(_cost > 0, "Der Tipp hat einen Preis")
 
-		_router.go_to("freecell")
-		await tree.create_timer(0.4).timeout
+		await t.goto(_router, tree, "freecell")
 		var screen = _router.current_screen
 		t.check(screen != null, "Der Screen wird geöffnet")
 		if screen == null:
@@ -494,8 +493,7 @@ class ScreenChecks:
 		t.equal(screen.hints_used, 0, "Ein neues Spiel zählt die Tipps neu")
 		t.check(screen.hint_move.is_empty(), "und ohne Tipp")
 		t.suite_done()
-		_router.go_to("lobby")
-		await tree.create_timer(0.3).timeout
+		await t.goto(_router, tree, "lobby")
 
 	## Eight single cards with even ranks: nothing fits on anything, no ace is
 	## reachable. A position the hint has to admit it cannot solve.

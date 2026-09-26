@@ -124,30 +124,13 @@ func _wants(screen_id: String) -> bool:
 ## soon as the screen is in the tree, so polling ends the wait after the fade
 ## (0.12 s) instead of guessing: faster, and it cannot under-wait a screen that
 ## is slow to build. The cap keeps a broken screen from hanging the run.
-func _goto(screen_id: String, cap := 2.0) -> bool:
-	# Drain a transition that is still running, otherwise `go_to` ignores the
-	# request outright and the wait below would burn its whole budget.
-	var waited := 0.0
-	while router.transitioning and waited < cap:
-		await tree.process_frame
-		waited += 1.0 / 60.0
-	router.go_to(screen_id)
-	waited = 0.0
-	while waited < cap:
-		await tree.process_frame
-		waited += 1.0 / 60.0
-		# Both conditions matter: `current_id` flips when the screen is in the
-		# tree, but the router only accepts the next request once the fade ended.
-		if router.current_id == screen_id and not router.transitioning:
-			await tree.process_frame
-			return true
-	return false
+func _goto(screen_id: String, data: Dictionary = {}, cap := 2.0) -> bool:
+	return await t.goto(router, tree, screen_id, data, cap)
 
 
 func _arena_actually_plays() -> void:
 	t.suite("Arena — Spielablauf")
-	router.go_to("arena", {"weaponId": "pistol", "modeId": "classic"})
-	await tree.create_timer(0.4).timeout
+	await _goto("arena", {"weaponId": "pistol", "modeId": "classic"})
 	var screen = router.current_screen
 	if screen == null:
 		t.check(false, "Arena geöffnet")

@@ -131,8 +131,10 @@ func _screen_hint(tree: SceneTree) -> void:
 	if _router == null:
 		t.suite_done()
 		return
-	_router.go_to("merge3d_christmas")
-	await tree.create_timer(0.5).timeout
+	if not await t.goto(_router, tree, "merge3d_christmas"):
+		t.check(false, "Der Weihnachts-Screen öffnet")
+		t.suite_done()
+		return
 	var screen = _router.current_screen
 	t.check(screen != null, "Der Weihnachts-Screen öffnet")
 	if screen == null:
