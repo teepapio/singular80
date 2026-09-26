@@ -17,8 +17,14 @@ func _run() -> void:
 	var logic := TestLogic.new()
 	logic.run(kit)
 
+	var metro := TestMetro.new()
+	metro.run(kit)
+
 	var improvements := TestImprovements.new()
 	improvements.run(kit)
+
+	var metro_screens := TestMetroScreens.new()
+	await metro_screens.run(kit, self)
 
 	var screens := TestScreens.new()
 	await screens.run(kit, self)

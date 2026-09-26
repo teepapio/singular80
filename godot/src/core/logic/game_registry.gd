@@ -200,6 +200,17 @@ const GAMES: Array[Dictionary] = [
 		"highscore_key": Game.HS_DRAGONFLIGHT,
 	},
 	{
+		"id": "metro3d",
+		"name": "Metropol 3D",
+		"description": "Baue ein U-Bahn-Netz in einer 3D-Stadt: Linien ziehen, Züge setzen, Rush Hour überstehen.",
+		"icon": "▣",
+		"screen": "metro3d",
+		"accent": Color(0.024, 0.714, 0.831),
+		"accent_hex": 0x06b6d4,
+		"category": CATEGORY_PUZZLE,
+		"highscore_key": Game.HS_METRO,
+	},
+	{
 		"id": "2048",
 		"name": "2048",
 		"description": "Das Sucht-Puzzle: Verschiebe die Kacheln, verschmelze gleiche Zahlen und baue die 2048.",

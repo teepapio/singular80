@@ -26,6 +26,7 @@ const HS_HORSE := "singular80_horserunner_highscore"
 const HS_DRAGON := "singular80_dragonrpg_highscore"
 const HS_2048 := "singular80_2048_highscore"
 const HS_DRAGONFLIGHT := "singular80_dragonflight_highscore"
+const HS_METRO := "singular80_metro3d_highscore"
 const HS_SIEDLER := "singular80_siedler_highscore"
 
 var muted: bool = false
