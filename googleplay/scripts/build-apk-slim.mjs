@@ -224,8 +224,8 @@ if (!verifyOnly) {
   }
 
   // The actual exclusion: take the two folders out of the project, then let the
-  // editor re-index what is left. The filter alone ships 52 MB too much, and
-  // nothing in the export output would say so.
+  // editor re-index what is left. Nothing in the export output would say so if
+  // this silently stopped working, which is what the md5 check below is for.
   step('4/5 Release-APK bauen (Detailstufen aus dem Projekt nehmen)');
   try {
     for (const dir of LIFT_DIRS) mkdirSync(dir, { recursive: true });
