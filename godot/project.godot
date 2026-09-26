@@ -51,7 +51,14 @@ folder_colors={
 [input_devices]
 
 pointing/emulate_touch_from_mouse=true
-pointing/emulate_mouse_from_touch=false
+; MUSS true sein. Godots `Button` (BaseButton) reagiert auf `InputEventMouseButton`,
+; nicht auf rohen `InputEventScreenTouch`. Mit `false` bekommt ein Fingerdruck
+; nur ein Touch-Event — und damit war auf dem Tablet **jeder** Knopf des Spiels
+; tot, während der VirtualStick funktionierte, weil er Touch-Events selbst
+; auswertet. Der Stick schließt seine eigene Maus-Behandlung per
+; `not DisplayServer.is_touchscreen_available()` aus, und die Bildschirme
+; ebenso; deshalb erzeugt die Emulation auf einem Touch-Gerät kein Doppel-Event.
+pointing/emulate_mouse_from_touch=true
 
 [rendering]
 
