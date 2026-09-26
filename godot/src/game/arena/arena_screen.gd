@@ -70,6 +70,86 @@ class Spark:
 	var max_life := 0.28
 
 
+## The dash button for players without a keyboard.
+##
+## `content/mechanics.json` promises a dash and the mechanics module implements
+## it, but it listens to the `dash` input action — which a phone does not have.
+## This button presses exactly that action and draws the cooldown the arena
+## mirrors from the mechanic, so both input paths share one rule.
+class DashPad:
+	extends Control
+	const RADIUS := 54.0
+	## Bottom right, clear of the pause button above it and of the thumb stick.
+	const CENTER := Vector2(1204.0, 512.0)
+
+	var screen: ArenaScreen
+	var held := false
+	var _drawn_at := -1.0
+	var _drawn_held := false
+
+	## Redraws only when the ring actually moved — not every frame.
+	func sync() -> void:
+		if screen == null:
+			return
+		var step := snappedf(screen.dash_cooldown_left, 0.02)
+		if step == _drawn_at and held == _drawn_held:
+			return
+		_drawn_at = step
+		_drawn_held = held
+		queue_redraw()
+
+	func _gui_input(event: InputEvent) -> void:
+		if event is InputEventScreenTouch:
+			var touch := event as InputEventScreenTouch
+			_hold(touch.pressed)
+			accept_event()
+		elif event is InputEventMouseButton and not DisplayServer.is_touchscreen_available():
+			var click := event as InputEventMouseButton
+			if click.button_index == MOUSE_BUTTON_LEFT:
+				_hold(click.pressed)
+				accept_event()
+
+	## Behaves like a key: held while the finger is down, released when it
+	## lifts. Holding it cannot chain dashes — the mechanic's cooldown decides.
+	func _hold(down: bool) -> void:
+		if down == held:
+			return
+		held = down
+		ArenaRuns.dash_press(down)
+
+	func _draw() -> void:
+		var center := size * 0.5
+		var ratio := ArenaRuns.dash_cooldown_ratio(screen.dash_cooldown_left, screen.dash_cooldown)
+		var ready := ratio <= 0.0
+		var accent: Color = UiTheme.ACCENT if ready else UiTheme.TEXT_MUTED
+		var alpha := 1.0 if ready else 0.6
+		draw_circle(center, RADIUS, Color(0.031, 0.047, 0.086, 0.62))
+		draw_arc(center, RADIUS, 0.0, TAU, 40, Color(accent.r, accent.g, accent.b, 0.8 * alpha), 3.0, true)
+		# The sweep empties while the dash recharges, so the ring *is* the timer.
+		if not ready:
+			draw_arc(center, RADIUS - 7.0, -PI * 0.5, -PI * 0.5 + TAU * (1.0 - ratio), 40,
+				Color(accent.r, accent.g, accent.b, 0.85), 5.0, true)
+		_draw_chevrons(center, Color(accent.r, accent.g, accent.b, alpha))
+		var text := ArenaRuns.dash_charge_text(screen.dash_cooldown_left)
+		if text == "":
+			return
+		var font := Ui.font_bold()
+		if font != null:
+			var width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14)
+			draw_string(font, center + Vector2(-width.x * 0.5, RADIUS - 12.0), text,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(accent.r, accent.g, accent.b, 0.75))
+
+	## Two chevrons pointing the way a dash goes — a glyph DejaVu can draw
+	## without an icon font.
+	func _draw_chevrons(center: Vector2, tint: Color) -> void:
+		for i in 2:
+			var x := center.x - 8.0 + float(i) * 14.0
+			var chevron := PackedVector2Array([
+				Vector2(x, center.y - 13.0), Vector2(x + 10.0, center.y), Vector2(x, center.y + 13.0)
+			])
+			draw_polyline(chevron, tint, 4.0, true)
+
+
 var stats: PlayerStats
 var weapon: Dictionary = {}
 var mode: Dictionary = {}
@@ -104,6 +184,14 @@ var chain_milestone := 0.0
 var boss_banner_time := 0.0
 var boss_banner_name := ""
 
+# --- dash: the mechanic owns the rule, the arena owns the button and the look ---
+var dash_cooldown := 1.5
+var dash_cooldown_left := 0.0
+var dash_glow := 0.0
+var dash_dir := Vector2.RIGHT
+## Where the player was during the burst; the board draws these as after-images.
+var dash_trail: Array[Vector2] = []
+
 var _board: ArenaBoard
 var _hp_bar: ProgressBar
 var _xp_bar: ProgressBar
@@ -112,6 +200,7 @@ var _hint_label: Label
 var _preview_label: Label
 var _chain_label: Label
 var _boss_banner: Label
+var _dash_pad: DashPad
 var _stick: VirtualStick
 var _pointer := Vector2(ARENA_W * 0.5 + 140.0, ARENA_H * 0.5)
 var _board_base := Vector2.ZERO
@@ -149,6 +238,11 @@ func _reset_state() -> void:
 	chain_milestone = 0.0
 	boss_banner_time = 0.0
 	boss_banner_name = ""
+	dash_cooldown_left = 0.0
+	dash_glow = 0.0
+	dash_dir = Vector2.RIGHT
+	# Preallocated: the after-images are written every frame of a dash.
+	dash_trail.resize(ArenaRuns.DASH_TRAIL_STEPS)
 	paused = false
 	choosing_upgrade = false
 	pending_level_ups = 0
@@ -242,6 +336,29 @@ func _build_mechanics() -> void:
 		if mechanic != null:
 			mechanics.append(mechanic)
 			mechanic.init_mechanic(self)
+		# The dash rule stays in the mechanic; the button only needs to know how
+		# long the recharge takes so it can draw it.
+		var dash := mechanic as DashMechanic
+		if dash != null:
+			dash_cooldown = dash.COOLDOWN
+			_build_dash_pad()
+			# The mechanic's own hint talks about a key. On a phone the button
+			# is the only dash there is, so name it.
+			if Game.touch_controls:
+				add_hint("Daumen bewegen   ·   Dash-Knopf = ausweichen")
+
+
+## The on-screen dash. It presses the very action a key presses, so the
+## mechanic stays the only place the dash rule exists and the button can never
+## drift away from it.
+func _build_dash_pad() -> void:
+	_dash_pad = DashPad.new()
+	_dash_pad.screen = self
+	_dash_pad.mouse_filter = Control.MOUSE_FILTER_STOP
+	_dash_pad.size = Vector2(DashPad.RADIUS * 2.0, DashPad.RADIUS * 2.0)
+	_dash_pad.position = DashPad.CENTER - _dash_pad.size * 0.5
+	_dash_pad.visible = Game.touch_controls
+	stage().add_child(_dash_pad)
 
 
 # --- mechanics host ---------------------------------------------------------
@@ -307,6 +424,9 @@ func _process(delta: float) -> void:
 			override = result
 	if override != null:
 		player_pos += Vector2(float(override["x"]), float(override["y"])) * delta
+		# The dash is the only movement override in the game, so this is where
+		# the burst becomes visible and where its cooldown starts.
+		_begin_dash(Vector2(float(override["x"]), float(override["y"])))
 	else:
 		player_pos += input_direction() * stats.effective_move_speed() * delta
 	player_pos.x = clampf(player_pos.x, 22.0, ARENA_W - 22.0)
@@ -340,6 +460,22 @@ func _update_telegraph(delta: float) -> void:
 			# Hold the last half second, then fade.
 			_boss_banner.modulate.a = clampf(boss_banner_time * 2.0, 0.0, 1.0)
 	chain_state = ArenaRuns.decay(chain_state, elapsed)
+	dash_cooldown_left = maxf(0.0, dash_cooldown_left - delta)
+	dash_glow = maxf(0.0, dash_glow - delta / ArenaRuns.DASH_TRAIL_TIME)
+	if _dash_pad != null:
+		_dash_pad.sync()
+
+
+## Mirrors the burst the mechanic just started: the button gets its 1.5 s back
+## and the board gets three ghosts to fade out behind the player.
+func _begin_dash(velocity: Vector2) -> void:
+	if velocity.length() > 0.01:
+		dash_dir = velocity.normalized()
+	dash_glow = 1.0
+	dash_cooldown_left = dash_cooldown
+	for i in range(dash_trail.size() - 1, 0, -1):
+		dash_trail[i] = dash_trail[i - 1]
+	dash_trail[0] = player_pos
 
 
 func _update_shake(delta: float) -> void:
@@ -954,7 +1090,33 @@ class ArenaBoard:
 				continue
 			_draw_enemy(enemy)
 
-		_draw_player(screen.player_pos, screen.is_invulnerable(), screen.aim_dir, screen.elapsed)
+		_draw_dash(screen)
+		# A dash is a gift, not a hit: it keeps its solid body and lets the
+		# after-images carry the motion, instead of blinking like damage does.
+		_draw_player(screen.player_pos, screen.is_invulnerable() and screen.dash_glow <= 0.0, screen.aim_dir, screen.elapsed)
+
+	## After-images of the last dash. Without them the burst is a teleport the
+	## player cannot aim — this is what makes the invulnerable frames readable.
+	func _draw_dash(view: ArenaScreen) -> void:
+		if view.dash_glow <= 0.0:
+			return
+		_draw_wake(view)
+		for i in view.dash_trail.size():
+			var alpha := ArenaRuns.dash_step_alpha(view.dash_glow, i)
+			if alpha <= 0.02:
+				continue
+			var radius: float = 17.0 - float(i) * 4.0
+			draw_circle(view.dash_trail[i], radius, Color(0.290, 0.647, 0.898, alpha * 0.5))
+			draw_arc(view.dash_trail[i], radius, 0.0, TAU, 24, Color(0.490, 0.827, 0.988, alpha), 2.0, true)
+
+	## A wake in the dash direction. The ghosts alone are dots; the wake says
+	## which way the burst went and how far it carries the player.
+	func _draw_wake(view: ArenaScreen) -> void:
+		if view.dash_trail.is_empty():
+			return
+		var fade := ArenaRuns.dash_trail_alpha(view.dash_glow)
+		var from := view.dash_trail[view.dash_trail.size() - 1] - view.dash_dir * 14.0
+		draw_line(from, view.player_pos, Color(0.490, 0.827, 0.988, fade * 0.5), 9.0, true)
 
 	## Enemy shapes mirror the content definition, exactly like the browser
 	## build's procedurally generated textures.

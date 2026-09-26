@@ -93,6 +93,12 @@ func _run() -> void:
 		await TestCrystal3d.new().run(kit, self)
 	if _wants_class("res://tests/test_candy_match3.gd", only):
 		TestCandyMatch3.new().run(kit)
+	if _wants_class("res://tests/test_arena.gd", only):
+		# By path: `--script` mode does not refresh the global class cache, so a
+		# class added today is unknown until the next `godot:import`.
+		var arena_suite: GDScript = load("res://tests/test_arena.gd")
+		if arena_suite != null:
+			arena_suite.new().run(kit)
 	if _wants_class("res://tests/test_poker.gd", only):
 		# By path, like the suites above: `--script` mode does not refresh the
 		# global class cache, so a class added today is unknown.

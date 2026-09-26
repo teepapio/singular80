@@ -1,9 +1,11 @@
 class_name ArenaRuns
 extends RefCounted
-## Wave forecasting, boss telegraphs and kill chains for the Arena.
+## Wave forecasting, boss telegraphs, kill chains and the dash for the Arena.
 ##
 ## Everything here is a pure function of elapsed time, the content pack and the
-## kill feed, so the HUD can *anticipate* instead of only reacting.
+## kill feed, so the HUD can *anticipate* instead of only reacting. The single
+## exception is `dash_press()`, which is the one place a finger turns into
+## input.
 
 const WAVE_DURATION := 30.0
 const BOSS_INTERVAL := 120.0
@@ -155,3 +157,56 @@ static func preview_text(defs: Array, wave: int, elapsed: float) -> String:
 ## Colour for a content entry, by its rarity.
 static func color_of(def: Dictionary) -> Color:
 	return RARITY_COLORS.get(str(def.get("rarity", "common")), RARITY_COLORS["common"])
+
+
+# --- dash --------------------------------------------------------------------
+
+## The input action a finger and a key share. The dash rule itself lives in
+## `mechanics/dash_mechanic.gd` and listens to exactly this action; the arena
+## only supplies the button and the feedback, so the rule stays in one place.
+const DASH_ACTION := "dash"
+
+## How long the after-image of a dash lingers, in seconds.
+const DASH_TRAIL_TIME := 0.36
+
+## How many ghosts the after-image leaves, oldest last.
+const DASH_TRAIL_STEPS := 3
+
+
+## The one side effect in this module: a finger becomes the very same input a
+## key produces. It lives here rather than in the button so the promise "a thumb
+## dashes exactly like the space bar" is something a test can check.
+static func dash_press(held: bool) -> void:
+	if held:
+		Input.action_press(DASH_ACTION)
+	else:
+		Input.action_release(DASH_ACTION)
+
+
+## 0 means "ready", 1 means "just dashed": the sweep a cooldown ring draws.
+## `cooldown` comes from the mechanic, so tuning the dash there moves the ring
+## with it instead of leaving a second number behind to drift.
+static func dash_cooldown_ratio(remaining: float, cooldown: float) -> float:
+	return clampf(remaining / maxf(0.01, cooldown), 0.0, 1.0)
+
+
+static func dash_ready(remaining: float) -> bool:
+	return remaining <= 0.0
+
+
+## Countdown on the button, empty while the dash is available.
+static func dash_charge_text(remaining: float) -> String:
+	if dash_ready(remaining):
+		return ""
+	return "%.1f" % maxf(0.0, remaining)
+
+
+## After-images fade out quadratically: the burst pops, the tail lingers.
+static func dash_trail_alpha(glow: float) -> float:
+	var fade: float = clampf(glow, 0.0, 1.0)
+	return fade * fade
+
+
+## Alpha of the i-th after-image — the oldest ghost is the faintest.
+static func dash_step_alpha(glow: float, index: int) -> float:
+	return dash_trail_alpha(glow) * clampf(1.0 - float(index) / float(DASH_TRAIL_STEPS), 0.0, 1.0)

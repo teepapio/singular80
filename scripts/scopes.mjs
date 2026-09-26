@@ -89,7 +89,7 @@ const VARIANT_BASE = {
  * The `Screens` sweep is driven separately, by `screens` below.
  */
 const SCOPE_SUITES = {
-  arena: ['PlayerStats', 'Arena — Spielablauf', 'Arena — Wellenvorschau', 'Arena — Kill-Ketten'],
+  arena: ['PlayerStats', 'Arena — Spielablauf', 'Arena — Wellenvorschau', 'Arena — Kill-Ketten', 'Arena — Dash'],
   tetris: ['Tetris — Eingabe', 'Tetris — Punktewertung', 'Tetris — T-Spin-Erkennung',
     'Tetris — Vorschaukette', 'Tetris — Brettgefahr'],
   poker: ['Karten & Texas Hold\'em', 'Kartenspiele — Eingabe',
