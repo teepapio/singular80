@@ -10,6 +10,7 @@ import { ContentStore } from './content';
 import { Store } from './db';
 import * as discord from './discord';
 import * as telegram from './telegram';
+import { TelegramBot } from './telegramBot';
 import { findOpencodeBinary, Runner } from './runner';
 import {
   backupPath,
@@ -34,7 +35,8 @@ export interface AppOptions {
   runnerEnabled?: boolean;
 }
 
-const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:5173/dashboard.html';
+// Die Hauptseite ist das Dashboard; `/dashboard.html` leitet nur noch um.
+const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:5173/';
 
 export function createApp(options: AppOptions): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: 1024 * 256 });
@@ -242,29 +244,33 @@ export function createApp(options: AppOptions): FastifyInstance {
     if (!body.status || !allowed.includes(body.status)) {
       return reply.code(400).send({ error: `status muss einer von ${allowed.join(', ')} sein` });
     }
-    const updated = store.updateSuggestionStatus(id, body.status);
-    if (!updated) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
-    const view = viewOf(id)!;
-    const webhook = store.getSettings().discordWebhook || process.env.DISCORD_WEBHOOK_URL || '';
-    if (webhook && view.discordMessageId) {
-      await discord.updateSuggestionMessage(view, webhook, dashboardUrl);
-    }
-    emit({ type: 'suggestion:updated', suggestion: view });
-    return view;
+    const result = setStatus(id, body.status);
+    if (!result.ok) return reply.code(404).send({ error: result.error });
+    return viewOf(id);
   });
 
-  app.post('/api/suggestions/:id/implement', async (req, reply) => {
-    if (!runner) return reply.code(503).send({ error: 'Runner ist deaktiviert' });
-    const id = Number((req.params as { id: string }).id);
+  /**
+   * Startet einen Lauf für einen bestehenden Vorschlag.
+   *
+   * Das ist die **eine** Stelle, die das tut. Der HTTP-Knopf und der
+   * Telegram-Befehl `/run` gehen beide hierher; zwei Kopien wären zwei Stellen,
+   * an denen sich Dashboard und Chat stillschweigend unterscheiden — und der
+   * Unterschied fällt erst auf, wenn ein Lauf im einen Weg startet und im
+   * anderen nicht.
+   */
+  const startRun = (
+    id: number,
+    extraInstructions = '',
+  ): { ok: boolean; error?: string; runId?: string; run?: RunRecord; view?: SuggestionView } => {
+    if (!runner) return { ok: false, error: 'Der Runner ist abgeschaltet.' };
     const suggestion = store.getSuggestion(id);
-    if (!suggestion) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
+    if (!suggestion) return { ok: false, error: `Vorschlag #${id} gibt es nicht.` };
     if (runner.isBusyForSuggestion(suggestion)) {
-      return reply.code(409).send({ error: 'Für diesen Vorschlag läuft bereits ein Run.' });
+      return { ok: false, error: `Für #${id} läuft bereits ein Run.` };
     }
-    const body = (req.body ?? {}) as { extraInstructions?: string };
     const settings = store.getSettings();
     const merged = { ...settings };
-    const extra = (body.extraInstructions ?? '').trim();
+    const extra = extraInstructions.trim();
     if (extra) merged.extraInstructions = [settings.extraInstructions, extra].filter(Boolean).join('\n');
     const all = store.listSuggestions();
     const canonical = suggestion.canonicalId ?? suggestion.id;
@@ -272,7 +278,43 @@ export function createApp(options: AppOptions): FastifyInstance {
     const run = runner.enqueue(suggestion, merged, cluster);
     const view = viewOf(id)!;
     emit({ type: 'suggestion:updated', suggestion: view });
-    return { run, suggestion: view };
+    return { ok: true, runId: run.id, run, view };
+  };
+
+  /**
+   * Status setzen und beide Enden informieren. Auch das hat nur eine Quelle,
+   * damit der Chat keine eigene Wahrheit bekommt.
+   */
+  const setStatus = (id: number, status: SuggestionStatus): { ok: boolean; error?: string } => {
+    const updated = store.updateSuggestionStatus(id, status);
+    if (!updated) return { ok: false, error: `Vorschlag #${id} gibt es nicht.` };
+    const view = viewOf(id)!;
+    const webhook = store.getSettings().discordWebhook || process.env.DISCORD_WEBHOOK_URL || '';
+    if (webhook && view.discordMessageId) {
+      void discord.updateSuggestionMessage(view, webhook, dashboardUrl);
+    }
+    if (telegram.isConfigured()) {
+      const sent = telegram.sendMessage(
+        `${status === 'approved' ? '👍' : status === 'rejected' ? '❌' : 'ℹ️'} #${id} ist jetzt <b>${status}</b>\n${dashboardUrl}#suggestion-${id}`,
+      );
+      void sent.then((r) => {
+        if (!r.ok) console.warn('[telegram] Statuswechsel nicht zugestellt:', r.error);
+      });
+    }
+    emit({ type: 'suggestion:updated', suggestion: view });
+    return { ok: true };
+  };
+
+  app.post('/api/suggestions/:id/implement', async (req, reply) => {
+    if (!runner) return reply.code(503).send({ error: 'Runner ist deaktiviert' });
+    const id = Number((req.params as { id: string }).id);
+    const body = (req.body ?? {}) as { extraInstructions?: string };
+    const started = startRun(id, body.extraInstructions ?? '');
+    if (!started.ok) {
+      const code = started.error?.includes('gibt es nicht') ? 404 : 409;
+      return reply.code(code).send({ error: started.error });
+    }
+    return { run: started.run, suggestion: started.view };
   });
 
   /**
@@ -695,21 +737,37 @@ export function createApp(options: AppOptions): FastifyInstance {
     app.get('/', async (_req, reply) =>
       reply
         .type('text/plain')
-        .send('Dev-Modus: Spieldashboard unter http://localhost:5173 (Vite). API läuft hier.'),
+        .send('Dev-Modus: Dashboard unter http://localhost:5173 (Vite). API läuft hier.'),
     );
   }
+
+  // Der Telegram-Bot läuft nur, wenn ein Token hinterlegt ist. Ohne Token
+  // passiert hier nichts — ein Spielstand ohne Chatbedienung soll nicht an
+  // einem leeren Bot hängen.
+  const bot = new TelegramBot({
+    store,
+    runner: runner ?? null,
+    bus,
+    dashboardUrl,
+    viewOf,
+    startRun: (id) => startRun(id),
+    setStatus: (id, status) => setStatus(id, status),
+    onError: (err) => console.warn('[telegram]', err.message),
+  });
+  bot.start();
 
   app.addHook('onClose', async () => {
     // Only the timers: a run that is still going must survive the server, that
     // is what the PID registry and the adoption in `recover()` are for.
     runner?.dispose();
+    await bot.stop();
   });
 
   app.setErrorHandler((error: Error & { statusCode?: number }, _req, reply) => {
     reply.code(error.statusCode ?? 500).send({ error: error.message });
   });
 
-  (app as FastifyInstance & { _singular80?: unknown })._singular80 = { store, content, runner, bus };
+  (app as FastifyInstance & { _singular80?: unknown })._singular80 = { store, content, runner, bus, bot };
   return app;
 }
 

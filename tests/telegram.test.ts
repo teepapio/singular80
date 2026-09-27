@@ -3,11 +3,17 @@ import type { SuggestionView } from '../src/shared/types';
 import {
   buildSuggestionText,
   escapeHtml,
+  getUpdates,
+  HELP_TEXT,
+  isAuthorized,
   isConfigured,
   notifyNewSuggestion,
   notifyRunResult,
+  parseCommand,
   sendMessage,
+  suggestionIdArg,
 } from '../server/telegram';
+import { TelegramBot } from '../server/telegramBot';
 
 /**
  * Telegram ist der Kanal, über den der Besitzer erfährt, dass ein Spieler
@@ -39,6 +45,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.TELEGRAM_BOT_TOKEN;
   delete process.env.TELEGRAM_CHAT_ID;
+  delete process.env.TELEGRAM_ALLOWED_USER_IDS;
 });
 
 describe('Telegram-Text', () => {
@@ -140,3 +147,176 @@ describe('Telegram-Zustellung', () => {
     expect(body.disable_web_page_preview).toBe(true);
   });
 });
+
+/** Eine Nachricht so bauen, wie Telegram sie schickt. */
+function update(text: string, chatId = 42, fromId: number | null = 7) {
+  return {
+    update_id: 1,
+    message: {
+      message_id: 1,
+      text,
+      date: 1_700_000_000,
+      chat: { id: chatId, type: 'private' },
+      from: fromId === null ? undefined : { id: fromId, is_bot: false },
+    },
+  };
+}
+
+describe('Befehle aus dem Chat', () => {
+  it('erkennt den Befehl trotz @Bot-Namen und Argumenten', () => {
+    const command = parseCommand('/run@Singular80Bot 12 jetzt');
+    expect(command).not.toBeNull();
+    expect(command!.name).toBe('run');
+    expect(command!.args).toEqual(['12', 'jetzt']);
+  });
+
+  it('ignoriert normale Chatnachrichten', () => {
+    // Sonst antwortet der Bot auf jedes Wort mit der Hilfeliste.
+    expect(parseCommand('guten Morgen')).toBeNull();
+    expect(parseCommand('')).toBeNull();
+  });
+
+  it('liest nur eine echte Nummer als Vorschlagsnummer', () => {
+    expect(suggestionIdArg(['12'])).toBe(12);
+    expect(suggestionIdArg(['0', 'x'])).toBeNull();
+    expect(suggestionIdArg(['-3'])).toBeNull();
+    expect(suggestionIdArg(['zwölf'])).toBeNull();
+    expect(suggestionIdArg([])).toBeNull();
+  });
+
+  it('zeigt die Hilfeliste, ohne einen Lauf zu starten', () => {
+    // `/start` ist der Telegram-Befehl für den ersten Kontakt. Bedeutet er
+    // hier "starte den Runner", startet ein Versehen einen Agenten.
+    expect(HELP_TEXT).toContain('/run');
+    expect(HELP_TEXT).not.toMatch(/\/start\s+\d/);
+  });
+});
+
+describe('Wer den Bot steuern darf', () => {
+  it('lässt ohne konfigurierte Id niemanden an', () => {
+    // Ohne Allowlist wäre jeder, der den Bot findet, Operator.
+    expect(isAuthorized(update('/run 1', 99, 99))).toBe(false);
+  });
+
+  it('akzeptiert den Besitzer über Chat-Id und über Benutzer-Id', () => {
+    process.env.TELEGRAM_CHAT_ID = '42';
+    expect(isAuthorized(update('/run 1', 42, 7))).toBe(true);
+    process.env.TELEGRAM_CHAT_ID = '111';
+    process.env.TELEGRAM_ALLOWED_USER_IDS = '7, 8';
+    expect(isAuthorized(update('/run 1', 999, 7))).toBe(true);
+    expect(isAuthorized(update('/run 1', 999, 8))).toBe(true);
+  });
+
+  it('weist Fremde ab, ohne ihnen zu antworten', async () => {
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+    const bot = makeBot();
+    await bot.handle(update('/run 1', 999, 999));
+    // Keine Antwort: eine Rückmeldung bestätigt nur, dass der Bot lebt.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('weist andere Bots ab', () => {
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const other = update('/run 1');
+    other.message!.from = { id: 7, is_bot: true };
+    expect(isAuthorized(other)).toBe(false);
+  });
+});
+
+describe('Der Bot führt Befehle aus', () => {
+  it('startet einen Lauf und nennt die Run-Id', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+    const started: number[] = [];
+    const bot = makeBot({ startRun: (id) => (started.push(id), { ok: true, runId: 'run_9' }) });
+    await bot.handle(update('/run 12'));
+    expect(started).toEqual([12]);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.text).toContain('run_9');
+  });
+
+  it('sagt, wenn die Warteschlange pausiert, statt zu starten', async () => {
+    // Der wichtigste Fehler, den man nicht machen darf: ein Befehl, der die
+    // Pause umgeht, erzeugt Arbeit, die niemand bestellt hat.
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+    const started: number[] = [];
+    const bot = makeBot({
+      paused: true,
+      startRun: (id) => (started.push(id), { ok: true, runId: 'run_9' }),
+    });
+    await bot.handle(update('/run 12'));
+    expect(started).toEqual([]);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.text).toContain('pausiert');
+  });
+
+  it('meldet einen unbekannten Vorschlag, ohne zu raten', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+    const bot = makeBot({ startRun: () => ({ ok: false, error: 'Vorschlag #99 gibt es nicht.' }) });
+    await bot.handle(update('/run 99'));
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.text).toContain('gibt es nicht');
+  });
+
+  it('antwortet auf /help mit der Liste und ohne Seiteneffekt', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+    const bot = makeBot();
+    await bot.handle(update('/help'));
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.text).toContain('/list');
+    expect(body.text).toContain('/status');
+  });
+});
+
+describe('getUpdates', () => {
+  it('fragt nicht ab, solange kein Token gesetzt ist', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await getUpdates(0);
+    expect(result.ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('gibt das Wasserzeichen als Offset weiter', async () => {
+    // Ohne Offset bekäme Telegram dieselben Nachrichten endlos wieder.
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, result: [] }) });
+    vi.stubGlobal('fetch', fetchMock);
+    await getUpdates(4711);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('offset=4711');
+  });
+});
+
+/** Minimale Attrappe: der Bot braucht nur diese fünf Dinge. */
+type StartRun = (id: number) => { ok: boolean; runId?: string; error?: string };
+
+function makeBot(overrides: { startRun?: StartRun; paused?: boolean } = {}) {
+  const runner = {
+    isPaused: () => overrides.paused ?? false,
+    queueState: () => ({ queue: [], activeRuns: [] }),
+    capacity: () => 3,
+  };
+  return new TelegramBot({
+    store: { listSuggestions: () => [], listRuns: () => [] } as never,
+    runner: runner as never,
+    bus: { on: () => {}, emit: () => false } as never,
+    dashboardUrl: 'https://example.invalid/dashboard.html',
+    viewOf: () => null,
+    startRun: overrides.startRun ?? (() => ({ ok: true, runId: 'run_1' })),
+    setStatus: () => ({ ok: true }),
+    onError: () => {},
+  });
+}

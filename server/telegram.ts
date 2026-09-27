@@ -181,3 +181,117 @@ export async function sendTest(dashboardUrl: string): Promise<{ ok: boolean; err
     ].join('\n\n'),
   );
 }
+
+// --- Befehle aus dem Chat ----------------------------------------------------
+
+/** Ein Telegram-Bot pollt `getUpdates`; es ist nur ein Poller erlaubt. */
+const API_TIMEOUT = 30;
+
+export interface TelegramUpdate {
+  update_id: number;
+  message?: {
+    message_id: number;
+    text?: string;
+    date: number;
+    chat: { id: number; type: string };
+    from?: { id: number; is_bot?: boolean };
+  };
+}
+
+export interface Command {
+  /** Ohne `/`, klein: `run`. Leer, wenn die Nachricht kein Befehl war. */
+  name: string;
+  args: string[];
+  raw: string;
+}
+
+export const HELP_TEXT = [
+  '<b>Singular 80</b> — du steuerst das Dashboard aus diesem Chat.',
+  '',
+  '<code>/list</code> — offene Vorschläge',
+  '<code>/status 12</code> — ein Vorschlag mit seinen Läufen',
+  '<code>/run 12</code> — OpenCode-Lauf zu Vorschlag 12 starten',
+  '<code>/approve 12</code> · <code>/reject 12</code> — Status setzen',
+  '<code>/queue</code> — Warteschlange und Spuren',
+  '<code>/help</code> — diese Liste',
+].join('\n');
+
+/**
+ * Zerlegt eine Nachricht in einen Befehl. Alles ohne führendes `/` ist keine
+ * Befehlsnachricht — der Bot beantwortet normalen Chat nicht, sonst antwortet
+ * er auf jedes Wort mit einer Liste.
+ */
+export function parseCommand(text: string): Command | null {
+  const raw = text.trim();
+  if (!raw.startsWith('/')) return null;
+  // `/run@Singular80Bot 12` ist Telegram-Syntax; der Bot-Name ist optional.
+  const [head, ...rest] = raw.slice(1).split(/\s+/);
+  const name = (head ?? '').split('@')[0].toLowerCase();
+  if (!name) return null;
+  return { name, args: rest, raw };
+}
+
+/**
+ * Wer Befehle ausführen darf. Ein Run startet eine OpenCode-Sitzung im
+ * Arbeitsbaum, also ist „nur der Besitzer" keine Höflichkeit, sondern die
+ * Bedingung: jeder, der dem Bot schreiben kann, könnte sonst Code schreiben
+ * lassen. Die Liste ist die **Benutzer**-Id, nicht die Chat-Id — in Gruppen
+ * wäre die Chat-Id sonst geteilt.
+ */
+export function allowedUserIds(): Set<string> {
+  const raw = [chatId(), ...(process.env.TELEGRAM_ALLOWED_USER_IDS ?? '').split(',')]
+    .map((v) => v.trim())
+    .filter(Boolean);
+  return new Set(raw);
+}
+
+/** Prüft die Herkunft einer Nachricht. Bots und Fremde werden abgewiesen. */
+export function isAuthorized(update: TelegramUpdate): boolean {
+  const message = update.message;
+  if (!message) return false;
+  if (message.from?.is_bot) return false;
+  const allowed = allowedUserIds();
+  if (allowed.size === 0) return false;
+  // Die Chat-Id zählt ebenfalls: sie ist die einzige Angabe, die bei einem
+  // Einzelchat garantiert vorhanden ist.
+  if (allowed.has(String(message.chat.id))) return true;
+  return message.from ? allowed.has(String(message.from.id)) : false;
+}
+
+/** Holt aus einer Befehlszeile eine Vorschlagsnummer, sonst `null`. */
+export function suggestionIdArg(args: string[]): number | null {
+  const first = (args[0] ?? '').trim();
+  if (!/^\d+$/.test(first)) return null;
+  const id = Number(first);
+  return id > 0 ? id : null;
+}
+
+export interface RawUpdate {
+  ok: boolean;
+  result?: TelegramUpdate[];
+  error?: string;
+}
+
+/**
+ * Long-Polling. `timeout` veranlasst Telegram, die Anfrage bis zu 30 Sekunden
+ * offen zu halten, sodass ein leerer Durchlauf kein Request-Sturm ist.
+ * `offset` ist das Wasserzeichen: Telegram markiert damit Updates als gelesen.
+ */
+export async function getUpdates(offset: number, timeout = API_TIMEOUT): Promise<RawUpdate> {
+  if (!token()) return { ok: false, error: 'Kein TELEGRAM_BOT_TOKEN' };
+  try {
+    const res = await fetch(`${API}/bot${token()}/getUpdates?offset=${offset}&timeout=${timeout}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) {
+      const raw = await res.text().catch(() => '');
+      return { ok: false, error: `getUpdates ${res.status}: ${raw.slice(0, 200)}` };
+    }
+    const data = (await res.json().catch(() => null)) as { ok?: boolean; result?: TelegramUpdate[] } | null;
+    if (!data?.ok) return { ok: false, error: 'getUpdates: unerwartete Antwort' };
+    return { ok: true, result: data.result ?? [] };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+}
