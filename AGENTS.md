@@ -10,6 +10,56 @@ Backend.
 > fertige Änderungen weder committen noch zurücksetzen. Zum Prüfen gegen HEAD
 > eine Kopie in `/tmp` anlegen und dort die Suite laufen lassen.
 
+> **Achtung, `git push` ist Pflicht, nicht Kür:** Ein Commit, der nur lokal
+> existiert, ist für den Besitzer verloren — er sieht ihn nie, und dieser Zweig
+> hier hat 54 Commits, 387 Dateien und rund 50.000 Zeilen angesammelt, ohne dass
+> eines davon auf GitHub ankam. Details und die Branch-Frage unten.
+
+## Nach dem Commit: pushen
+
+`git push origin main` — **in derselben Sitzung, in der du committet hast.**
+
+Ein Commit ist ein Versprechen an *diesen* Arbeitsbaum, nicht an den Besitzer.
+Der Besitzer arbeitet mit GitHub, nicht mit `git log`: was er dort nicht sieht,
+existiert für ihn nicht. Der Unterschied ist billig zu reparieren, solange er
+noch da ist, und uninterreparabel, wenn der Rechner neu aufgesetzt wird.
+
+- **Ein Push pro Sitzung reicht**, am Ende — nicht nach jedem Commit.
+- **Vorher `git status`**: niemals `git add -A`, nur die eigenen Dateien (siehe
+  oben). Was du nicht committen darfst, schiebst du auch nicht.
+- **Nur `main`, keine Branches** für normale Arbeit. Der Besitzer arbeitet nicht
+  mit Pull Requests; ein Feature-Branch ohne Merge ist für ihn dasselbe wie
+  nicht existent. Branches sind ausschließlich für *eine* Sache da: halbfertige
+  Arbeit zu parken, die `main` grün hält (siehe „Parken statt Merge").
+- **Vor dem Push prüfen**, dass keine Geheimnisse mitgehen: das Repo ist
+  **öffentlich** (`teepapio/singular80`). `.env`, `*.pem`, `*.keystore`,
+  Datenbanken und APK-Bauartefakte gehören nicht hinein — `.gitignore` deckt
+  das ab, aber eine erzwungene `git add -f` umgeht es.
+- **Schlägt der Push fehl** (kein Netz, falscher Schlüssel), ist das ein Blocker
+  für den Abschluss der Sitzung, kein Detail: `git status -sb` muss am Ende
+  `## main...origin/main` **ohne** `ahead` zeigen. Sonst steht die Arbeit
+  wieder nur hier.
+
+**Prüf-Befehl für den Besitzer:** `git status -sb | head -1`. Steht dort
+`ahead`, ist etwas nicht auf GitHub.
+
+### Parken statt Merge
+
+Liegt fremde, halbfertige Arbeit im Baum (typisch nach einem abgebrochenen
+Runner-Lauf) und lässt sie sich nicht sauber fertigstellen, wird sie **nicht
+verworfen und nicht auf `main` gemischt**, sondern auf einen Neben-Branch
+geparkt und der gepusht:
+
+```bash
+git stash push -u -m "WIP" -- <nur diese Dateien>   # oder: auf Branch committen
+git switch -c wip/<kurze-beschreibung>
+git push -u origin wip/<kurze-beschreibung>
+```
+
+So liegt die Arbeit auf GitHub, `main` bleibt grün, und sie ist später greifbar.
+Vorher `npm run typecheck` laufen lassen — halbfertige Arbeit bricht erfahrungsgemäß
+genau dort, und ein geparkter Branch ist der richtige Ort dafür, nicht `main`.
+
 ## Vor der ersten Änderung
 
 Drei Sekunden, die in dieser Sitzung einen halben Tag ersetzt haben:
