@@ -1,0 +1,14 @@
+{
+  "kind": "singular80-dashboard-backup",
+  "version": 1,
+  "writtenAt": 1790550762930,
+  "machine": "edi-pc",
+  "counts": {
+    "suggestions": 0,
+    "runs": 0,
+    "votes": 0
+  },
+  "suggestions": [],
+  "runs": [],
+  "votes": []
+}

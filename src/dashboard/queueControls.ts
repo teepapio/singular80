@@ -24,6 +24,14 @@ export interface QueueSummary {
   waiting: number;
   /** How long until the next queued run may start, when a backoff is pending. */
   startsIn: string | null;
+  /** How many lanes exist and how many are busy, e.g. "2 von 3 Spuren belegt". */
+  lanes: string;
+  /** Busy lanes, oldest first. */
+  busyLanes: number;
+  /** Lanes the operator configured, i.e. how many sessions may run at once. */
+  totalLanes: number;
+  /** Queued runs that wait for a busy lane instead of for their turn. */
+  blocked: number;
 }
 
 /** German duration, reused for countdowns ("in 25 s", "in 2 min 5 s"). */
@@ -44,7 +52,15 @@ export function describePolicy(policy: RunnerPolicy): string {
   if (policy.retryLimit > 0) {
     parts.push(`${formatCountdown(policy.retryBackoffSeconds * 1000)} Wartezeit`);
   }
+  parts.push(laneLabel(policy.maxParallelRuns, 0));
   return parts.join(' · ');
+}
+
+/** `3 Spuren parallel` / `keine Parallelität (1 Spur)`. */
+export function laneLabel(totalLanes: number, busyLanes: number): string {
+  const total = Math.max(1, totalLanes);
+  if (total === 1) return busyLanes > 0 ? '1 Spur, belegt' : '1 Spur (nur nacheinander)';
+  return `${busyLanes} von ${total} Spuren belegt`;
 }
 
 export function describeQueue(state: QueueState, now: number): QueueSummary {
@@ -52,13 +68,63 @@ export function describeQueue(state: QueueState, now: number): QueueSummary {
     .filter((run) => run.notBefore != null && run.notBefore > now)
     .map((run) => run.notBefore as number);
   const soonest = pending.length ? Math.min(...pending) : null;
+  const busyLanes = state.activeRuns.length;
+  const totalLanes = Math.max(1, state.policy.maxParallelRuns);
   return {
     paused: state.paused,
     label: state.paused ? '⏸ Queue pausiert' : '▶ Queue läuft',
     policyLabel: describePolicy(state.policy),
     waiting: state.queue.length,
     startsIn: soonest !== null && soonest > now ? `nächster Start in ${formatCountdown(soonest - now)}` : null,
+    lanes: laneLabel(totalLanes, busyLanes),
+    busyLanes,
+    totalLanes,
+    blocked: state.blockedRunIds.length,
   };
+}
+
+/**
+ * Scope ids that name a kind of work rather than a place, and that the server
+ * hands to a run *in addition* to the specific scope. Two lanes may therefore
+ * both have been pointed at the same one — the scheduler allows it (otherwise the
+ * queue stays serial), so the panel has to say it out loud instead of leaving
+ * the operator to find it in a scope audit hours later. Mirrors `BROAD_SCOPES`
+ * in `server/scopes.ts`.
+ */
+export const BROAD_SCOPE_IDS = new Set(['core', 'content']);
+
+export interface LaneRisk {
+  /** Scope both busy lanes were pointed at, e.g. `core`. */
+  scope: string;
+  /** Lanes involved, ascending. */
+  lanes: number[];
+}
+
+/**
+ * Pairs of busy lanes that share a broad scope, so the operator can see the one
+ * collision the parallel queue deliberately allows.
+ */
+export function laneRisks(runs: readonly RunRecord[]): LaneRisk[] {
+  const out: LaneRisk[] = [];
+  for (let i = 0; i < runs.length; i += 1) {
+    for (let j = i + 1; j < runs.length; j += 1) {
+      const a = runs[i];
+      const b = runs[j];
+      if (a.lane == null || b.lane == null) continue;
+      const shared = a.scopes.filter((id) => BROAD_SCOPE_IDS.has(id) && b.scopes.includes(id));
+      for (const scope of shared) {
+        out.push({ scope, lanes: [a.lane, b.lane].sort((x, y) => x - y) });
+      }
+    }
+  }
+  return out;
+}
+
+/** One German warning line for `laneRisks`, or null when there is nothing to say. */
+export function describeLaneRisks(risks: readonly LaneRisk[]): string | null {
+  if (risks.length === 0) return null;
+  const parts = risks.map((risk) => `${risk.scope} (Spur ${risk.lanes.join(' + ')})`);
+  return `⚠ ${parts.join(', ')} — beide Spuren dürfen dort schreiben; der Scope-Audit meldet es, falls es passiert.`;
 }
 
 /** `Versuch 2/3` for a retried run, or null for a first attempt. */

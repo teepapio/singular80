@@ -21,6 +21,9 @@ export const DEFAULT_SETTINGS: Settings = {
   runTimeoutMinutes: 45,
   retryLimit: 1,
   retryBackoffSeconds: 30,
+  // Three lanes: enough to work on three different games at once, few enough
+  // that the agents do not fight over CPU, disk and the shared git index.
+  maxParallelRuns: 3,
 };
 
 /** Upper bounds for the runner policy, so one bad request cannot stop every run. */
@@ -28,6 +31,9 @@ export const SETTINGS_BOUNDS = {
   runTimeoutMinutes: { min: 0, max: 1440 },
   retryLimit: { min: 0, max: 5 },
   retryBackoffSeconds: { min: 0, max: 3600 },
+  // 1 is the old serial queue and is always allowed; the ceiling is a machine
+  // limit, not a taste question — every lane is a full opencode session.
+  maxParallelRuns: { min: 1, max: 8 },
 } as const;
 
 export type PolicyKey = keyof typeof SETTINGS_BOUNDS;
@@ -73,6 +79,7 @@ interface RunRow {
   scope: string | null;
   note: string | null;
   scope_issues: string | null;
+  lane: number | null;
 }
 
 function rowToSuggestion(row: SuggestionRow): Suggestion {
@@ -158,6 +165,7 @@ function rowToRun(row: RunRow): RunRecord {
     suggestionId: row.suggestion_id,
     status: row.status as RunStatus,
     sessionId: row.session_id,
+    lane: row.lane ?? null,
     prompt: row.prompt,
     exitCode: row.exit_code,
     cost: row.cost,
@@ -360,6 +368,10 @@ export class Store {
       'ALTER TABLE runs ADD COLUMN scope TEXT',
       'ALTER TABLE runs ADD COLUMN note TEXT',
       'ALTER TABLE runs ADD COLUMN scope_issues TEXT',
+      // The lane a run occupies. Nullable on purpose: a queued run has no lane
+      // yet, and a run from before parallel queues existed reads back as null
+      // rather than pretending it was in slot 1.
+      'ALTER TABLE runs ADD COLUMN lane INTEGER',
     ]) {
       try {
         this.db.exec(ddl);
@@ -474,11 +486,106 @@ export class Store {
     return { votes: row?.votes ?? 0, changed: Number(inserted.changes) > 0 };
   }
 
+  /** Every vote, oldest first. The backup needs them: a vote count alone cannot
+   * tell "nobody voted" from "the voters are lost", and only the second one is
+   * worth restoring. */
+  listVotes(): { suggestionId: number; voterId: string; createdAt: number }[] {
+    const rows = this.db
+      .prepare('SELECT suggestion_id, voter_id, created_at FROM votes ORDER BY suggestion_id ASC, voter_id ASC')
+      .all() as unknown as { suggestion_id: number; voter_id: string; created_at: number }[];
+    return rows.map((r) => ({ suggestionId: r.suggestion_id, voterId: r.voter_id, createdAt: r.created_at }));
+  }
+
+  /**
+   * Inserts a suggestion under its *existing* id, or changes nothing.
+   *
+   * This exists for the repository backup, where the id is the whole point: the
+   * same suggestion has to keep the same number on every machine, otherwise
+   * "Vorschlag #42" means two different things after a pull. `INSERT OR IGNORE`
+   * makes the call idempotent, so reading the same file twice is harmless.
+   */
+  importSuggestion(s: Suggestion): boolean {
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO suggestions (id, text, author, source, category, status, votes, canonical_id, created_at, updated_at, discord_message_id, run_id, parent_id, client_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        s.id,
+        s.text,
+        s.author,
+        s.source,
+        s.category,
+        s.status,
+        s.votes,
+        s.canonicalId,
+        s.createdAt,
+        s.updatedAt,
+        s.discordMessageId,
+        s.runId,
+        s.parentId ?? null,
+        s.clientKey ?? null,
+      );
+    return Number(result.changes) > 0;
+  }
+
+  /** Writes a whole suggestion row over an existing one, id included. */
+  overwriteSuggestion(s: Suggestion): void {
+    this.db
+      .prepare(
+        `UPDATE suggestions SET text = ?, author = ?, source = ?, category = ?, status = ?, votes = ?, canonical_id = ?, created_at = ?, updated_at = ?, discord_message_id = ?, run_id = ?, parent_id = ?, client_key = ?
+         WHERE id = ?`,
+      )
+      .run(
+        s.text,
+        s.author,
+        s.source,
+        s.category,
+        s.status,
+        s.votes,
+        s.canonicalId,
+        s.createdAt,
+        s.updatedAt,
+        s.discordMessageId,
+        s.runId,
+        s.parentId ?? null,
+        s.clientKey ?? null,
+        s.id,
+      );
+  }
+
+  /** Inserts votes, ignoring the ones already present. Returns how many were new. */
+  importVotes(votes: readonly { suggestionId: number; voterId: string; createdAt: number }[]): number {
+    const stmt = this.db.prepare(
+      'INSERT OR IGNORE INTO votes (suggestion_id, voter_id, created_at) VALUES (?, ?, ?)',
+    );
+    let added = 0;
+    for (const vote of votes) {
+      // A vote for a suggestion this database does not have would be invisible
+      // and would distort the count if the suggestion arrives later.
+      if (!this.getSuggestion(vote.suggestionId)) continue;
+      const result = stmt.run(vote.suggestionId, vote.voterId, vote.createdAt);
+      added += Number(result.changes) > 0 ? 1 : 0;
+    }
+    return added;
+  }
+
+  /**
+   * Recomputes `suggestions.votes` from the votes table. The counter is a cache
+   * of the table, and an import writes the table directly — without this, a
+   * restored suggestion would show zero votes next to its voters.
+   */
+  recountVotes(): void {
+    this.db.exec(
+      `UPDATE suggestions SET votes = (SELECT COUNT(*) FROM votes WHERE votes.suggestion_id = suggestions.id)`,
+    );
+  }
+
   createRun(run: RunRecord) {
     this.db
       .prepare(
-        `INSERT INTO runs (id, suggestion_id, status, session_id, prompt, exit_code, cost, tokens_input, tokens_output, commit_hash, result_summary, created_at, started_at, finished_at, log_path, attempt, max_attempts, retry_of, not_before, timeout_ms, scope, note, scope_issues)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO runs (id, suggestion_id, status, session_id, prompt, exit_code, cost, tokens_input, tokens_output, commit_hash, result_summary, created_at, started_at, finished_at, log_path, attempt, max_attempts, retry_of, not_before, timeout_ms, scope, note, scope_issues, lane)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -504,13 +611,14 @@ export class Store {
         run.scopes.join(','),
         run.note,
         run.scopeIssues,
+        run.lane,
       );
   }
 
   updateRun(run: RunRecord) {
     this.db
       .prepare(
-        `UPDATE runs SET status = ?, session_id = ?, exit_code = ?, cost = ?, tokens_input = ?, tokens_output = ?, commit_hash = ?, result_summary = ?, started_at = ?, finished_at = ?, attempt = ?, max_attempts = ?, retry_of = ?, not_before = ?, timeout_ms = ?, scope = ?, note = ?, scope_issues = ?
+        `UPDATE runs SET status = ?, session_id = ?, exit_code = ?, cost = ?, tokens_input = ?, tokens_output = ?, commit_hash = ?, result_summary = ?, started_at = ?, finished_at = ?, attempt = ?, max_attempts = ?, retry_of = ?, not_before = ?, timeout_ms = ?, scope = ?, note = ?, scope_issues = ?, lane = ?
          WHERE id = ?`,
       )
       .run(
@@ -532,6 +640,7 @@ export class Store {
         run.scopes.join(','),
         run.note,
         run.scopeIssues,
+        run.lane,
         run.id,
       );
   }
@@ -539,6 +648,21 @@ export class Store {
   getRun(id: string): RunRecord | null {
     const row = this.db.prepare('SELECT * FROM runs WHERE id = ?').get(id) as RunRow | undefined;
     return row ? rowToRun(row) : null;
+  }
+
+  /**
+   * Inserts a run under its existing id, or changes nothing. Same purpose as
+   * `importSuggestion`: a run id is quoted in logs, prompts and commit messages,
+   * so it has to survive a move between machines unchanged.
+   */
+  importRun(run: RunRecord): boolean {
+    try {
+      this.createRun(run);
+      return true;
+    } catch (err) {
+      if (!isUniqueViolation(err)) throw err;
+      return false;
+    }
   }
 
   listRuns(limit = 50): RunRecord[] {
@@ -669,6 +793,11 @@ export class Store {
         DEFAULT_SETTINGS.retryBackoffSeconds,
         SETTINGS_BOUNDS.retryBackoffSeconds,
       ),
+      maxParallelRuns: numberSetting(
+        raw.maxParallelRuns,
+        DEFAULT_SETTINGS.maxParallelRuns,
+        SETTINGS_BOUNDS.maxParallelRuns,
+      ),
     };
   }
 
@@ -709,10 +838,16 @@ export class Store {
   }
 }
 
-/** SQLite meldet einen verletzten UNIQUE-Index als SQLITE_CONSTRAINT_UNIQUE (2067). */
+/**
+ * SQLite meldet einen verletzten UNIQUE-Index als SQLITE_CONSTRAINT_UNIQUE (2067)
+ * und einen doppelten Primärschlüssel als SQLITE_CONSTRAINT_PRIMARYKEY (1555) —
+ * beide mit derselben Meldung. `runs.id` ist ein Text-Primärschlüssel, also
+ * braucht der Import beide Fälle.
+ */
 function isUniqueViolation(err: unknown): boolean {
   const sqlite = err as { errcode?: number; message?: string } | null;
-  return sqlite?.errcode === 2067 || /UNIQUE constraint failed/i.test(sqlite?.message ?? '');
+  if (sqlite?.errcode === 2067 || sqlite?.errcode === 1555) return true;
+  return /UNIQUE constraint failed|PRIMARY KEY must be unique/i.test(sqlite?.message ?? '');
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -9,15 +9,19 @@ import type {
   ScopeManifest,
   SuggestionView,
 } from '../shared/types';
+import { OPERATOR_SOURCE } from '../shared/types';
 import {
   attemptLabel,
   describeQueue,
   formatCountdown,
+  describeLaneRisks,
   groupScopes,
+  laneRisks,
   manifestHeadline,
   outcomeBadge,
   scopeLabel,
   scopeWarning,
+  type QueueSummary,
 } from './queueControls';
 import { describeRunActivity, formatDuration, lastEventTimestamp, needsRunCleanup } from './runActivity';
 
@@ -26,18 +30,20 @@ type Tab = 'queue' | 'new' | 'top' | 'cluster' | 'done';
 interface DashboardState {
   suggestions: SuggestionView[];
   runs: RunRecord[];
-  activeRun: RunRecord | null;
-  runEvents: RunEvent[];
-  /** Wall-clock time of the last received/synced event of the active run. */
-  lastActivityAt: number | null;
-  /** Whether the server still tracks a live process for the active run. */
-  activeRunAlive: boolean | null;
+  /** Runs currently holding a lane, oldest first — one card each. */
+  activeRuns: RunRecord[];
+  /** Live output per run id, so parallel sessions do not overwrite each other. */
+  runEvents: Map<string, RunEvent[]>;
+  /** Wall-clock time of the last received/synced event, per run id. */
+  lastActivityAt: Map<string, number>;
+  /** Whether the server still tracks a live process, per run id. */
+  alive: Map<string, boolean>;
   /** Pause state, policy and pending runs as the server reports them. */
   queue: QueueState | null;
   /** Scope layout the runner depends on (from scripts/scopes.mjs). */
   manifest: ScopeManifest | null;
-  /** Which files a run touched relative to its declared scope. */
-  audit: ScopeAudit | null;
+  /** Which files a run touched relative to its declared scope, per run id. */
+  audits: Map<string, ScopeAudit>;
   tab: Tab;
   category: string | null;
   search: string;
@@ -45,25 +51,67 @@ interface DashboardState {
   connected: boolean;
   /** Suggestion id currently being split in the dialog, or null. */
   splitFor: number | null;
+  /** State of the repo-committed backup file. */
+  backup: BackupState | null;
+  /** True while an operator order is being sent, so the button cannot double-fire. */
+  taskSending: boolean;
+}
+
+/** What the dashboard knows about `backup/dashboard.json` in the repository. */
+interface BackupState {
+  /** Repo-relative path of the file. */
+  path: string;
+  exists: boolean;
+  writtenAt: number | null;
+  /** Machine that wrote it — the first question when two histories disagree. */
+  machine: string | null;
+  suggestionCount: number;
+  runCount: number;
+  voteCount: number;
+  /** Suggestions in the file that this database does not know yet. */
+  missingHere: number;
+  /** Suggestions here that the file has never seen. */
+  missingThere: number;
+  /** Suggestions that exist in both but differ — two machines, one history. */
+  differing: number;
+  older: number;
+  newer: number;
+  /** Runs the file has that this database has not. */
+  runsMissingHere: number;
+  /** German one-liner from the server, so both sides word it the same way. */
+  headline: string;
+  /** Set when the file exists but cannot be read (broken JSON, newer version). */
+  error: string | null;
 }
 
 const state: DashboardState = {
   suggestions: [],
   runs: [],
-  activeRun: null,
-  runEvents: [],
-  lastActivityAt: null,
-  activeRunAlive: null,
+  activeRuns: [],
+  runEvents: new Map(),
+  lastActivityAt: new Map(),
+  alive: new Map(),
   queue: null,
   manifest: null,
-  audit: null,
+  audits: new Map(),
   tab: 'queue',
   category: null,
   search: '',
   expanded: new Set(),
   connected: false,
   splitFor: null,
+  backup: null,
+  taskSending: false,
 };
+
+/** Newest live event per run id; an empty array means "nothing seen yet". */
+function eventsOf(runId: string): RunEvent[] {
+  return state.runEvents.get(runId) ?? [];
+}
+
+function lastActivityOf(runId: string): number | null {
+  return state.lastActivityAt.get(runId) ?? null;
+}
 
 /** How often the "last output" indicator is refreshed while a run is active. */
 const ACTIVITY_TICK_MS = 1000;
@@ -126,11 +174,16 @@ function timeAgo(timestamp: number): string {
   return `vor ${Math.floor(seconds / 86400)} d`;
 }
 
-/** Records the newest activity of the active run, ignoring out-of-order times. */
-function markActivity(timestamp?: number): void {
+/**
+ * Records the newest activity of one run, ignoring out-of-order times. Per run
+ * id, because several sessions write to the stream at the same time and a single
+ * shared clock would report lane 2 as silent while lane 1 talks.
+ */
+function markActivity(runId: string, timestamp?: number): void {
   const now = Date.now();
   const t = Math.min(timestamp ?? now, now);
-  state.lastActivityAt = state.lastActivityAt === null ? t : Math.max(state.lastActivityAt, t);
+  const seen = state.lastActivityAt.get(runId) ?? null;
+  state.lastActivityAt.set(runId, seen === null ? t : Math.max(seen, t));
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -255,6 +308,11 @@ function renderCard(s: SuggestionView, children: number[]): string {
         ${runBadge}
         ${s.clusterSize > 1 ? `<span title="ähnliche Vorschläge">🧩 ${s.clusterSize}</span>` : ''}
         ${s.parentId != null ? `<span class="badge split-child" title="Teilauftrag von #${s.parentId}">↳ Teil von #${s.parentId}</span>` : ''}
+        ${
+          s.source === OPERATOR_SOURCE
+            ? '<span class="badge operator" title="Direkt im Dashboard als Auftrag getippt, nicht von einem Spieler">📌 Betreiberauftrag</span>'
+            : ''
+        }
         ${hasChildren ? `<span class="badge split-parent" title="In Einzelaufträge aufgeteilt">✂ ${children.length}</span>` : ''}
         <span>#${s.id}</span>
         <span>${escapeHtml(s.author)}</span>
@@ -333,73 +391,107 @@ function renderList(): void {
   }
 }
 
+/** One lane, drawn as a chip. Busy lanes name the run they carry. */
+function renderLanes(summary: QueueSummary): string {
+  if (summary.totalLanes <= 1) return '';
+  const chips: string[] = [];
+  for (let lane = 1; lane <= summary.totalLanes; lane += 1) {
+    const run = state.activeRuns.find((r) => r.lane === lane);
+    const busy = Boolean(run);
+    const title = run
+      ? `Spur ${lane}: #${run.suggestionId} · ${scopeLabel(run, state.manifest)}`
+      : `Spur ${lane} ist frei`;
+    chips.push(
+      `<span class="chip lane ${busy ? 'busy' : 'free'}" title="${escapeHtml(title)}">` +
+        `${busy ? '⚙' : '○'} Spur ${lane}${run ? ` · #${run.suggestionId}` : ''}</span>`,
+    );
+  }
+  // The one collision parallel lanes deliberately allow, said out loud.
+  const risk = describeLaneRisks(laneRisks(state.activeRuns));
+  const note = risk ? `<div class="lane-risk">${escapeHtml(risk)}</div>` : '';
+  return `<div class="lane-strip" title="Jede Spur ist ein eigener OpenCode-Sitzungsplatz">${chips.join('')}</div>${note}`;
+}
+
+/** The live card of one lane: header, budget, scope, activity, console, actions. */
+function renderRunCard(run: RunRecord): string {
+  const alive = state.alive.get(run.id);
+  const activity = describeRunActivity({
+    lastActivityAt: lastActivityOf(run.id),
+    startedAt: run.startedAt,
+    connected: state.connected,
+    alive: alive ?? undefined,
+  });
+  const lines = eventsOf(run.id)
+    .slice(-400)
+    .map((event) => `<div class="line ${event.kind}">${escapeHtml(event.text)}</div>`)
+    .join('');
+  const warning = scopeWarning(state.audits.get(run.id) ?? null);
+  const operator = suggestionAuthor(run.suggestionId) === 'Betreiber' ? ' · Auftrag' : '';
+  return `
+    <div class="run-card activity-${activity.level}" data-run-card="${run.id}">
+      <div class="run-title">
+        <span>🤖 #${run.suggestionId}${operator} <span class="lane-tag" title="Diese Spur in der Warteschlange">Spur ${run.lane ?? '?'}</span></span>
+        <span>${alive === false ? '⚠ Prozess weg' : '⚙ läuft'}</span>
+      </div>
+      <div class="run-sub" data-run-budget="${run.id}">${escapeHtml(runBudgetLine(run))}</div>
+      <div class="run-sub">📁 ${escapeHtml(scopeLabel(run, state.manifest))}</div>
+      ${
+        warning
+          ? `<div class="run-warning" title="Der Run hat Dateien außerhalb seines Scopes angefasst">⚠ ${escapeHtml(warning)}</div>`
+          : ''
+      }
+      <div class="run-activity ${activity.level}" data-run-activity="${run.id}" title="Zeit seit der letzten Ausgabe von OpenCode">
+        ${escapeHtml(activity.label)}
+      </div>
+      <div class="console" data-run-console="${run.id}">${lines}</div>
+      <div class="card-actions">
+        <button data-action="cancel-run" data-run="${run.id}">⏹ Abbrechen</button>
+        ${
+          activity.level === 'stale' || activity.level === 'offline' || alive === false
+            ? '<button data-action="reconcile-runs">🧹 Als beendet markieren</button>'
+            : ''
+        }
+      </div>
+    </div>
+  `;
+}
+
+/** Author of a suggestion, for the badge that marks an operator order. */
+function suggestionAuthor(id: number): string {
+  return state.suggestions.find((s) => s.id === id)?.author ?? '';
+}
+
 function renderRuns(): void {
   const active = $('#active-run');
-  const running = state.activeRun && state.activeRun.status === 'running' ? state.activeRun : null;
-  const runningCount = state.runs.filter((r) => r.status === 'running').length;
+  const running = state.activeRuns.filter((r) => r.status === 'running');
   const queued = state.runs.filter((r) => r.status === 'queued').slice(0, 20);
+  const blocked = new Set(state.queue?.blockedRunIds ?? []);
 
   renderQueueState();
 
   let html = '';
-  // A server restart can leave several runs marked as "running" at once. Surface
-  // that clearly and offer a one-click cleanup instead of silently showing the
-  // newest one.
-  if (runningCount > 1) {
+  // A server restart can leave runs marked as "running" that no lane can hold —
+  // more than the configured number of sessions. Surface that clearly and offer a
+  // one-click cleanup instead of silently showing the newest ones.
+  const capacity = Math.max(1, state.queue?.policy.maxParallelRuns ?? 1);
+  if (running.length > capacity) {
     html += `
       <div class="run-warning">
-        <span>⚠ ${runningCount} Runs sind gleichzeitig als „läuft“ markiert (z. B. nach einem Neustart).</span>
+        <span>⚠ ${running.length} Runs sind gleichzeitig als „läuft“ markiert, aber es sind nur ${capacity} Spuren eingestellt — vermutlich ein Neustart mitten im Lauf.</span>
         <button data-action="reconcile-runs">🧹 Jetzt aufräumen</button>
       </div>`;
   }
-  if (running) {
-    const activity = describeRunActivity({
-      lastActivityAt: state.lastActivityAt,
-      startedAt: running.startedAt,
-      connected: state.connected,
-      alive: state.activeRunAlive ?? undefined,
-    });
-    const lines = state.runEvents
-      .slice(-400)
-      .map((event) => `<div class="line ${event.kind}">${escapeHtml(event.text)}</div>`)
-      .join('');
-    const warning = scopeWarning(state.audit);
-    html += `
-      <div class="run-card activity-${activity.level}" id="active-run-card">
-        <div class="run-title">
-          <span>🤖 Vorschlag #${running.suggestionId}</span>
-          <span>${state.activeRunAlive === false ? '⚠ Prozess weg' : '⚙ läuft'}</span>
-        </div>
-        <div class="run-sub" id="run-budget">${escapeHtml(runBudgetLine(running))}</div>
-        <div class="run-sub">📁 ${escapeHtml(scopeLabel(running, state.manifest))}</div>
-        ${
-          warning
-            ? `<div class="run-warning" title="Der Run hat Dateien außerhalb seines Scopes angefasst">⚠ ${escapeHtml(warning)}</div>`
-            : ''
-        }
-        <div class="run-activity ${activity.level}" id="run-activity" title="Zeit seit der letzten Ausgabe von OpenCode">
-          ${escapeHtml(activity.label)}
-        </div>
-        <div class="console" id="active-console">${lines}</div>
-        <div class="card-actions">
-          <button data-action="cancel-run" data-run="${running.id}">⏹ Abbrechen</button>
-          ${
-            activity.level === 'stale' || activity.level === 'offline'
-              ? '<button data-action="reconcile-runs">🧹 Als beendet markieren</button>'
-              : ''
-          }
-        </div>
-      </div>
-    `;
+  if (running.length > 0) {
+    html += running.map(renderRunCard).join('');
   } else {
-    html += '<p class="run-sub">Kein aktiver Run. Klicke bei einem Vorschlag auf „In OpenCode umsetzen“.</p>';
+    html += '<p class="run-sub">Kein aktiver Run. Klicke bei einem Vorschlag auf „In OpenCode umsetzen“ oder tippe unten einen Auftrag ein.</p>';
   }
 
   if (queued.length > 0) {
     html += `
       <div class="run-title" style="margin-top:14px">
         <span>⏳ Warteschlange</span>
-        <span>${queued.length}</span>
+        <span>${queued.length}${blocked.size > 0 ? ` · ${blocked.size} warten auf eine Spur` : ''}</span>
       </div>
     `;
     html += queued
@@ -407,13 +499,15 @@ function renderRuns(): void {
         const badge = attemptLabel(run);
         const wait =
           run.notBefore && run.notBefore > Date.now() ? ` · startet in ${formatCountdown(run.notBefore - Date.now())}` : '';
+        const waitReason = blocked.has(run.id) ? 'wartet auf eine belegte Spur (gleicher Scope)' : 'wartet';
         return `
-      <div class="run-card">
+      <div class="run-card${blocked.has(run.id) ? ' blocked' : ''}">
         <div class="run-title">
           <span>#${run.suggestionId}${badge ? ` · ${escapeHtml(badge)}` : ''}</span>
-          <span>wartet</span>
+          <span>${waitReason}</span>
         </div>
         <div class="run-sub">${escapeHtml(run.id)}${escapeHtml(wait)}</div>
+        <div class="run-sub">📁 ${escapeHtml(scopeLabel(run, state.manifest))}</div>
         <div class="card-actions">
           <button data-action="cancel-run" data-run="${run.id}">⏹ Entfernen</button>
         </div>
@@ -423,15 +517,17 @@ function renderRuns(): void {
   }
 
   active.innerHTML = html;
-  const consoleEl = document.getElementById('active-console');
-  if (consoleEl) consoleEl.scrollTop = consoleEl.scrollHeight;
+  for (const run of running) {
+    const consoleEl = document.querySelector(`[data-run-console="${run.id}"]`);
+    if (consoleEl) consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
   updateRunActivity();
 
   $('#run-history').innerHTML = renderRunHistory();
   renderScopes();
 }
 
-/** Pause chip plus the policy that is currently in force. */
+/** Pause chip, lane occupancy and the policy that is currently in force. */
 function renderQueueState(): void {
   const container = $('#queue-state');
   const button = $('#toggle-pause') as HTMLButtonElement | null;
@@ -445,13 +541,15 @@ function renderQueueState(): void {
     button.textContent = state.queue.paused ? '▶' : '⏸';
     button.title = state.queue.paused
       ? 'Warteschlange fortsetzen'
-      : 'Warteschlange anhalten — der laufende Run läuft weiter';
+      : 'Warteschlange anhalten — laufende Runs laufen weiter';
   }
   const summary = describeQueue(state.queue, Date.now());
   container.innerHTML = `
     <span class="chip ${summary.paused ? 'paused' : 'active'}">${escapeHtml(summary.label)}</span>
+    <span class="chip lanes" title="So viele OpenCode-Sitzungen dürfen gleichzeitig laufen">${escapeHtml(summary.lanes)}</span>
     <span class="policy" id="queue-policy">${escapeHtml(summary.policyLabel)}</span>
     <span class="policy" id="queue-waiting">${summary.waiting} wartend${summary.startsIn ? ` · ${escapeHtml(summary.startsIn)}` : ''}</span>
+    ${renderLanes(summary)}
   `;
 }
 
@@ -463,7 +561,9 @@ function updateQueueCountdown(): void {
   const el = document.getElementById('queue-waiting');
   if (!el || !state.queue) return;
   const summary = describeQueue(state.queue, Date.now());
-  el.textContent = `${summary.waiting} wartend${summary.startsIn ? ` · ${summary.startsIn}` : ''}`;
+  el.textContent = `${summary.waiting} wartend${summary.blocked > 0 ? ` · ${summary.blocked} auf Spur` : ''}${
+    summary.startsIn ? ` · ${summary.startsIn}` : ''
+  }`;
 }
 
 /** Finished runs: why they ended, which attempt, and which scope they touched. */
@@ -474,7 +574,7 @@ function renderRunHistory(): string {
     .map((run) => {
       const badge = outcomeBadge(run);
       const attempt = attemptLabel(run);
-      const audit = run.id === state.audit?.runId ? state.audit : parseStoredAudit(run);
+      const audit = state.audits.get(run.id) ?? parseStoredAudit(run);
       const warning = scopeWarning(audit);
       return `
       <div class="run-card">
@@ -489,7 +589,7 @@ function renderRunHistory(): string {
         </div>
         <div class="run-sub">📁 ${escapeHtml(scopeLabel(run, state.manifest))}${
           run.retryOf ? ` · ↻ wiederholt ${escapeHtml(run.retryOf)}` : ''
-        }</div>
+        }${run.lane != null ? ` · Spur ${run.lane}` : ''}</div>
         ${warning ? `<div class="run-warning">⚠ ${escapeHtml(warning)}</div>` : ''}
         <div class="card-actions">
           ${
@@ -504,7 +604,7 @@ function renderRunHistory(): string {
   return history || '<p class="run-sub" style="margin-top:10px">Noch keine Runs.</p>';
 }
 
-/** The scope layout, grouped by owning agent, with the active run highlighted. */
+/** The scope layout, grouped by owning agent, with the busy scopes highlighted. */
 function renderScopes(): void {
   const list = $('#scope-list');
   if (!list) return;
@@ -513,7 +613,12 @@ function renderScopes(): void {
     list.innerHTML = '<p class="run-sub">Keine Scopes geladen.</p>';
     return;
   }
-  const active = state.activeRun?.scopes ?? [];
+  // Every lane at once: with three sessions running, three scopes are in use and
+  // the panel has to say which.
+  const busy = new Map<string, number>();
+  for (const run of state.activeRuns) {
+    for (const id of run.scopes) busy.set(id, run.lane ?? 0);
+  }
   list.innerHTML = groupScopes(state.manifest.scopes)
     .map(
       (group) => `
@@ -522,7 +627,7 @@ function renderScopes(): void {
         ${group.scopes
           .map(
             (scope) => `
-          <div class="scope-row ${active.includes(scope.id) ? 'current' : ''}">
+          <div class="scope-row ${busy.has(scope.id) ? 'current' : ''}">
             <span class="scope-id">${escapeHtml(scope.id)}</span>
             <span class="scope-label">${escapeHtml(scope.label)}</span>
             <span class="scope-meta" title="${escapeHtml(scope.own.join('\n'))}">${scope.own.length} eigene${
@@ -565,51 +670,57 @@ function runBudgetLine(run: RunRecord): string {
   return `${run.id} · ${elapsed} · Restzeit ${formatCountdown(left)} von ${formatCountdown(run.timeoutMs)}`;
 }
 
-/** Refreshes the live "last output" indicator without rebuilding the whole panel. */
+/** Refreshes every lane's "last output" indicator without rebuilding the panel. */
 function updateRunActivity(): void {
-  const el = document.getElementById('run-activity');
-  const budget = document.getElementById('run-budget');
-  const running = state.activeRun && state.activeRun.status === 'running' ? state.activeRun : null;
-  if (budget && running) budget.textContent = runBudgetLine(running);
-  if (!el || !running) return;
-  const activity = describeRunActivity({
-    lastActivityAt: state.lastActivityAt,
-    startedAt: running.startedAt,
-    connected: state.connected,
-    alive: state.activeRunAlive ?? undefined,
-  });
-  el.className = `run-activity ${activity.level}`;
-  el.textContent = activity.label;
-  const card = document.getElementById('active-run-card');
-  if (card) card.className = `run-card activity-${activity.level}`;
+  for (const run of state.activeRuns) {
+    const el = document.querySelector(`[data-run-activity="${run.id}"]`);
+    const budget = document.querySelector(`[data-run-budget="${run.id}"]`);
+    if (budget) budget.textContent = runBudgetLine(run);
+    if (!el) continue;
+    const activity = describeRunActivity({
+      lastActivityAt: lastActivityOf(run.id),
+      startedAt: run.startedAt,
+      connected: state.connected,
+      alive: state.alive.get(run.id) ?? undefined,
+    });
+    el.className = `run-activity ${activity.level}`;
+    el.textContent = activity.label;
+    const card = document.querySelector(`[data-run-card="${run.id}"]`);
+    if (card) card.className = `run-card activity-${activity.level}`;
+  }
 }
 
 /**
- * Re-fetches the running run from the API. This recovers events missed while the
- * SSE stream was interrupted and provides an accurate "last output" timestamp
- * when the run has been quiet for a while.
+ * Re-fetches every running run from the API. This recovers events missed while
+ * the SSE stream was interrupted and provides an accurate "last output"
+ * timestamp when a lane has been quiet for a while. Each run is polled on its
+ * own schedule: a chatty lane must not keep a silent one from being checked.
  */
-async function syncActiveRun(): Promise<void> {
-  const running = state.activeRun;
-  if (!running || running.status !== 'running') return;
-  const base = state.lastActivityAt ?? running.startedAt;
-  const silentMs = base == null ? 0 : Date.now() - base;
-  // While the stream is delivering we do not need to poll.
-  if (state.connected && silentMs < ACTIVITY_RESYNC_MS) return;
-  try {
-    const view = await api<RunView>(`/api/runs/${running.id}`);
-    if (state.activeRun?.id !== running.id) return;
-    if (view.status !== 'running') {
-      // The finish event was missed: refresh so the run leaves the active panel.
-      await refreshAll();
-      return;
+async function syncActiveRuns(): Promise<void> {
+  const running = state.activeRuns.filter((r) => r.status === 'running');
+  if (running.length === 0) return;
+  const due = running.filter((run) => {
+    const base = lastActivityOf(run.id) ?? run.startedAt;
+    const silentMs = base == null ? 0 : Date.now() - base;
+    // While the stream is delivering we do not need to poll.
+    return !(state.connected && silentMs < ACTIVITY_RESYNC_MS);
+  });
+  for (const run of due) {
+    try {
+      const view = await api<RunView>(`/api/runs/${run.id}`);
+      if (view.status !== 'running') {
+        // The finish event was missed: refresh so the run leaves the active panel.
+        await refreshAll();
+        return;
+      }
+      state.runEvents.set(view.id, view.events);
+      state.alive.set(view.id, view.alive);
+      if (view.scopeAudit) state.audits.set(view.id, view.scopeAudit);
+      markActivity(view.id, lastEventTimestamp(view.events) ?? view.startedAt ?? undefined);
+      renderRuns();
+    } catch {
+      /* run view is best-effort */
     }
-    state.runEvents = view.events;
-    state.activeRunAlive = view.alive;
-    markActivity(lastEventTimestamp(view.events) ?? view.startedAt ?? undefined);
-    renderRuns();
-  } catch {
-    /* run view is best-effort */
   }
 }
 
@@ -628,37 +739,37 @@ async function loadSuggestions(): Promise<void> {
 async function loadRuns(): Promise<void> {
   const data = await api<{ runs: RunRecord[] }>('/api/runs');
   state.runs = data.runs;
-  // Only one run executes at a time: show the actually running one, not the last queued.
-  const running = data.runs.find((r) => r.status === 'running') ?? null;
-  const changedRun = state.activeRun?.id !== running?.id;
-  state.activeRun = running;
-  if (!running) {
-    state.runEvents = [];
-    state.lastActivityAt = null;
-    state.activeRunAlive = null;
-    state.audit = null;
-    return;
+  // Every run that holds a lane gets a card; the newest queued one does not, it
+  // belongs in the waiting list below.
+  const running = data.runs
+    .filter((r) => r.status === 'running')
+    .sort((a, b) => (a.startedAt ?? a.createdAt) - (b.startedAt ?? b.createdAt));
+  const before = new Set(state.activeRuns.map((r) => r.id));
+  state.activeRuns = running;
+  // Forget a lane that ended while the page was closed, so its console does not
+  // stay in memory and reappear on the next start event.
+  for (const id of before) {
+    if (running.some((r) => r.id === id)) continue;
+    state.runEvents.delete(id);
+    state.lastActivityAt.delete(id);
+    state.alive.delete(id);
+    state.audits.delete(id);
   }
-  // A fresh run starts with an empty console and activity clock.
-  if (changedRun) {
-    state.runEvents = [];
-    state.lastActivityAt = null;
-    state.activeRunAlive = null;
-    state.audit = null;
-  }
-  // Populate/refresh the console from the server, so an already running run shows
-  // its progress (and last-output time) even when SSE events were missed.
-  try {
-    const view = await api<RunView>(`/api/runs/${running.id}`);
-    if (state.activeRun?.id === running.id) {
-      state.runEvents = view.events;
-      state.activeRunAlive = view.alive;
-      state.audit = view.scopeAudit;
-      markActivity(lastEventTimestamp(view.events) ?? view.startedAt ?? undefined);
-    }
-  } catch {
-    /* run view is best-effort */
-  }
+  // Populate/refresh the consoles from the server, so runs that are already going
+  // show their progress (and last-output time) even when SSE events were missed.
+  await Promise.all(
+    running.map(async (run) => {
+      try {
+        const view = await api<RunView>(`/api/runs/${run.id}`);
+        state.runEvents.set(view.id, view.events);
+        state.alive.set(view.id, view.alive);
+        if (view.scopeAudit) state.audits.set(view.id, view.scopeAudit);
+        markActivity(view.id, lastEventTimestamp(view.events) ?? view.startedAt ?? undefined);
+      } catch {
+        /* run view is best-effort */
+      }
+    }),
+  );
 }
 
 async function loadQueue(): Promise<void> {
@@ -677,7 +788,86 @@ async function loadManifest(): Promise<void> {
   }
 }
 
-/** Pauses or resumes the queue. The running run keeps its process either way. */
+/** Status line of the repository backup, with the button states that follow. */
+async function loadBackup(): Promise<void> {
+  try {
+    state.backup = await api<BackupState>('/api/backup');
+  } catch {
+    state.backup = null;
+  }
+  renderBackup();
+}
+
+function renderBackup(): void {
+  const headline = $('#backup-headline');
+  if (!headline) return;
+  const backup = state.backup;
+  if (!backup) {
+    headline.textContent = 'Backup-Status nicht erreichbar.';
+    return;
+  }
+  headline.textContent = backup.headline;
+  const read = $('#backup-read') as HTMLButtonElement | null;
+  if (read) {
+    // Nothing to load and nothing to reconcile: say so instead of offering a
+    // button that would change nothing.
+    const nothingToDo = !backup.error && backup.missingHere === 0 && backup.differing === 0;
+    read.disabled = nothingToDo;
+    read.title = nothingToDo
+      ? 'Datei und Datenbank sind identisch — nichts nachzuladen.'
+      : 'Alle Vorschläge, Stimmen und Runs aus der Datei übernehmen (neuere lokale Daten bleiben)';
+  }
+  const write = $('#backup-write') as HTMLButtonElement | null;
+  if (write) write.title = `Momentaufnahme nach ${backup.path} schreiben — die Datei gehört mit ins Git.`;
+}
+
+/** Writes the snapshot into the repository. */
+async function writeBackup(): Promise<void> {
+  const button = $('#backup-write') as HTMLButtonElement;
+  button.disabled = true;
+  try {
+    const result = await api<{ path: string; counts: { suggestions: number; runs: number; votes: number } }>(
+      '/api/backup/write',
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+    const c = result.counts;
+    toast(`Backup geschrieben: ${result.path} · ${c.suggestions} Vorschläge, ${c.runs} Runs — jetzt committen.`, 'success');
+    await loadBackup();
+  } catch (err) {
+    toast((err as Error).message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+/** Merges the repository file into the database. */
+async function readBackup(): Promise<void> {
+  const button = $('#backup-read') as HTMLButtonElement;
+  button.disabled = true;
+  try {
+    const result = await api<{
+      report: {
+        suggestionsAdded: number;
+        suggestionsUpdated: number;
+        votesAdded: number;
+        runsAdded: number;
+        runsCompleted: number;
+      };
+    }>('/api/backup/read', { method: 'POST', body: JSON.stringify({}) });
+    const r = result.report;
+    toast(
+      `Backup gelesen: ${r.suggestionsAdded} Vorschläge neu, ${r.suggestionsUpdated} aktualisiert, ` +
+        `${r.votesAdded} Stimmen, ${r.runsAdded} Runs neu, ${r.runsCompleted} Runs mit Ergebnis nachgetragen.`,
+      'success',
+    );
+    await refreshAll();
+  } catch (err) {
+    toast((err as Error).message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
+/** Pauses or resumes the queue. The running runs keep their process either way. */
 async function togglePause(): Promise<void> {
   if (!state.queue) return;
   const paused = !state.queue.paused;
@@ -687,10 +877,45 @@ async function togglePause(): Promise<void> {
       body: JSON.stringify({ paused }),
     });
     state.queue = next;
-    toast(paused ? 'Warteschlange pausiert — der laufende Run läuft weiter.' : 'Warteschlange läuft weiter.', 'success');
+    toast(
+      paused
+        ? 'Warteschlange pausiert — die laufenden Runs laufen weiter.'
+        : 'Warteschlange läuft weiter.',
+      'success',
+    );
     await refreshAll();
   } catch (err) {
     toast((err as Error).message, 'error');
+  }
+}
+
+/**
+ * Sends a free-form order to the runner. No suggestion, no vote, no approval:
+ * the operator's own text is the order, and it goes into the same queue as
+ * everything else.
+ */
+async function submitTask(text: string): Promise<void> {
+  const area = $('#task-text') as HTMLTextAreaElement;
+  const button = $('#task-send') as HTMLButtonElement;
+  if (state.taskSending) return;
+  state.taskSending = true;
+  button.disabled = true;
+  button.textContent = 'wird gesendet …';
+  try {
+    const result = await api<{ run: RunRecord; suggestion: SuggestionView }>('/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    });
+    const label = scopeLabel(result.run, state.manifest);
+    toast(`Auftrag #${result.suggestion.id} in der Warteschlange · ${label}`, 'success');
+    area.value = '';
+    await refreshAll();
+  } catch (err) {
+    toast((err as Error).message, 'error');
+  } finally {
+    state.taskSending = false;
+    button.disabled = false;
+    button.textContent = '🚀 Auftrag starten';
   }
 }
 
@@ -718,6 +943,7 @@ async function loadSettings(): Promise<void> {
     runTimeoutMinutes: number;
     retryLimit: number;
     retryBackoffSeconds: number;
+    maxParallelRuns: number;
     webhookConfigured: boolean;
     envWebhook: boolean;
   }>('/api/settings');
@@ -732,6 +958,7 @@ async function loadSettings(): Promise<void> {
   ($('#setting-timeout') as HTMLInputElement).value = String(settings.runTimeoutMinutes);
   ($('#setting-retries') as HTMLInputElement).value = String(settings.retryLimit);
   ($('#setting-backoff') as HTMLInputElement).value = String(settings.retryBackoffSeconds);
+  ($('#setting-lanes') as HTMLInputElement).value = String(settings.maxParallelRuns);
   $('#webhook-state').textContent = settings.webhookConfigured
     ? settings.envWebhook
       ? 'Webhook kommt aus .env'
@@ -793,13 +1020,17 @@ async function reconcileRuns(): Promise<void> {
 }
 
 /**
- * Self-healing: when the dashboard notices phantom running rows (e.g. it was
- * reopened after a run was interrupted), it cleans them up automatically
- * instead of leaving the user with a confusing list of "running" runs.
+ * Self-healing: when the dashboard notices running rows that no lane can hold, or
+ * a run whose process is gone, it cleans them up automatically instead of
+ * leaving the user with a confusing list of "running" runs. Several running rows
+ * are normal now — that is what the lanes are for — so only the impossible counts
+ * and the process-less runs count as a reason.
  */
 async function maybeAutoReconcile(): Promise<void> {
   const runningCount = state.runs.filter((r) => r.status === 'running').length;
-  if (!needsRunCleanup({ runningCount, activeRunAlive: state.activeRunAlive })) return;
+  const deadRunIds = state.activeRuns.filter((r) => state.alive.get(r.id) === false).map((r) => r.id);
+  const capacity = state.queue?.policy.maxParallelRuns ?? 1;
+  if (!needsRunCleanup({ runningCount, capacity, deadRunIds })) return;
   if (autoReconcileRunning) return;
   if (Date.now() - lastAutoReconcileAt < AUTO_RECONCILE_COOLDOWN_MS) return;
   autoReconcileRunning = true;
@@ -867,7 +1098,7 @@ function connectEvents(): void {
     el.innerHTML = '<span class="dot"></span> live';
     updateRunActivity();
     if (hadConnection) void refreshAll();
-    else void syncActiveRun();
+    else void syncActiveRuns();
     hadConnection = true;
   };
   source.onerror = () => {
@@ -899,37 +1130,43 @@ function connectEvents(): void {
       renderList();
       renderRuns();
     } else if (event.type === 'run:started') {
-      state.activeRun = event.run;
-      state.runEvents = [];
-      state.activeRunAlive = true;
-      state.lastActivityAt = event.run.startedAt ?? Date.now();
+      // A new lane: add it next to the ones already running instead of replacing
+      // whatever was on screen.
+      state.activeRuns = [...state.activeRuns.filter((r) => r.id !== event.run.id), event.run];
+      state.runEvents.set(event.run.id, []);
+      state.alive.set(event.run.id, true);
+      markActivity(event.run.id, event.run.startedAt ?? Date.now());
       renderRuns();
-      // Refresh so the started run leaves the queue list.
+      // Refresh so the started run leaves the queue list and its lane is known.
       void refreshAll();
     } else if (event.type === 'run:log') {
-      if (state.activeRun && event.runId === state.activeRun.id) {
-        state.runEvents.push(event.event);
-        // Any streamed event is proof that the runner just did something.
-        markActivity();
-        if (state.runEvents.length > 1500) state.runEvents.splice(0, state.runEvents.length - 1500);
-        const consoleEl = document.getElementById('active-console');
-        if (consoleEl) {
-          const line = document.createElement('div');
-          line.className = `line ${event.event.kind}`;
-          line.textContent = event.event.text;
-          consoleEl.appendChild(line);
-          consoleEl.scrollTop = consoleEl.scrollHeight;
-        } else {
-          renderRuns();
-        }
-        updateRunActivity();
+      const events = state.runEvents.get(event.runId);
+      // An event for a run this page has not seen as running (a run started
+      // while the stream was down) is not dropped: buffer it and let the next
+      // full sync replace it with the server's version.
+      const buffer = events ?? [];
+      buffer.push(event.event);
+      // Any streamed event is proof that the runner just did something.
+      markActivity(event.runId);
+      if (buffer.length > 1500) buffer.splice(0, buffer.length - 1500);
+      state.runEvents.set(event.runId, buffer);
+      const consoleEl = document.querySelector(`[data-run-console="${event.runId}"]`);
+      if (consoleEl) {
+        const line = document.createElement('div');
+        line.className = `line ${event.event.kind}`;
+        line.textContent = event.event.text;
+        consoleEl.appendChild(line);
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+      } else {
+        renderRuns();
       }
+      updateRunActivity();
     } else if (event.type === 'run:finished') {
       toast(`Run für #${event.run.suggestionId}: ${event.run.status}`, event.run.status === 'succeeded' ? 'success' : 'error');
-      state.activeRun = null;
-      state.runEvents = [];
-      state.lastActivityAt = null;
-      state.activeRunAlive = null;
+      state.activeRuns = state.activeRuns.filter((r) => r.id !== event.run.id);
+      state.runEvents.delete(event.run.id);
+      state.lastActivityAt.delete(event.run.id);
+      state.alive.delete(event.run.id);
       void refreshAll();
     } else if (event.type === 'queue:state') {
       state.queue = event.state;
@@ -982,6 +1219,30 @@ function setupUi(): void {
   $('#toggle-pause').addEventListener('click', () => void togglePause());
   $('#cleanup-runs').addEventListener('click', () => void reconcileRuns());
   $('#refresh-runs').addEventListener('click', () => void refreshAll());
+  $('#backup-write').addEventListener('click', () => void writeBackup());
+  $('#backup-read').addEventListener('click', () => void readBackup());
+  // Opening the panel is the signal that the numbers may have moved (a commit on
+  // another machine, a merge by hand), so that is when it re-reads them.
+  $('#backup-panel').addEventListener('toggle', () => void loadBackup());
+  $('#task-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const area = $('#task-text') as HTMLTextAreaElement;
+    const text = area.value.trim();
+    if (text.length < 3) {
+      toast('Der Auftrag braucht mindestens 3 Zeichen.', 'error');
+      area.focus();
+      return;
+    }
+    void submitTask(text);
+  });
+  // Ctrl/Cmd+Enter sends from the textarea, so a long order needs no mouse.
+  $('#task-text').addEventListener('keydown', (event) => {
+    const key = event as KeyboardEvent;
+    if (key.key === 'Enter' && (key.ctrlKey || key.metaKey)) {
+      key.preventDefault();
+      ($('#task-form') as HTMLFormElement).requestSubmit();
+    }
+  });
   $('#reload-content').addEventListener('click', async () => {
     try {
       await api('/api/content/reload', { method: 'POST' });
@@ -1005,6 +1266,7 @@ function setupUi(): void {
       runTimeoutMinutes: Number(($('#setting-timeout') as HTMLInputElement).value) || 0,
       retryLimit: Number(($('#setting-retries') as HTMLInputElement).value) || 0,
       retryBackoffSeconds: Number(($('#setting-backoff') as HTMLInputElement).value) || 0,
+      maxParallelRuns: Math.max(1, Number(($('#setting-lanes') as HTMLInputElement).value) || 1),
     };
     const webhook = ($('#setting-webhook') as HTMLInputElement).value.trim();
     if (webhook) body.discordWebhook = webhook;
@@ -1076,20 +1338,21 @@ async function main(): Promise<void> {
   setupUi();
   await refreshAll();
   applyDefaultTab();
+  void loadBackup();
   connectEvents();
   setInterval(() => {
     if (!state.connected) void refreshAll();
   }, 8000);
   // Keep the "last output" indicator ticking while a run is active.
   setInterval(() => {
-    if (state.activeRun?.status === 'running') updateRunActivity();
+    if (state.activeRuns.length > 0) updateRunActivity();
     updateQueueCountdown();
   }, ACTIVITY_TICK_MS);
   // Re-check quiet/interrupted runs against the API so a stuck run is detected
   // even when the stream stalls silently.
-  setInterval(() => void syncActiveRun(), ACTIVITY_TICK_MS * 10);
+  setInterval(() => void syncActiveRuns(), ACTIVITY_TICK_MS * 10);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') void syncActiveRun();
+    if (document.visibilityState === 'visible') void syncActiveRuns();
   });
   const hash = location.hash.match(/^#suggestion-(\d+)$/);
   if (hash) state.expanded.add(Number(hash[1]));

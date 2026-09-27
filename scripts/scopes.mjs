@@ -231,6 +231,7 @@ const staticScopes = {
       'scripts/install-guard.sh',
       'scripts/install-android-template.mjs',
       'scripts/smoke.ts',
+      'scripts/backup.ts',
     ],
     shared: ['package.json'],
   },

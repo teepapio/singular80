@@ -15,6 +15,16 @@ export type SuggestionStatus =
   | 'implemented'
   | 'failed';
 
+/**
+ * `source` of an order the operator typed into the dashboard's task composer
+ * instead of a player submitting it. It travels the same road as a player
+ * suggestion — same queue, same runner, same commit — but it is not one: no
+ * votes, no Discord post, and it starts out `approved`, because the operator is
+ * the one asking for it. Keeping it a suggestion rather than a second entity is
+ * what lets the composer borrow scope prediction, retries and history for free.
+ */
+export const OPERATOR_SOURCE = 'operator';
+
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 /**
@@ -157,6 +167,12 @@ export interface RunRecord {
   suggestionId: number;
   status: RunStatus;
   sessionId: string | null;
+  /**
+   * 1-based lane the run occupies while it is executing, null while it waits in
+   * the queue. Persisted, so a run adopted after a server restart keeps the
+   * slot the operator already sees.
+   */
+  lane: number | null;
   prompt: string;
   exitCode: number | null;
   cost: number | null;
@@ -224,6 +240,14 @@ export interface Settings {
   retryLimit: number;
   /** Base backoff in seconds before the first retry; doubles with every attempt. */
   retryBackoffSeconds: number;
+  /**
+   * How many opencode sessions may run at the same time. 1 = the old serial
+   * queue. Runs are only admitted to a free lane when their scope does not
+   * collide with a lane that is already busy, so this is an upper bound and not
+   * a promise: three lanes can still sit idle because everything left in the
+   * queue wants the same files.
+   */
+  maxParallelRuns: number;
 }
 
 /** Queue policy as the runner currently applies it. */
@@ -231,15 +255,32 @@ export interface RunnerPolicy {
   timeoutMinutes: number;
   retryLimit: number;
   retryBackoffSeconds: number;
+  /** Number of lanes, i.e. how many runs may execute at the same time. */
+  maxParallelRuns: number;
 }
 
 export interface QueueState {
   /** While true no new run starts; a running run still finishes. */
   paused: boolean;
   policy: RunnerPolicy;
+  /**
+   * Every run currently executing, one entry per occupied lane. Oldest first, so
+   * `activeRuns[0]` is the run that has had the most time to make progress.
+   */
+  activeRuns: RunRecord[];
+  /**
+   * The oldest running run, or null. Kept next to `activeRuns` because a single
+   * caller (the API health check, an older dashboard) only ever needs one.
+   */
   activeRun: RunRecord | null;
   /** Runs waiting to start, in the order they will start. */
   queue: RunRecord[];
+  /**
+   * Ids of queued runs that cannot start yet because a busy lane already claims
+   * their scope. Purely informational — it explains an empty free lane to the
+   * operator instead of leaving a run "waiting" with no visible reason.
+   */
+  blockedRunIds: string[];
 }
 
 /** One entry of the scope manifest in `scripts/scopes.mjs`. */

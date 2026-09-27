@@ -4,11 +4,21 @@ import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import type { BusEvent, RunRecord, Suggestion, SuggestionStatus, SuggestionView } from '../src/shared/types';
+import { OPERATOR_SOURCE } from '../src/shared/types';
 import { classify, decorate, findCanonical, scoreSuggestion, sortSuggestions, type SortMode } from '../src/shared/sorting';
 import { ContentStore } from './content';
 import { Store } from './db';
 import * as discord from './discord';
 import { findOpencodeBinary, Runner } from './runner';
+import {
+  backupPath,
+  backupStatus,
+  buildSnapshot,
+  describeBackup,
+  mergeSnapshot,
+  readSnapshotFile,
+  writeSnapshotFile,
+} from './backup';
 import { CheckRunner } from './checkrunner';
 import { CHECKS_BY_ID, CHECK_SPECS } from './checks/catalogue';
 import { scopeForSuggestion, scopeManifest } from './scopes';
@@ -105,6 +115,7 @@ export function createApp(options: AppOptions): FastifyInstance {
       opencodeBin: bin,
       opencodeFound: existsSync(bin),
       activeRun: runner?.activeRun() ?? null,
+      activeRuns: runner?.activeRuns() ?? [],
       suggestions: store.listSuggestions().length,
     };
   });
@@ -245,6 +256,46 @@ export function createApp(options: AppOptions): FastifyInstance {
     return { run, suggestion: view };
   });
 
+  /**
+   * The task composer: the operator writes an order into the dashboard and it
+   * goes straight into the queue — no suggestion to approve first, no vote, no
+   * Discord post. It is still a *suggestion* row on purpose: the runner, the
+   * scope prediction, the retry policy, the commit guard and the history all
+   * work on suggestions, and a second parallel kind of order would mean a
+   * second copy of every one of them.
+   *
+   * The trade-off is deliberate: an operator order is not a player complaint, so
+   * it never reaches Discord, and it is created `approved` because the operator
+   * asking for it is the approval.
+   */
+  app.post('/api/tasks', async (req, reply) => {
+    if (!runner) return reply.code(503).send({ error: 'Runner ist deaktiviert' });
+    const body = (req.body ?? {}) as { text?: string; extraInstructions?: string };
+    const text = (body.text ?? '').trim();
+    if (text.length < 3) {
+      return reply.code(400).send({ error: 'Der Auftrag braucht mindestens 3 Zeichen.' });
+    }
+    if (text.length > 4000) {
+      return reply.code(400).send({ error: 'Der Auftrag ist länger als 4000 Zeichen — bitte kürzen.' });
+    }
+    const settings = store.getSettings();
+    const merged = { ...settings };
+    const extra = (body.extraInstructions ?? '').trim();
+    if (extra) merged.extraInstructions = [settings.extraInstructions, extra].filter(Boolean).join('\n');
+    const suggestion = store.createSuggestion({
+      text,
+      author: 'Betreiber',
+      source: OPERATOR_SOURCE,
+      category: classify(text),
+      canonicalId: null,
+      status: 'approved',
+    });
+    const run = runner.enqueue(suggestion, merged, [suggestion]);
+    const view = viewOf(suggestion.id)!;
+    emit({ type: 'suggestion:new', suggestion: view });
+    return { run, suggestion: view, scope: runner.auditScopeOf(run.id) };
+  });
+
   // Preview: which sub-tasks would an automatic split produce?
   app.get('/api/suggestions/:id/split', async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
@@ -337,11 +388,14 @@ export function createApp(options: AppOptions): FastifyInstance {
         runnerEnabled: false,
         paused: false,
         activeRun: null,
+        activeRuns: [] as RunRecord[],
         queue: [] as RunRecord[],
+        blockedRunIds: [] as string[],
         policy: {
           timeoutMinutes: settings.runTimeoutMinutes,
           retryLimit: settings.retryLimit,
           retryBackoffSeconds: settings.retryBackoffSeconds,
+          maxParallelRuns: settings.maxParallelRuns,
         },
       };
     }
@@ -356,6 +410,55 @@ export function createApp(options: AppOptions): FastifyInstance {
     }
     const paused = runner.setPaused(body.paused);
     return { ...runner.queueState(), paused };
+  });
+
+  // --- backup in the repository ---------------------------------------------
+  //
+  // The database under data/ is gitignored, so the dashboard's whole memory —
+  // every suggestion, decision, vote and run — would be lost with it. These
+  // three routes keep a committed JSON copy in sync: one to write it, one to read
+  // it back, one to ask what the difference currently is. Merging is a merge and
+  // not a restore (see server/backup.ts), so reading the file can never undo a
+  // decision made here.
+  app.get('/api/backup', async () => {
+    const status = backupStatus(store, options.projectRoot);
+    return { ...status, headline: describeBackup(status) };
+  });
+
+  app.post('/api/backup/write', async () => {
+    const path = backupPath(options.projectRoot);
+    const snapshot = buildSnapshot(store, options.projectRoot);
+    try {
+      writeSnapshotFile(path, snapshot);
+    } catch (err) {
+      return { ok: false, error: `Backup konnte nicht geschrieben werden: ${(err as Error).message}` };
+    }
+    const status = backupStatus(store, options.projectRoot);
+    return { ok: true, path: status.path, counts: snapshot.counts, headline: describeBackup(status) };
+  });
+
+  app.post('/api/backup/read', async (req, reply) => {
+    const path = backupPath(options.projectRoot);
+    let snapshot;
+    try {
+      snapshot = readSnapshotFile(path);
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
+    if (!snapshot) {
+      return reply.code(404).send({
+        error: `Keine Backup-Datei gefunden (${backupStatus(store, options.projectRoot).path}).`,
+      });
+    }
+    const report = mergeSnapshot(store, snapshot, { projectRoot: options.projectRoot });
+    // A restored suggestion is news to every open dashboard, exactly like one
+    // that arrives from the game — and only for the rows that really changed.
+    for (const id of [...report.suggestionIdsAdded, ...report.suggestionIdsUpdated]) {
+      const view = viewOf(id);
+      if (view) emit({ type: 'suggestion:updated', suggestion: view });
+    }
+    const status = backupStatus(store, options.projectRoot);
+    return { ok: true, report, headline: describeBackup(status), path: status.path };
   });
 
   // --- deployed-version check queue -----------------------------------------
@@ -491,7 +594,7 @@ export function createApp(options: AppOptions): FastifyInstance {
     if (typeof body.autoApproveScore === 'number') patch.autoApproveScore = body.autoApproveScore;
     // Runner policy. The store clamps these to its bounds, so a typo cannot
     // disable the timeout or ask for a thousand retries.
-    for (const key of ['runTimeoutMinutes', 'retryLimit', 'retryBackoffSeconds'] as const) {
+    for (const key of ['runTimeoutMinutes', 'retryLimit', 'retryBackoffSeconds', 'maxParallelRuns'] as const) {
       const value = body[key];
       if (typeof value === 'number' && Number.isFinite(value)) patch[key] = value;
       else if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {

@@ -67,11 +67,37 @@ Die reicheren Stufen sind keine eigenen Modelle, sondern aus den Low-Poly-Meshes
 abgeleitet (`scripts/blender/generate_lod_meshes.py`), damit die Geometrie in allen
 drei Stufen identisch bleibt. Sie kosten zusammen rund 45 MB APK.
 
+## Das Dashboard baut mit
+
+Das Web-Dashboard sammelt die Ideen, priorisiert sie und **setzt sie mit echten
+OpenCode-Sitzungen um** — ohne Umweg über einen Menschen, der jeden Auftrag
+freigibt:
+
+- **Direkter Auftrag.** Auftrag ins Feld tippen, `🚀 Auftrag starten`: er landet
+  sofort in der Warteschlange, mit Scope-Zuordnung, Wiederholungsregeln und
+  Commit-Schutz wie ein Spieler-Vorschlag.
+- **Mehrere Sitzungen gleichzeitig.** Standard sind drei Spuren, einstellbar bis
+  acht. Zwei Agenten teilen sich den Arbeitsbaum nur, wenn ihre Scopes sich nicht
+  überschneiden — ein zweiter Auftrag auf dasselbe Spiel wartet, statt in
+  dieselben Dateien zu schreiben.
+- **Ein Panel, alles drin.** Jede Spur mit eigener Konsole, Zeitlimit-Restzeit und
+  Abbruch-Knopf; darunter Warteschlange, Historie und der Scope-Besitz aller
+  Agenten.
+- **Die Historie liegt im Repo.** `backup/dashboard.json` hält Vorschläge,
+  Entscheidungen, Stimmen und Runs mit Commit-Hash — committet, also auf jeder
+  Maschine da und mit `git show` auch ohne Server lesbar.
+
+```bash
+npm run backup            # Stand der Datei melden
+npm run backup -- write   # Historie ins Repository schreiben
+npm run backup -- read    # Datei einlesen und mit der Datenbank zusammenführen
+```
+
 ## Qualitätssicherung
 
 ```bash
 npm run typecheck   # Server + Dashboard
-npm test            # 54 Vitest-Tests + Content-Sync-Prüfung
+npm test            # Vitest (Server, Dashboard, Backup) + Content-Sync-Prüfung
 npm run test:game   # GDScript-Suite: Regeln *und* echte Screens, headless
 ```
 
@@ -87,6 +113,7 @@ godot/            das Spiel: Autoloads, reine Logik, UI-Basisklassen, alle Scree
   assets/meshes/  GLBs in drei Stufen (Blender-Generator in scripts/blender/)
 server/           Fastify-API, SQLite, Discord, OpenCode-Runner
 src/dashboard/    Web-Dashboard
+backup/           Dashboard-Historie als JSON (gehört ins Git)
 content/          einzige Quelle der Spieldaten (wird in die App gespiegelt)
 scripts/          Content-Sync, Android-Template, API-Smoke, Blender-Meshes
 tests/            Vitest für Server und Dashboard

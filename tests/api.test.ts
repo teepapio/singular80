@@ -34,6 +34,7 @@ interface Api {
   put: <T>(path: string, body: unknown) => Promise<{ status: number; body: T }>;
   close: () => Promise<void>;
   dataDir: string;
+  projectRoot: string;
 }
 
 /**
@@ -76,6 +77,7 @@ async function boot(runnerEnabled = true): Promise<Api> {
     put: <T>(path: string, body: unknown) => call<T>(path, 'PUT', JSON.stringify(body)),
     close: () => app.close(),
     dataDir,
+    projectRoot,
   };
 }
 
@@ -287,5 +289,96 @@ describe('Runner-Politik in den Einstellungen', () => {
     await api.put('/api/settings', { runTimeoutMinutes: 20 });
     const res = await api.put<{ runTimeoutMinutes: number }>('/api/settings', { runTimeoutMinutes: 'bald' });
     expect(res.body.runTimeoutMinutes).toBe(20);
+  });
+});
+
+describe('POST /api/tasks', () => {
+  it('legt einen Betreiberauftrag an und stellt ihn sofort in die Schlange', async () => {
+    const api = await boot();
+    // Pause, damit der Run nicht schon gestartet ist und die Werte sich nicht
+    // unter dem Test verschieben.
+    await api.post('/api/runner/pause', { paused: true });
+    const res = await api.post<{ run: RunRecord; suggestion: SuggestionView }>('/api/tasks', {
+      text: 'Pang: die Bälle sollen schneller fliegen',
+    });
+    expect(res.status).toBe(200);
+    // Kein Abstimmungsweg: der Auftrag startet genehmigt, ohne Spieler, ohne Discord.
+    expect(res.body.suggestion.status).toBe('approved');
+    expect(res.body.suggestion.source).toBe('operator');
+    expect(res.body.suggestion.author).toBe('Betreiber');
+    expect(res.body.run.suggestionId).toBe(res.body.suggestion.id);
+    expect(res.body.run.status).toBe('queued');
+  });
+
+  it('lehnt leere und zu lange Aufträge ab', async () => {
+    const api = await boot();
+    expect((await api.post<{ error: string }>('/api/tasks', { text: 'ab' })).status).toBe(400);
+    expect((await api.post<{ error: string }>('/api/tasks', { text: 'x'.repeat(4001) })).status).toBe(400);
+  });
+
+  it('gibt 503 bei deaktiviertem Runner', async () => {
+    const api = await boot(false);
+    const res = await api.post<{ error: string }>('/api/tasks', { text: 'Mach irgendwas' });
+    expect(res.status).toBe(503);
+  });
+});
+
+describe('PUT /api/settings (Spuren)', () => {
+  it('speichert die Zahl der Spuren und begrenzt sie', async () => {
+    const api = await boot();
+    expect((await api.get<{ maxParallelRuns: number }>('/api/settings')).body.maxParallelRuns).toBe(3);
+    const saved = await api.put<{ maxParallelRuns: number }>('/api/settings', { maxParallelRuns: 5 });
+    expect(saved.body.maxParallelRuns).toBe(5);
+    // 0 Spuren hieße "kein Run startet" — das muss die Klemme verhindern.
+    const clamped = await api.put<{ maxParallelRuns: number }>('/api/settings', { maxParallelRuns: 0 });
+    expect(clamped.body.maxParallelRuns).toBe(1);
+    const high = await api.put<{ maxParallelRuns: number }>('/api/settings', { maxParallelRuns: 99 });
+    expect(high.body.maxParallelRuns).toBe(8);
+  });
+});
+
+describe('Backup im Repository', () => {
+  it('schreibt die Historie ins Repo und meldet sie identisch zurück', async () => {
+    const api = await boot();
+    await newSuggestion(api, 'Tetris: mehr Bälle am Stück');
+    const written = await api.post<{ ok: boolean; path: string; counts: { suggestions: number } }>(
+      '/api/backup/write',
+      {},
+    );
+    expect(written.body.ok).toBe(true);
+    expect(written.body.path).toBe('backup/dashboard.json');
+    expect(written.body.counts.suggestions).toBe(1);
+    const status = await api.get<{ exists: boolean; headline: string }>('/api/backup');
+    expect(status.body.exists).toBe(true);
+    expect(status.body.headline).toContain('identisch');
+  });
+
+  it('liest die Datei zurück, ohne doppelt anzulegen', async () => {
+    const api = await boot();
+    await newSuggestion(api, 'Poker: Chips anders verteilen');
+    await api.post('/api/backup/write', {});
+    const first = await api.post<{ report: { suggestionsAdded: number } }>('/api/backup/read', {});
+    // Alles ist schon da: der Import darf nichts erfinden.
+    expect(first.body.report.suggestionsAdded).toBe(0);
+    const second = await api.post<{ report: { suggestionsAdded: number } }>('/api/backup/read', {});
+    expect(second.body.report.suggestionsAdded).toBe(0);
+  });
+
+  it('gibt 404, wenn noch keine Datei da ist', async () => {
+    const api = await boot();
+    const res = await api.post<{ error: string }>('/api/backup/read', {});
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('backup/dashboard.json');
+  });
+
+  it('lehnt eine kaputte Datei ab, statt sie zu mischen', async () => {
+    const api = await boot();
+    await api.post('/api/backup/write', {});
+    writeFileSync(join(api.projectRoot, 'backup', 'dashboard.json'), '{ kaputt');
+    const res = await api.post<{ error: string }>('/api/backup/read', {});
+    expect(res.status).toBe(400);
+    // Und der Status sagt dasselbe, damit das Panel nicht „alles in Ordnung" zeigt.
+    const status = await api.get<{ error: string | null }>('/api/backup');
+    expect(status.body.error).toContain('gültiges JSON');
   });
 });

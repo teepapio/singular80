@@ -54,8 +54,33 @@
           </div>
         </div>
         <div id="queue-state" class="queue-state"></div>
+        <form id="task-form" class="task-form">
+          <label for="task-text">Direkter Auftrag an OpenCode</label>
+          <textarea
+            id="task-text"
+            rows="3"
+            spellcheck="false"
+            placeholder="z. B. „Der Siedler-Knopf zum Zurücksetzen ist auf dem Tablet verdeckt — mach ihn größer“"
+          ></textarea>
+          <div class="task-row">
+            <small id="task-hint" class="run-sub">Der Auftrag landet sofort in der Warteschlange, ohne Abstimmung.</small>
+            <button type="submit" id="task-send" class="primary">🚀 Auftrag starten</button>
+          </div>
+        </form>
         <div id="active-run" class="active-run"></div>
         <div id="run-history" class="run-history"></div>
+        <details id="backup-panel" class="scope-panel">
+          <summary>Backup im Repository</summary>
+          <p id="backup-headline" class="run-sub">Backup-Status wird geladen …</p>
+          <div class="card-actions">
+            <button type="button" id="backup-write" class="ghost small">⬇ Ins Repo schreiben</button>
+            <button type="button" id="backup-read" class="ghost small">⬆ Aus Repo lesen</button>
+          </div>
+          <small class="run-sub"
+            >Alle Vorschläge, Entscheidungen, Stimmen und Runs liegen als JSON im Repository. Nach einem
+            `git commit` ist die Historie auf jeder Maschine wieder da.</small
+          >
+        </details>
         <details id="scope-panel" class="scope-panel">
           <summary>Scopes &amp; Agenten</summary>
           <p id="scope-headline" class="run-sub"></p>
@@ -95,9 +120,15 @@
           Wartezeit vor der ersten Wiederholung (Sekunden)
           <input id="setting-backoff" type="number" min="0" max="3600" step="5" class="number" />
         </label>
+        <label class="row">
+          Spuren (gleichzeitige OpenCode-Sitzungen, 1 = nacheinander)
+          <input id="setting-lanes" type="number" min="1" max="8" step="1" class="number" />
+        </label>
         <small class="run-sub">Nach Ablauf des Zeitlimits wird der Prozess beendet und der Run als fehlgeschlagen
           vermerkt. Eine Wiederholung ist ein eigener Run in der Historie — es entsteht dadurch kein zweiter
-          Commit für denselben Vorschlag.</small>
+          Commit für denselben Vorschlag.<br />
+          Zwei Spuren teilen sich nur den Baum, wenn ihre Scopes sich nicht überschneiden: ein Run wartet
+          auf eine freie Spur, statt einem belegten Scope zu schreiben.</small>
         <div class="settings-actions">
           <button type="button" id="test-webhook" class="ghost">Testnachricht senden</button>
           <button type="button" id="save-settings" class="primary">Speichern</button>

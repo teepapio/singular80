@@ -161,6 +161,8 @@ das Auswerten von Logcat gibt es die Agenten `apk` und `device-debug`.
 - `npm run godot:android-template` — Godot-Android-Build-Template installieren
   (läuft in `godot:apk*` automatisch mit).
 - `npm run smoke` — API-Smoke-Test.
+- `npm run backup` — Dashboard-Historie als JSON ins Repository schreiben
+  (`-- write`), von dort einlesen (`-- read`) oder nur den Stand melden.
 - Reihenfolge für Änderungen: `typecheck` → `test` → `test:game` → `build` → `godot:apk`.
 
 ## Struktur
@@ -173,7 +175,44 @@ das Auswerten von Logcat gibt es die Agenten `apk` und `device-debug`.
 - `content/*.json` — **einzige** Quelle für Spieldaten.
 - `godot/assets/content/` — Spiegel davon für die App (nie direkt editieren).
 - `scripts/blender/` — headless Blender-Generator für die 3D-Meshes.
+- `backup/dashboard.json` — **gehört ins Git**: die Historie des Dashboards
+  (Vorschläge, Entscheidungen, Stimmen, Runs mit Commit). Siehe unten.
 - `log/` — JSONL-Log pro KI-Run (nicht committen).
+
+## Agenten-Runner (Dashboard)
+
+`server/runner.ts` startet für jeden Auftrag eine echte `opencode run`-Sitzung
+im gemeinsamen Arbeitsbaum. Drei Dinge sind inzwischen wichtig.
+
+**Spuren statt einer Schlange.** `maxParallelRuns` (Einstellungen im Dashboard,
+1–8, Vorgabe 3) ist die Zahl der gleichzeitigen Sitzungen. Eine wartende Arbeit
+startet nur, wenn eine Spur frei ist **und** kein laufender Run ihren Scope schon
+beansprucht — die Regel ist `scopesConflict` in `server/scopes.ts` und sie
+entscheidet nach dem *primären* Scope. Das ist Absicht und kein Versehen:
+`scopeForSuggestion` hängt an jeden Spielauftrag noch die breite Kategorie
+(`core`, `content`), und ein Vergleich der ganzen Scope-Liste würde Tetris und
+Pang deshalb wieder hintereinander einreihen.
+
+Was das offen lässt, wird nicht versteckt: Zwei verschiedene Spiele *dürfen* beide
+auf `content/` oder `core/` zeigen. Der Scope-Audit meldet es pro Run
+(`shared: [...]`), und das Panel beschriftet ein solches Paar
+(`laneRisks` in `src/dashboard/queueControls.ts`). Ein Run ohne bekannten Scope
+oder mit breitem primären Scope bekommt den Baum immer allein.
+
+**Direkte Aufträge.** `POST /api/tasks` (im Panel: „Direkter Auftrag an OpenCode")
+legt eine Empfehlung mit `source: 'operator'` an und stellt sie sofort in die
+Schlange — ohne Abstimmung, ohne Spieler, ohne Discord. Sie bleibt eine
+Empfehlung, damit Scope-Vorhersage, Wiederholung, Commit-Schutz und Historie
+alles weiter funktionieren; nur `status` startet auf `approved`.
+
+**Backup im Repository.** `backup/dashboard.json` enthält Vorschläge,
+Entscheidungen, Stimmen und Runs und **gehört committet** — `data/` ist
+ignoriert, und genau deshalb wäre die Historie sonst mit der Datenbank weg.
+`npm run backup -- write` schreibt sie, `npm run backup -- read` führt sie als
+Merge ein (neuere lokale Daten gewinnen, Ids bleiben, ein unfertiger Run aus der
+Datei kommt als `cancelled` an). Der Prompt jedes Runs steht **nicht** in der
+Datei: er ist aus Empfehlung und Einstellungen ableitbar und wird beim Import neu
+gebaut.
 
 ## Godot-Spiel
 

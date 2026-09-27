@@ -91,19 +91,22 @@ export function describeRunActivity(input: {
 
 /**
  * Tells whether the dashboard should ask the server to clean up stuck runs on
- * its own, without waiting for the user to click the cleanup button. This heals
- * the "chaos" left behind when the page was closed while a run was interrupted:
- * several rows are marked as running at once, or the shown run has no live
- * process behind it anymore.
+ * its own, without waiting for the user to click the cleanup button.
+ *
+ * Several running rows are *not* a reason on their own any more: the queue runs
+ * one session per lane, so `runningCount === capacity` is the normal case and
+ * the old "more than one is a phantom" rule would have wiped live runs. What
+ * still is a reason is a run count the configured number of lanes cannot hold,
+ * or a run the server has already reported as process-less.
  */
 export function needsRunCleanup(input: {
   /** Number of runs currently marked as `running` in the database. */
   runningCount: number;
-  /**
-   * Whether the server knows a live process for the displayed run
-   * (`null` while it has not been checked yet).
-   */
-  activeRunAlive: boolean | null;
+  /** Lanes the operator configured; how many runs may run at the same time. */
+  capacity: number;
+  /** Ids of running runs whose process the server no longer knows. */
+  deadRunIds?: readonly string[];
 }): boolean {
-  return input.runningCount > 1 || input.activeRunAlive === false;
+  if (input.deadRunIds && input.deadRunIds.length > 0) return true;
+  return input.runningCount > Math.max(1, input.capacity);
 }

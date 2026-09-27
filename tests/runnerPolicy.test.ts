@@ -184,6 +184,7 @@ describe('Hartes Zeitlimit', () => {
       suggestionId: suggestion.id,
       status: 'running',
       sessionId: null,
+    lane: 1,
       prompt: 'p',
       exitCode: null,
       cost: null,

@@ -18,6 +18,7 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
     suggestionId: 7,
     status: 'failed',
     sessionId: null,
+    lane: null,
     prompt: '',
     exitCode: 1,
     cost: null,
@@ -42,10 +43,15 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
   };
 }
 
-const policy: RunnerPolicy = { timeoutMinutes: 45, retryLimit: 1, retryBackoffSeconds: 30 };
+const policy: RunnerPolicy = {
+  timeoutMinutes: 45,
+  retryLimit: 1,
+  retryBackoffSeconds: 30,
+  maxParallelRuns: 3,
+};
 
 function queue(overrides: Partial<QueueState> = {}): QueueState {
-  return { paused: false, policy, activeRun: null, queue: [], ...overrides };
+  return { paused: false, policy, activeRuns: [], activeRun: null, queue: [], blockedRunIds: [], ...overrides };
 }
 
 describe('formatCountdown', () => {
@@ -65,12 +71,18 @@ describe('formatCountdown', () => {
 
 describe('describePolicy', () => {
   it('nennt Zeitlimit, Wiederholungen und Wartezeit', () => {
-    expect(describePolicy(policy)).toBe('Zeitlimit 45 min · 1× Wiederholung · 30 s Wartezeit');
+    expect(describePolicy(policy)).toBe('Zeitlimit 45 min · 1× Wiederholung · 30 s Wartezeit · 0 von 3 Spuren belegt');
   });
 
   it('sagt es, wenn etwas aus ist', () => {
-    expect(describePolicy({ timeoutMinutes: 0, retryLimit: 0, retryBackoffSeconds: 30 })).toBe(
-      'kein Zeitlimit · keine Wiederholung',
+    expect(
+      describePolicy({ timeoutMinutes: 0, retryLimit: 0, retryBackoffSeconds: 30, maxParallelRuns: 3 }),
+    ).toBe('kein Zeitlimit · keine Wiederholung · 0 von 3 Spuren belegt');
+  });
+
+  it('nennt bei einer Spur ausdrücklich, dass es nacheinander ist', () => {
+    expect(describePolicy({ timeoutMinutes: 0, retryLimit: 0, retryBackoffSeconds: 0, maxParallelRuns: 1 })).toContain(
+      '1 Spur (nur nacheinander)',
     );
   });
 });
@@ -90,6 +102,28 @@ describe('describeQueue', () => {
 
   it('schweigt über den Backoff, wenn keiner wartet', () => {
     expect(describeQueue(queue({ queue: [run({ notBefore: 10 })] }), 100).startsIn).toBeNull();
+  });
+
+  it('zählt die belegten Spuren', () => {
+    const summary = describeQueue(
+      queue({ activeRuns: [run({ id: 'a', status: 'running' }), run({ id: 'b', status: 'running' })] }),
+      0,
+    );
+    expect(summary.busyLanes).toBe(2);
+    expect(summary.totalLanes).toBe(3);
+    expect(summary.lanes).toBe('2 von 3 Spuren belegt');
+  });
+
+  it('meldet Runs, die auf eine belegte Spur warten', () => {
+    const summary = describeQueue(
+      queue({
+        activeRuns: [run({ id: 'a', status: 'running' })],
+        queue: [run({ id: 'b' })],
+        blockedRunIds: ['b'],
+      }),
+      0,
+    );
+    expect(summary.blocked).toBe(1);
   });
 });
 

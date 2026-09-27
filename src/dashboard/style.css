@@ -225,15 +225,27 @@ textarea {
   border-color: #475569;
 }
 
+/*
+ * The run panel is the operator's console: with several lanes it has to hold
+ * several consoles under one header, and 380 px was not enough for one line of
+ * agent output. 760 px — double — with a step down for laptops and a single
+ * column for tablets.
+ */
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-columns: minmax(0, 1fr) 760px;
   gap: 18px;
   padding: 0 26px;
   align-items: start;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1600px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) 560px;
+  }
+}
+
+@media (max-width: 1180px) {
   .layout {
     grid-template-columns: 1fr;
   }
@@ -327,6 +339,12 @@ textarea {
 .badge.split-parent {
   background: rgba(56, 189, 248, 0.18);
   color: #bae6fd;
+}
+
+/* An order the operator typed into the dashboard, not a player suggestion. */
+.badge.operator {
+  background: rgba(167, 139, 250, 0.2);
+  color: #ddd6fe;
 }
 
 .badge.status-new {
@@ -644,7 +662,7 @@ textarea {
   font-weight: 700;
 }
 
-/* Queue state: pause chip plus the policy actually in force. */
+/* Queue state: pause chip, lane occupancy and the policy actually in force. */
 .queue-state {
   display: flex;
   flex-wrap: wrap;
@@ -671,6 +689,11 @@ textarea {
   border-color: var(--amber);
 }
 
+.queue-state .chip.lanes {
+  color: var(--violet);
+  border-color: var(--violet);
+}
+
 .queue-state .chip.muted {
   color: var(--muted);
 }
@@ -678,6 +701,119 @@ textarea {
 .queue-state .policy {
   color: var(--muted);
   font-size: 11.5px;
+}
+
+/* One chip per lane, so "which session is where" is answerable at a glance. */
+.lane-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  margin-top: 2px;
+}
+
+.chip.lane {
+  border: 1px dashed var(--border);
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.chip.lane.busy {
+  border-style: solid;
+  border-color: var(--green);
+  color: var(--green);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.chip.lane.free {
+  opacity: 0.7;
+}
+
+.lane-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--violet);
+  color: var(--violet);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Two busy lanes that were both pointed at the same broad scope. */
+.lane-risk {
+  width: 100%;
+  margin-top: 4px;
+  padding: 5px 9px;
+  border: 1px solid var(--amber);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.1);
+  color: #fcd34d;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* A queued run that waits for a busy lane rather than for its turn. */
+.run-card.blocked {
+  border-style: dashed;
+  border-color: var(--amber);
+}
+
+.run-card.blocked .run-title {
+  color: var(--amber);
+}
+
+/* Operator order: type it, send it, it runs. */
+.task-form {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  background: var(--panel-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-form label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.task-form textarea {
+  width: 100%;
+  background: #020617;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 9px 11px;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.task-form textarea:focus {
+  outline: 1px solid var(--accent);
+}
+
+.task-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.task-row .primary {
+  padding: 7px 14px;
+  font-size: 13px;
+}
+
+.task-row .primary:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Scope layout, collapsed by default — it is reference, not news. */

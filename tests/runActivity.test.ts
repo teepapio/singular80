@@ -94,15 +94,23 @@ describe('describeRunActivity', () => {
 
 describe('needsRunCleanup', () => {
   it('fordert kein Aufräumen ohne Auffälligkeit', () => {
-    expect(needsRunCleanup({ runningCount: 1, activeRunAlive: true })).toBe(false);
-    expect(needsRunCleanup({ runningCount: 0, activeRunAlive: null })).toBe(false);
+    expect(needsRunCleanup({ runningCount: 1, capacity: 3 })).toBe(false);
+    expect(needsRunCleanup({ runningCount: 0, capacity: 3 })).toBe(false);
   });
 
-  it('fordert Aufräumen bei mehreren gleichzeitig laufenden Runs an', () => {
-    expect(needsRunCleanup({ runningCount: 2, activeRunAlive: true })).toBe(true);
+  it('hält mehrere laufende Runs für normal — das sind die Spuren', () => {
+    // Drei Spuren, drei laufende Runs: der Normalfall, seit es Lanes gibt.
+    // Die alte Regel ("mehr als einer ist ein Phantom") würde hier einen
+    // lebenden Run abschießen.
+    expect(needsRunCleanup({ runningCount: 3, capacity: 3 })).toBe(false);
+    expect(needsRunCleanup({ runningCount: 2, capacity: 1 })).toBe(true);
   });
 
-  it('fordert Aufräumen, wenn der angezeigte Run keinen lebenden Prozess hat', () => {
-    expect(needsRunCleanup({ runningCount: 1, activeRunAlive: false })).toBe(true);
+  it('fordert Aufräumen, wenn mehr Runs laufen als Spuren existieren', () => {
+    expect(needsRunCleanup({ runningCount: 4, capacity: 3 })).toBe(true);
+  });
+
+  it('fordert Aufräumen, wenn ein Run keinen lebenden Prozess hat', () => {
+    expect(needsRunCleanup({ runningCount: 1, capacity: 3, deadRunIds: ['run_1'] })).toBe(true);
   });
 });

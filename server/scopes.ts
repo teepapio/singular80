@@ -327,6 +327,83 @@ export interface AuditInput {
   manifestError?: string | null;
 }
 
+/** The two things a lane admission has to know about a run. */
+export interface ScopedRun {
+  id: string;
+  scopes: string[];
+}
+
+/**
+ * Scopes that name a *kind* of work rather than a place. `scopeForSuggestion`
+ * adds them to a run on top of the specific scope it guessed from the text, so
+ * they are a supplement, never the owner. Their names are the values of
+ * `CATEGORY_SCOPES` above, kept here so the scheduler and the prediction cannot
+ * drift apart.
+ */
+const BROAD_SCOPES = new Set<string>(Object.values(CATEGORY_SCOPES));
+
+/**
+ * May two runs share the working tree at the same time?
+ *
+ * Comparing the two scope lists for *any* common id looks right and is useless
+ * here: every game job carries a broad category scope on top of the game (`core`
+ * for mechanics/balance/ui/bug, `content` for data), so a Tetris run and a Pang
+ * run would both claim `core` and the queue would silently stay serial — which
+ * is the whole thing the operator asked to get rid of.
+ *
+ * So the unit of the claim is the **primary** scope, the most specific one:
+ *
+ *  - equal primaries → one owner, no parallelism. This is the case the
+ *    exclusive-ownership rule in `scripts/scopes.mjs` exists for.
+ *  - a broad primary (`core`, `content`) → the tree to itself. Those scopes own
+ *    the files that everybody else may also have to touch, and a run whose whole
+ *    job *is* that shared file set cannot safely stand next to anybody.
+ *  - an unknown primary (no scopes, unreadable manifest, a scope id the manifest
+ *    does not know) → the tree to itself as well. Guessing "probably fine" for a
+ *    run nobody can place is how a half-finished registry line ends up in a
+ *    stranger's commit.
+ *  - otherwise → parallel. The manifest gives exclusive ownership of every
+ *    concrete file to exactly one scope, so two different games cannot both own
+ *    the same file.
+ *
+ * What this leaves open, and does not hide: two runs on *different* games may
+ * still both have been pointed at `content/` or `core/` by their category and
+ * edit the same file. The scope audit reports that per run (`shared: [...]`),
+ * and it is the price of running agents in parallel on one tree at all. The
+ * dashboard labels such a pair — see `sharedBroadScopes`.
+ */
+export function scopesConflict(a: ScopedRun, b: ScopedRun): boolean {
+  if (a.id === b.id) return true;
+  const primaryA = primaryScope(a.scopes);
+  const primaryB = primaryScope(b.scopes);
+  if (!primaryA || !primaryB) return true;
+  if (primaryA === primaryB) return true;
+  if (BROAD_SCOPES.has(primaryA) || BROAD_SCOPES.has(primaryB)) return true;
+  return false;
+}
+
+/**
+ * The scope that owns the work: the most specific one, i.e. the first that is
+ * not a broad category supplement. Null when nothing at all is known.
+ */
+export function primaryScope(scopes: readonly string[]): string | null {
+  for (const id of scopes) if (!BROAD_SCOPES.has(id)) return id;
+  // A run that is *only* about a broad scope still has an owner — a broad one,
+  // which `scopesConflict` then treats as exclusive.
+  return scopes[0] ?? null;
+}
+
+/** Broad scopes a busy pair of lanes has in common, for the operator's label. */
+export function sharedBroadScopes(a: ScopedRun, b: ScopedRun): string[] {
+  return a.scopes.filter((id) => BROAD_SCOPES.has(id) && b.scopes.includes(id));
+}
+
+export function freeLane(taken: Iterable<number>, capacity: number): number | null {
+  const used = new Set(taken);
+  for (let lane = 1; lane <= capacity; lane += 1) if (!used.has(lane)) return lane;
+  return null;
+}
+
 /**
  * Compares the files a run touched with the scope it declared. Same verdict the
  * pre-commit guard gives, so a green dashboard and a green `scopes.mjs check`

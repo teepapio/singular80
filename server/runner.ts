@@ -18,7 +18,7 @@ import type {
   SuggestionView,
 } from '../src/shared/types';
 import type { Store } from './db';
-import { auditScope, scopeForSuggestion } from './scopes';
+import { auditScope, freeLane, scopeForSuggestion, scopesConflict } from './scopes';
 
 export interface RunnerCallbacks {
   onStarted?: (run: RunRecord, suggestion: Suggestion) => void;
@@ -225,7 +225,14 @@ ${extra}`;
 export class Runner {
   private entries = new Map<string, RunEntry>();
   private queue: string[] = [];
-  private activeId: string | null = null;
+  /**
+   * Ids of the runs that currently hold a lane, in the order they took it. A set
+   * and not a single id because the queue runs several opencode sessions at
+   * once: how many is the operator's setting (`maxParallelRuns`), and *which*
+   * run may take a free lane is decided by `scopesConflict`, so two agents never
+   * work on the same files.
+   */
+  private activeIds = new Set<string>();
   /** Persisted, not in memory: the queue survives a restart. */
   private paused: boolean;
   /** Wakes the runner when the head of the queue may start (retry backoff). */
@@ -350,7 +357,13 @@ export class Runner {
       timeoutMinutes: settings.runTimeoutMinutes,
       retryLimit: settings.retryLimit,
       retryBackoffSeconds: settings.retryBackoffSeconds,
+      maxParallelRuns: settings.maxParallelRuns,
     };
+  }
+
+  /** How many lanes exist, i.e. how many sessions may run at the same time. */
+  capacity(): number {
+    return Math.max(1, this.store.getSettings().maxParallelRuns);
   }
 
   queueState(): QueueState {
@@ -359,7 +372,15 @@ export class Runner {
       const run = this.store.getRun(id);
       if (run) queue.push(run);
     }
-    return { paused: this.paused, policy: this.policy(), activeRun: this.activeRun(), queue };
+    const activeRuns = this.activeRecords();
+    return {
+      paused: this.paused,
+      policy: this.policy(),
+      activeRuns,
+      activeRun: activeRuns[0] ?? null,
+      queue,
+      blockedRunIds: queue.filter((run) => this.blockedBy(run)).map((run) => run.id),
+    };
   }
 
   /**
@@ -382,6 +403,7 @@ export class Runner {
       timeoutMinutes: settings.runTimeoutMinutes,
       retryLimit: settings.retryLimit,
       retryBackoffSeconds: settings.retryBackoffSeconds,
+      maxParallelRuns: settings.maxParallelRuns,
     };
     return this.createRun(suggestion, cluster, {
       attempt: 1,
@@ -421,6 +443,7 @@ export class Runner {
       suggestionId: suggestion.id,
       status: 'queued',
       sessionId: null,
+      lane: null,
       prompt: buildPrompt(suggestion, cluster, settings, this.options.projectRoot, prediction.scopes, options.attempt),
       exitCode: null,
       cost: null,
@@ -568,7 +591,13 @@ export class Runner {
       if (pid !== null && isProcessAlive(pid)) {
         const entry = this.adoptEntry(record, pid);
         this.entries.set(record.id, entry);
-        if (!this.activeId) this.activeId = record.id;
+        // Beides ist nötig: die Spur, die der Betreiber schon sieht, *und* die
+        // Anmeldung, die diesen Run zum Besitzer macht. Ohne die Anmeldung ist
+        // der übernommene Run für `activeRecords()` unsichtbar und der nächste
+        // `pump()` vergibt denselben Scope noch einmal — zwei Agenten, ein
+        // Dateisatz, ohne jede Warnung.
+        this.claimLane(entry);
+        this.activeIds.add(record.id);
         this.watchOrphan(entry);
         adopted.push(record.id);
       } else {
@@ -743,32 +772,106 @@ export class Runner {
   }
 
   /**
-   * Starts the next queued run, unless the queue is paused or the head of the
-   * queue is still inside its retry backoff.
+   * Fills every free lane, oldest queued run first.
+   *
+   * Two rules decide whether a queued run may start, and they are checked per run
+   * instead of only for the head of the queue:
+   *
+   *  1. its retry backoff has expired, and
+   *  2. no busy lane already claims its scope (`scopesConflict`).
+   *
+   * The head-of-queue-only rule this replaces was right for one lane and wrong
+   * for several: one Tetris run waiting out a backoff would have held the whole
+   * machine idle. So a run that is not allowed to start yet is *skipped*, not
+   * fatal — it keeps its place in the queue and the next run gets the lane.
+   * Skipping cannot loop forever, because the loop walks a snapshot of the queue
+   * and never reconsiders a run it has already looked at.
    */
-  private pump() {
+  private pump(): void {
     if (this.paused) return;
-    if (this.activeId) return;
-    const id = this.queue[0];
-    if (!id) {
-      this.clearWake();
+    const capacity = this.capacity();
+    const now = Date.now();
+    // What the busy lanes hold. Grown as lanes are filled, so two runs started
+    // by this very call already see each other.
+    const claimed = this.activeRecords();
+    let wakeAt: number | null = null;
+    let started = 0;
+    for (const id of [...this.queue]) {
+      if (this.activeIds.size >= capacity) break;
+      const entry = this.entries.get(id);
+      // A run id without an entry cannot be started or reported on; dropping it
+      // here is what keeps the queue from growing a hole that blocks a lane.
+      if (!entry || entry.record.status !== 'queued') {
+        this.dropFromQueue(id);
+        continue;
+      }
+      const notBefore = entry.record.notBefore ?? 0;
+      if (notBefore > now) {
+        wakeAt = wakeAt === null ? notBefore : Math.min(wakeAt, notBefore);
+        continue;
+      }
+      if (claimed.some((run) => scopesConflict(run, entry.record))) continue;
+      this.dropFromQueue(id);
+      claimed.push(entry.record);
+      this.claimLane(entry);
+      this.activeIds.add(entry.record.id);
+      void this.start(entry);
+      started += 1;
+    }
+    if (wakeAt !== null) this.scheduleWake(wakeAt);
+    else this.clearWake();
+    if (started > 0) this.options.callbacks.onQueueState?.(this.queueState());
+  }
+
+  /** The runs currently occupying a lane, oldest first. */
+  private activeRecords(): RunRecord[] {
+    const out: RunRecord[] = [];
+    for (const id of this.activeIds) {
+      const entry = this.entries.get(id);
+      if (entry) out.push(entry.record);
+    }
+    return out.sort((a, b) => (a.startedAt ?? a.createdAt) - (b.startedAt ?? b.createdAt));
+  }
+
+  /**
+   * Why a queued run cannot start yet, or null when nothing stands in its way.
+   * Only the lane occupancy counts: a run in its retry backoff is not "blocked",
+   * it is simply not due yet, and saying otherwise would put a wrong reason in
+   * the operator's face.
+   */
+  private blockedBy(record: RunRecord): boolean {
+    return this.activeRecords().some((run) => scopesConflict(run, record));
+  }
+
+  /**
+   * Puts a run into the lowest free lane. An adopted run keeps the lane it had,
+   * because the operator has been looking at that number; it is only moved when
+   * the lane no longer exists (the setting was lowered) or is already occupied.
+   */
+  private claimLane(entry: RunEntry): void {
+    const capacity = this.capacity();
+    const taken = this.activeRecords()
+      .map((run) => run.lane)
+      .filter((lane): lane is number => lane !== null);
+    const current = entry.record.lane;
+    if (current !== null && current <= capacity && !taken.includes(current)) {
+      entry.record.lane = current;
       return;
     }
-    const entry = this.entries.get(id);
-    if (!entry) {
-      this.queue.shift();
-      this.pump();
-      return;
-    }
-    const notBefore = entry.record.notBefore ?? 0;
-    if (notBefore > Date.now()) {
-      this.scheduleWake(notBefore);
-      return;
-    }
-    this.clearWake();
-    this.queue.shift();
-    this.activeId = id;
-    void this.start(entry);
+    const lane = freeLane(taken, capacity);
+    if (lane === null) return;
+    entry.record.lane = lane;
+    this.store.updateRun(entry.record);
+  }
+
+  /** Frees the lane of a finished run and reports it, so `pump` can refill. */
+  private releaseLane(record: RunRecord): void {
+    this.activeIds.delete(record.id);
+  }
+
+  private dropFromQueue(id: string): void {
+    if (!this.queue.includes(id)) return;
+    this.queue = this.queue.filter((queued) => queued !== id);
   }
 
   private scheduleWake(at: number): void {
@@ -1032,12 +1135,16 @@ export class Runner {
       kind: 'done',
       text: note ?? (record.status === 'succeeded' ? 'Erfolgreich abgeschlossen' : `Fehlgeschlagen (Exit ${exitCode})`),
     });
+    // The lane is freed *before* the retry is queued. A retry repeats this very
+    // scope, and the finished run still claims it — ordering these two the other
+    // way round would make the retry block on the ghost of its own predecessor
+    // and only start on some later, unrelated pump.
+    this.releaseLane(record);
     const retry = this.scheduleRetry(entry);
-    if (this.activeId === record.id) this.activeId = null;
+    this.pump();
     if (silent) return;
     this.options.callbacks.onFinished?.(record, suggestion!);
     if (retry) this.options.callbacks.onQueueState?.(this.queueState());
-    this.pump();
   }
 
   /** Compact JSON of what the run touched outside its scope, or null when clean. */
@@ -1145,7 +1252,7 @@ export class Runner {
       this.finalize(entry, null, 'Vor dem Start abgebrochen', 'cancelled');
       return { ok: true };
     }
-    if (this.activeId === runId && entry.child) {
+    if (this.activeIds.has(runId) && entry.child) {
       entry.cancelRequested = true;
       this.terminate(entry);
       return { ok: true };
@@ -1218,8 +1325,12 @@ export class Runner {
   }
 
   activeRun(): RunRecord | null {
-    if (!this.activeId) return null;
-    return this.store.getRun(this.activeId);
+    return this.activeRecords()[0] ?? null;
+  }
+
+  /** Every run currently holding a lane. */
+  activeRuns(): RunRecord[] {
+    return this.activeRecords();
   }
 
   isBusyForSuggestion(suggestion: Suggestion): boolean {

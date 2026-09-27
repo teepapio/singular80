@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -70,6 +70,7 @@ function setupInterruptedRun(
     suggestionId: suggestion.id,
     status: 'running',
     sessionId: null,
+    lane: 1,
     prompt: 'prompt',
     exitCode: null,
     cost: null,
@@ -173,6 +174,7 @@ describe('Runner.reconcileNow (Dashboard-Aufräumaktion)', () => {
       suggestionId: suggestion.id,
       status: 'running',
       sessionId: null,
+    lane: 1,
       prompt: 'prompt',
       exitCode: null,
       cost: null,
@@ -209,5 +211,107 @@ describe('Runner.reconcileNow (Dashboard-Aufräumaktion)', () => {
     const { runner, id } = createPhantomRun();
     runner.reconcileNow();
     expect(runner.reconcileNow().map((r) => r.id)).not.toContain(id);
+  });
+});
+
+describe('Übernommene Runs halten ihre Spur', () => {
+  const adopted: ReturnType<typeof spawn>[] = [];
+
+  afterEach(() => {
+    for (const child of adopted.splice(0)) {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }
+  });
+
+  /**
+   * The state a server restart finds: the database says `running`, the opencode
+   * process is still alive, and the PID registry points at it. Building the
+   * `Runner` is what adopts the run, so the record has to exist *before*.
+   */
+  function bootWithAdoptedRun(settings: Record<string, number> = {}): {
+    runner: Runner;
+    run: RunRecord;
+    store: Store;
+  } {
+    const dir = makeTempDir();
+    const dataDir = join(dir, 'data');
+    const store = new Store(dataDir);
+    store.saveSettings({ runTimeoutMinutes: 0, retryLimit: 0, retryBackoffSeconds: 0, ...settings });
+    const suggestion = store.createSuggestion({
+      text: 'Tetris: mehr Bälle am Stück',
+      author: 'Test',
+      source: 'dashboard',
+      category: 'mechanics',
+      canonicalId: null,
+      status: 'implementing',
+    });
+    const logPath = join(dir, 'adopted.jsonl');
+    writeFileSync(logPath, `${JSON.stringify({ type: 'run_meta', runId: 'run_adopted' })}\n`);
+    const run: RunRecord = {
+      id: 'run_adopted',
+      suggestionId: suggestion.id,
+      status: 'running',
+      sessionId: null,
+      lane: null,
+      prompt: 'p',
+      exitCode: null,
+      cost: null,
+      tokensInput: null,
+      tokensOutput: null,
+      commitHash: null,
+      resultSummary: '',
+      createdAt: Date.now() - 5_000,
+      startedAt: Date.now() - 5_000,
+      finishedAt: null,
+      logPath,
+      attempt: 1,
+      maxAttempts: 1,
+      retryOf: null,
+      notBefore: null,
+      timeoutMs: 0,
+      scopes: ['tetris', 'core'],
+      scope: 'tetris',
+      note: null,
+      scopeIssues: null,
+    };
+    store.createRun(run);
+    // A real, long-lived process: `recover()` only adopts what is genuinely
+    // alive, and the bug this guards against is exactly in that path.
+    const child = spawn('sleep', ['600'], { stdio: 'ignore' });
+    adopted.push(child);
+    writeFileSync(join(dataDir, 'active-runs.json'), JSON.stringify({ run_adopted: child.pid }));
+    const runner = new Runner(store, {
+      projectRoot: root,
+      dataDir,
+      contentDir: join(root, 'content'),
+      callbacks: {},
+    });
+    return { runner, run, store };
+  }
+
+  it('übernimmt einen lebenden Run und weist ihm eine Spur zu', () => {
+    const { runner, run, store } = bootWithAdoptedRun({ maxParallelRuns: 3 });
+    expect(runner.activeRuns().map((r) => r.id)).toEqual([run.id]);
+    expect(runner.activeRun()?.id).toBe(run.id);
+    // The lane is persisted, so the panel shows the same number after a reload.
+    expect(store.getRun(run.id)?.lane).toBe(1);
+    runner.dispose();
+  });
+
+  it('vergibt die Spur des übernommenen Runs nicht ein zweites Mal', () => {
+    // The failure this protects against: the adopted run is not registered, so
+    // `activeRecords()` is empty, the next pump hands out lane 1 again, and two
+    // agents end up in the same scope with nothing warning about it.
+    const { runner, run } = bootWithAdoptedRun({ maxParallelRuns: 1 });
+    expect(runner.queueState().activeRuns).toHaveLength(1);
+    const fresh = runner.queueState().activeRuns[0];
+    expect(fresh.id).toBe(run.id);
+    runner.dispose();
+  });
+
+  it('gibt eine zu hohe Spur auf, wenn die Einstellung kleiner geworden ist', () => {
+    const { runner } = bootWithAdoptedRun({ maxParallelRuns: 1 });
+    expect(runner.activeRuns()[0].lane).toBe(1);
+    runner.dispose();
   });
 });
