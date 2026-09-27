@@ -114,14 +114,9 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 	name_edit.custom_minimum_size = Vector2(640, 46)
 	column.add_child(name_edit)
 
-	# Google Play verlangt, dass Spieler die Nutzungsbedingungen akzeptieren,
-	# **bevor** sie nutzergenerierten Inhalt abschicken. Deshalb hängt der
-	# Absenden-Button an diesem Kästchen und nicht nur an einem Link daneben.
-	var consent := CheckBox.new()
-	consent.text = "Ich habe die Nutzungsbedingungen gelesen und akzeptiere sie."
-	consent.button_pressed = false
-	column.add_child(consent)
-
+	# Die Nutzungsbedingungen stehen als Hinweis daneben und sperren nichts mehr:
+	# das Kästchen vor dem Absenden ist entfernt. Wer nicht zustimmt, sendet
+	# trotzdem — die Bedingungen sind damit eine Information, keine Bedingung.
 	var terms := Ui.label("Nutzungsbedingungen: %s" % AppLegal.terms_url(), 14, UiTheme.TEXT_MUTED)
 	terms.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	terms.custom_minimum_size = Vector2(640, 0)
@@ -158,11 +153,6 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 	actions.add_child(send)
 
 	send.pressed.connect(func() -> void:
-		if not consent.button_pressed:
-			# Ohne Zustimmung geht nichts raus — auch nicht in die Warteschlange.
-			status.text = "Ohne Zustimmung zu den Nutzungsbedingungen wird nichts gesendet."
-			status.add_theme_color_override("font_color", UiTheme.DANGER)
-			return
 		var text := text_area.text.strip_edges()
 		if text.length() > MAX_LENGTH:
 			text = text.substr(0, MAX_LENGTH)

@@ -9,6 +9,7 @@ import { classify, decorate, findCanonical, scoreSuggestion, sortSuggestions, ty
 import { ContentStore } from './content';
 import { Store } from './db';
 import * as discord from './discord';
+import * as telegram from './telegram';
 import { findOpencodeBinary, Runner } from './runner';
 import {
   backupPath,
@@ -77,6 +78,17 @@ export function createApp(options: AppOptions): FastifyInstance {
             const webhook = store.getSettings().discordWebhook || process.env.DISCORD_WEBHOOK_URL || '';
             if (suggestion && webhook) {
               void discord.notifyRunResult(suggestion, run, webhook, dashboardUrl);
+            }
+            // Telegram läuft unabhängig vom Webhook: wer Discord nicht hat,
+            // bekommt das Ergebnis trotzdem. Der Fehler landet bewusst nur im
+            // Log — ein kaputter Kanal darf keinen Run als fehlgeschlagen
+            // melden, der Erfolg hängt an `run.status`, nicht an der Zustellung.
+            if (suggestion && telegram.isConfigured()) {
+              void telegram
+                .notifyRunResult(suggestion, run, dashboardUrl)
+                .then((sent) => {
+                  if (!sent.ok) console.warn('[telegram] Run-Ergebnis nicht zugestellt:', sent.error);
+                });
             }
           },
         },
@@ -199,6 +211,13 @@ export function createApp(options: AppOptions): FastifyInstance {
         store.setSuggestionDiscordMessage(suggestion.id, result.messageId);
         view = viewOf(suggestion.id)!;
       }
+    }
+    // Ein Kanal ist optional und der andere genügt: die Einreichung ist zu
+    // diesem Zeitpunkt bereits in der Datenbank, also kostet ein Fehler hier
+    // nichts als eine Logzeile.
+    if (telegram.isConfigured()) {
+      const sent = await telegram.notifyNewSuggestion(view, dashboardUrl);
+      if (!sent.ok) console.warn('[telegram] Vorschlag nicht zugestellt:', sent.error);
     }
     emit({ type: 'suggestion:new', suggestion: view });
     return view;
@@ -518,6 +537,10 @@ export function createApp(options: AppOptions): FastifyInstance {
       const sent = await discord.notifyNewSuggestion(viewOf(suggestionId)!, webhook, dashboardUrl);
       if (sent.ok && sent.messageId) store.setSuggestionDiscordMessage(suggestionId, sent.messageId);
     }
+    if (telegram.isConfigured()) {
+      const sent = await telegram.notifyNewSuggestion(viewOf(suggestionId)!, dashboardUrl);
+      if (!sent.ok) console.warn('[telegram] Befund nicht zugestellt:', sent.error);
+    }
     const view = viewOf(suggestionId);
     if (view) emit({ type: 'suggestion:new', suggestion: view });
     return { suggestionId, suggestion: view };
@@ -614,6 +637,20 @@ export function createApp(options: AppOptions): FastifyInstance {
     const webhook = (body.webhook ?? '').trim() || store.getSettings().discordWebhook || process.env.DISCORD_WEBHOOK_URL || '';
     if (!webhook) return reply.code(400).send({ error: 'Kein Webhook konfiguriert' });
     const result = await discord.sendTest(webhook, dashboardUrl);
+    if (!result.ok) return reply.code(502).send({ error: result.error });
+    return { ok: true };
+  });
+
+  // Der Testknopf für Telegram. Die Konfiguration kommt aus der Umgebung und
+  // nicht aus dem Request: ein Token, den der Client mitschickt, landet im
+  // Serverlog, sobald sich etwas verwirrt.
+  app.post('/api/telegram/test', async (_req, reply) => {
+    if (!telegram.isConfigured()) {
+      return reply
+        .code(400)
+        .send({ error: 'Kein Telegram konfiguriert: TELEGRAM_BOT_TOKEN und TELEGRAM_CHAT_ID in der .env setzen' });
+    }
+    const result = await telegram.sendTest(dashboardUrl);
     if (!result.ok) return reply.code(502).send({ error: result.error });
     return { ok: true };
   });
