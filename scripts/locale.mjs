@@ -20,7 +20,7 @@ import {
   readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, copyFileSync,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const godotRoot = join(root, 'godot');
@@ -321,11 +321,25 @@ export function readAll() {
 }
 
 
+/**
+ * Per language: the entries that stay equal to the German on purpose.
+ *
+ * The list exists to keep the coverage figure honest, and "honest" is a property
+ * of one language, not of all of them. "Bonbonland" *is* the French name of the
+ * Candy world while the English one says "Candy Land", so one shared list would
+ * either call the French untranslated or excuse the English.
+ */
 function readIdentical() {
-  const file = join(sourceDir, 'identical.json');
-  if (!existsSync(file)) return new Set();
-  const parsed = JSON.parse(readFileSync(file, 'utf8'));
-  return new Set([...(parsed.keys ?? []), ...(parsed.text ?? [])]);
+  const file = join(sourceDir, IDENTICAL_FILE);
+  if (!existsSync(file)) return new Map();
+  return JSON.parse(readFileSync(file, 'utf8'));
+}
+
+
+/** The set for one language, in the shape `coverage` wants. */
+export function identicalSet(all, code) {
+  const entry = readIdentical()[code] ?? {};
+  return new Set([...(entry.keys ?? []), ...(entry.text ?? [])]);
 }
 
 function readExcludes() {
@@ -458,6 +472,48 @@ function sync() {
   return 0;
 }
 
+/**
+ * Rewrites `identical.json`: every entry a language still spells like the
+ * German goes onto that language's list.
+ *
+ * Running it is how a translator says "this one stays". Running it *after* a
+ * translation shrinks the list, which is what keeps it from becoming a place to
+ * hide a sentence nobody got round to — `check` fails in both directions.
+ */
+function lock() {
+  const all = readAll();
+  const source = all.get(SOURCE);
+  if (!source) {
+    console.error(`[locale] locale/${SOURCE}.json fehlt.`);
+    return 1;
+  }
+  const out = {};
+  for (const [code, catalogue] of all) {
+    if (code === SOURCE) continue;
+    const entry = { keys: [], text: [] };
+    for (const section of ['keys', 'text']) {
+      for (const [key, value] of Object.entries(catalogue[section] ?? {})) {
+        if (JSON.stringify(value) === JSON.stringify(source[section][key])) entry[section].push(key);
+      }
+      entry[section].sort((a, b) => a.localeCompare(b, 'de'));
+    }
+    out[code] = entry;
+    console.log(`[locale] ${code}: ${entry.keys.length} Kennungen und ${entry.text.length} Quellstrings bleiben gleich`);
+  }
+  writeFileSync(join(sourceDir, IDENTICAL_FILE), `${JSON.stringify({
+    _comment: [
+      'Je Sprache die Einträge, die absichtlich dem Deutschen entsprechen — Markennamen,',
+      'Symbolmuster, geliehene Wörter. „Tetris“ und „‖ Pause“ sind nicht unübersetzt,',
+      'sondern richtig so; „Bonbonland“ steht nur bei „fr“, weil es auf Deutsch so heißt.',
+      'Gilt, solange niemand etwas übersetzt — danach gehört der Eintrag raus, damit',
+      '„check“ wieder die Zahl nennt, die etwas bedeutet.',
+    ],
+    ...out,
+  }, null, 2)}\n`);
+  return 0;
+}
+
+
 function list() {
   const all = readAll();
   const source = all.get(SOURCE);
@@ -470,7 +526,7 @@ function list() {
       console.log(`${code}  Quelle   ${Object.keys(source.text).length + Object.keys(source.keys).length} Einträge`);
       continue;
     }
-    const c = coverage(catalogue, source, readIdentical());
+    const c = coverage(catalogue, source, identicalSet(all, code));
     console.log(`${code}  ${catalogue.native.padEnd(10)} ${(c.percent * 100).toFixed(1).padStart(5)} %  `
       + `${String(c.done).padStart(4)}/${c.total} übersetzt  ·  ${c.same} gleich  ·  ${c.open} offen`
       + `  (keys ${c.keys.done}/${c.keys.total}, text ${c.text.done}/${c.text.total})`);
@@ -544,17 +600,25 @@ function check() {
   const identical = readIdentical();
   for (const [code, catalogue] of all) {
     if (code === SOURCE) continue;
+    const locked = identicalSet(all, code);
     for (const section of ['keys', 'text']) {
       for (const [key, value] of Object.entries(catalogue[section] ?? {})) {
-        if (JSON.stringify(value) === JSON.stringify(source[section][key]) && !identical.has(key)) {
-          problems.push(`${code}.json: "${key}" ist noch unübersetzt — übersetzen oder in identical.json eintragen`);
+        const same = JSON.stringify(value) === JSON.stringify(source[section][key]);
+        if (same && !locked.has(key)) {
+          problems.push(`${code}.json: "${key}" ist noch unübersetzt — übersetzen oder "npm run locale:lock"`);
+        }
+        if (!same && locked.has(key)) {
+          problems.push(`${code}.json: '${key}' ist in identical.json (${code}) als gleich geführt, ist aber übersetzt — "npm run locale:lock"`);
         }
       }
     }
   }
-  for (const key of identical) {
-    if (!(key in source.keys) && !(key in source.text)) {
-      problems.push(`identical.json nennt '${key}', das es in ${SOURCE}.json nicht gibt`);
+  for (const [code, locked] of Object.entries(identical)) {
+    if (!all.has(code)) problems.push(`identical.json kennt die Sprache '${code}', für die es keinen Katalog gibt`);
+    for (const key of new Set([...(locked.keys ?? []), ...(locked.text ?? [])])) {
+      if (!(key in source.keys) && !(key in source.text)) {
+        problems.push(`identical.json nennt '${key}', das es in ${SOURCE}.json nicht gibt`);
+      }
     }
   }
   // 6. An identifier passed to `Loc.f` is nearly always a slip for `Loc.t`:
@@ -571,11 +635,22 @@ function check() {
   return 0;
 }
 
-const command = process.argv[2] ?? 'check';
-if (command === 'sync') process.exit(sync());
-else if (command === 'list') process.exit(list());
-else if (command === 'check') process.exit(check());
-else {
-  console.error(`[locale] unbekannter Befehl '${command}' — list, sync oder check`);
-  process.exit(2);
+/**
+ * Only dispatch when this file is the command, not when a test imports it.
+ *
+ * `tests/locale.test.ts` imports `collect`, `isDisplayText` and `coverage` from
+ * here. Without the guard the import ran the default `check` and called
+ * `process.exit` in the middle of the test run, which vitest reports as a failed
+ * suite with no tests in it.
+ */
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const command = process.argv[2] ?? 'check';
+  if (command === 'sync') process.exit(sync());
+  else if (command === 'lock') process.exit(lock());
+  else if (command === 'list') process.exit(list());
+  else if (command === 'check') process.exit(check());
+  else {
+    console.error(`[locale] unbekannter Befehl '${command}' — list, lock, sync oder check`);
+    process.exit(2);
+  }
 }
