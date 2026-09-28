@@ -308,6 +308,7 @@ function readCatalogue(code) {
  * language, and the mirror below copies exactly the catalogues.
  */
 const CATALOGUE_FILE = /^[a-z]{2}(-[A-Za-z0-9]+)*\.json$/;
+const IDENTICAL_FILE = 'identical.json';
 
 export function readAll() {
   const out = new Map();
@@ -442,9 +443,14 @@ function sync() {
     if (added || dropped) console.log(`[locale] ${code}.json: ${added} neu, ${dropped} entfernt`);
   }
 
+  // The mirror carries the catalogues and `identical.json`, and nothing else.
+  // `identical.json` goes along on purpose: `Loc` reads it to report a truthful
+  // coverage figure, and would otherwise call "Tetris" untranslated. `Loc` skips
+  // it as a catalogue by name, so it never becomes a language called
+  // "identical".
   if (!existsSync(mirrorDir)) mkdirSync(mirrorDir, { recursive: true });
   for (const name of readdirSync(sourceDir)) {
-    if (!CATALOGUE_FILE.test(name)) continue;
+    if (!CATALOGUE_FILE.test(name) && name !== IDENTICAL_FILE) continue;
     copyFileSync(join(sourceDir, name), join(mirrorDir, name));
   }
   console.log(`[locale] ${SOURCE}.json: ${Object.keys(source.text).length} Quellstrings, `
@@ -519,10 +525,10 @@ function check() {
   }
   // 4. The mirror under godot/assets has to match the repository, or the device
   //    translates a different revision than the one that was reviewed.
-  for (const [code] of all) {
-    const name = `${code}.json`;
+  for (const name of [...all.keys().map((c) => `${c}.json`), IDENTICAL_FILE]) {
     const from = join(sourceDir, name);
     const to = join(mirrorDir, name);
+    if (!existsSync(from)) continue;
     if (!existsSync(to)) {
       problems.push(`godot/assets/locale/${name} fehlt — "npm run locale:sync"`);
       continue;

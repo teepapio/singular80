@@ -10,6 +10,8 @@ extends RefCounted
 ## No `ConfigFile` here: persistence goes through `Game.set_language`.
 
 const DIR := "res://assets/locale"
+## Mirrored from `locale/identical.json`; read, never treated as a language.
+const IDENTICAL_FILE := "identical.json"
 ## Language the source text is written in. Fallback for every other language,
 ## so it must always have a catalogue.
 const SOURCE := "de"
@@ -27,6 +29,11 @@ static var _registered := false
 ## German template -> how many `%` placeholders it has. Only the source counts;
 ## every other catalogue is measured against it before it is used.
 static var _specifiers: Dictionary = {}
+## Entries that are equal in every language on purpose — brand names, symbol
+## patterns, loanwords. Mirrored from `locale/identical.json`; they leave the
+## coverage denominator, because calling "Tetris" untranslated would make
+## the number a complaint about the one thing that is right.
+static var _identical: Dictionary = {}
 
 const _MISSING := "__loc_missing__"
 
@@ -63,6 +70,8 @@ static func _ensure() -> void:
 
 static func _load_all() -> void:
 	_catalogues.clear()
+	_specifiers.clear()
+	_load_identical()
 	var dir := DirAccess.open(DIR)
 	if dir == null:
 		push_warning("Loc: %s nicht lesbar — das Spiel bleibt in der Quellsprache." % DIR)
@@ -77,8 +86,28 @@ static func _load_all() -> void:
 	_register_translations()
 
 
+## The entries `locale/identical.json` marks as equal in every language.
+##
+## Without this the coverage figure calls "Tetris", "‖ Pause" and "★ %d  %s"
+## untranslated, which is a complaint about the one thing that is right — and a
+## number that cries wolf is a number nobody reads.
+static func _load_identical() -> void:
+	_identical = {}
+	var file := "%s/%s" % [DIR, IDENTICAL_FILE]
+	if not FileAccess.file_exists(file):
+		return
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(file))
+	if not (parsed is Dictionary):
+		return
+	for section in ["keys", "text"]:
+		for key in (parsed as Dictionary).get(section, []):
+			_identical[str(key)] = true
+
+
 static func _load_catalogue(file: String, dir: DirAccess) -> void:
-	if not file.ends_with(".json"):
+	# `identical.json` lives in the same directory and is a tool, not a
+	# language. Reading it as one would put "identical" in the language picker.
+	if not file.ends_with(".json") or file == IDENTICAL_FILE:
 		return
 	var raw := FileAccess.get_file_as_string("%s/%s" % [DIR, file])
 	var parsed: Variant = JSON.parse_string(raw)
@@ -111,6 +140,13 @@ static func _placeholders(text: String) -> PackedStringArray:
 
 
 ## How many `%` placeholders a text has — `%%` does not count as one.
+##
+## A space is deliberately not accepted as a flag. `printf` allows `% d`, but in
+## this catalogue `% ` is a literal percent sign in prose — "+12 % Feuerrate",
+## "+3 % Rüstung je Stufe" — and treating the next word as a conversion made the
+## guard report a German sentence and its English translation as incompatible
+## over nothing but the case of one letter: `F` is not a conversion character,
+## `f` is. The trade is one format style the game does not use.
 static func _count_specifiers(text: String) -> int:
 	var count := 0
 	var i := 0
@@ -122,7 +158,7 @@ static func _count_specifiers(text: String) -> int:
 			i += 2
 			continue
 		var j := i + 1
-		while j < text.length() and "-+ #0123456789.*".contains(text[j]):
+		while j < text.length() and "-+#0123456789.*".contains(text[j]):
 			j += 1
 		if j < text.length() and "sdfxXo".contains(text[j]):
 			count += 1
@@ -487,6 +523,8 @@ static func coverage(code: String) -> float:
 		var want: Dictionary = source.get(section, {})
 		var have: Dictionary = catalogue.get(section, {})
 		for key in want:
+			if _identical.has(key):
+				continue
 			total += 1
 			if str(have.get(key, "")) != str(want[key]) and str(have.get(key, "")) != "":
 				done += 1
@@ -504,6 +542,8 @@ static func missing(code: String) -> PackedStringArray:
 		var want: Dictionary = source.get(section, {})
 		var have: Dictionary = catalogue.get(section, {})
 		for key in want:
+			if _identical.has(key):
+				continue
 			var translated := str(have.get(key, ""))
 			if translated == "" or translated == str(want[key]):
 				out.append(key)
@@ -521,3 +561,4 @@ static func reset() -> void:
 	_numbers = {"decimal": ".", "group": ",", "percent": " %"}
 	_catalogues = {}
 	_specifiers = {}
+	_identical = {}
