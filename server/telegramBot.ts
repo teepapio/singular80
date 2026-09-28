@@ -7,17 +7,15 @@ import type { Store } from './db';
 import type { Runner } from './runner';
 
 /**
- * Der Betreiber steuert die Warteschlange aus dem Telegram-Chat.
+ * The operator steers the queue from the Telegram chat.
  *
- * Der Bot ist bewusst **kein** zweiter Server: er bekommt Store und Runner
- * übergeben und benutzt dieselben Objekte wie die HTTP-Routen. Ein Chat,
- * der eine eigene Warteschlange hätte, wäre die höfliche Art, zwei
- * Wahrheiten zu bauen — der Chat zeigt dann etwas an, das das Dashboard nicht
- * kennt.
+ * The bot is deliberately **not** a second server: it is handed the store and the
+ * runner and uses the same objects as the HTTP routes. A chat with its own queue
+ * would be the polite way to build two truths — and then the chat shows
+ * something the dashboard does not know.
  *
- * Ein Run startet eine OpenCode-Sitzung im Arbeitsbaum. Deshalb ist
- * `isAuthorized()` die Tür: ohne erlaubte Id tut der Bot nichts, auch nicht
- * antworten.
+ * A run starts an opencode session in the working tree. So `isAuthorized()` is
+ * the door: without an allowed id the bot does nothing, not even a reply.
  */
 
 export interface TelegramBotDeps {
@@ -27,11 +25,19 @@ export interface TelegramBotDeps {
   runner: Runner | null;
   bus: EventEmitter;
   dashboardUrl: string;
-  /** Genau die Sicht, die das Dashboard zeigt — damit beide übereinstimmen. */
+  /** Exactly the view the dashboard shows, so the two agree. */
   viewOf: (id: number) => SuggestionView | null;
-  /** Startet einen Lauf. Wird von der Route `/implement` mit benutzt. */
+  /** Starts a run. Shared with the `/implement` route. */
   startRun: (id: number) => { ok: boolean; error?: string; runId?: string };
-  /** Setzt den Status und meldet die Änderung wie das Dashboard. */
+  /**
+   * Creates a free order and queues it immediately. `POST /api/tasks` uses the
+   * same function, so an order from the chat and one from the dashboard take the
+   * same path.
+   */
+  createTask: (
+    text: string,
+  ) => { ok: boolean; error?: string; runId?: string; suggestionId?: number };
+  /** Sets the status and reports the change the way the dashboard does. */
   setStatus: (id: number, status: SuggestionStatus) => { ok: boolean; error?: string };
   onError?: (err: Error) => void;
 }
@@ -49,9 +55,9 @@ const ERROR_BACKOFF_MS = 10_000;
  * This is why the offset is written to disk before the next poll rather than
  * after it: an offset that lives only in memory is 0 again after every restart,
  * and Telegram then replays every command the bot has not seen confirmed. A
- * `/run 12` would be executed a second time. Restarting the server is routine
- * here (`tsx watch` does it on every save), so that was a real way to start a
- * second OpenCode run for the same suggestion.
+ * `/run 12` would execute a second time. Restarting the server is routine here
+ * (`tsx watch` does it on every save), so that was a real way to start a second
+ * opencode run for the same suggestion.
  */
 const STATE_FILE = 'telegram-bot.json';
 
@@ -68,6 +74,8 @@ export class TelegramBot {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private lastError = '';
+  /** Set when `/task` arrived without text, waiting for the next message. */
+  private awaitingTaskText = false;
 
   constructor(private readonly deps: TelegramBotDeps) {
     this.load();
@@ -159,12 +167,11 @@ export class TelegramBot {
 
   /**
    * Handles one update. Marking the update as seen happens here, not in the
-   * polling loop, so that the replay guard holds for every caller.
+   * polling loop, so the replay guard holds for every caller.
    *
-   * The order is deliberate: mark, persist, then act. A crash in the middle
-   * then loses one command rather than repeating it — a lost `/run` is
-   * recoverable, a repeated one starts a second OpenCode session for the same
-   * suggestion.
+   * The order is deliberate: mark, persist, then act. A crash in between loses
+   * one command rather than repeating it — a lost `/run` is recoverable, a
+   * repeated one starts a second opencode session for the same suggestion.
    */
   async handle(update: telegram.TelegramUpdate): Promise<void> {
     if (this.seen.has(update.update_id)) return;
@@ -182,10 +189,32 @@ export class TelegramBot {
     }
     const command = telegram.parseCommand(text);
     if (!command) {
+      // A message that is not a command is only interesting when `/task` asked
+      // for the text to follow separately. Everything else is chatter, and the
+      // bot stays quiet.
+      if (this.awaitingTaskText) {
+        this.awaitingTaskText = false;
+        this.markSeen(update.update_id);
+        await telegram.sendMessage(await this.answer({ name: 'task', args: [text.trim()], raw: text }));
+        return;
+      }
       this.markSeen(update.update_id);
       return;
     }
     this.markSeen(update.update_id);
+    // `/task` with no text opens a second step instead of failing outright: a
+    // multi-line order pasted from a phone arrives across several messages, and
+    // a command that rejects what it received teaches the owner nothing about
+    // what to send instead.
+    if (command.name === 'task' && command.args.length === 0) {
+      this.awaitingTaskText = true;
+      await telegram.sendMessage('Schick den Auftrag als nächste Nachricht.');
+      return;
+    }
+    // Any other command cancels the pending text. Without this, `/task` followed
+    // by `/help` and then an ordinary sentence would silently start an agent run
+    // on that sentence.
+    this.awaitingTaskText = false;
     await telegram.sendMessage(await this.answer(command));
   }
 
@@ -202,9 +231,8 @@ export class TelegramBot {
       case 'help':
       case 'start':
       case 'h': {
-        // `/start` ist der Befehl, den Telegram selbst erwartet: er darf nicht
-        // die Run-Steuerung bedeuten, sonst startet ein versehentliches /start
-        // einen Agenten.
+        // `/start` is the command Telegram itself expects, so it must not mean
+        // run control — otherwise a stray /start launches an agent.
         return telegram.HELP_TEXT;
       }
       case 'list': {
@@ -236,6 +264,19 @@ export class TelegramBot {
         const result = this.deps.startRun(id);
         if (!result.ok) return telegram.escapeHtml(result.error ?? 'unbekannter Fehler');
         return `Run für #${id} gestartet: ${telegram.escapeHtml(result.runId ?? '')}`;
+      }
+      case 'task': {
+        // A free-form order: not a suggestion from a player, but a direct
+        // instruction. It is stored as one anyway, so scope prediction,
+        // retries, commit protection and the history keep working unchanged.
+        if (!runner) return 'Der Runner ist abgeschaltet.';
+        if (runner.isPaused()) return 'Die Warteschlange ist pausiert. Läuft nach dem Fortsetzen.';
+        const text = command.args.join(' ').trim();
+        const result = this.deps.createTask(text);
+        if (!result.ok) return telegram.escapeHtml(result.error ?? 'unbekannter Fehler');
+        // The number comes back so the run can be followed in `/status` and in
+        // the dashboard, where it sits next to the player suggestions.
+        return `Auftrag #${result.suggestionId} gestartet: ${telegram.escapeHtml(result.runId ?? '')}`;
       }
       case 'approve':
       case 'reject': {

@@ -35,7 +35,7 @@ export interface AppOptions {
   runnerEnabled?: boolean;
 }
 
-// Die Hauptseite ist das Dashboard; `/dashboard.html` leitet nur noch um.
+// The main page is the dashboard; `/dashboard.html` only redirects there.
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:5173/';
 
 export function createApp(options: AppOptions): FastifyInstance {
@@ -81,10 +81,10 @@ export function createApp(options: AppOptions): FastifyInstance {
             if (suggestion && webhook) {
               void discord.notifyRunResult(suggestion, run, webhook, dashboardUrl);
             }
-            // Telegram läuft unabhängig vom Webhook: wer Discord nicht hat,
-            // bekommt das Ergebnis trotzdem. Der Fehler landet bewusst nur im
-            // Log — ein kaputter Kanal darf keinen Run als fehlgeschlagen
-            // melden, der Erfolg hängt an `run.status`, nicht an der Zustellung.
+            // Telegram runs independently of the webhook, so someone without
+            // Discord still hears the result. The failure goes to the log only:
+            // a broken channel must not report a run as failed, because success
+            // is `run.status`, not delivery.
             if (suggestion && telegram.isConfigured()) {
               void telegram
                 .notifyRunResult(suggestion, run, dashboardUrl)
@@ -214,9 +214,8 @@ export function createApp(options: AppOptions): FastifyInstance {
         view = viewOf(suggestion.id)!;
       }
     }
-    // Ein Kanal ist optional und der andere genügt: die Einreichung ist zu
-    // diesem Zeitpunkt bereits in der Datenbank, also kostet ein Fehler hier
-    // nichts als eine Logzeile.
+    // Either channel is optional and one of them suffices: the submission is
+    // already in the database at this point, so a failure here costs a log line.
     if (telegram.isConfigured()) {
       const sent = await telegram.notifyNewSuggestion(view, dashboardUrl);
       if (!sent.ok) console.warn('[telegram] Vorschlag nicht zugestellt:', sent.error);
@@ -250,16 +249,15 @@ export function createApp(options: AppOptions): FastifyInstance {
   });
 
   /**
-   * Löschen — für Testeinträge, Doubletten und Spuk-Eingaben aus dem Spiel.
+   * Deleting — for test entries, duplicates and phantom input from the game.
    *
-   * Der Weg über `rejected` genügt dafür nicht: ein abgelehnter Vorschlag
-   * bleibt in der Historie und in `backup/dashboard.json` stehen. Wer ihn
-   * wirklich weg haben will, muss ihn löschen können.
+   * Going through `rejected` is not enough: a rejected suggestion stays in the
+   * history and in `backup/dashboard.json`. Someone who really wants it gone has
+   * to be able to delete it.
    *
-   * **Während ein Run läuft, geht es nicht.** Der Runner hält den Vorschlag im
-   * Speicher und schreibt das Ergebnis später zurück; ein Löschen in diesem
-   * Moment hinterlässt einen Lauf, der auf einen Vorschlag zeigt, den es nicht
-   * mehr gibt. 409 statt eines stillen Datenverlusts.
+   * **Not while a run is executing.** The runner holds the suggestion in memory
+   * and writes the result back later; deleting now would leave a run pointing at
+   * a suggestion that no longer exists. 409 beats silent data loss.
    */
   app.delete('/api/suggestions/:id', async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
@@ -269,21 +267,19 @@ export function createApp(options: AppOptions): FastifyInstance {
       return reply.code(409).send({ error: `Für #${id} läuft gerade ein Run — Abbrechen oder warten.` });
     }
     if (!store.deleteSuggestion(id)) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
-    // Kein `emit`: ein neuer Ereignistyp müsste in `src/shared/types.ts`
-    // stehen, und das ist laut AGENTS.md nicht zu ändern. Die Oberfläche lädt
-    // ihre Liste nach dem Löschen neu — das ist hier ohnehin der Fall, weil sie
-    // den Eintrag lokal entfernen muss.
+    // No `emit`: a new event type would have to live in `src/shared/types.ts`,
+    // which AGENTS.md forbids changing. The UI reloads its list after a delete,
+    // which it has to do anyway to drop the entry locally.
     return { ok: true, id };
   });
 
   /**
-   * Startet einen Lauf für einen bestehenden Vorschlag.
+   * Starts a run for an existing suggestion.
    *
-   * Das ist die **eine** Stelle, die das tut. Der HTTP-Knopf und der
-   * Telegram-Befehl `/run` gehen beide hierher; zwei Kopien wären zwei Stellen,
-   * an denen sich Dashboard und Chat stillschweigend unterscheiden — und der
-   * Unterschied fällt erst auf, wenn ein Lauf im einen Weg startet und im
-   * anderen nicht.
+   * This is the **one** place that does. The HTTP button and the Telegram
+   * command `/run` both come here; two copies would be two places where
+   * dashboard and chat silently diverge, and the divergence only shows up once a
+   * run starts by one route and not by the other.
    */
   const startRun = (
     id: number,
@@ -309,8 +305,50 @@ export function createApp(options: AppOptions): FastifyInstance {
   };
 
   /**
-   * Status setzen und beide Enden informieren. Auch das hat nur eine Quelle,
-   * damit der Chat keine eigene Wahrheit bekommt.
+   * Creates a free order and queues it immediately.
+   *
+   * Single source for that too: the dashboard's "Direkter Auftrag" button and the
+   * chat's `/task` command both call here. Two copies would be two places where
+   * an order behaves differently depending on where it came from — and the
+   * difference only shows up once an order reaches the queue by one route and not
+   * by the other.
+   *
+   * The order is stored as a suggestion with `OPERATOR_SOURCE` rather than held
+   * in memory: scope prediction, retry rules, commit guard and history then keep
+   * working unchanged, and it appears in the dashboard next to the player
+   * suggestions instead of existing beside them.
+   */
+  const createTask = (
+    text: string,
+    extraInstructions = '',
+  ): { ok: boolean; error?: string; runId?: string; suggestionId?: number } => {
+    if (!runner) return { ok: false, error: 'Der Runner ist abgeschaltet.' };
+    const clean = text.trim();
+    if (clean.length < 3) return { ok: false, error: 'Der Auftrag braucht mindestens 3 Zeichen.' };
+    if (clean.length > 4000) {
+      return { ok: false, error: `Der Auftrag ist ${clean.length} Zeichen lang — bitte auf 4000 kürzen.` };
+    }
+    const settings = store.getSettings();
+    const merged = { ...settings };
+    const extra = extraInstructions.trim();
+    if (extra) merged.extraInstructions = [settings.extraInstructions, extra].filter(Boolean).join('\n');
+    const suggestion = store.createSuggestion({
+      text: clean,
+      author: 'Betreiber',
+      source: OPERATOR_SOURCE,
+      category: classify(clean),
+      canonicalId: null,
+      status: 'approved',
+    });
+    const run = runner.enqueue(suggestion, merged, [suggestion]);
+    const view = viewOf(suggestion.id);
+    if (view) emit({ type: 'suggestion:new', suggestion: view });
+    return { ok: true, runId: run.id, suggestionId: suggestion.id };
+  };
+
+  /**
+   * Sets the status and tells both ends. Single source as well, so the chat does
+   * not grow its own truth.
    */
   const setStatus = (id: number, status: SuggestionStatus): { ok: boolean; error?: string } => {
     const updated = store.updateSuggestionStatus(id, status);
@@ -357,29 +395,17 @@ export function createApp(options: AppOptions): FastifyInstance {
   app.post('/api/tasks', async (req, reply) => {
     if (!runner) return reply.code(503).send({ error: 'Runner ist deaktiviert' });
     const body = (req.body ?? {}) as { text?: string; extraInstructions?: string };
-    const text = (body.text ?? '').trim();
-    if (text.length < 3) {
-      return reply.code(400).send({ error: 'Der Auftrag braucht mindestens 3 Zeichen.' });
+    const result = createTask(body.text ?? '', body.extraInstructions ?? '');
+    if (!result.ok) {
+      const code = /abschaltet/.test(result.error ?? '') ? 503 : 400;
+      return reply.code(code).send({ error: result.error });
     }
-    if (text.length > 4000) {
-      return reply.code(400).send({ error: 'Der Auftrag ist länger als 4000 Zeichen — bitte kürzen.' });
-    }
-    const settings = store.getSettings();
-    const merged = { ...settings };
-    const extra = (body.extraInstructions ?? '').trim();
-    if (extra) merged.extraInstructions = [settings.extraInstructions, extra].filter(Boolean).join('\n');
-    const suggestion = store.createSuggestion({
-      text,
-      author: 'Betreiber',
-      source: OPERATOR_SOURCE,
-      category: classify(text),
-      canonicalId: null,
-      status: 'approved',
-    });
-    const run = runner.enqueue(suggestion, merged, [suggestion]);
-    const view = viewOf(suggestion.id)!;
-    emit({ type: 'suggestion:new', suggestion: view });
-    return { run, suggestion: view, scope: runner.auditScopeOf(run.id) };
+    const id = result.suggestionId!;
+    return {
+      run: result.runId ? store.getRun(result.runId) : null,
+      suggestion: viewOf(id),
+      scope: runner.auditScopeOf(result.runId!),
+    };
   });
 
   // Preview: which sub-tasks would an automatic split produce?
@@ -673,9 +699,9 @@ export function createApp(options: AppOptions): FastifyInstance {
       discordWebhook: maskWebhook(settings.discordWebhook || process.env.DISCORD_WEBHOOK_URL || ''),
       webhookConfigured: Boolean(settings.discordWebhook || process.env.DISCORD_WEBHOOK_URL),
       envWebhook: Boolean(process.env.DISCORD_WEBHOOK_URL && !settings.discordWebhook),
-      // Nur ja/nein und der Grund, warum nicht. Der Token selbst kommt nicht
-      // über die Leitung: `/api/settings` ist genau die Antwort, die ein
-      // Bildschirm zum Anzeigen braucht, und mehr nicht.
+      // Yes/no and the reason only. The token itself does not go over the wire:
+      // `/api/settings` is exactly the answer a screen needs to display, and
+      // nothing more.
       telegramConfigured: Boolean(token && chat),
       telegramTokenSet: Boolean(token),
       telegramChatSet: Boolean(chat),
@@ -716,9 +742,9 @@ export function createApp(options: AppOptions): FastifyInstance {
     return { ok: true };
   });
 
-  // Der Testknopf für Telegram. Die Konfiguration kommt aus der Umgebung und
-  // nicht aus dem Request: ein Token, den der Client mitschickt, landet im
-  // Serverlog, sobald sich etwas verwirrt.
+  // The Telegram test button. Configuration comes from the environment, not the
+  // request: a token the client sends along ends up in the server log the moment
+  // anything goes sideways.
   app.post('/api/telegram/test', async (_req, reply) => {
     if (!telegram.isConfigured()) {
       return reply
@@ -774,9 +800,8 @@ export function createApp(options: AppOptions): FastifyInstance {
     );
   }
 
-  // Der Telegram-Bot läuft nur, wenn ein Token hinterlegt ist. Ohne Token
-  // passiert hier nichts — ein Spielstand ohne Chatbedienung soll nicht an
-  // einem leeren Bot hängen.
+  // The Telegram bot only runs when a token is set. Without one nothing happens
+  // here — a game that works without chat control must not hang on an empty bot.
   const bot = new TelegramBot({
     projectRoot: options.projectRoot,
     store,
@@ -785,6 +810,7 @@ export function createApp(options: AppOptions): FastifyInstance {
     dashboardUrl,
     viewOf,
     startRun: (id) => startRun(id),
+    createTask: (text) => createTask(text),
     setStatus: (id, status) => setStatus(id, status),
     onError: (err) => console.warn('[telegram]', err.message),
   });
