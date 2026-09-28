@@ -59,31 +59,50 @@ function clip(value: string, limit = MAX_MESSAGE): string {
  * sit in the request path of a player submission, and a broken channel must not
  * lose a suggestion — it is stored anyway.
  */
+/** How often a send is retried before the caller is told it failed. */
+const SEND_ATTEMPTS = 3;
+
+/**
+ * Sends one message, retrying a few times.
+ *
+ * The retry is not politeness, it is the fix for a real symptom: `tsx watch`
+ * restarts the server on every save, and the process that comes up first sends
+ * into a connection Telegram has not finished tearing down. Node reports that as
+ * a bare `fetch failed` — no status, no message, indistinguishable from a real
+ * network outage. One retry resolves it; without one, the answer to `/task` is
+ * lost while the task itself runs, and the owner cannot tell the two apart.
+ */
 export async function sendMessage(text: string): Promise<{ ok: boolean; error?: string }> {
   if (!isConfigured()) {
     return { ok: false, error: 'Kein Telegram konfiguriert (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID)' };
   }
-  try {
-    const res = await fetch(`${API}/bot${token()}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId(),
-        text: clip(text),
-        parse_mode: 'HTML',
-        // The suggestion text is player input; a URL in it must not open a
-        // preview on its own.
-        disable_web_page_preview: true,
-      }),
-    });
-    if (!res.ok) {
+  let last = 'unbekannter Fehler';
+  for (let attempt = 0; attempt < SEND_ATTEMPTS; attempt += 1) {
+    try {
+      const res = await fetch(`${API}/bot${token()}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId(),
+          text: clip(text),
+          parse_mode: 'HTML',
+          // The suggestion text is player input; a URL in it must not open a
+          // preview on its own.
+          disable_web_page_preview: true,
+        }),
+      });
+      if (res.ok) return { ok: true };
       const raw = await res.text().catch(() => '');
-      return { ok: false, error: explain(res.status, raw) };
+      last = explain(res.status, raw);
+      // A rejected message will be rejected identically on the next try — only a
+      // torn connection or a 5xx is worth repeating.
+      if (res.status < 500) return { ok: false, error: last };
+    } catch (err) {
+      last = (err as Error).message;
     }
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: (err as Error).message };
+    if (attempt < SEND_ATTEMPTS - 1) await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
   }
+  return { ok: false, error: last };
 }
 
 /** Turns Telegram errors into something one can actually fix. */
@@ -243,19 +262,33 @@ export interface RawUpdate {
  */
 export async function getUpdates(offset: number, timeout = API_TIMEOUT): Promise<RawUpdate> {
   if (!token()) return { ok: false, error: 'Kein TELEGRAM_BOT_TOKEN' };
-  try {
-    const res = await fetch(`${API}/bot${token()}/getUpdates?offset=${offset}&timeout=${timeout}`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (!res.ok) {
-      const raw = await res.text().catch(() => '');
-      return { ok: false, error: `getUpdates ${res.status}: ${raw.slice(0, 200)}` };
+  // Retried like `sendMessage`: the first poll after a restart is the one that
+  // trips over a socket Telegram is still tearing down, and a poll loop that
+  // gives up on the first failure then backs off for ten seconds and says
+  // nothing more. A 409 is *not* retried here — that means a second poller
+  // exists, and hammering would only extend the conflict.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const res = await fetch(`${API}/bot${token()}/getUpdates?offset=${offset}&timeout=${timeout}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        const raw = await res.text().catch(() => '');
+        const error = `getUpdates ${res.status}: ${raw.slice(0, 200)}`;
+        if (res.status < 500) return { ok: false, error };
+        if (attempt === 0) await new Promise((r) => setTimeout(r, 1200));
+        continue;
+      }
+      const data = (await res.json().catch(() => null)) as
+        | { ok?: boolean; result?: TelegramUpdate[] }
+        | null;
+      if (!data?.ok) return { ok: false, error: 'getUpdates: unerwartete Antwort' };
+      return { ok: true, result: data.result ?? [] };
+    } catch (err) {
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 1200));
+      else return { ok: false, error: (err as Error).message };
     }
-    const data = (await res.json().catch(() => null)) as { ok?: boolean; result?: TelegramUpdate[] } | null;
-    if (!data?.ok) return { ok: false, error: 'getUpdates: unerwartete Antwort' };
-    return { ok: true, result: data.result ?? [] };
-  } catch (err) {
-    return { ok: false, error: (err as Error).message };
   }
+  return { ok: false, error: 'getUpdates: mehrfach fehlgeschlagen' };
 }

@@ -143,6 +143,36 @@ describe('Telegram-Zustellung', () => {
     expect(result.error).toMatch(/schreiben/);
   });
 
+  it('schickt eine Nachricht nach einem abgerissenen Socket erneut', async () => {
+    // Without the retry, the reply to `/task` is lost exactly when the task
+    // itself has been accepted — the owner sees nothing and cannot tell whether
+    // the order arrived.
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await sendMessage('Auftrag #7 gestartet');
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('wiederholt eine abgelehnte Nachricht nicht', async () => {
+    // 400 means the message itself is wrong; the next try is identical. Only a
+    // torn connection or a 5xx is worth sending again.
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: false, status: 400, text: async () => '{"description":"chat not found"}' });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await sendMessage('x');
+    expect(result.ok).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('meldet einen Erfolg, ohne Discord nachzuahmen', async () => {
     process.env.TELEGRAM_BOT_TOKEN = 'gut';
     process.env.TELEGRAM_CHAT_ID = '42';
@@ -467,6 +497,34 @@ describe('getUpdates', () => {
     const result = await getUpdates(0);
     expect(result.ok).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('versucht es nach einem abgerissenen Socket erneut', async () => {
+    // The symptom this fixes: `tsx watch` restarts the server, the first call
+    // after that lands in a connection Telegram is still tearing down, Node says
+    // only `fetch failed`, and the answer to `/task` is lost while the task
+    // itself runs. One retry is the whole fix.
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true, result: [] }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await getUpdates(5);
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('gibt bei 409 auf, statt den Konflikt zu verlängern', async () => {
+    // 409 means a second poller exists. Retrying would only keep both alive.
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: false, status: 409, text: async () => '{"description":"Conflict"}' });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await getUpdates(5);
+    expect(result.ok).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('gibt das Wasserzeichen als Offset weiter', async () => {

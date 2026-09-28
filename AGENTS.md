@@ -93,13 +93,53 @@ die halbfertige Arbeit einer fremden Sitzung mitnehmen — siehe oben. Ein
 Fehlschlag ist eine fehlende Zeile, **kein** Anlass, einen guten Lauf als
 fehlgeschlagen zu melden.
 
+## Auftrag ausführen, nicht vorschlagen
+
+**Ein Auftrag wird ausgeführt, nicht zur Diskussion gestellt.** Der Besitzer
+gibt einen Auftrag und erwartet ein Ergebnis, keine Rückfrage. Bis die Aufgabe
+erledigt ist, wird weitergearbeitet — auch wenn zwischendurch eine Frage
+aufkommt.
+
+**Entscheidungen sind meine.** Wenn eine Wahl offen ist, entscheide ich sie,
+schreibe sie in den Bericht und arbeite weiter. Nachfragen gibt es nur, wenn
+eine Antwort **nicht ersetzbar** ist, das heißt wenn ein Fehler ein reales Risiko
+ist:
+
+- Ein Auftrag würde Daten löschen, überschreiben oder zurücksetzen, und es gibt
+  keinen Hinweis darauf, dass genau das gemeint ist.
+- Zwei Lesarten führen zu **unumkehrbar** verschiedenen Ergebnissen und es
+  gibt keinen Weg, es später zu korrigieren.
+- Eine Berechtigung, ein Geheimnis oder ein Zugang fehlt.
+
+Sonst nicht. „Soll ich?", „Möchtest du?" und „Ich könnte …" sind im Bericht
+**keine** Zulieferung. Typische Fälle, die ohne Rückfrage entschieden werden:
+
+- **Aufraeumen statt fragen:** `#6` und `#7` waren zwei fast gleiche Auftraege.
+  Richtig ist, die Doppelte zu verwerfen und es zu *sagen* — nicht, den
+  Besitzer zwischen zwei fast gleichen Vorschlaegen entscheiden zu lassen.
+- **Fehlendes Werkzeug:** Ist `adb` nicht da, wird der Grund genannt und der
+  nächstbeste Weg versucht, statt die Arbeit abzubrechen.
+- **Unklare Formulierung:** Die naheliegendste Lesart wählen, im Bericht
+  benennen, damit sie auffällt, falls sie falsch war.
+- **Zweiter Weg vorhanden:** functionierenden Weg nehmen, anderen erwaehnen.
+
+**Nicht abgeben.** Der Auftrag endet nicht mit „ich habe vorbereitet", „der Rest
+ist manuell" oder „bitte ausfuehren". Fertig heisst: laeuft, getestet,
+committet, gepusht. Was nicht erreichbar war, wird benannt — aber nicht als
+Uebergabe, sondern als Befund.
+
+Wenn ein Schritt scheitert, zuerst den Grund beheben und neu versuchen. Ein
+Fehlschlag ist ein Ergebnis des Wegs, kein Grund, ihn dem Besitzer zu
+ueberlassen.
+
 ## Kurze Abschlussberichte
 
 **Der Bericht am Ende einer Aufgabe ist kurz.** Höchstens fünf Stichpunkte,
 und nur was eine Entscheidung ändert oder verlangt:
 
 - Was geändert wurde — in einem Satz, nicht in einer Aufzählung von Dateien.
-- Was der Besitzer tun muss, mit dem konkreten Befehl oder der Reihenfolge.
+- Welche **Entscheidungen** getroffen wurden und warum, damit eine andere
+  Lesart auffällt.
 - Was **nicht** fertig ist oder warum etwas nicht ging.
 - Ein Sicherheits- oder Datenverlustrisiko, wenn es eines gibt.
 
@@ -107,6 +147,10 @@ Kein "Ich habe X geprüft", kein "die Tests laufen durch", keine Wiederholung
 desselben Punkts in zwei Formulierungen. Wer eine Datei oder Zeile braucht,
 schaut in den Commit. Ein Bericht, den niemand liest, ist genauso wertlos
 wie ein Changelog, das keiner pflegt.
+
+Die Liste „Was der Besitzer tun muss" ist die einzige, die nicht weggelassen
+werden darf — und sie ist **kurz**: ein Befehl, ein Satz. Sie ist kein Weg, die
+eigene Arbeit weiterzugeben. Geht nichts übrig, steht sie nicht da.
 
 ## Vor der ersten Änderung
 

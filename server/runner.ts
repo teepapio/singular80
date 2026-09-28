@@ -155,12 +155,34 @@ export function formatBudget(ms: number): string {
   return `${Number.isInteger(minutes) ? minutes : minutes.toFixed(1)} min`;
 }
 
-/** Collapse the agent's final text output into a short single-line summary. */
-function shortSummary(raw: string, fallback: string): string {
+/**
+ * Collapse the agent's final text output into a short single-line summary.
+ *
+ * Agents narrate: their closing message is a report of what they just did, in
+ * the order they did it ("…berührt. Jetzt die Prüfungen: Typecheck ist
+ * sauber. Jetzt die Test-Suite: 5 Tests sind fehlgeschlagen…"). Taking the
+ * **last** MAX_SUMMARY characters of that produces a changelog entry that opens
+ * mid-word and reports the agent's feelings about its own test run — which is
+ * what the changelog for #6 read like.
+ *
+ * So the first sentence is preferred, and a long one is cut on a word boundary.
+ * If the agent opened with a heading and never wrote a sentence, the result is
+ * the first line rather than the last.
+ */
+export function shortSummary(raw: string, fallback: string): string {
   const clean = raw.replace(/\s+/g, ' ').trim();
   if (!clean) return fallback;
-  if (clean.length <= MAX_SUMMARY) return clean;
-  return `…${clean.slice(-MAX_SUMMARY).trimStart()}`;
+  // A sentence end after at least 15 characters: earlier than that and "e.g." or
+  // a numbered list steals the summary.
+  const sentence = clean.match(/^[^.!?\n]{15,}[.!?](?=\s|$)/);
+  let text = sentence ? sentence[0] : clean.split(/(?<=[.!?])\s/)[0] ?? clean;
+  if (text.length < 15) text = clean.split(/(?<=[.!?])\s/).find((p) => p.length >= 15) ?? text;
+  if (text.length > MAX_SUMMARY) {
+    const cut = text.slice(0, MAX_SUMMARY);
+    const lastSpace = cut.lastIndexOf(' ');
+    text = `${(lastSpace > MAX_SUMMARY / 2 ? cut.slice(0, lastSpace) : cut).replace(/[\s,;:.-]+$/, '')}…`;
+  }
+  return text;
 }
 
 export function findOpencodeBinary(): string {
@@ -592,11 +614,10 @@ export class Runner {
       if (pid !== null && isProcessAlive(pid)) {
         const entry = this.adoptEntry(record, pid);
         this.entries.set(record.id, entry);
-        // Beides ist nötig: die Spur, die der Betreiber schon sieht, *und* die
-        // Anmeldung, die diesen Run zum Besitzer macht. Ohne die Anmeldung ist
-        // der übernommene Run für `activeRecords()` unsichtbar und der nächste
-        // `pump()` vergibt denselben Scope noch einmal — zwei Agenten, ein
-        // Dateisatz, ohne jede Warnung.
+        // Both are needed: the lane the operator already sees, *and* the claim
+        // that makes this run its owner. Without the claim the adopted run is
+        // invisible to `activeRecords()` and the next `pump()` hands the same
+        // scope out again — two agents, one file set, no warning.
         this.claimLane(entry);
         this.activeIds.add(record.id);
         this.watchOrphan(entry);
@@ -775,18 +796,15 @@ export class Runner {
   /**
    * Fills every free lane, oldest queued run first.
    *
-   * Two rules decide whether a queued run may start, and they are checked per run
-   * instead of only for the head of the queue:
-   *
-   *  1. its retry backoff has expired, and
-   *  2. no busy lane already claims its scope (`scopesConflict`).
+   * A queued run may start when its retry backoff has expired and no busy lane
+   * already claims its scope (`scopesConflict`) — checked per run, not only for
+   * the head of the queue.
    *
    * The head-of-queue-only rule this replaces was right for one lane and wrong
    * for several: one Tetris run waiting out a backoff would have held the whole
-   * machine idle. So a run that is not allowed to start yet is *skipped*, not
-   * fatal — it keeps its place in the queue and the next run gets the lane.
-   * Skipping cannot loop forever, because the loop walks a snapshot of the queue
-   * and never reconsiders a run it has already looked at.
+   * machine idle. So a run that may not start yet is *skipped*, not fatal — it
+   * keeps its place and the next run gets the lane. Skipping cannot loop forever:
+   * the loop walks a snapshot of the queue.
    */
   private pump(): void {
     if (this.paused) return;
@@ -836,9 +854,9 @@ export class Runner {
 
   /**
    * Why a queued run cannot start yet, or null when nothing stands in its way.
-   * Only the lane occupancy counts: a run in its retry backoff is not "blocked",
-   * it is simply not due yet, and saying otherwise would put a wrong reason in
-   * the operator's face.
+   * Only lane occupancy counts: a run in its retry backoff is not "blocked", it
+   * is simply not due yet, and saying otherwise would put a wrong reason in front
+   * of the operator.
    */
   private blockedBy(record: RunRecord): boolean {
     return this.activeRecords().some((run) => scopesConflict(run, record));

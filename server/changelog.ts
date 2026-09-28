@@ -29,6 +29,11 @@ import type { RunRecord, Suggestion } from '../src/shared/types';
 
 const FILE = 'CHANGELOG.md';
 
+/** Blocking sleep: the process is about to exit anyway, nothing else needs the thread. */
+function sleep(ms: number): void {
+  spawnSync('sleep', [String(ms / 1000)]);
+}
+
 function git(projectRoot: string, args: string[]): { ok: boolean; out: string } {
   const res = spawnSync('git', ['-C', projectRoot, ...args], { encoding: 'utf8' });
   return { ok: res.status === 0, out: (res.stdout ?? '').trim() };
@@ -42,17 +47,37 @@ function today(): string {
   return `${now.getFullYear()}-${month}-${day}`;
 }
 
+/** Caps a line at the same width everywhere, whatever it describes. */
+function clipText(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > 100 ? `${flat.slice(0, 99)}…` : flat;
+}
+
 /**
  * Collapses a summary to one line and caps its length. A changelog entry that
  * wraps over four lines is a paragraph, and the point of this file is that it
  * can be skimmed in one sitting.
  */
 export function entryLine(suggestion: Suggestion, run: RunRecord): string {
-  const text = (run.resultSummary ?? suggestion.text).replace(/\s+/g, ' ').trim();
-  const clipped = text.length > 100 ? `${text.slice(0, 99)}…` : text;
+  const text = clipText(run.resultSummary ?? suggestion.text);
   // The number leads, because the reader is looking for "which one was this?"
   const hash = run.commitHash ? ` — \`${run.commitHash}\`` : '';
-  return `- **#${suggestion.id}** ${clipped}${hash}`;
+  return `- **#${suggestion.id}** ${text}${hash}`;
+}
+
+/**
+ * The line for work that came from a normal session rather than from a
+ * suggestion — the owner asked for a fix, an agent made it, and there is no
+ * number to point at.
+ *
+ * `edi:` rather than a name: it is a prefix you can search for, it does not
+ * change when someone works here, and it does not pretend to be a suggestion
+ * id. Without a marker like this the file would mix "the bot implemented #12"
+ * with "I fixed the thing you reported" in the same voice, and the first would
+ * look as automatic as the second.
+ */
+export function sessionEntryLine(text: string): string {
+  return `- **edi:** ${clipText(text)}`;
 }
 
 /**
@@ -61,35 +86,47 @@ export function entryLine(suggestion: Suggestion, run: RunRecord): string {
  * never a reason to fail a run.
  */
 export function appendChangelog(projectRoot: string, suggestion: Suggestion, run: RunRecord): boolean {
+  return appendLine(projectRoot, entryLine(suggestion, run), `docs(changelog): #${suggestion.id} implemented`);
+}
+
+/** The same, for a change that has no suggestion behind it. */
+export function appendSessionEntry(projectRoot: string, text: string): boolean {
+  return appendLine(projectRoot, sessionEntryLine(text), 'docs(changelog): session change');
+}
+
+function appendLine(projectRoot: string, line: string, commitMessage: string): boolean {
   try {
     const path = join(projectRoot, FILE);
     if (!existsSync(path)) return false;
-    const line = entryLine(suggestion, run);
     // Group by day: a new date opens a new section, anything after it is
     // appended to the section that already exists.
     let body = readFileSync(path, 'utf8');
     const date = today();
-    if (body.includes(`\n## ${date}\n`)) {
-      body = body.replace(new RegExp(`(\n## ${date}\n(?:[^#]*)$)`), `$1${line}\n`);
+    const heading = `\n## ${date}\n`;
+    if (body.includes(heading)) {
+      // Append at the end of the day's section, which runs until the next
+      // heading. The earlier version inserted right after the heading, which
+      // reversed the order and — worse — a `$1` referencing a group that had
+      // not matched wrote the *original* text back and silently dropped the
+      // entry. That is how #7 went missing.
+      const start = body.indexOf(heading) + heading.length;
+      const next = body.indexOf('\n## ', start);
+      const end = next === -1 ? body.length : next + 1;
+      const section = body.slice(start, end).replace(/\n*$/, '\n');
+      body = `${body.slice(0, start)}${section}${line}\n${body.slice(end)}`;
     } else {
       body = `${body.replace(/\n*$/, '')}\n\n## ${date}\n\n${line}\n`;
     }
     // Written directly rather than through a shell heredoc: the text comes
-    // from players, and a shell would read a backtick or `$(` inside a
-    // suggestion as a command.
+    // from players and from the owner, and a shell would read a backtick or
+    // `$(` inside it as a command.
     writeFileSync(path, body, 'utf8');
     // Only this file, by path. Never `add -A`: see the note at the top.
     if (!git(projectRoot, ['add', '--', FILE]).ok) {
       console.warn('[changelog] konnte nicht gestaged werden');
       return false;
     }
-    const committed = git(projectRoot, [
-      'commit',
-      '-m',
-      `docs(changelog): #${suggestion.id} implemented`,
-      '--',
-      FILE,
-    ]);
+    const committed = git(projectRoot, ['commit', '-m', commitMessage, '--', FILE]);
     if (!committed.ok) {
       console.warn('[changelog] commit fehlgeschlagen');
       return false;
@@ -102,10 +139,16 @@ export function appendChangelog(projectRoot: string, suggestion: Suggestion, run
       console.warn('[changelog] kein Branch, nicht gepusht');
       return false;
     }
-    if (!git(projectRoot, ['push', 'origin', branch.out]).ok) {
-      console.warn('[changelog] push fehlgeschlagen — der Eintrag ist aber committed');
+    // Retry the push a few times. A run that commits while `tsx watch` restarts
+    // the server, or while another session pushes at the same moment, loses the
+    // race once and would otherwise leave the changelog local — which is the
+    // one outcome this file exists to avoid.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (git(projectRoot, ['push', 'origin', branch.out]).ok) return true;
+      if (attempt < 2) sleep(2000 * (attempt + 1));
     }
-    return true;
+    console.warn('[changelog] push nach 3 Versuchen fehlgeschlagen — der Eintrag ist committed, aber lokal');
+    return false;
   } catch (err) {
     console.warn('[changelog] fehlgeschlagen:', (err as Error).message);
     return false;

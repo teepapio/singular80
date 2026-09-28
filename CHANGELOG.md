@@ -17,4 +17,6 @@ session. Written by the runner on success, or by
 
 ## 2026-09-28
 
-- **#6** …erührt. Jetzt die Prüfungen:Typecheck ist sauber. Jetzt die Test-Suite:5 Tests sind fehlgeschlagen… — `47740e5`
+- **#6** Slime langsamer: speed 55 auf 38 — `47740e5`
+- **#7** Slime noch langsamer: speed 38 auf 32 — `b2110c6`
+- **edi:** Changelog-Zeile für Aufträge aus Telegram ergänzt, die nach einem Server-Neustart sonst verloren gingen
