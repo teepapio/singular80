@@ -10,7 +10,7 @@
     "build": "vite build",
     "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/sync-content.mjs --check && vitest run",
+    "test": "node scripts/sync-content.mjs --check && node scripts/locale.mjs check && vitest run",
     "test:game": "node scripts/test-game.mjs",
     "scopes": "node scripts/scopes.mjs list",
     "scopes:check": "node scripts/scopes.mjs list",
@@ -30,7 +30,10 @@
     "godot:apk:release": "node scripts/install-android-template.mjs && godot --headless --path godot --export-release \"Android\"",
     "content:sync": "node scripts/sync-content.mjs",
     "content:check": "node scripts/sync-content.mjs --check",
-    "godot:android-template": "node scripts/install-android-template.mjs"
+    "godot:android-template": "node scripts/install-android-template.mjs",
+    "locale:sync": "node scripts/locale.mjs sync",
+    "locale:check": "node scripts/locale.mjs check",
+    "locale:list": "node scripts/locale.mjs list"
   },
   "dependencies": {
     "@fastify/static": "^8.0.0",
