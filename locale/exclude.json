@@ -1,0 +1,16 @@
+{
+  "_comment": [
+    "Schlüssel, die im Katalog stehen dürfen, aber nie übersetzt werden.",
+    "Der Generator kann das nicht selbst entscheiden: ein einzelner Buchstabe wie",
+    "\"W\" ist in der U-Bahn ein Linienzeichen und in \"Vorschlag\" ein Wortanfang,",
+    "und eine Übersetzung wäre beides falsch. Alles hier ist eine bewusste",
+    "Entscheidung, kein Versehen — eine neue Zeile bedeutet, dass jemand geprüft",
+    "hat, was der String im Spiel tut.",
+    "\"MAX\" steht als Kürzel in einer 16-px-Zeile über einem Wert; ein übersetzter",
+    "Ausdruck passt dort nicht und ist als Kürzel in Spielen ohnehin üblich."
+  ],
+  "text": [
+    "MAX"
+  ],
+  "keys": []
+}
