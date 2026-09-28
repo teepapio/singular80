@@ -141,7 +141,7 @@ static func chain_text(state: Dictionary) -> String:
 		return ""
 	var capped: int = mini(chain, CHAIN_CAP)
 	var bonus: int = int(round(float(maxi(0, capped - 1)) * CHAIN_STEP))
-	return "KETTE ×%d  ·  +%d EP" % [capped, bonus]
+	return Loc.f("CHAIN ×%d  ·  +%d XP", [capped, bonus])
 
 
 ## HUD line for the wave forecast: what is coming and how long there is left.
@@ -150,8 +150,8 @@ static func preview_text(defs: Array, wave: int, elapsed: float) -> String:
 	for entry in wave_preview(defs, wave + 1):
 		names.append(str(entry.get("name", "?")))
 	if names.is_empty():
-		return "Welle %d" % wave
-	return "Welle %d → %s" % [wave, " · ".join(names)]
+		return Loc.f("Wave %d", [wave])
+	return Loc.f("Wave %d → %s", [wave, " · ".join(names)])
 
 
 ## Colour for a content entry, by its rarity.
@@ -193,11 +193,26 @@ const STAT_AXIS := {
 	"xp_mult": "ertrag",
 }
 
-const AXIS_LABEL := {
-	"angriff": "Angriff",
-	"zaehigkeit": "Zähigkeit",
-	"ertrag": "Ertrag",
+## What each stat is called on the card. A caption rather than a sentence, but a
+## caption that a language may want to word differently ("Yield" is not a
+## one-word idea everywhere), so it is a key and not a bare string.
+const AXIS_LOC_KEY := {
+	"angriff": "arena.axis.angriff",
+	"zaehigkeit": "arena.axis.zaehigkeit",
+	"ertrag": "arena.axis.ertrag",
 }
+
+## Every key this module hands to `Loc.t`, so the extractor can find them: they
+## are looked up in dictionaries, and a key that is only ever built at runtime is
+## invisible to it.
+const ARENA_LOC_KEYS: Array[String] = [
+	"arena.axis.angriff",
+	"arena.axis.zaehigkeit",
+	"arena.axis.ertrag",
+	"arena.repair.0",
+	"arena.repair.1",
+	"arena.repair.2",
+]
 
 const AXIS_WEIGHT := {"angriff": 1.0, "zaehigkeit": 0.7, "ertrag": 0.6}
 
@@ -220,7 +235,7 @@ const EFFECT_FULL := 0.3
 ## share of what is missing, so even a fallback draft offers a choice instead of
 ## three identical buttons.
 const REPAIR_SHARE := [0.3, 0.5, 0.75]
-const REPAIR_NAME := ["Reparatur", "Notversorgung", "Feldlazarett"]
+const REPAIR_LOC_KEY := ["arena.repair.0", "arena.repair.1", "arena.repair.2"]
 const REPAIR_RARITY := ["common", "uncommon", "rare"]
 
 
@@ -248,7 +263,7 @@ static func axis_of(upgrade: Dictionary) -> String:
 
 
 static func axis_label(upgrade: Dictionary) -> String:
-	return str(AXIS_LABEL.get(axis_of(upgrade), AXIS_LABEL["angriff"]))
+	return Loc.t(str(AXIS_LOC_KEY.get(axis_of(upgrade), AXIS_LOC_KEY["angriff"])))
 
 
 ## One offer per stat, in the order the pool lists them.
@@ -320,8 +335,8 @@ static func repair_offer(stats: PlayerStats, slot: int) -> Dictionary:
 	var amount: int = maxi(floor_amount, int(round(missing * float(REPAIR_SHARE[index]))))
 	return {
 		"id": "repair_%d" % index,
-		"name": str(REPAIR_NAME[index]),
-		"description": "+%d health" % amount,
+		"name": Loc.t(str(REPAIR_LOC_KEY[index])),
+		"description": Loc.f("+%d health", [amount]),
 		"stat": "hp",
 		"amount": amount,
 		"maxStacks": 99,
@@ -423,11 +438,11 @@ static func draft_headline(offers: Array, stats: PlayerStats) -> String:
 	if index < 0:
 		return ""
 	var offer: Dictionary = offers[index]
-	return "Stärkstes: %s  ·  +%d %% %s" % [
+	return Loc.f("Strongest: %s  ·  +%d %% %s", [
 		str(offer.get("name", "")),
 		int(round(effect_value(offer, stats) * 100.0)),
 		axis_label(offer),
-	]
+	])
 
 
 ## The two numbers the player compares, and the word that says what they measure.
@@ -437,37 +452,37 @@ static func effect_text(upgrade: Dictionary, stats: PlayerStats, weapon: Diction
 	var amount := float(upgrade.get("amount", 0.0))
 	match stat:
 		"max_hp":
-			return "Leben  %d → %d" % [_i(stats.max_hp), _i(stats.max_hp + amount)]
+			return Loc.f("Health  %d → %d", [_i(stats.max_hp), _i(stats.max_hp + amount)])
 		"hp":
-			return "+%d Leben" % _i(minf(stats.max_hp, stats.hp + amount) - stats.hp)
+			return Loc.f("+%d health", [_i(minf(stats.max_hp, stats.hp + amount) - stats.hp)])
 		"damage_mult":
-			return "Schaden  %s → %s" % [_n(stats.effective_damage()), _n(stats.damage * (stats.damage_mult + amount))]
+			return Loc.f("Damage  %s → %s", [_n(stats.effective_damage()), _n(stats.damage * (stats.damage_mult + amount))])
 		"move_speed_mult":
-			return "Tempo  %d → %d" % [_i(stats.effective_move_speed()), _i(stats.move_speed * (stats.move_speed_mult + amount))]
+			return Loc.f("Speed  %d → %d", [_i(stats.effective_move_speed()), _i(stats.move_speed * (stats.move_speed_mult + amount))])
 		"fire_rate":
 			if weapon.is_empty():
-				return "Feuerrate  ×%s → ×%s" % [_x(1.0 + stats.fire_rate), _x(1.0 + stats.fire_rate + amount)]
+				return Loc.f("Fire rate  ×%s → ×%s", [_x(1.0 + stats.fire_rate), _x(1.0 + stats.fire_rate + amount)])
 			var base := float(weapon.get("cooldown", 500.0))
 			var faster := maxf(70.0, base / (1.0 + stats.fire_rate + amount))
-			return "Abzug  %d → %d ms" % [_i(stats.effective_cooldown(weapon)), _i(faster)]
+			return Loc.f("Draw  %d → %d ms", [_i(stats.effective_cooldown(weapon)), _i(faster)])
 		"pickup_radius":
-			return "Aufnahme  %d → %d" % [_i(stats.pickup_radius), _i(stats.pickup_radius + amount)]
+			return Loc.f("Pickup  %d → %d", [_i(stats.pickup_radius), _i(stats.pickup_radius + amount)])
 		"projectile_speed":
-			return "Ladung  %d → %d" % [_i(stats.projectile_speed), _i(stats.projectile_speed + amount)]
+			return Loc.f("Charge  %d → %d", [_i(stats.projectile_speed), _i(stats.projectile_speed + amount)])
 		"hp_regen":
-			return "Regeneration  %s/s → %s/s" % [_n(stats.hp_regen), _n(stats.hp_regen + amount)]
+			return Loc.f("Regeneration  %s/s → %s/s", [_n(stats.hp_regen), _n(stats.hp_regen + amount)])
 		"armor":
-			return "Schaden pro Treffer  %s → %s" % [_n(hit_damage(stats.armor)), _n(hit_damage(stats.armor + amount))]
+			return Loc.f("Damage per hit  %s → %s", [_n(hit_damage(stats.armor)), _n(hit_damage(stats.armor + amount))])
 		"crit_chance":
-			return "Kritik  %d %% → %d %%" % [_i(stats.crit_chance * 100.0), _i((stats.crit_chance + amount) * 100.0)]
+			return Loc.f("Crit  %d %% → %d %%", [_i(stats.crit_chance * 100.0), _i((stats.crit_chance + amount) * 100.0)])
 		"crit_mult":
-			return "Kritschaden  %d %% → %d %%" % [_i(stats.crit_mult * 100.0), _i((stats.crit_mult + amount) * 100.0)]
+			return Loc.f("Crit damage  %d %% → %d %%", [_i(stats.crit_mult * 100.0), _i((stats.crit_mult + amount) * 100.0)])
 		"pierce":
-			return "Durchschlag  %d → %d" % [_i(stats.pierce), _i(stats.pierce + amount)]
+			return Loc.f("Pierce  %d → %d", [_i(stats.pierce), _i(stats.pierce + amount)])
 		"projectile_count":
-			return "Geschosse  %d → %d" % [_i(stats.projectile_count), _i(stats.projectile_count + amount)]
+			return Loc.f("Projectiles  %d → %d", [_i(stats.projectile_count), _i(stats.projectile_count + amount)])
 		"xp_mult":
-			return "Erfahrung  %d %% → %d %%" % [_i(stats.xp_mult * 100.0), _i((stats.xp_mult + amount) * 100.0)]
+			return Loc.f("Experience  %d %% → %d %%", [_i(stats.xp_mult * 100.0), _i((stats.xp_mult + amount) * 100.0)])
 		_:
 			return ""
 

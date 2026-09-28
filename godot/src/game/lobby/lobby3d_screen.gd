@@ -12,7 +12,6 @@ const RUN_MULT := 1.7
 const CAMERA_HEIGHT := 11.5
 const CAMERA_DISTANCE := 12.5
 const HUB_RADIUS := 7.0
-const DEFAULT_TOAST := "Laufe zu einer Kategorie-Plaza …"
 const MAP_SIZE := 190.0
 const MAP_PADDING := 8.0
 const MAP_INTERVAL := 1.0 / 15.0
@@ -337,7 +336,9 @@ func _build_gallery_portal() -> void:
 	gallery_portal.add_child(light)
 
 	gallery_label = Label3D.new()
-	gallery_label.text = "◈  MESH-GALERIE"
+	# A `Label3D` has no `Ui.*` helper behind it, so it resolves nothing on its
+	# own: the caption has to be translated where it is assigned.
+	gallery_label.text = Loc.f("◈  MESH GALLERY", [])
 	gallery_label.font_size = 60
 	gallery_label.outline_size = 16
 	gallery_label.outline_modulate = Color("020617")
@@ -436,7 +437,7 @@ func _build_hud_panels() -> void:
 	_panel_games.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(_panel_games)
 
-	_toast = Ui.label(DEFAULT_TOAST, 18, UiTheme.TEXT, true)
+	_toast = Ui.label(Loc.t("lobby.walk_hint"), 18, UiTheme.TEXT, true)
 	_toast.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	_toast.position = Vector2(-300, -190)
 	_toast.size = Vector2(600, 34)
@@ -537,13 +538,13 @@ func _refresh_panel(zone: Dictionary) -> void:
 	if zone.is_empty():
 		_panel.visible = false
 		_toast.visible = true
-		_toast.text = DEFAULT_TOAST
+		_toast.text = Loc.t("lobby.walk_hint")
 		return
 	_panel.visible = true
 	var category: Dictionary = zone["category"]
 	_panel_icon.text = str(category["icon"])
-	_panel_name.text = str(category["name"])
-	_panel_tag.text = str(category["tagline"])
+	_panel_name.text = Loc.resolve(str(category["name"]))
+	_panel_tag.text = Loc.resolve(str(category["tagline"]))
 	for child in _panel_games.get_children():
 		child.queue_free()
 	_panel_buttons.clear()
@@ -572,10 +573,10 @@ func _refresh_near(pedestal: Dictionary) -> void:
 		_panel_buttons[i].modulate = Color(1, 1, 1) if not near else Color(1.3, 1.3, 1.0)
 	if not pedestal.is_empty():
 		_toast.visible = true
-		_toast.text = "E — %s %s" % [pedestal["game"]["icon"], pedestal["game"]["name"]]
+		_toast.text = Loc.f("E — %s %s", [pedestal["game"]["icon"], pedestal["game"]["name"]])
 	elif active_zone.is_empty():
 		_toast.visible = true
-		_toast.text = DEFAULT_TOAST
+		_toast.text = Loc.t("lobby.walk_hint")
 
 
 func _start(game: Dictionary) -> void:

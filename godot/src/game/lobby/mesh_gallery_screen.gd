@@ -194,7 +194,7 @@ func _build_panels() -> void:
 	left.add_child(tier_row)
 	for name in AssetRegistry.TIERS:
 		var tier_id: String = name
-		var button := Ui.button(str(AssetRegistry.TIER_LABELS[tier_id]), Vector2(112, 40), UiTheme.PANEL_LIGHT, func() -> void:
+		var button := Ui.button(AssetRegistry.tier_label(tier_id), Vector2(112, 40), UiTheme.PANEL_LIGHT, func() -> void:
 			_set_tier(tier_id)
 		)
 		tier_row.add_child(button)

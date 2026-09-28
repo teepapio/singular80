@@ -36,7 +36,7 @@ export interface TelegramBotDeps {
    */
   createTask: (
     text: string,
-  ) => { ok: boolean; error?: string; runId?: string; suggestionId?: number };
+  ) => Promise<{ ok: boolean; error?: string; runId?: string; suggestionId?: number }>;
   /** Sets the status and reports the change the way the dashboard does. */
   setStatus: (id: number, status: SuggestionStatus) => { ok: boolean; error?: string };
   onError?: (err: Error) => void;
@@ -263,7 +263,9 @@ export class TelegramBot {
         if (runner.isPaused()) return 'Die Warteschlange ist pausiert. Läuft nach dem Fortsetzen.';
         const result = this.deps.startRun(id);
         if (!result.ok) return telegram.escapeHtml(result.error ?? 'unbekannter Fehler');
-        return `Run für #${id} gestartet: ${telegram.escapeHtml(result.runId ?? '')}`;
+        // No run id: it is in the dashboard and on GitHub, and the chat is
+        // kept to the minimum.
+        return `Aufruf ${id} gestartet`;
       }
       case 'task': {
         // A free-form order: not a suggestion from a player, but a direct
@@ -272,11 +274,9 @@ export class TelegramBot {
         if (!runner) return 'Der Runner ist abgeschaltet.';
         if (runner.isPaused()) return 'Die Warteschlange ist pausiert. Läuft nach dem Fortsetzen.';
         const text = command.args.join(' ').trim();
-        const result = this.deps.createTask(text);
+        const result = await this.deps.createTask(text);
         if (!result.ok) return telegram.escapeHtml(result.error ?? 'unbekannter Fehler');
-        // The number comes back so the run can be followed in `/status` and in
-        // the dashboard, where it sits next to the player suggestions.
-        return `Auftrag #${result.suggestionId} gestartet: ${telegram.escapeHtml(result.runId ?? '')}`;
+        return `Aufruf ${result.suggestionId} gestartet`;
       }
       case 'approve':
       case 'reject': {

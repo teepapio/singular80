@@ -273,11 +273,26 @@ const SIEDLER_KEYS: Array[String] = [
 const TIERS: Array[String] = ["low", "med", "high"]
 
 ## What the gallery calls the tiers, plus the triangle budget each one aims for.
+##
+## "med" and "high" are display names, not asset keys, and a language that wants
+## to say something other than the English "Medium" needs a key to say it with —
+## hence `TIER_LOC_KEY` and `tier_label()`. "Low Poly" is the name of the
+## technique itself and stays what it is in every language.
 const TIER_LABELS := {
 	"low": "Low Poly",
 	"med": "Mittel",
 	"high": "Hoch",
 }
+
+const TIER_LOC_KEY := {
+	"med": "gallery.tier.med",
+	"high": "gallery.tier.high",
+}
+
+const GALLERY_LOC_KEYS: Array[String] = [
+	"gallery.tier.med",
+	"gallery.tier.high",
+]
 
 const TIER_BUDGET := {"low": 0, "med": 1000, "high": 10000}
 
@@ -349,7 +364,15 @@ static func tri_text(key: String, tier: String) -> String:
 	return "—" if count < 0 else Ui.format_number(count)
 
 
-## German display name for a key, derived from the file name.
+## The tier's name in the player's language, for every place that shows one.
+static func tier_label(tier: String) -> String:
+	var key := str(TIER_LOC_KEY.get(tier, ""))
+	if key != "":
+		return Loc.t(key)
+	return str(TIER_LABELS.get(tier, tier))
+
+
+## Display name for a key, derived from the file name.
 static func display_name(key: String) -> String:
 	var raw := key.get_file().replace("_", " ")
 	var words := raw.split(" ")

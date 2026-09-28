@@ -474,9 +474,14 @@ static func set_code(code: String) -> bool:
 ## The player's stored choice, or `""`.
 static func stored_code() -> String:
 	var game := _game()
-	if game != null and game.has_method("language"):
-		return str(game.call("language"))
-	return ""
+	if game == null:
+		return ""
+	# `Game.language` is a property, not a method: `has_method("language")` is
+	# false for it and `call("language")` throws, so the guard below always
+	# answered "no stored choice" and every launch followed the device. Which
+	# also meant the reconciliation in `boot` had nothing to reconcile.
+	var value: Variant = game.get("language")
+	return str(value) if value is String else ""
 
 
 ## The device language, reduced to two letters (`de`).

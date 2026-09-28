@@ -5,13 +5,14 @@ import { join } from 'node:path';
 import type { SuggestionView } from '../src/shared/types';
 import {
   buildSuggestionText,
+  editMessageText,
   escapeHtml,
   getUpdates,
   HELP_TEXT,
   isAuthorized,
   isConfigured,
   notifyNewSuggestion,
-  notifyRunResult,
+  runResultText,
   parseCommand,
   sendMessage,
   suggestionIdArg,
@@ -178,11 +179,7 @@ describe('Telegram-Zustellung', () => {
     process.env.TELEGRAM_CHAT_ID = '42';
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
     vi.stubGlobal('fetch', fetchMock);
-    const result = await notifyRunResult(
-      { id: 7, text: 'Idee' } as never,
-      { id: 'run_1', status: 'succeeded', cost: 0.5, commitHash: 'abc1234' } as never,
-      URL_TEXT,
-    );
+    const result = await sendMessage(runResultText(7, true));
     expect(result.ok).toBe(true);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     // `chat_id` comes from the environment; no preview, the text is player text.
@@ -279,7 +276,9 @@ describe('Der Bot führt Befehle aus', () => {
     await bot.handle(update('/run 12'));
     expect(started).toEqual([12]);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body.text).toContain('run_9');
+    // The run id is deliberately gone: the chat stays at the minimum.
+    expect(body.text).toBe('Aufruf 12 gestartet');
+    expect(body.text).not.toContain('run_9');
   });
 
   it('sagt, wenn die Warteschlange pausiert, statt zu starten', async () => {
@@ -324,33 +323,49 @@ describe('Der Bot führt Befehle aus', () => {
 });
 
 describe('Das Ergebnis eines Laufs', () => {
-  it('meldet Nummer, Ausgang und Commit — sonst nichts', async () => {
-    process.env.TELEGRAM_BOT_TOKEN = 'gut';
-    process.env.TELEGRAM_CHAT_ID = '42';
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
-    vi.stubGlobal('fetch', fetchMock);
-    await notifyRunResult(
-      { id: 7, text: 'Idee' } as never,
-      { id: 'run_1', status: 'succeeded', cost: 0.5, commitHash: 'abc1234' } as never,
-      URL_TEXT,
-    );
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body.text).toBe('#7 umgesetzt abc1234');
-    expect(body.text).not.toContain('0.5000');
+  // Three words. The task text is one scroll up, the commit is in the changelog
+  // and on GitHub. A line that has to be read twice is not read at all.
+  it('ist genau eine Zeile bei Erfolg', () => {
+    expect(runResultText(7, true)).toBe('Aufruf 7 beendet');
   });
 
-  it('nennt beim Fehlschlag den Status des Laufs', async () => {
+  it('sagt Fehlschlag, wenn es einer war', () => {
+    expect(runResultText(7, false)).toBe('Aufruf 7 fehlgeschlagen');
+  });
+
+  it('nennt weder Commit noch Kosten noch Status', () => {
+    expect(runResultText(7, true)).not.toMatch(/[0-9a-f]{7}/);
+    expect(runResultText(7, true).length).toBeLessThan(20);
+  });
+});
+
+describe('Der Chat bleibt kurz', () => {
+  it('das Ergebnis ersetzt die Auftragsnachricht, statt eine neue zu senden', async () => {
+    // One message per task, rewritten when it is done. Without the message id
+    // every outcome would be an extra line, and the channel would grow with every
+    // status change — which is what the owner asked to be rid of.
     process.env.TELEGRAM_BOT_TOKEN = 'gut';
     process.env.TELEGRAM_CHAT_ID = '42';
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
     vi.stubGlobal('fetch', fetchMock);
-    await notifyRunResult(
-      { id: 7, text: 'Idee' } as never,
-      { id: 'run_2', status: 'failed' } as never,
-      URL_TEXT,
+    await editMessageText('4711', runResultText(7, true));
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('editMessageText');
+    expect(JSON.parse(init.body as string).message_id).toBe(4711);
+    expect(JSON.parse(init.body as string).text).toBe('Aufruf 7 beendet');
+  });
+
+  it('meldet eine nicht auffindbare Nachricht, statt zu schweigen', async () => {
+    // A message the owner deleted cannot be edited; the error names it.
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    process.env.TELEGRAM_CHAT_ID = '42';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false, status: 400, text: async () => '{"description":"message to edit not found"}' }),
     );
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body.text).toBe('#7 fehlgeschlagen (failed)');
+    const result = await editMessageText('1', 'Aufruf 7 beendet');
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/400/);
   });
 });
 
@@ -363,12 +378,11 @@ describe('Freier Auftrag aus dem Chat', () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
     vi.stubGlobal('fetch', fetchMock);
     const texts: string[] = [];
-    const bot = makeBot({ createTask: (t) => (texts.push(t), { ok: true, runId: 'run_77', suggestionId: 55 }) });
+    const bot = makeBot({ createTask: async (t) => (texts.push(t), { ok: true, runId: 'run_77', suggestionId: 55 }) });
     await bot.handle(update('/task Mach den Slime schneller'));
     expect(texts).toEqual(['Mach den Slime schneller']);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body.text).toContain('#55');
-    expect(body.text).toContain('run_77');
+    expect(body.text).toBe('Aufruf 55 gestartet');
   });
 
   it('nimmt den Text auch als nächste Nachricht', async () => {
@@ -379,7 +393,7 @@ describe('Freier Auftrag aus dem Chat', () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
     vi.stubGlobal('fetch', fetchMock);
     const texts: string[] = [];
-    const bot = makeBot({ createTask: (t) => (texts.push(t), { ok: true, runId: 'run_1', suggestionId: 3 }) });
+    const bot = makeBot({ createTask: async (t) => (texts.push(t), { ok: true, runId: 'run_1', suggestionId: 3 }) });
     // Two distinct update ids: the replay guard would otherwise treat the second
     // message as one already handled.
     await bot.handle(update('/task', 42, 7, 1));
@@ -394,7 +408,7 @@ describe('Freier Auftrag aus dem Chat', () => {
     process.env.TELEGRAM_CHAT_ID = '42';
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) }));
     const texts: string[] = [];
-    const bot = makeBot({ createTask: (t) => (texts.push(t), { ok: true, runId: 'r', suggestionId: 1 }) });
+    const bot = makeBot({ createTask: async (t) => (texts.push(t), { ok: true, runId: 'r', suggestionId: 1 }) });
     await bot.handle(update('/task', 42, 7, 1));
     await bot.handle(update('/help', 42, 7, 2));
     // No plain text follows, so the pending text is dropped and this is a
@@ -411,7 +425,7 @@ describe('Freier Auftrag aus dem Chat', () => {
     const texts: string[] = [];
     const bot = makeBot({
       paused: true,
-      createTask: (t) => (texts.push(t), { ok: true, runId: 'r', suggestionId: 1 }),
+      createTask: async (t) => (texts.push(t), { ok: true, runId: 'r', suggestionId: 1 }),
     });
     await bot.handle(update('/task etwas'));
     expect(texts).toEqual([]);
@@ -424,7 +438,7 @@ describe('Freier Auftrag aus dem Chat', () => {
     process.env.TELEGRAM_CHAT_ID = '42';
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
     vi.stubGlobal('fetch', fetchMock);
-    const bot = makeBot({ createTask: () => ({ ok: false, error: 'Der Auftrag braucht mindestens 3 Zeichen.' }) });
+    const bot = makeBot({ createTask: async () => ({ ok: false, error: 'Der Auftrag braucht mindestens 3 Zeichen.' }) });
     await bot.handle(update('/task a'));
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body.text).toContain('mindestens 3 Zeichen');
@@ -539,7 +553,9 @@ describe('getUpdates', () => {
 
 /** Minimal stand-in: the bot needs only these two types. */
 type StartRun = (id: number) => { ok: boolean; runId?: string; error?: string };
-type CreateTask = (text: string) => { ok: boolean; runId?: string; suggestionId?: number; error?: string };
+type CreateTask = (
+  text: string,
+) => Promise<{ ok: boolean; runId?: string; suggestionId?: number; error?: string }>;
 
 function makeBot(
   overrides: { startRun?: StartRun; createTask?: CreateTask; paused?: boolean; projectRoot?: string } = {},
@@ -558,7 +574,7 @@ function makeBot(
     dashboardUrl: 'https://example.invalid/dashboard.html',
     viewOf: () => null,
     startRun: overrides.startRun ?? (() => ({ ok: true, runId: 'run_1' })),
-    createTask: overrides.createTask ?? (() => ({ ok: true, runId: 'run_1', suggestionId: 1 })),
+    createTask: overrides.createTask ?? (async () => ({ ok: true, runId: 'run_1', suggestionId: 1 })),
     setStatus: () => ({ ok: true }),
     onError: () => {},
   });

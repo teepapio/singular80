@@ -77,10 +77,10 @@ func _build_content() -> void:
 	column.add_child(record)
 
 	column.add_child(_spacer(10))
-	column.add_child(_caption("Startwaffe"))
+	column.add_child(_caption("Start weapon"))
 	column.add_child(_weapon_row())
 	column.add_child(_spacer(8))
-	column.add_child(_caption("Modus"))
+	column.add_child(_caption("Difficulty"))
 	column.add_child(_mode_row())
 	column.add_child(_spacer(10))
 

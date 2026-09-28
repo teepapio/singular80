@@ -15,11 +15,11 @@ var _dir := Vector2.RIGHT
 func _init() -> void:
 	id = "dash"
 	mechanic_name = "Dash"
-	description = "Sprung-Taste: kurzer Dash mit Unverwundbarkeit."
+	description = Loc.f("Jump key: a short dash with invulnerability.", [])
 
 
 func init_mechanic(host: Node) -> void:
-	host.add_hint("Sprung/Dash-Taste = Dash")
+	host.set_hint("Jump / dash key = dash")
 
 
 func update_mechanic(host: Node, delta: float) -> void:
@@ -52,8 +52,8 @@ func movement_override(_host: Node, delta: float) -> Variant:
 
 func hud(_host: Node) -> String:
 	if _cooldown <= 0.0:
-		return "Dash bereit"
-	return "Dash %.1fs" % _cooldown
+		return Loc.f("Dash ready", [])
+	return Loc.f("Dash %.1fs", [_cooldown])
 
 
 func reset() -> void:

@@ -348,7 +348,7 @@ func _build_mechanics() -> void:
 			# The mechanic's own hint talks about a key. On a phone the button
 			# is the only dash there is, so name it.
 			if Game.touch_controls:
-				add_hint("Daumen bewegen   ·   Dash-Knopf = ausweichen")
+				set_hint("Move the thumb   ·   Dash button = dodge")
 
 
 ## The on-screen dash. It presses the very action a key presses, so the
@@ -366,9 +366,13 @@ func _build_dash_pad() -> void:
 
 # --- mechanics host ---------------------------------------------------------
 
-func add_hint(text: String) -> void:
+## The mechanics host, and the one caption a mechanic may write. Named `set_hint`
+## because the extractor knows that name and reads the literal as player-visible
+## text; `Loc.resolve` then does the same at runtime, which a plain assignment to
+## `Label.text` never did.
+func set_hint(text: String) -> void:
 	if _hint_label != null:
-		_hint_label.text = text
+		_hint_label.text = Loc.resolve(text)
 
 
 func input_direction() -> Vector2:
@@ -1001,7 +1005,7 @@ func refresh_hud() -> void:
 	var forecast := ArenaRuns.preview_text(Content.enemies, wave, elapsed)
 	var to_wave := int(ceil(ArenaRuns.time_to_next_wave(elapsed)))
 	if _preview_label != null:
-		_preview_label.text = "%s  ·  nächste Welle in %ds" % [forecast, maxi(0, to_wave)]
+		_preview_label.text = Loc.f("%s  ·  next wave in %ds", [forecast, maxi(0, to_wave)])
 	# While the boss itself is on screen its name owns the banner; only a
 	# standing countdown may overwrite it.
 	if _boss_banner != null and boss_banner_time <= 0.0:
@@ -1024,10 +1028,10 @@ func refresh_hud() -> void:
 		if text != "":
 			status.append(text)
 	var extra := "   ".join(status)
-	_hud_label.text = "Level %d   Welle %d   Zeit %s   Kills %d   Score %s\n%s%s" % [
+	_hud_label.text = Loc.f("Level %d   Wave %d   Time %s   Kills %d   Score %s\n%s%s", [
 		stats.level, wave, Ui.format_time(elapsed * 1000.0), kills, Ui.format_number(score),
 		str(weapon.get("name", "")), ("   " + extra) if extra != "" else "",
-	]
+	])
 
 
 # --- pause / end ------------------------------------------------------------

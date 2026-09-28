@@ -200,8 +200,8 @@ static func context() -> String:
 
 ## How the gallery describes the detail levels, for the HUD.
 static func tier_caption(tier: String) -> String:
-	var label := str(AssetRegistry.TIER_LABELS.get(tier, tier))
+	var label := AssetRegistry.tier_label(tier)
 	var budget := int(AssetRegistry.TIER_BUDGET.get(tier, 0))
 	if budget <= 0:
-		return "%s — die Fassung, die die Spiele benutzen" % label
-	return "%s — Ziel: ca. %s Dreiecke" % [label, Ui.format_number(budget)]
+		return Loc.f("%s — the version the games use", [label])
+	return Loc.f("%s — target: about %s triangles", [label, Ui.format_number(budget)])

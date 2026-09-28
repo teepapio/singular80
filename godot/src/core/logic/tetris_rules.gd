@@ -247,8 +247,8 @@ static func danger_text(board: Array) -> String:
 		if empty:
 			free += 1
 	if level == 1:
-		return "Der Turm wächst  ·  %d freie Reihen" % free
-	return "GEFAHR!  Nur noch %d freie Reihen" % free
+		return Loc.f("The tower grows  ·  %d free rows", [free])
+	return Loc.f("DANGER!  Only %d free rows left", [free])
 
 
 ## The next `count` pieces, padded with -1 when the queue runs dry.

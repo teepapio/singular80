@@ -91,16 +91,19 @@ export function createApp(options: AppOptions): FastifyInstance {
             if (suggestion && webhook) {
               void discord.notifyRunResult(suggestion, run, webhook, dashboardUrl);
             }
-            // Telegram runs independently of the webhook, so someone without
-            // Discord still hears the result. The failure goes to the log only:
-            // a broken channel must not report a run as failed, because success
-            // is `run.status`, not delivery.
+            // The outcome is written **into** the task's own message instead of
+            // as a new one. That is what keeps the chat short: one message per
+            // task, shrinking to one line when it is done. If the id is unknown
+            // — an older suggestion, or one re-announced on another machine — the
+            // line is sent instead, so the owner is never left without a result.
             if (suggestion && telegram.isConfigured()) {
-              void telegram
-                .notifyRunResult(suggestion, run, dashboardUrl)
-                .then((sent) => {
-                  if (!sent.ok) console.warn('[telegram] Run-Ergebnis nicht zugestellt:', sent.error);
-                });
+              const text = telegram.runResultText(suggestion.id, run.status === 'succeeded');
+              const messageId = store.getSuggestionTelegramMessage(suggestion.id);
+              void (messageId ? telegram.editMessageText(messageId, text) : telegram.sendMessage(text)).then(
+                (sent) => {
+                  if (!sent.ok) console.warn('[telegram] Ergebnis nicht zugestellt:', sent.error);
+                },
+              );
             }
           },
         },
@@ -229,6 +232,9 @@ export function createApp(options: AppOptions): FastifyInstance {
     if (telegram.isConfigured()) {
       const sent = await telegram.notifyNewSuggestion(view, dashboardUrl);
       if (!sent.ok) console.warn('[telegram] Vorschlag nicht zugestellt:', sent.error);
+      // Remembered so the run's outcome is written into this very message
+      // instead of arriving as another one.
+      else if (sent.messageId) store.setSuggestionTelegramMessage(suggestion.id, sent.messageId);
     }
     emit({ type: 'suggestion:new', suggestion: view });
     return view;
@@ -328,10 +334,10 @@ export function createApp(options: AppOptions): FastifyInstance {
    * working unchanged, and it appears in the dashboard next to the player
    * suggestions instead of existing beside them.
    */
-  const createTask = (
+  const createTask = async (
     text: string,
     extraInstructions = '',
-  ): { ok: boolean; error?: string; runId?: string; suggestionId?: number } => {
+  ): Promise<{ ok: boolean; error?: string; runId?: string; suggestionId?: number }> => {
     if (!runner) return { ok: false, error: 'Der Runner ist abgeschaltet.' };
     const clean = text.trim();
     if (clean.length < 3) return { ok: false, error: 'Der Auftrag braucht mindestens 3 Zeichen.' };
@@ -352,7 +358,16 @@ export function createApp(options: AppOptions): FastifyInstance {
     });
     const run = runner.enqueue(suggestion, merged, [suggestion]);
     const view = viewOf(suggestion.id);
-    if (view) emit({ type: 'suggestion:new', suggestion: view });
+    if (view) {
+      if (telegram.isConfigured()) {
+        // Announced once, so the result can replace this message rather than
+        // follow it.
+        const sent = await telegram.notifyNewSuggestion(view, dashboardUrl);
+        if (!sent.ok) console.warn('[telegram] Auftrag nicht zugestellt:', sent.error);
+        else if (sent.messageId) store.setSuggestionTelegramMessage(suggestion.id, sent.messageId);
+      }
+      emit({ type: 'suggestion:new', suggestion: view });
+    }
     return { ok: true, runId: run.id, suggestionId: suggestion.id };
   };
 
@@ -368,8 +383,12 @@ export function createApp(options: AppOptions): FastifyInstance {
     if (webhook && view.discordMessageId) {
       void discord.updateSuggestionMessage(view, webhook, dashboardUrl);
     }
-    if (telegram.isConfigured()) {
-      const sent = telegram.sendMessage(`#${id} ist jetzt ${status}.`);
+    // Only a decision the owner made is worth a message. `implementing`,
+    // `implemented` and `failed` arrive on their own as a rewritten task message,
+    // and announcing them again would put three lines per task back into the chat
+    // — the noise this is meant to remove.
+    if (telegram.isConfigured() && (status === 'approved' || status === 'rejected')) {
+      const sent = telegram.sendMessage(`Aufruf ${id} ${status === 'approved' ? 'freigegeben' : 'abgelehnt'}`);
       void sent.then((r) => {
         if (!r.ok) console.warn('[telegram] Statuswechsel nicht zugestellt:', r.error);
       });
@@ -405,7 +424,7 @@ export function createApp(options: AppOptions): FastifyInstance {
   app.post('/api/tasks', async (req, reply) => {
     if (!runner) return reply.code(503).send({ error: 'Runner ist deaktiviert' });
     const body = (req.body ?? {}) as { text?: string; extraInstructions?: string };
-    const result = createTask(body.text ?? '', body.extraInstructions ?? '');
+    const result = await createTask(body.text ?? '', body.extraInstructions ?? '');
     if (!result.ok) {
       const code = /abschaltet/.test(result.error ?? '') ? 503 : 400;
       return reply.code(code).send({ error: result.error });
@@ -643,6 +662,7 @@ export function createApp(options: AppOptions): FastifyInstance {
     if (telegram.isConfigured()) {
       const sent = await telegram.notifyNewSuggestion(viewOf(suggestionId)!, dashboardUrl);
       if (!sent.ok) console.warn('[telegram] Befund nicht zugestellt:', sent.error);
+      else if (sent.messageId) store.setSuggestionTelegramMessage(suggestionId, sent.messageId);
     }
     const view = viewOf(suggestionId);
     if (view) emit({ type: 'suggestion:new', suggestion: view });

@@ -214,12 +214,43 @@ func _build_ui() -> void:
 	layer.add_child(hint)
 
 
-## German control reference, shown inside the pause overlay.
-const CONTROL_HELP := "← →  bewegen\n↓  sanft fallen\n↑ / W / X  drehen\nZ  gegen den Uhrzeigersinn\nLeertaste  hart fallen\nC / Shift  halten\nESC / P  Pause\nR  neu starten"
+## The control reference, one whole caption per row, shown in the pause overlay.
+##
+## These used to be one multi-line literal that was `split("\n")` and handed to
+## `Ui.label` line by line — which put a *fragment* of a sentence in front of the
+## extractor, and a fragment is not something a catalogue can hold. One key per
+## row instead: the extractor sees a key, and the whole caption travels as one
+## string.
+const CONTROL_HELP: Array[String] = [
+	"tetris.control.move",
+	"tetris.control.soft_drop",
+	"tetris.control.rotate",
+	"tetris.control.rotate_ccw",
+	"tetris.control.hard_drop",
+	"tetris.control.hold",
+	"tetris.control.pause",
+	"tetris.control.restart",
+]
 
 ## What the violet marks on the board mean, shown next to the control reference:
 ## the kick tables are only fair if the game says what they do.
-const SPIN_HELP := "Violett: Rahmen und Geisterbild zeigen den\nT-Spin, den die nächste Drehung bringt — samt\nKick und Zeilenzahl. Die Drehung selbst ist\nes, die zählt; nötig ist sie immer."
+const SPIN_HELP: Array[String] = [
+	"tetris.spin.frame",
+	"tetris.spin.ghost",
+	"tetris.spin.kick",
+	"tetris.spin.turn",
+	"tetris.spin.always",
+]
+
+## Both reference blocks as the overlay wants them: one entry per label, spin
+## explanation first.
+func _help_lines() -> Array:
+	var out: Array = []
+	for key in SPIN_HELP:
+		out.append(Loc.t(key))
+	for key in CONTROL_HELP:
+		out.append(Loc.t(key))
+	return out
 
 
 ## On-screen controls so the game is fully playable without a keyboard.
@@ -732,10 +763,10 @@ func _toggle_pause() -> void:
 	if paused:
 		# The control reference and the explanation of the spin marks sit side by
 		# side; both are multi-line, so the overlay gets two columns.
-		var help: Array = [SPIN_HELP] + Array(CONTROL_HELP.split("\n"))
+		var help := _help_lines()
 		_show_overlay("Pause", UiTheme.TEXT, [
-			["Fortsetzen", func() -> void: _toggle_pause()],
-			["Neu starten", func() -> void: reset_game()],
+			["Resume", func() -> void: _toggle_pause()],
+			["Restart", func() -> void: reset_game()],
 			["◀  Lobby", func() -> void: Router.to_lobby()],
 		], help)
 	else:

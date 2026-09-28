@@ -23,7 +23,7 @@ const CATEGORIES: Array[Dictionary] = [
 	},
 	{
 		"id": CATEGORY_ADVENTURE,
-		"name": "3D-Abenteuer",
+		"name": "3D Adventures",
 		"icon": "☄",
 		"accent": Color(0.937, 0.267, 0.267),
 		"accent_hex": 0xef4444,

@@ -174,7 +174,7 @@ export function buildSuggestionText(suggestion: SuggestionView, _dashboardUrl: s
 export async function notifyNewSuggestion(
   suggestion: SuggestionView,
   dashboardUrl: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; messageId?: string }> {
   return sendMessage(buildSuggestionText(suggestion, dashboardUrl));
 }
 
