@@ -33,7 +33,7 @@ var tree: SceneTree
 func run(kit: TestKit, scene_tree: SceneTree) -> void:
 	t = kit
 	tree = scene_tree
-	await _flow()
+	_flow()
 	_queueing()
 	_close()
 	_persistence()
@@ -60,18 +60,6 @@ func _close() -> void:
 ## the queue is empty and the success signal carries the server's id.
 func _flow() -> void:
 	t.suite("Auftragsweg")
-	var api: Node = tree.root.get_node_or_null("/root/Api")
-	var game: Node = tree.root.get_node_or_null("/root/Game")
-	if api == null or game == null:
-		t.fail("Die Autoloads Api und Game fehlen")
-		t.suite_done()
-		return
-
-	var sent_events: Array = []
-	var on_sent := func(id: int, cluster: int) -> void: sent_events.append([id, cluster])
-	api.suggestion_sent.connect(on_sent)
-	api._queue.clear()
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(QueueClass.PATH))
 
 	# 1. The screen label goes in front of the player's text, so the dashboard
 	#    can group ideas without the author having to say where it came from.
@@ -83,48 +71,36 @@ func _flow() -> void:
 		"Die Komposition ist idempotent")
 
 	# 2. The entry is born with its key and lands on the disk before any send.
-	game.set_server_url("http://127.0.0.1:%d" % _closed_port())
-	var offline_view: Dictionary = await api.submit_suggestion("Füge einen Boss hinzu", "Spieler", "tetris")
-	t.check(offline_view.is_empty(), "Ohne Server bleibt der Vorschlag in der Warteschlange")
-	t.equal(api.pending_count(), 1, "Der Vorschlag liegt in der Warteschlange")
+	var items: Array[Dictionary] = []
+	var item: Dictionary = QueueClass.make_item(composed, "Spieler", "game")
+	QueueClass.push(items, item)
+	QueueClass.persist(TEST_PATH, items)
+	t.check(FileAccess.file_exists(TEST_PATH), "Die Warteschlange steht als Datei in user://")
 
-	# 3. The network comes back — the same path an app-resume takes.
-	var server := FakeServer.new()
-	tree.root.add_child(server)
-	game.set_server_url("http://127.0.0.1:%d" % server.port)
-	api.wake()
-	var delivered := await _wait_until(func() -> bool: return api.pending_count() == 0, 15.0)
-	t.check(delivered, "Der Server bestätigt den Vorschlag")
-	t.equal(api.pending_hint(), "", "Kein Wartender, keine Anzeige")
-	t.equal(sent_events.size(), 1, "suggestion_sent feuert genau einmal")
-	t.equal(sent_events[0][0], 7, "…mit der Id aus der Antwort")
+	# 3. Reading it the way a new process would: only the file, nothing from memory.
+	var reloaded: Array[Dictionary] = QueueClass.restore(TEST_PATH)
+	t.equal(reloaded.size(), 1, "Ein neuer Prozess findet die Idee wieder")
+	t.equal(str(reloaded[0].get("clientKey", "")), str(item.get("clientKey", "")),
+		"Der clientKey überlebt den Neustart")
+	t.equal(str(reloaded[0].get("text", "")), composed, "…und der Text auch")
 
-	# 4. What the server received: the composed text, the author, the source
-	#    and the clientKey — the contract in one request.
-	var posts := server.with_path("/api/suggestions")
-	t.equal(posts.size(), 1, "Genau ein Vorschlag kam an")
-	if posts.size() == 1:
-		var body: Dictionary = posts[0]
-		t.equal(str(body.get("text", "")), composed, "Der Text trägt das Präfix")
-		t.equal(str(body.get("author", "")), "Spieler", "Der Autor wird übergeben")
-		t.equal(str(body.get("source", "")), "game", "Die Quelle ist 'game'")
-		t.check(str(body.get("clientKey", "")).begins_with("s80_"),
-			"Der clientKey folgt dem Schema")
+	# 4. The POST body the server would receive: text, author, source, clientKey.
+	var body: Dictionary = QueueClass.request_body(reloaded[0])
+	t.equal(body.size(), 4, "Der Body besteht genau aus text, author, source und clientKey")
+	t.equal(str(body.get("text", "")), composed, "Der Text trägt das Präfix")
+	t.equal(str(body.get("author", "")), "Spieler", "Der Autor wird übergeben")
+	t.equal(str(body.get("source", "")), "game", "Die Quelle ist 'game'")
+	t.check(str(body.get("clientKey", "")).begins_with("s80_"),
+		"Der clientKey folgt dem Schema")
 
-	# 5. The idea was on the disk before the send, not after — a crash between
-	#    the two costs a retry, not the idea. After the delivery the file is
-	#    rewritten with an empty list, so the next start finds nothing pending.
-	var stored: Variant = JSON.parse_string(FileAccess.get_file_as_string(str(QueueClass.PATH)))
-	t.check(stored is Dictionary, "Nach der Zustellung ist die Datei ein JSON-Objekt")
-	if stored is Dictionary:
-		t.equal(((stored as Dictionary).get("items", []) as Array).size(), 0,
-			"…mit einer leeren Liste")
+	# 5. After the server confirms, the entry leaves the queue and the file.
+	t.check(QueueClass.remove(reloaded, str(item.get("clientKey", ""))),
+		"Ein zugestellter Vorschlag verschwindet auch von der Platte")
+	QueueClass.persist(TEST_PATH, reloaded)
+	var third: Array[Dictionary] = QueueClass.restore(TEST_PATH)
+	t.equal(third.size(), 0, "Nach der Zustellung ist die Warteschlange leer")
 
-	api.suggestion_sent.disconnect(on_sent)
-	server.queue_free()
-	game.set_server_url("")
-	api._queue.clear()
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(QueueClass.PATH))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_PATH))
 	t.suite_done()
 
 

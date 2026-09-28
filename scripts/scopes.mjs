@@ -219,6 +219,9 @@ const staticScopes = {
       'scripts/test-game.mjs',
       'scripts/sync-content.mjs',
       'scripts/locale.mjs',
+      // Die Typen für den Test, der das Werkzeug benutzt. `.d.mts`, weil der
+      // Import auf `locale.mjs` zeigt und TypeScript daneben genau das sucht.
+      'scripts/locale.d.mts',
       'scripts/install-guard.sh',
       'scripts/install-android-template.mjs',
       'scripts/smoke.ts',
