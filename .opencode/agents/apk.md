@@ -1,6 +1,9 @@
 ---
 description: Baut das Android-APK und spielt es auf ein per USB/adb verbundenes Tablet oder Handy. Kennt die Pfade, die Reihenfolge und die Stolperfallen dieses Rechners.
 mode: subagent
+# Delegation runs one step below the main session; a single call can override
+# this with the `model` argument of the subagent tool.
+model: opencode-go/space-bunny-free#high
 color: "#34d399"
 permissions:
   # Erst alles verbieten, dann den Baubereich freigeben — letzte Regel gewinnt.

@@ -1,6 +1,9 @@
 ---
 description: Server-API und Web-Dashboard (server/, src/dashboard/, src/shared/). Enthält auch den Agent-Runner und seine Auftragswarteschlange.
 mode: subagent
+# Delegation runs one step below the main session; a single call can override
+# this with the `model` argument of the subagent tool.
+model: opencode-go/space-bunny-free#high
 color: "#f472b6"
 permissions:
   # Erst alles verbieten, dann den eigenen Bereich freigeben — die letzte

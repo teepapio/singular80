@@ -1,6 +1,9 @@
 ---
 description: Verbessert genau ein Spiel anhand seiner Registry-ID (tetris, pang, siedler, …). Nutzt das Manifest in scripts/scopes.mjs für Dateieigentum und gezielte Tests.
 mode: subagent
+# Delegation runs one step below the main session; a single call can override
+# this with the `model` argument of the subagent tool.
+model: opencode-go/space-bunny-free#high
 color: "#38bdf8"
 permissions:
   # Erst alles verbieten, dann gezielt freigeben — die letzte passende Regel

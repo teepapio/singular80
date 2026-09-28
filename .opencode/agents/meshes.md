@@ -1,6 +1,9 @@
 ---
 description: Erzeugt und pflegt 3D-Meshes samt LOD-Stufen. Einziger Agent, der godot/assets/meshes/ und scripts/blender/ anfasst; andere Agenten fragen ihn.
 mode: subagent
+# Delegation runs one step below the main session; a single call can override
+# this with the `model` argument of the subagent tool.
+model: opencode-go/space-bunny-free#high
 color: "#fbbf24"
 permissions:
   # Letzte passende Regel gewinnt: erst alles verbieten, dann erlauben. Ohne

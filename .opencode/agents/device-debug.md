@@ -1,6 +1,9 @@
 ---
 description: Sucht Fehler direkt auf dem angeschlossenen Android-Gerät. Liest Logcat, steuert Touch und Tasten ferngesteuert, zieht Spielstand und Absturzstapel, misst Bildrate und Speicher auf dem echten Gerät.
 mode: subagent
+# Delegation runs one step below the main session; a single call can override
+# this with the `model` argument of the subagent tool.
+model: opencode-go/space-bunny-free#high
 color: "#f97316"
 permissions:
   # Erst alles verbieten, dann den Diagnosebereich freigeben — letzte Regel gewinnt.

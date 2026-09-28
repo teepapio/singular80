@@ -1,6 +1,9 @@
 ---
 description: Prüft und führt parallele Agentenläufe zusammen: Scopes prüfen, gezielte Tests, Konflikte in geteilten Dateien melden, vollständigen Lauf als Merge-Gate.
 mode: subagent
+# Delegation runs one step below the main session; a single call can override
+# this with the `model` argument of the subagent tool.
+model: opencode-go/space-bunny-free#high
 color: "#a855f7"
 ---
 
