@@ -6,6 +6,7 @@
  *   npm run test:game -- --scope pang          # nur Pangs Suiten + Screens
  *   npm run test:game -- --scope tetris,pang
  *   npm run test:game -- --scope meshes
+ *   npm run test:game -- --isolated            # in einem eigenen Worktree
  *
  * Why a wrapper instead of passing `--only` straight to Godot: the mapping from
  * "a game" to "the test suites that cover it" lives in `scripts/scopes.mjs`, the
@@ -13,6 +14,14 @@
  * agent cannot end up testing the wrong thing because a list drifted.
  *
  * `--full` forces the complete catalogue even when a scope is given.
+ *
+ * `--isolated` runs the suite in a throwaway worktree instead of the shared
+ * tree. Measured cost: 11 s of import, 113 MB, and in exchange the run tests a
+ * snapshot instead of a moving target. That is not a small thing: a suite that
+ * starts in a shared tree can read a file another session rewrote halfway
+ * through, and the failure it reports then belongs to somebody else — one
+ * measured here was a parse error that surfaced ten minutes in, in a test file
+ * another agent had committed to three minutes before.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
@@ -20,6 +29,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildScopes, testArgs, gameIds } from './scopes.mjs';
+import { importGodot } from './worktree.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -75,11 +85,39 @@ const keep = argv.includes('--keep-userdata');
  * SceneTree running forever, because the crash happens before `quit()`.
  */
 const budgetSeconds = Number(flag('timeout') ?? (names.length && !full ? 240 : 900));
+
+/**
+ * `--isolated`: a worktree of HEAD, so the suite sees the committed state and
+ * nothing else. Detached, in a temp directory, removed again — nothing about it
+ * survives the run, which is the point: it is a measuring instrument, not a
+ * lane. The import is the price of admission and is reported, because 11 s that
+ * looks like a hang is how a tool teaches its user to distrust it.
+ */
+const isolated = argv.includes('--isolated');
+let runRoot = root;
+let isoDir = null;
+if (isolated) {
+  isoDir = mkdtempSync(join(tmpdir(), 's80-verify-'));
+  const added = spawnSync('git', ['-C', root, 'worktree', 'add', '--detach', isoDir, 'HEAD'], { encoding: 'utf8' });
+  if (added.status !== 0) {
+    console.error(`[test:game] Worktree nicht anlegbar: ${(added.stderr ?? '').trim() || added.error?.message}`);
+    process.exit(1);
+  }
+  const imported = importGodot(isoDir, { log: (line) => console.log(`[test:game] ${line}`) });
+  if (!imported.ok) {
+    console.error(`[test:game] Import im Worktree fehlgeschlagen: ${imported.reason}`);
+    spawnSync('git', ['-C', root, 'worktree', 'remove', '--force', isoDir]);
+    process.exit(1);
+  }
+  runRoot = isoDir;
+  console.log(`[test:game] isoliert in ${isoDir}`);
+}
+
 const cmd = spawnSync(
   'godot',
   ['--headless', '--path', 'godot', '--script', 'res://tests/run_tests.gd', '--', ...godotArgs],
   {
-    cwd: root,
+    cwd: runRoot,
     stdio: 'inherit',
     env: { ...process.env, XDG_DATA_HOME: userHome },
     timeout: budgetSeconds * 1000,
@@ -90,6 +128,13 @@ const cmd = spawnSync(
 const cleanup = () => {
   if (keep) console.log(`[test:game] User-Daten behalten: ${userHome}`);
   else rmSync(userHome, { recursive: true, force: true });
+  if (isoDir) {
+    // `git worktree remove` also drops the admin entry under `.git/worktrees`;
+    // deleting the directory alone would leave that behind until the next
+    // `git worktree prune`, and `list` would report a checkout that is gone.
+    spawnSync('git', ['-C', root, 'worktree', 'remove', '--force', isoDir]);
+    rmSync(isoDir, { recursive: true, force: true });
+  }
 };
 cleanup();
 

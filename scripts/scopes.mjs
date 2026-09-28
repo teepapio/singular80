@@ -284,6 +284,14 @@ const staticScopes = {
       'scripts/test-game.mjs',
       'scripts/sync-content.mjs',
       'scripts/locale.mjs',
+      // The lane tools: one worktree and one branch per agent run, and the gate
+      // that merges them into `main`. They were untracked when the manifest was
+      // last read, which is exactly the case the ownership rule could not see —
+      // see `unownedFiles` below. This is their lane, and it is this one, because
+      // the alternative is that the next agent looking for an owner finds none.
+      'scripts/worktree.mjs',
+      'scripts/worktree.d.mts',
+      'scripts/merge-gate.mjs',
       // Die Typen für den Test, der das Werkzeug benutzt. `.d.mts`, weil der
       // Import auf `locale.mjs` zeigt und TypeScript daneben genau das sucht.
       'scripts/locale.d.mts',
@@ -678,24 +686,19 @@ export function validate(scopes = buildScopes()) {
 }
 
 /**
- * Tracked files that no scope claims and the allowlist does not cover.
+ * Tracked files that no scope claims and the allowlist does not cover, plus
+ * untracked ones — a file on disk nobody has claimed is exactly the file a
+ * stranger's `git add -A` takes.
  *
  * `null` means "could not tell", which is not the same as "none": without git
  * there is no list of what the repository contains, and reporting an empty
  * result would turn a broken check into a green one.
  */
 export function unownedFiles(scopes = buildScopes()) {
-  if (trackedCache === null) {
-    try {
-      trackedCache = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', maxBuffer: 1e8 })
-        .split('\n').map((s) => s.trim()).filter(Boolean);
-    } catch {
-      trackedCache = false;
-    }
-  }
-  if (trackedCache === false) return null;
+  const files = repoFiles();
+  if (files === null) return null;
   const allowed = UNOWNED_ALLOWED.map((glob) => globToRegExp(glob));
-  return trackedCache
+  return files
     .filter((file) => !allowed.some((re) => re.test(file)))
     // `own` and `shared` both count: a shared file is exactly as reachable by a
     // stranger's `git add -A` as an owned one, it is just allowed to be reached
@@ -712,6 +715,39 @@ export function unownedFiles(scopes = buildScopes()) {
  * the value for "git failed" — the two mean different things to the caller.
  */
 let trackedCache = null;
+
+/**
+ * Everything the repository contains: tracked, plus untracked and not ignored.
+ *
+ * The untracked half is not a nicety. `git ls-files` alone cannot see a file
+ * that nobody has staged yet, and an unclaimed file is at its most dangerous
+ * precisely then — it is a stranger's work in progress, and the moment it gets
+ * staged the same rule that passed a moment ago starts failing, in a session
+ * that has no idea why. Measured on this repository: three files of finished
+ * tooling (`worktree.mjs`, `worktree.d.mts`, `merge-gate.mjs`) sat untracked and
+ * unowned for a day while `scopes.mjs list` printed "Manifest ist konsistent".
+ *
+ * `--exclude-standard` is what keeps this useful rather than noisy: `log/`,
+ * `data/`, `dist/`, `build/`, `node_modules/`, `godot/.godot/` and the probe
+ * scripts `.gitignore` already names never reach the check.
+ */
+function repoFiles() {
+  if (trackedCache === null) {
+    const read = (args) => {
+      const res = execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 1e8 });
+      return res.split('\n').map((s) => s.trim()).filter(Boolean);
+    };
+    try {
+      trackedCache = [
+        ...read(['ls-files']),
+        ...read(['ls-files', '--others', '--exclude-standard']),
+      ];
+    } catch {
+      trackedCache = false;
+    }
+  }
+  return trackedCache === false ? null : trackedCache;
+}
 
 /** Test files that define a suite, i.e. everything but the shared TestKit. */
 function suiteFiles() {
