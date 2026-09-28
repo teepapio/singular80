@@ -348,6 +348,31 @@ Vier Sekunden, die in dieser Sitzung einen halben Tag ersetzt haben:
    Unterschied um. Steht man dabei als Agent in einer Unterteilung, ist
    `sync` Sache der Leitsitzung: siehe „Tests gehören der Leitsitzung".
 
+## Keine Prozesse nach Namensmuster töten
+
+**Ein `kill` mit einem Namensmuster ist ein `kill` gegen den Besitzer.** Getan
+worden, mitten in dieser Sitzung: `pkill -f "bin/opencode --auto"` sollte die
+Läufe des Runners beenden und hat das **eigene offene Fenster des Besitzers**
+mitgenommen, weil dessen Prozess auf dieselbe Zeichenkette passt. Der Dienst
+hinter dem Fenster blieb, der Verlauf war nicht verloren — aber das Fenster
+schloss sich mitten in seinem Satz.
+
+Ein Namensmuster ist keine Unterscheidung, sondern eine Vermutung. Gilt:
+
+- **Nur töten, was eine Datei benennt.** Der Runner schreibt seine pid nach
+  `run/terminal/<runId>.pid`; diese pids sind zweifelsfrei die eigenen. Abbrechen
+  läuft ohnehin über `POST /api/runs/:id/cancel`, und das ist der richtige Weg.
+- **Ein Muster, das `opencode`, `node`, `python` oder `npm` enthält, ist verboten.**
+  Auf dieser Maschine laufen der Dienst des Besitzers, seine Fenster, der
+  Dev-Server und Vite gleichzeitig; sie unterscheiden sich nicht über ihre
+  Befehlszeile hinweg zuverlässig.
+- **Vor dem Töten nachsehen, wer der Besitzer ist.** `ps -o pid,ppid,args` und
+  die Elternkette ansehen. Ein Prozess, dessen Eltern ein Terminal des
+  Besitzers ist, gehört ihm.
+- **Im Zweifel nicht töten und im Bericht sagen, was noch läuft.** Ein
+  hängender Prozess ist ein Ärgernis; ein zerstörtes Fenster des Besitzers ist
+  ein Vertrauensverlust.
+
 ## Tests gehören der Leitsitzung
 
 **Ein Agent aus einer Unterteilung prüft nichts. Das Testen ist die Arbeit der
