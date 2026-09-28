@@ -24,15 +24,13 @@ const SEATS := [
 	{"cx": 1130.0, "cardY": 250.0, "cardW": 62.0, "cardH": 88.0, "scale": 0.68, "nameY": 350.0, "statusY": 370.0, "betX": 1130.0, "betY": 226.0, "dealerX": 1228.0, "dealerY": 334.0},
 ]
 
-## Die Legende der drei Typen liegt rechts unter der Kopfzeile — der einzige
-## Streifen, der auf 1280 breit weder mit den Karten noch mit den Knöpfen
-## kollidiert.
+## The legend of the three types sits right under the header — the only strip
+## that collides with neither cards nor buttons at 1280 wide.
 const LEGEND_POS := Vector2(700, 54)
 const LEGEND_SIZE := Vector2(570, 26)
-## So viele Hände bleibt die Legende stehen, bevor sie ausblendet.
+## How many hands the legend stays up before fading out.
 const LEGEND_HANDS := 3
-## So viele Zahlen aus der Bilanz stehen am Sitz — mehr läuft auf einem Telefon
-## über den Sitz hinaus.
+## How many balance numbers a seat shows — more would overflow on a phone.
 const READ_COUNTS := 2
 
 var table: Holdem.HoldemGame
@@ -59,9 +57,9 @@ var _hands := 0
 
 
 func _ready_game() -> void:
-	# Kein `styles` im Optionen: der Motor besetzt von allein Sitz 1 mit dem
-	# Stein, Sitz 2 mit dem Wilden und Sitz 3 mit dem Bluff-Typen. Feste
-	# Reihenfolge, damit man nach ein paar Händen weiß, wer wie spielt.
+	# No `styles` in the options: the engine assigns seat 1 the rock, seat 2
+	# the wild one and seat 3 the bluffer by itself. Fixed order, so after a few
+	# hands one knows who plays how.
 	table = Holdem.HoldemGame.new({
 		"playerCount": PLAYER_COUNT,
 		"startingChips": STARTING_CHIPS,
@@ -133,8 +131,8 @@ func _build_ui() -> void:
 	_raise_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(_raise_label)
 
-	# Legende der drei Typen. Sie verschwindet, sobald der Typ am Tisch sitzt
-	# und sein Name genug sagt.
+	# Legend of the three types. It vanishes once the type sits at the table
+	# and its name says enough.
 	_legend_label = Ui.label(Holdem.legend(), 14, Color("94a3b8"))
 	_legend_label.position = LEGEND_POS
 	_legend_label.size = LEGEND_SIZE
@@ -260,9 +258,9 @@ func _refresh() -> void:
 		var player: Holdem.Player = table.players[i]
 		var read: Dictionary = table.style_read(i)
 		var style_name := str(read["label"])
-		# Der Typ steht am Namen, nicht im Statusfeld: der Status ist das, was
-		# gerade passiert, der Typ das, was dauerhaft gilt. Die Farbe des Typs
-		# macht den Tisch auf einen Blick lesbar.
+		# The type goes with the name, not the status field: the status is what is
+		# happening right now, the type is what holds for good. The type's color
+		# makes the table readable at a glance.
 		var name_label := _name_labels[i] as Label
 		name_label.text = "%s  %s%s" % [
 			player.name,
@@ -309,17 +307,17 @@ func _refresh() -> void:
 		_message_label.text = "%s%s ist am Zug" % [actor.name, cue]
 
 
-## Was der Typ bisher gezeigt hat. Solange ein Sitz nichts getan hat, steht dort
-## sein Versprechen („ruft alles“); danach die Bilanz („Raise 4  ·  Fold 2“),
-## damit man die Schilder mit der Zeit an der Realität prüfen kann. Höchstens
-## zwei Zahlen — auf einem Telefon läuft die Zeile sonst über den Sitz hinaus.
+## What the type has shown so far. Until a seat acts, its promise stands there
+## ("calls everything"); afterwards the balance ("Raise 4  ·  Fold 2"), so the
+## badges can be checked against reality over time. At most two numbers — on a
+## phone the line would overflow the seat otherwise.
 func _read_text(read: Dictionary, status: String) -> String:
 	var parts: Array = []
 	if int(read["seen"]) <= 0:
 		parts.append(str(read["hint"]))
 	else:
-		# Raises zuerst, Folds zweitens: das sind die beiden Zahlen, aus denen
-		# man ein Gegenbild liest. Calls sind nur der Rest.
+		# Raises first, folds second: these are the two numbers to read the
+		# counter-image from. Calls are only the rest.
 		var shown := 0
 		for entry in [["Raise", int(read["raises"])], ["Fold", int(read["folds"])], ["Call", int(read["calls"])]]:
 			if int(entry[1]) <= 0:

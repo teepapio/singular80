@@ -28,11 +28,11 @@ var game_over := false
 var wins := 0
 var ai_timer := 0.0
 var show_legal := true
-## Schlagzüge der Hinweisseite, einmal pro Stellung gerechnet: je schlagendem
-## Stein ein `{"from", "captures"}` für die roten Zahlen auf dem Brett.
+## Capture marks for the hint side, recomputed once per position: one
+## `{"from", "captures"}` per capturing stone for the red board badges.
 var capture_marks: Array = []
-## Die Kette, die der Tipp gerade zeigt, und die Felder, die er als ziehbar
-## markiert, wenn nichts zu schlagen ist.
+## The chain the hint currently shows, and the squares it marks as movable
+## when nothing can be captured.
 var hint_steps: Array = []
 var hint_moves: Array = []
 var _status := ""
@@ -183,18 +183,18 @@ func _refresh() -> void:
 		_message_label.text = "Du bist am Zug" if side == Checkers.WHITE else "KI denkt …"
 
 
-# --- Schlagzüge sichtbar machen ----------------------------------------------
-# Der Spieler soll nie raten müssen, ob er einen Schlag übersieht. Jeder Stein,
-# der schlagen kann, trägt deshalb seine Zahl auf dem Brett, und der Tipp legt
-# den stärksten Schlag samt Weg auf den Tisch.
+# --- Making captures visible -----------------------------------------------
+# The player should never have to guess whether a capture is due. Every stone
+# that can capture wears its count on the board, and the hint lays out the
+# strongest capture with its path.
 
-## Die Seite, für die Marken und Tipp gelten: im Zweispiel die jeweils am Zug,
-## im Einzelspiel immer der Spieler.
+## The side marks and hints belong to: whoever is to move in two-player mode,
+## always the human in single-player.
 func _hint_side() -> int:
 	return side if two_player else Checkers.WHITE
 
 
-## Badges und Anzeige einmal pro Stellung rechnen — nie pro Bild.
+## Badges and label are computed once per position — never per frame.
 func _recompute_captures() -> void:
 	capture_marks = [] if game_over else Checkers.capture_candidates(board, _hint_side())
 	_update_capture_label()
@@ -215,9 +215,9 @@ func _clear_hint() -> void:
 	_status = ""
 
 
-## Der Tipp wählt den stärksten Schlagzug aus und zeichnet seinen Weg; ist
-## nichts zu schlagen, markiert er die Steine, die ziehen dürfen. In beiden
-## Fällen kann der Spieler den gemarkten Zug sofort antippen.
+## The hint picks the strongest capture and draws its path; if nothing can be
+## captured, it marks the stones that may move. Either way the player can tap
+## the marked move at once.
 func show_hint() -> void:
 	if game_over:
 		return
@@ -342,9 +342,8 @@ func _play_turn(turn: Dictionary, by_ai: bool) -> void:
 	board = Checkers.apply_turn(board, turn)
 	_clear_selection()
 	_clear_hint()
-	# `generate_turns` liefert stets fertige Ketten — der Zug ist mit diesem
-	# Schritt zu Ende. Bliebe `forced_from` stehen, blockierte die Markierung
-	# die Seite, die als Nächstes zieht.
+	# `generate_turns` always yields complete chains — the turn ends here.
+	# Leaving `forced_from` set would block the side that moves next.
 	forced_from = -1
 	Sfx.hit()
 	if not _finish_turn(by_ai):
@@ -421,7 +420,7 @@ class BoardView:
 			else:
 				_highlight(square, Color(0.133, 0.773, 0.369, 0.45))
 
-		# Steine, die ziehen dürfen, und der vom Tipp gezeigte Schlagweg.
+		# Stones that may move, and the capture path shown by the hint.
 		for move in screen.hint_moves:
 			_highlight(int(move), Color(0.133, 0.773, 0.369, 0.30))
 		for step in screen.hint_steps:

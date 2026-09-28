@@ -622,8 +622,8 @@ func _lock_piece() -> void:
 func _clear_lines(spin: String = "none") -> void:
 	var cleared := 0
 	var y := ROWS - 1
-	# `y` wandert immer eine Zeile nach oben; eine geräumte Zeile kompensiert das,
-	# damit die darunterliegende erneut geprüft wird.
+	# `y` steps up one row at a time; a cleared row compensates, so the one
+	# below is checked again.
 	while y >= 0:
 		var full := true
 		for x in COLS:
