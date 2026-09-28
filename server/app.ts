@@ -41,6 +41,16 @@ export interface AppOptions {
    * it without touching code.
    */
   terminalRuns?: boolean;
+  /**
+   * Give every run its own git worktree and its own branch, instead of having all
+   * runs write into the shared tree. Set from `server/index.ts`; off by default,
+   * and `S80_ISOLATE_RUNS=1` turns it on without touching code.
+   *
+   * With it on, a finished run's commits are on `agent/suggestion-<id>` and not
+   * on `main` — `npm run merge-gate` is what merges them, verifies the result
+   * and pushes. See `server/isolation.ts` for the failure modes it removes.
+   */
+  isolateRuns?: boolean;
 }
 
 // The main page is the dashboard; `/dashboard.html` only redirects there.
@@ -138,6 +148,7 @@ export function createApp(options: AppOptions): FastifyInstance {
         // Only the application may turn this on. Tests build a Runner directly
         // and would otherwise open a window on the desktop for every case.
         terminalMode: options.terminalRuns === true && findTerminal() !== null,
+        isolateRuns: options.isolateRuns === true,
         callbacks: {
           onStarted: (run) => {
             emit({ type: 'run:started', run });

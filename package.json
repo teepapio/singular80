@@ -17,6 +17,7 @@
     "agent:new": "node scripts/worktree.mjs new",
     "agent:list": "node scripts/worktree.mjs list",
     "agent:path": "node scripts/worktree.mjs path",
+    "agent:remove": "node scripts/worktree.mjs remove",
     "agent:prune": "node scripts/worktree.mjs prune",
     "gate": "node scripts/merge-gate.mjs",
     "gate:status": "node scripts/merge-gate.mjs --status",

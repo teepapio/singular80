@@ -159,12 +159,18 @@ export interface RunRecord {
   suggestionId: number;
   status: RunStatus;
   sessionId: string | null;
-  /**
-   * 1-based lane the run occupies while it is executing, null while it waits in
+  /** 1-based lane the run occupies while it is executing, null while it waits in
    * the queue. Persisted, so a run adopted after a server restart keeps the
    * slot the operator already sees.
    */
   lane: number | null;
+  /**
+   * The checkout an isolated run works in, and the branch it commits to. Both
+   * null for the default: a run in the shared tree, which is what every run
+   * before worktrees existed reads back as.
+   */
+  worktreePath: string | null;
+  worktreeBranch: string | null;
   prompt: string;
   exitCode: number | null;
   cost: number | null;

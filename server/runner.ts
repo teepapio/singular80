@@ -19,6 +19,7 @@ import type {
 } from '../src/shared/types';
 import type { Store } from './db';
 import { appendChangelog } from './changelog';
+import { prepareRunWorktree } from './isolation';
 import {
   buildTerminalCommand,
   buildTerminalSession,
@@ -155,13 +156,27 @@ const COMMIT_CLOCK_SLACK_MS = 1000;
  * an interrupted run managed to finish its work before its server process died,
  * and to keep a failed attempt from being repeated when it already committed.
  * When no suggestion id is given, the newest commit overall is considered.
+ *
+ * `ref` is where to look. Without it the answer comes from `HEAD` of the shared
+ * tree, which is what a run in the shared tree needs. An isolated run commits to
+ * its own branch, and that commit is *not* on `main` until the merge gate has
+ * run — so reading `HEAD` would report a finished, committed run as "no commit"
+ * and the queue would offer the same suggestion a second time.
  */
-export function commitSince(startedAt: number | null, projectRoot: string, suggestionId?: number): string | null {
+export function commitSince(
+  startedAt: number | null,
+  projectRoot: string,
+  suggestionId?: number,
+  ref?: string | null,
+): string | null {
   if (startedAt === null) return null;
   const args = ['-C', projectRoot, 'log', '-1', '--pretty=format:%h%n%ct'];
   if (suggestionId !== undefined) {
     args.push('--extended-regexp', `--grep=suggestion-${suggestionId}([^0-9]|$)`);
   }
+  // Positional, and last. A ref that does not exist makes git fail, which reads
+  // as "no commit" — the right answer for a worktree that was pruned.
+  if (ref) args.push(ref);
   const result = spawnSync('git', args, { encoding: 'utf8' });
   if (result.status !== 0) return null;
   const [hash, seconds] = result.stdout.trim().split('\n');
@@ -317,6 +332,29 @@ ${siblingBlock}${scopeBlock}${retryBlock}REGELN:
 ${extra}`;
 }
 
+/**
+ * Tells an isolated run where it works and what it may commit to.
+ *
+ * Rule 8 asks for a private index because the shared tree is shared. In a
+ * worktree that dance is unnecessary — there is nobody to collide with, and
+ * `git add -A` is exactly right — but the run's own prompt is what the agent
+ * reads, so it has to say so. Without this the agent would keep the old habit,
+ * commit to `HEAD` in its worktree (harmless), and still report a path that
+ * points at the shared tree.
+ */
+export function appendIsolationNotice(prompt: string, isolation: { path: string; branch: string }): string {
+  const label = isolation.branch.replace(/^agent\//, '');
+  return `${prompt}
+
+ISOLIERTER WORKTREE:
+Dein Arbeitsverzeichnis ist "${isolation.path}" — ein eigener Checkout dieses Repository auf dem Zweig "${isolation.branch}".
+- Bleibe hier. Der gemeinsame Baum ist die Arbeit anderer Agenten.
+- Committiere auf "${isolation.branch}", niemals auf main. Hier ist "git add -A" richtig: es gibt in diesem Checkout nichts zu stehlen.
+- Der Merge auf main ist Sache des Merge-Schritts, nicht deiner: "npm run merge-gate ${label}".
+- Prüfe wie gewohnt mit "npm run test:game -- --scope <dein-scope>".
+`;
+}
+
 export class Runner {
   private entries = new Map<string, RunEntry>();
   private queue: string[] = [];
@@ -354,6 +392,16 @@ export class Runner {
        * library does nothing unless the application asks for it.
        */
       terminalMode?: boolean;
+      /**
+       * Give every run its own `git worktree` and its own branch, instead of
+       * having all runs write into the shared tree.
+       *
+       * **Opt-in, for the same reason `terminalMode` is, and for a stronger
+       * one:** it changes where every run's commits land, so a run's work is no
+       * longer on `main` when it finishes — the merge gate is what puts it
+       * there. Off means today's behaviour, byte for byte.
+       */
+      isolateRuns?: boolean;
     },
   ) {
     mkdirSync(this.logDir, { recursive: true });
@@ -391,6 +439,21 @@ export class Runner {
   /** Project-level folder holding one complete JSONL log per implementation run. */
   private get logDir(): string {
     return join(this.options.projectRoot, 'log');
+  }
+
+  /**
+   * Where a run actually works: its own worktree when it has one and the
+   * directory still exists, otherwise the shared tree.
+   *
+   * The fallback is the point. A worktree can be pruned by hand, and a run that
+   * is adopted after a restart may name a directory that is gone; in both cases
+   * the session has to start *somewhere*, and the shared tree is where it was
+   * working a moment ago.
+   */
+  private workdir(record: RunRecord): string {
+    const path = record.worktreePath;
+    if (path && existsSync(path)) return path;
+    return this.options.projectRoot;
   }
 
   /**
@@ -554,6 +617,10 @@ export class Runner {
       status: 'queued',
       sessionId: null,
       lane: null,
+      // Set when the run starts, and only then: a queued run has no checkout
+      // yet, and a run that never gets a lane must not claim one.
+      worktreePath: null,
+      worktreeBranch: null,
       prompt: buildPrompt(suggestion, cluster, settings, this.options.projectRoot, prediction.scopes, options.attempt),
       exitCode: null,
       cost: null,
@@ -843,7 +910,7 @@ export class Runner {
       .join('')
       .slice(-8000);
     this.accumulateUsage(record, events);
-    const commit = commitSince(record.startedAt, this.options.projectRoot, record.suggestionId);
+    const commit = commitSince(record.startedAt, this.options.projectRoot, record.suggestionId, record.worktreeBranch);
     record.commitHash = commit;
     const succeeded = commit !== null;
     this.finalize(
@@ -1132,6 +1199,10 @@ export class Runner {
     mkdirSync(stateDir, { recursive: true });
     const title = `Singular 80 — #${record.suggestionId}`;
     const command = this.terminalArgs(bin, record);
+    // The session's directory is the run's worktree, but the *bookkeeping* stays
+    // in the shared tree: the pid file has to be readable by the server, which
+    // does not care where the agent works.
+    const workdir = this.workdir(record);
     const tui = this.terminalMode() === 'tui';
     // TUI mode gets no wrapper: the interface has to be the foreground process of
     // its own terminal or it freezes on the first write.
@@ -1141,7 +1212,7 @@ export class Runner {
           bin: found.bin,
           args: found.args,
           title,
-          cwd: this.options.projectRoot,
+          cwd: workdir,
           command,
           stateDir,
           runId: record.id,
@@ -1160,7 +1231,7 @@ export class Runner {
       : { bin: session!.bin, argv: session!.args };
     try {
       const child = spawn(launch.bin, launch.argv, {
-        cwd: this.options.projectRoot,
+        cwd: workdir,
         env: { ...process.env },
         stdio: 'ignore',
         detached: false,
@@ -1311,7 +1382,7 @@ export class Runner {
    * nobody confirmed.
    */
   private terminalOutcome(entry: RunEntry): TerminalOutcome {
-    const commit = commitSince(entry.record.startedAt, this.options.projectRoot, entry.record.suggestionId);
+    const commit = commitSince(entry.record.startedAt, this.options.projectRoot, entry.record.suggestionId, entry.record.worktreeBranch);
     if (commit !== null) {
       return {
         code: 0,
@@ -1373,6 +1444,29 @@ export class Runner {
       },
     );
 
+    // Isolation happens here, after the record exists and before anything is
+    // spawned: the session's working directory is decided once, and both spawn
+    // paths below read it back from the record.
+    const isolation = prepareRunWorktree(this.options.projectRoot, record.suggestionId, {
+      enabled: this.options.isolateRuns === true,
+      log: (line) => this.pushEvent(record.id, { t: Date.now(), kind: 'info', text: line }),
+    });
+    if (isolation) {
+      record.worktreePath = isolation.path;
+      record.worktreeBranch = isolation.branch;
+      // The prompt is stored, so what is written here is what the run was
+      // actually asked — including where. An agent told it works in
+      // `/home/edi/singular80` while its cwd is a worktree will `cd` there and
+      // commit into the shared tree, which is the one thing this is for.
+      record.prompt = appendIsolationNotice(record.prompt, isolation);
+      this.store.updateRun(record);
+      this.pushEvent(record.id, {
+        t: Date.now(),
+        kind: 'status',
+        text: `Eigener Worktree: ${isolation.path} (Zweig ${isolation.branch}) — zusammenführen mit: npm run merge-gate`,
+      });
+    }
+
     // A terminal window, if one can be opened: the session is then something the
     // owner can watch *and* type into, which a log pane in the dashboard is not.
     // `--auto` stays, so the agent does not stop on a permission question that
@@ -1404,7 +1498,7 @@ export class Runner {
     let child: RunnerChild;
     try {
       child = spawn(bin, args, {
-        cwd: this.options.projectRoot,
+        cwd: this.workdir(record),
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -1536,7 +1630,7 @@ export class Runner {
       // flight it handed one run the hash of whatever was committed last. That is
       // where a changelog line citing a commit came from that
       // `git log --grep=suggestion-14` does not match.
-      record.commitHash = commitSince(record.startedAt, this.options.projectRoot, record.suggestionId);
+      record.commitHash = commitSince(record.startedAt, this.options.projectRoot, record.suggestionId, record.worktreeBranch);
     }
     // A run that committed is not "nothing happened". The work is in the
     // repository even when the process died before it could report, and recording
@@ -1545,7 +1639,7 @@ export class Runner {
     // `failed` rather than `succeeded`: the run did not end cleanly, and the
     // commitHash says who did the work.
     if (record.status === 'cancelled' && record.commitHash === null) {
-      const commit = commitSince(record.startedAt, this.options.projectRoot, record.suggestionId);
+      const commit = commitSince(record.startedAt, this.options.projectRoot, record.suggestionId, record.worktreeBranch);
       if (commit !== null) {
         record.commitHash = commit;
         record.status = 'failed';
@@ -1586,9 +1680,13 @@ export class Runner {
     // changelog that misses a line must never turn a good run into a failed one,
     // so the return value is not inspected.
     if (record.status === 'succeeded' && suggestion) {
-      const projectRoot = this.options.projectRoot;
+      // In the worktree, so the line lands on the run's branch and the gate
+      // merges it. `appendChangelog` refuses to push anything that is not
+      // `main`, which is the right answer here: the gate is what pushes `main`,
+      // and a run that pushed it would race every other lane.
+      const changelogRoot = this.workdir(record);
       setImmediate(() => {
-        appendChangelog(projectRoot, suggestion, record);
+        appendChangelog(changelogRoot, suggestion, record);
       }).unref?.();
     }
     if (silent) return;
@@ -1668,7 +1766,7 @@ export class Runner {
   private existingCommit(record: RunRecord): string | null {
     const chainStart = this.chainStart(record);
     if (chainStart === null) return null;
-    const commit = commitSince(chainStart, this.options.projectRoot, record.suggestionId);
+    const commit = commitSince(chainStart, this.options.projectRoot, record.suggestionId, record.worktreeBranch);
     return commit === null ? null : `es gibt bereits einen Commit (${commit}) für Vorschlag #${record.suggestionId}`;
   }
 

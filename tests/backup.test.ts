@@ -71,6 +71,8 @@ function makeRun(suggestion: Suggestion, overrides: Partial<RunRecord> = {}): Ru
     status: 'succeeded',
     sessionId: 'ses_1',
     lane: 1,
+    worktreePath: null,
+    worktreeBranch: null,
     prompt: 'PROMO — gehört nicht ins Backup',
     exitCode: 0,
     cost: 0.01,

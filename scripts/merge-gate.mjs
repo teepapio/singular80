@@ -184,9 +184,19 @@ export function runGate({ branches, verify = true, push = true, advance = true, 
     // reading; regenerating it from the sources cannot conflict at all.
     const reset = git(gateDir, ['checkout', 'main', '--', ...DERIVED_MIRRORS]);
     if (!reset.ok) log(`Hinweis: Spiegel zurücksetzen ging nicht (${reset.err}) — sie werden neu erzeugt.`);
-    const contentSync = run(gateDir, 'node', ['scripts/sync-content.mjs']);
-    const localeSync = run(gateDir, 'node', ['scripts/locale.mjs', 'sync']);
-    for (const [name, res] of [['content:sync', contentSync], ['locale:sync', localeSync]]) {
+    // A repository without the sync tools has nothing derived to regenerate.
+    // Reporting that as a failure would make the gate unusable on a clone that
+    // only carries code, and it would be the wrong reason for a red gate.
+    for (const [name, script, args] of [
+      ['content:sync', 'scripts/sync-content.mjs', []],
+      ['locale:sync', 'scripts/locale.mjs', ['sync']],
+    ]) {
+      if (!existsSync(join(gateDir, script))) {
+        log(`Hinweis: ${script} fehlt — nichts zu regenerieren.`);
+        report.steps.push({ kind: name, ok: true, skipped: true });
+        continue;
+      }
+      const res = run(gateDir, 'node', [script, ...args]);
       report.steps.push({ kind: name, ok: res.status === 0, output: res.status === 0 ? '' : (res.stderr ?? '').slice(-800) });
       if (res.status !== 0) report.refused.push(`${name} fehlgeschlagen — siehe Ausgabe.`);
     }

@@ -81,6 +81,8 @@ interface RunRow {
   scope: string | null;
   note: string | null;
   scope_issues: string | null;
+  worktree_path: string | null;
+  worktree_branch: string | null;
   lane: number | null;
 }
 
@@ -188,6 +190,8 @@ function rowToRun(row: RunRow): RunRecord {
     scope: scopes[0] ?? null,
     note: row.note ?? null,
     scopeIssues: row.scope_issues ?? null,
+    worktreePath: row.worktree_path ?? null,
+    worktreeBranch: row.worktree_branch ?? null,
   };
 }
 
@@ -441,6 +445,11 @@ export class Store {
       // yet, and a run from before parallel queues existed reads back as null
       // rather than pretending it was in slot 1.
       'ALTER TABLE runs ADD COLUMN lane INTEGER',
+      // Where an isolated run works, and which branch it commits to. Both null
+      // for a run in the shared tree, which is the default and what a database
+      // from before worktrees existed reads back as.
+      'ALTER TABLE runs ADD COLUMN worktree_path TEXT',
+      'ALTER TABLE runs ADD COLUMN worktree_branch TEXT',
     ]) {
       try {
         this.db.exec(ddl);
@@ -733,8 +742,8 @@ export class Store {
   createRun(run: RunRecord) {
     this.db
       .prepare(
-        `INSERT INTO runs (id, suggestion_id, status, session_id, prompt, exit_code, cost, tokens_input, tokens_output, commit_hash, result_summary, created_at, started_at, finished_at, log_path, attempt, max_attempts, retry_of, not_before, timeout_ms, scope, note, scope_issues, lane)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO runs (id, suggestion_id, status, session_id, prompt, exit_code, cost, tokens_input, tokens_output, commit_hash, result_summary, created_at, started_at, finished_at, log_path, attempt, max_attempts, retry_of, not_before, timeout_ms, scope, note, scope_issues, lane, worktree_path, worktree_branch)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -761,13 +770,15 @@ export class Store {
         run.note,
         run.scopeIssues,
         run.lane,
+        run.worktreePath,
+        run.worktreeBranch,
       );
   }
 
   updateRun(run: RunRecord) {
     this.db
       .prepare(
-        `UPDATE runs SET status = ?, session_id = ?, exit_code = ?, cost = ?, tokens_input = ?, tokens_output = ?, commit_hash = ?, result_summary = ?, started_at = ?, finished_at = ?, attempt = ?, max_attempts = ?, retry_of = ?, not_before = ?, timeout_ms = ?, scope = ?, note = ?, scope_issues = ?, lane = ?
+        `UPDATE runs SET status = ?, session_id = ?, exit_code = ?, cost = ?, tokens_input = ?, tokens_output = ?, commit_hash = ?, result_summary = ?, started_at = ?, finished_at = ?, attempt = ?, max_attempts = ?, retry_of = ?, not_before = ?, timeout_ms = ?, scope = ?, note = ?, scope_issues = ?, lane = ?, worktree_path = ?, worktree_branch = ?
          WHERE id = ?`,
       )
       .run(
@@ -790,6 +801,8 @@ export class Store {
         run.note,
         run.scopeIssues,
         run.lane,
+        run.worktreePath,
+        run.worktreeBranch,
         run.id,
       );
   }

@@ -8,7 +8,10 @@ Backend.
 > eingereichte Vorschläge einen zweiten Agenten im selben Verzeichnis. Vor dem
 > Commit `git status` prüfen und nur die eigenen Dateien stagen — fremde, halb
 > fertige Änderungen weder committen noch zurücksetzen. Zum Prüfen gegen HEAD
-> eine Kopie in `/tmp` anlegen und dort die Suite laufen lassen.
+> `npm run test:game -- --isolated` benutzen: der Lauf passiert dann in einem
+> Wegwerf-Worktree und kann keine halb geschriebene Datei eines anderen lesen.
+> Wer dauerhaft getrennt arbeiten will, nimmt einen Worktree je Agent und führt
+> über das Gate zusammen — siehe „Ein Worktree je Agent".
 
 > **Achtung, `git push` ist Pflicht, nicht Kür:** Ein Commit, der nur lokal
 > existiert, ist für den Besitzer verloren — er sieht ihn nie, und dieser Zweig
@@ -59,6 +62,108 @@ git push -u origin wip/<kurze-beschreibung>
 So liegt die Arbeit auf GitHub, `main` bleibt grün, und sie ist später greifbar.
 Vorher `npm run typecheck` laufen lassen — halbfertige Arbeit bricht erfahrungsgemäß
 genau dort, und ein geparkter Branch ist der richtige Ort dafür, nicht `main`.
+
+## Ein Worktree je Agent
+
+Ein Branch allein isoliert nichts: zwei Agenten können nicht beide im selben
+Verzeichnis auf ihrem Zweig sitzen, weil das zweite `git switch` dem ersten die
+Dateien unter den Füßen wegzieht. Was isoliert, ist ein **zweiter Auscheck** —
+`git worktree` — und genau den gibt es als Werkzeug:
+
+```bash
+npm run agent:new vorschlag-14   # Worktree + Zweig agent/vorschlag-14, Import läuft
+cd "$(npm run --silent agent:path vorschlag-14)"
+npm run agent:list               # alle Agent-Zweige mit Zustand
+npm run agent:prune              # gemergte und saubere Worktrees entfernen
+```
+
+Die Worktrees liegen **außerhalb** des Repositorys (per Vorgabe unter
+`~/.local/share/singular80/worktrees`, überschreibbar mit `S80_WORKTREE_DIR`),
+damit sie weder in `git status` auftauchen noch ein `git clean` erwischt.
+
+**Was das kauft.** Drei Fehlerbilder verschwinden, und jedes davon ist in dieser
+Sitzung gemessen worden:
+
+- **Lesen während dem Schreiben.** Ein Lauf im gemeinsamen Baum liest, was ein
+  anderer halb geschrieben hat. Ein voller Lauf endete nach zehn Minuten an einem
+  Parse-Fehler in einer Testdatei, die eine andere Sitzung drei Minuten zuvor
+  geschrieben hatte. Mit Worktree ist der Auscheck eine Momentaufnahme.
+- **Ein Commit-Rennen, das still Arbeit verliert.** Regel 8 des Runner-Prompts
+  verlangt einen eigenen Index (`GIT_INDEX_FILE`, `read-tree HEAD`, `add`,
+  `commit`). Der eigene Index verhindert nur das Lock-Problem: `read-tree HEAD`
+  nimmt einen Schnappschuss, und lesen zwei Agenten vor dem ersten Commit, trägt
+  der zweite Commit die **alten** Blobs der Dateien des ersten — er macht dessen
+  Arbeit Rückgängig, und `git log` zeigt beide Commits sauber.
+- **Kein Zweig, den man mergen könnte.** Die Scopes halten zwei Agenten von den
+  `own`-Dateien des anderen fern, aber `SHARED_FILES` — `game_registry.gd`,
+  `CHANGELOG.md` — gehören absichtlich allen sechzehn Spiel-Scopes. Diese
+  Änderungen landen heute ineinander in einer Datei, ohne jede Konflikterkennung.
+
+**Was es nicht kauft.** Zwei Agenten, die beide ein Spiel eintragen, fassen beide
+`game_registry.gd` an — das bleibt ein Merge, nur jetzt einer, der benannt wird
+und nicht beim nächsten `git status` überrascht. Die Lane-Regeln in
+`server/scopes.ts` bleiben deshalb genau so wie sie sind; Worktrees kommen
+**dazu**, nicht stattdessen. Ebenso teuer bleibt der volle Lauf: er ist das Gate,
+und es gibt ihn nur einmal.
+
+**Was es kostet.** 56 MB Auscheckout und 11 s Import je Lane (gemessen,
+`godot/.godot` = 57 MB, zusammen 113 MB). Drei Lanes sind rund 340 MB und 35 s
+Setup — der Platz ist kein Argument, die 11 s sind es schon, deshalb sagt das
+Werkzeug beim Anlegen, was es tut.
+
+### Das Gate ist der einzige Weg auf `main`
+
+`npm run gate` (`scripts/merge-gate.mjs`) macht, in dieser Reihenfolge:
+
+1. einen Wegwerf-Worktree auf `main` — der gemeinsame Baum wird nicht angefasst
+2. Merge der Agent-Zweige, je ein Merge-Commit
+3. abgeleitete Dateien zurücksetzen und **neu erzeugen**, nicht zusammenführen
+   (`godot/assets/content`, `godot/assets/locale`, `locale`)
+4. `typecheck`, `npm test`, voller Spieltestlauf — gegen das gemergte Ergebnis
+5. erst danach Fast-Forward von `main` und Push
+
+Ein roter Lauf kostet damit **einen Worktree, nicht den Branch eines Spielers**,
+und `main` ist bei jedem roten Lauf unverändert. Ein Konflikt wird mit dem
+Dateinamen gemeldet und nicht aufgelöst — eine `game_registry.gd` ohne
+Spielzeile ist ein Fehler, kein Ergebnis.
+
+```bash
+npm run gate:status        # was würde gemergt, welcher Zweig ist offen
+npm run gate               # prüfen, mergen, fast-forwarden, pushen
+npm run gate -- --no-verify    # ohne die Suiten (nur mit Begründung)
+npm run gate -- --no-advance   # prüfen, main aber unangetastet lassen
+npm run gate -- --keep         # Gate-Worktree liegen lassen zum Nachsehen
+```
+
+**Kein Hand-Rebase, kein `git merge` von Hand, kein Push eines Agent-Zweigs.**
+
+### Isolierte Läufe im Runner
+
+`S80_ISOLATE_RUNS=1` gibt **jedem Lauf** seinen eigenen Worktree und Zweig
+(`server/isolation.ts`). Aus ist es per Vorgabe, und aus bedeutet: alle Läufe
+arbeiten wie bisher im gemeinsamen Baum, mit Scopes und eigenem Index. An ist es
+derselbe Ablauf wie oben, nur automatisch — mit einer Folge, die man wissen muss:
+der Commit eines beendeten Laufs ist **nicht** auf `main`, sondern auf
+`agent/suggestion-<n>`, bis das Gate gelaufen ist.
+
+Deshalb sucht die Commit-Erkennung des Runners auf dem Zweig
+(`commitSince(…, ref)`). Ohne das wäre ein fertiger, committeter Lauf „ohne
+Commit" und der Vorschlag stünde wieder in der Warteschlange. Die Changelog-Zeile
+gehört dann ebenfalls auf den Zweig; `server/changelog.ts` pusht ohnehin nur
+`main`, also lässt das Gate sie mitgehen.
+
+Kann kein Worktree entstehen (kein Repository, belegter Pfad, schmutziger
+Worktree), läuft der Auftrag **im gemeinsamen Baum weiter** und schreibt einen
+Satz in den Run-Log. Ein herabgestufter Lauf ist besser als ein Lauf, der nicht
+startet, weil ein Verzeichnis belegt ist.
+
+### Isoliert prüfen
+
+`npm run test:game -- --isolated` legt für den Lauf einen Wegwerf-Worktree auf
+`HEAD` an, importiert und wirft ihn danach weg. Es kostet 11 s extra und
+verhindert genau den Fehler, der in dieser Sitzung einen vollen Lauf gekostet
+hat: ein Lauf, der die halbe Arbeit eines anderen als eigenen Fehler meldet.
+
 
 ## Sprache im Code
 
@@ -523,6 +628,14 @@ das Auswerten von Logcat gibt es die Agenten `apk` und `device-debug`.
 - `npm run smoke` — API-Smoke-Test.
 - `npm run backup` — Dashboard-Historie als JSON ins Repository schreiben
   (`-- write`), von dort einlesen (`-- read`) oder nur den Stand melden.
+- `npm run test:game -- --isolated` — derselbe Lauf in einem Wegwerf-Worktree
+  gegen den committeten Stand (11 s Import, 113 MB). Siehe „Ein Worktree je
+  Agent".
+- `npm run agent:new <name>` / `agent:list` / `agent:path <name>` /
+  `agent:prune` — Worktree eines Agenten anlegen, auflisten, Ort ausgeben,
+  gemergte und saubere entfernen.
+- `npm run gate:status` / `npm run gate` — Merge-Gate: was würde gemergt, dann
+  mergen, prüfen, fast-forwarden, pushen.
 - Reihenfolge für Änderungen: `typecheck` → `test` → `test:game` → `build` → `godot:apk`.
 
 ## Struktur
@@ -571,6 +684,12 @@ oder mit breitem primären Scope bekommt den Baum immer allein.
 Katalog und Werkzeug arbeiten — aber sie dürfen es auch nicht versuchen,
 `locale/**` zu fassen, um an `content/` zu kommen: das sind zwei verschiedene
 Bäume.
+
+**`S80_ISOLATE_RUNS=1` trennt die Läufe zusätzlich.** Per Vorgabe laufen sie im
+gemeinsamen Baum; die Umschaltung gibt jedem Lauf seinen Worktree und seinen
+Zweig, und dann ist das Gate (`npm run gate`) der einzige Weg auf `main`. Beide
+Betriebsarten gelten nebeneinander, und die Umschaltung ist eine Entscheidung des
+Besitzers — der Grund und die Folgen stehen in „Ein Worktree je Agent".
 
 **Direkte Aufträge.** `POST /api/tasks` (im Panel: „Direkter Auftrag an OpenCode")
 legt eine Empfehlung mit `source: 'operator'` an und stellt sie sofort in die

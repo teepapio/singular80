@@ -288,9 +288,14 @@ const staticScopes = {
       // last read, which is exactly the case the ownership rule could not see —
       // see `unownedFiles` below. This is their lane, and it is this one, because
       // the alternative is that the next agent looking for an owner finds none.
+      // `worktree.d.mts` is named because `server/isolation.ts` imports the
+      // module, and a runner change that does not typecheck is no runner change.
       'scripts/worktree.mjs',
       'scripts/worktree.d.mts',
       'scripts/merge-gate.mjs',
+      // The types for the gate, for the same reason as `worktree.d.mts`: the
+      // test imports the module, and an untyped import is a typecheck error.
+      'scripts/merge-gate.d.mts',
       // Die Typen für den Test, der das Werkzeug benutzt. `.d.mts`, weil der
       // Import auf `locale.mjs` zeigt und TypeScript daneben genau das sucht.
       'scripts/locale.d.mts',
