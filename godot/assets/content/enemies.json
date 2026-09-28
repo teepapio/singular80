@@ -3,7 +3,7 @@
     "id": "slime",
     "name": "Slime",
     "hp": 14,
-    "speed": 38,
+    "speed": 32,
     "damage": 8,
     "radius": 14,
     "color": "#6ee7b7",
