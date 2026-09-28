@@ -60,9 +60,9 @@ static func _build(tree: SceneTree, id: int, text: String) -> void:
 	var column := Ui.vbox(12)
 	panel.add_child(column)
 
-	column.add_child(Ui.title("Inhalt melden", 30, UiTheme.WARNING))
+	column.add_child(Ui.title(Loc.t("ui.report_title"), 30, UiTheme.WARNING))
 
-	var quoted := Ui.label("Vorschlag #%d" % id, 16, UiTheme.ACCENT, true)
+	var quoted := Ui.label(Loc.t("ui.report_quoted", {"id": str(id)}), 16, UiTheme.ACCENT, true)
 	column.add_child(quoted)
 
 	var excerpt := Ui.label(AppLegal.quote(text), 16, UiTheme.TEXT_DIM)
@@ -70,14 +70,16 @@ static func _build(tree: SceneTree, id: int, text: String) -> void:
 	excerpt.custom_minimum_size = Vector2(640, 0)
 	column.add_child(excerpt)
 
-	column.add_child(Ui.label("Grund", 17, UiTheme.TEXT_DIM, true))
+	column.add_child(Ui.label(Loc.t("ui.report_reason"), 17, UiTheme.TEXT_DIM, true))
 	var reasons := OptionButton.new()
-	for reason in AppLegal.REASONS:
-		reasons.add_item(reason)
+	# Displayed is the translation, reported is the German text from `REASONS` —
+	# see `AppLegal.reason_label`.
+	for index in AppLegal.REASONS.size():
+		reasons.add_item(AppLegal.reason_label(index))
 	column.add_child(reasons)
 
 	var note := TextEdit.new()
-	note.placeholder_text = "Was stört dich daran? (optional)"
+	note.placeholder_text = Loc.t("ui.report_note")
 	note.custom_minimum_size = Vector2(640, 90)
 	note.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	column.add_child(note)
@@ -91,20 +93,20 @@ static func _build(tree: SceneTree, id: int, text: String) -> void:
 		# Ehrlich bleiben: ohne Adresse geht keine Meldung raus, und das ist
 		# besser als eine Adresse, an die niemand zuhört.
 		status.add_theme_color_override("font_color", UiTheme.WARNING)
-		status.text = "Noch keine Meldeadresse hinterlegt (MODERATION_MAIL in app_legal.gd)."
+		status.text = Loc.t("ui.report_unconfigured")
 
 	var actions := Ui.hbox(10)
 	actions.alignment = BoxContainer.ALIGNMENT_END
 	column.add_child(actions)
 
-	var copy := Ui.button("Text kopieren", Vector2(200, 46), UiTheme.PANEL_LIGHT, func() -> void:
+	var copy := Ui.button(Loc.t("ui.report_copy"), Vector2(200, 46), UiTheme.PANEL_LIGHT, func() -> void:
 		DisplayServer.clipboard_set(AppLegal.report_message(
 			id, text, _selected(reasons), note.text))
 		Sfx.select()
 		status.add_theme_color_override("font_color", UiTheme.SUCCESS)
-		status.text = "In die Zwischenablage kopiert — in der Mail-App einfach einfügen."
+		status.text = Loc.t("ui.report_copied")
 	)
-	var send := Ui.button("Melde-Mail öffnen", Vector2(230, 46), UiTheme.ACCENT, func() -> void:
+	var send := Ui.button(Loc.t("ui.report_send"), Vector2(230, 46), UiTheme.ACCENT, func() -> void:
 		var url := AppLegal.report_mailto(id, text, _selected(reasons), note.text)
 		if OS.shell_open(url) == OK:
 			close()
@@ -114,9 +116,9 @@ static func _build(tree: SceneTree, id: int, text: String) -> void:
 		DisplayServer.clipboard_set(AppLegal.report_message(
 			id, text, _selected(reasons), note.text))
 		status.add_theme_color_override("font_color", UiTheme.WARNING)
-		status.text = "Keine Mail-App geöffnet — der Text liegt jetzt in der Zwischenablage."
+		status.text = Loc.t("ui.report_no_mail_app")
 	)
-	var cancel := Ui.button("Schließen", Vector2(140, 46), UiTheme.PANEL_LIGHT, func() -> void:
+	var cancel := Ui.button(Loc.t("ui.close"), Vector2(140, 46), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		close()
 	)

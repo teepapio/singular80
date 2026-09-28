@@ -1,52 +1,50 @@
 class_name SuggestionQueue
 extends RefCounted
-## Die Warteschlange für Spielervorschläge — Regeln, Format und Ablage.
+## Queue for player suggestions — rules, format, storage.
 ##
-## Netzfrei und renderer-frei, damit sich alles ohne Server prüfen lässt. Die
-## Liste selbst ist ein schlichtes `Array[Dictionary]`, das `Api` hält; hier
-## stehen die Entscheidungen drumherum:
+## Network-free and renderer-free, so everything tests without a server.
+## The list itself is a plain `Array[Dictionary]` held by `Api`; what
+## lives here are the decisions around it:
 ##
-## 1. Jeder Eintrag bekommt beim Einpflegen einen `clientKey` und behält ihn für
-##    alle Wiederholungen. Der Server dedupliziert daran — der Client vergleicht
-##    nie Texte, denn zwei wirklich gleiche Ideen desselben Spielers sind
-##    erlaubt und gehören beide dem Spieler.
-## 2. Die Liste steht in `user://` und wird bei **jeder** Änderung geschrieben,
-##    bevor ein Senden als Erfolg gilt. Bricht der Prozess mitten im Versand ab,
-##    kostet das eine Wiederholung, nicht die Idee.
+## 1. Every entry gets a `clientKey` on insert and keeps it across
+##    retries. The server dedupes on it — the client never compares
+##    texts: two identical ideas from one player are allowed.
+## 2. The list lives in `user://` and is written on **every** change
+##    before a send counts as success. If the process dies mid-send,
+##    that costs a retry, not the idea.
 ##
-## Alles hier ist bewusst `static`: die Warteschlange ist Daten, kein Objekt mit
-## eigenem Leben.
+## Everything here is deliberately `static`: the queue is data.
 
-## Ablage der Warteschlange. Über `user://` überlebt sie App-Kill, Reboot und
-## Absturz — anders als eine Liste im Arbeitsspeicher.
+## Storage path. Survives app kill, reboot and crash via `user://` —
+## unlike a list in RAM.
 const PATH := "user://suggestions.json"
 
-## Formatversion der Datei. Eine fremde Version wird verworfen, nicht geraten.
+## File format version. A foreign version is discarded, not guessed at.
 const VERSION := 1
 
-## Obergrenze. Eine unbegrenzte Datei in `user://` ist schlechter als eine
-## sichtbare Lücke: im Zweifel weicht der **älteste** Eintrag.
+## Upper limit. An unbounded file in `user://` is worse than a visible
+## gap: the **oldest** entry yields.
 const MAX_ITEMS := 50
 
-## Der Server nimmt 2000 Zeichen an. Ein längerer Eintrag in der Warteschlange
-## wäre beim Flush nur ein abgelehnter Request.
+## The server accepts 2000 characters; longer entries would only be
+## rejected at flush time.
 const MAX_TEXT := 2000
 
-## Länge des `clientKey` laut Vertrag mit dem Server.
+## Length of the `clientKey` per the server contract.
 const CLIENT_KEY_MAX := 64
 
-## Wartezeit nach einem fehlgeschlagenen Zustellversuch, in Sekunden. Der
-## Versuch 1 wartet nicht, danach 15 → 24 → 38 → 61 → 98 → 157 → 251 → 300.
-## Ohne Deckel wäre eine Nacht ohne Netz ein Endlosschleifen-Netzverkehr.
+## Wait after a failed delivery attempt, in seconds. Attempt 1 does not
+## wait, then 15 → 24 → 38 → 61 → 98 → 157 → 251 → 300. Without a
+## cap, a night without network would mean endless retries.
 const BACKOFF_BASE := 15.0
 const BACKOFF_FACTOR := 1.6
 const BACKOFF_MAX := 300.0
 
 
-# --- Einpflegen -------------------------------------------------------------
+# --- Insert -----------------------------------------------------------------
 
-## Der Eintrag, wie er in der Warteschlange steht. `clientKey` und `queuedAt`
-## entstehen genau hier und bleiben danach unverändert.
+## The entry as it sits in the queue. `clientKey` and `queuedAt` are
+## born here and never change after.
 static func make_item(text: String, author: String, source: String = "game") -> Dictionary:
 	return {
 		"clientKey": new_client_key(),
@@ -57,13 +55,13 @@ static func make_item(text: String, author: String, source: String = "game") -> 
 	}
 
 
-## Nimmt einen Eintrag auf die Liste. Gibt den **ältesten verworfenen** Eintrag
-## zurück, falls die Grenze gerissen wurde — leer heißt: nichts ging verloren.
+## Appends an entry. Returns the **oldest dropped** entry if the limit
+## was hit — empty means nothing was lost.
 static func push(items: Array, item: Dictionary, limit: int = MAX_ITEMS) -> Dictionary:
 	var stored := sanitise(item)
 	if find(items, str(stored.get("clientKey", ""))) != {}:
-		# Doppelte Schlüssel verschmelzen serverseitig zu einem Vorschlag, und
-		# der zweite verschwände dabei ohne Spur.
+		# Duplicate keys would merge server-side into one suggestion,
+		# the second vanishing without a trace.
 		stored["clientKey"] = new_client_key()
 	items.append(stored)
 	var dropped := {}
@@ -75,8 +73,8 @@ static func push(items: Array, item: Dictionary, limit: int = MAX_ITEMS) -> Dict
 	return dropped
 
 
-## Nimmt einen Eintrag heraus. Erst der Server bestätigt einen Versand, dann
-## verschwindet er hier — und der Aufrufer schreibt das sofort auf die Platte.
+## Removes an entry. Only after the server confirms a send does it
+## disappear — and the caller writes that to disk immediately.
 static func remove(items: Array, client_key: String) -> bool:
 	for i in items.size():
 		var entry: Variant = items[i]
@@ -88,7 +86,7 @@ static func remove(items: Array, client_key: String) -> bool:
 	return false
 
 
-## Der Eintrag mit diesem `clientKey`, oder `{}`.
+## The entry with this `clientKey`, or `{}`.
 static func find(items: Array, client_key: String) -> Dictionary:
 	for entry in items:
 		if not (entry is Dictionary):
@@ -98,8 +96,8 @@ static func find(items: Array, client_key: String) -> Dictionary:
 	return {}
 
 
-## Wie viele verschiedene `clientKey` die Liste trägt. Zwei Zeilen mit gleichem
-## Schlüssel wären ein stiller Verlust auf der Gegenseite.
+## How many distinct `clientKey` values the list carries. Two rows with
+## the same key would be a silent loss on the server side.
 static func distinct_keys(items: Array) -> int:
 	var seen := {}
 	for entry in items:
@@ -108,10 +106,10 @@ static func distinct_keys(items: Array) -> int:
 	return seen.size()
 
 
-# --- Ablage -----------------------------------------------------------------
+# --- Storage ----------------------------------------------------------------
 
-## Liest die Warteschlange von der Platte und repariert sie gleich. Fehlt die
-## Datei, ist das kein Fehler: dann hat der Spieler noch nichts gespeichert.
+## Reads the queue from disk and repairs it on the way. A missing file
+## is not an error: the player has saved nothing yet.
 static func restore(path: String = PATH, limit: int = MAX_ITEMS) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	if not FileAccess.file_exists(path):
@@ -119,19 +117,18 @@ static func restore(path: String = PATH, limit: int = MAX_ITEMS) -> Array[Dictio
 	out = decode(FileAccess.get_file_as_string(path))
 	var cap := maxi(limit, 1)
 	if out.size() > cap:
-		# Der Überhang stammt aus einer Zeit mit größerem Limit: das Neueste
-		# gewinnt, das Alte ist ohnehin am wenigsten wert.
+		# Overflow from a time with a higher limit: the newest wins.
 		out = out.slice(out.size() - cap)
-	# Sofort neu schreiben: `decode()` hat fehlende Schlüssel ergänzt und
-	# Dubletten entfernt, und ab hier ist der Plattenstand die Wahrheit, die ein
-	# Absturz nicht mehr beschädigen kann.
+	# Write back immediately: `decode()` has filled in missing keys and
+	# dropped duplicates; the on-disk state is now the truth a crash can
+	# no longer corrupt.
 	persist(path, out)
 	return out
 
 
-## Schreibt die Warteschlange atomar: erst eine Temp-Datei, dann umbenennen.
-## Bricht der Prozess dazwischen ab, ist die alte Liste noch da statt einer
-## halben Datei.
+## Writes the queue atomically: temp file first, then rename. If the
+## process dies in between, the old list survives instead of a
+## half-written file.
 static func persist(path: String, items: Array) -> bool:
 	var text := encode(items)
 	var file := FileAccess.open(path + ".tmp", FileAccess.WRITE)
@@ -156,7 +153,7 @@ static func _write_plain(path: String, text: String) -> bool:
 	return true
 
 
-# --- Reines Format ----------------------------------------------------------
+# --- Pure format ------------------------------------------------------------
 
 static func encode(items: Array) -> String:
 	var out: Array = []
@@ -167,10 +164,10 @@ static func encode(items: Array) -> String:
 	return JSON.stringify({"version": VERSION, "items": out}, "  ")
 
 
-## Liest das JSON-Format und repariert, was nicht in Ordnung ist: fehlende oder
-## zu lange `clientKey` werden ersetzt, gleiche Schlüssel bekommen einen neuen,
-## Einträge ohne Text fliegen raus. Eine kaputte Datei ergibt eine leere Liste
-## statt einen Absturz.
+## Reads the JSON format and repairs what is off: missing or over-long
+## `clientKey` values are replaced, duplicates get a new one, entries
+## without text are dropped. A broken file yields an empty list, not a
+## crash.
 static func decode(text: String) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var parsed: Variant = JSON.parse_string(text)
@@ -178,7 +175,7 @@ static func decode(text: String) -> Array[Dictionary]:
 	if parsed is Dictionary:
 		raw = (parsed as Dictionary).get("items", [])
 	elif parsed is Array:
-		# Toleranz für eine nackte Liste, falls die Datei von Hand entstand.
+		# Tolerance for a bare list, in case the file was written by hand.
 		raw = parsed
 	if not (raw is Array):
 		return out
@@ -188,16 +185,16 @@ static func decode(text: String) -> Array[Dictionary]:
 		if item.is_empty() or str(item.get("text", "")) == "":
 			continue
 		if seen.has(item.get("clientKey", "")):
-			# Zwei Einträge mit gleichem Schlüssel würden serverseitig zu einem
-			# verschmelzen — der zweite ginge dabei still verloren.
+			# Two entries with the same key would merge server-side —
+			# the second would be silently lost.
 			item["clientKey"] = new_client_key()
 		seen[item.get("clientKey", "")] = true
 		out.append(item)
 	return out
 
 
-## Bringt einen Eintrag auf die Felder, die der Server kennt. Alles andere wird
-## verworfen: die Warteschlange ist kein Archiv.
+## Brings an entry down to the fields the server knows. Everything else
+## is discarded: the queue is not an archive.
 static func sanitise(entry: Variant) -> Dictionary:
 	var out := {}
 	if not (entry is Dictionary):
@@ -219,8 +216,8 @@ static func sanitise(entry: Variant) -> Dictionary:
 	return out
 
 
-## Der POST-Body für einen Eintrag. `clientKey` liegt oben und bleibt über alle
-## Wiederholungen gleich — genau daran dedupliziert der Server.
+## The POST body for one entry. `clientKey` sits on top and stays the
+## same across all retries — the server dedupes on exactly that.
 static func request_body(item: Dictionary) -> Dictionary:
 	var clean := sanitise(item)
 	return {
@@ -231,10 +228,10 @@ static func request_body(item: Dictionary) -> Dictionary:
 	}
 
 
-# --- Entscheidungen ---------------------------------------------------------
+# --- Decisions --------------------------------------------------------------
 
-## Wartezeit vor dem nächsten Versuch. Stufe 0 wartet nicht — direkt nach einer
-## Zustandsänderung (neue Idee, App wieder im Vordergrund) soll es losgehen.
+## Wait time before the next attempt. Attempt 0 does not wait — after a
+## state change (new idea, app back in foreground) it should go at once.
 static func backoff_seconds(attempt: int) -> float:
 	if attempt <= 0:
 		return 0.0
@@ -246,30 +243,34 @@ static func backoff_seconds(attempt: int) -> float:
 	return minf(wait, BACKOFF_MAX)
 
 
-## Der Text, den ein Bildschirm zum Wartestand zeigen kann. Leer ohne
-## Warteschlange, damit die Anzeige sich selbst versteckt, statt „0 warten“ zu
-## behaupten.
+## The text a screen can show for the pending count. Empty without a
+## queue, so the display hides itself instead of claiming "0 waiting".
 static func pending_hint(count: int) -> String:
 	if count <= 0:
 		return ""
-	if count == 1:
-		return "1 Vorschlag wartet auf Netz"
-	return "%d Vorschläge warten auf Netz" % count
+	# Plural forms rather than two German sentences. The grammar — French counts
+	# zero as singular too — belongs in the catalogue, not in this file; here it is
+	# only recorded that there is something to count.
+	return Loc.tn("ui.queue_waiting", count)
 
 
-## Die Begründung, wenn die Liste zu voll war. Ein verworfener Vorschlag braucht
-## einen sichtbaren Grund, sonst merkt der Spieler erst davon, wenn die Liste
-## wieder leer ist.
+## The reason shown when the list was too full. A dropped suggestion
+## needs a visible reason, otherwise the player only notices when the
+## list is empty again.
 static func cap_warning(dropped_item: Dictionary, limit: int) -> String:
 	var text := str(dropped_item.get("text", "")).strip_edges()
 	if text.length() > 40:
 		text = text.substr(0, 40) + " …"
-	return "Warteschlange voll (höchstens %d) — der älteste Vorschlag wurde verworfen: „%s“" % [limit, text]
+	# `Loc.f` translates the template and substitutes afterwards. The other way
+	# round — format first, translate second — would mean writing a finished
+	# sentence with a player's own text already inside it into the catalogue.
+	return Loc.f("ui.queue_full", [limit, text])
 
 
-## Ein zufälliger, stabiler Schlüssel: einmal erzeugt, dann für alle Versuche
-## dieses Vorschlags identisch. Kurz genug für das 64-Zeichen-Limit des Servers
-## und eindeutig genug für zwei Ideen im selben Sekunden-Takt.
+## A random, stable key: generated once, then identical for every
+## attempt of this suggestion. Short enough for the server's
+## 64-character limit, unique enough for two ideas in the same
+## millisecond.
 static func new_client_key() -> String:
 	return "s80_%08x%06x" % [
 		randi() & 0xFFFFFFFF,

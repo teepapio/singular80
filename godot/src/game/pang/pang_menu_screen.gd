@@ -51,7 +51,7 @@ func _build_chrome() -> void:
 	column.add_child(Ui.title("PANG 3D", 44, UiTheme.ACCENT))
 	column.add_child(Ui.label("Spieß alle Kugeln auf, bevor die Zeit abläuft.", 17, UiTheme.TEXT_DIM))
 	column.add_child(Ui.label(
-		"Ab Level %d kündigt sich der Nachschub an; die Karte nennt die Seite." % Pang.WAVE_FIRST_LEVEL, 15, Color("f472b6")
+		Loc.f("Ab Level %d kündigt sich der Nachschub an; die Karte nennt die Seite.", [Pang.WAVE_FIRST_LEVEL]), 15, Color("f472b6")
 	))
 	_page_label = Ui.label("", 16, UiTheme.TEXT_DIM)
 	_page_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -126,7 +126,7 @@ func _level_card(level: int) -> Control:
 	var column := Ui.vbox(2)
 	box.add_child(column)
 
-	var headline := Ui.label("%d" % level, 30, UiTheme.ACCENT if unlocked else UiTheme.TEXT_MUTED, true)
+	var headline := Ui.label(Loc.f("%d", [level]), 30, UiTheme.ACCENT if unlocked else UiTheme.TEXT_MUTED, true)
 	headline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(headline)
 
@@ -148,7 +148,7 @@ func _level_card(level: int) -> Control:
 		flanks.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		column.add_child(flanks)
 
-	var record := Ui.label("%.1f s" % best if best > 0.0 else "—", 18, Color("facc15") if best > 0.0 else UiTheme.TEXT_MUTED, true)
+	var record := Ui.label(Loc.f("%.1f s", [best if best > 0.0 else "—"]), 18, Color("facc15") if best > 0.0 else UiTheme.TEXT_MUTED, true)
 	record.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(record)
 
@@ -158,7 +158,7 @@ func _level_card(level: int) -> Control:
 	button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	button.pressed.connect(func() -> void:
 		if not Pang.is_unlocked(level):
-			show_toast("Level %d ist noch gesperrt." % level)
+			show_toast(Loc.f("Level %d ist noch gesperrt.", [level]))
 			Sfx.hurt()
 			return
 		Sfx.select()

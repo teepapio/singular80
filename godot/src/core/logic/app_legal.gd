@@ -19,6 +19,11 @@ const MODERATION_MAIL := "moderation@example.invalid"
 ## Die Gründe aus §4 der Nutzungsbedingungen, in derselben Reihenfolge. Der
 ## Spieler wählt einen, damit die Meldung sofort eingeordnet werden kann und
 ## nicht nur „finde ich nicht gut".
+##
+## Diese Liste ist **deutsch und bleibt es**: sie geht unverändert in die
+## Meldung an die Moderation, und die ist ein internes Dokument, kein Spieltext.
+## Übersetzt wird nur, was der Spieler im Menü liest — dafür sind die
+## Schlüssel in `REASON_LOC_KEYS` da.
 const REASONS: Array[String] = [
 	"Beleidigung oder Hassrede",
 	"Personenbezogene Daten Dritter",
@@ -28,8 +33,30 @@ const REASONS: Array[String] = [
 	"Sonstiges",
 ]
 
+## Translation keys for the picker in the report dialog, parallel to `REASONS`.
+##
+## The suffix says what the array is *for*: `asset_registry.gd` has a dozen
+## `const …_KEYS` lists full of asset names, and the locale extractor needs to
+## tell "these are keys" from "these are mesh ids" without guessing.
+const REASON_LOC_KEYS: Array[String] = [
+	"legal.reason.insult",
+	"legal.reason.personal_data",
+	"legal.reason.sexual",
+	"legal.reason.ad",
+	"legal.reason.copyright",
+	"legal.reason.other",
+]
+
 ## Kürzt für Anzeige und Mail, ohne den Sinnezusammenhang zu zerreißen.
 const MAX_QUOTE := 240
+
+
+## The reason in the player's language. The German one goes into the report, the
+## translated one into the picker — hence two lists instead of one.
+static func reason_label(index: int) -> String:
+	if index < 0 or index >= REASON_LOC_KEYS.size():
+		index = REASON_LOC_KEYS.size() - 1
+	return Loc.t(REASON_LOC_KEYS[index])
 
 
 static func terms_url() -> String:
@@ -72,6 +99,10 @@ static func quote(text: String) -> String:
 
 ## Betreffzeile der Meldung. Die ID steht vorn, damit sich Meldungen im Postfach
 ## sortieren lassen, ohne den Text zu lesen.
+##
+## Deliberately German and with no catalogue: this text goes to a human being in
+## a mailbox, not to the interface. Translating it would create a second language
+## somebody has to maintain without a single player ever seeing it.
 static func report_subject(id: int) -> String:
 	return "Melde: Vorschlag #%d aus Singular 80" % id
 

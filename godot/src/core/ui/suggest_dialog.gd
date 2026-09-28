@@ -76,18 +76,18 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 	var column := Ui.vbox(14)
 	panel.add_child(column)
 
-	column.add_child(Ui.title("Vorschlag einreichen", 32, UiTheme.ACCENT))
+	column.add_child(Ui.title(Loc.t("ui.suggest_title"), 32, UiTheme.ACCENT))
 
 	# The origin is filled in from the active screen, so the player only has to
 	# write *what* should change, never where.
 	var source := context.strip_edges()
 	if source == "":
 		source = SuggestionContext.for_screen(Router.current_id)
-	var origin := Ui.label("Aus: %s" % source, 16, UiTheme.ACCENT, true)
+	var origin := Ui.label(Loc.t("ui.suggest_origin", {"game": source}), 16, UiTheme.ACCENT, true)
 	column.add_child(origin)
 
 	var hint := Ui.label(
-		"Neue Inhalte, Mechaniken, Balance oder Bugs — alles landet gesammelt auf dem Dashboard und wird dort priorisiert. Umsetzungen erscheinen direkt im Spiel.",
+		Loc.t("ui.suggest_hint"),
 		16, UiTheme.TEXT_DIM)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.custom_minimum_size = Vector2(640, 0)
@@ -101,23 +101,23 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 	column.add_child(waiting)
 	_show_waiting(waiting)
 
-	column.add_child(Ui.label("Dein Vorschlag *", 17, UiTheme.TEXT_DIM, true))
+	column.add_child(Ui.label(Loc.t("ui.suggest_yours"), 17, UiTheme.TEXT_DIM, true))
 	var text_area := TextEdit.new()
-	text_area.placeholder_text = "z. B. Füge einen Gegner hinzu, der beim Sterben in zwei kleinere Slimes zerfällt …"
+	text_area.placeholder_text = Loc.t("ui.suggest_placeholder")
 	text_area.custom_minimum_size = Vector2(640, 150)
 	text_area.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	column.add_child(text_area)
 
-	column.add_child(Ui.label("Name (optional)", 17, UiTheme.TEXT_DIM, true))
+	column.add_child(Ui.label(Loc.t("ui.suggest_name"), 17, UiTheme.TEXT_DIM, true))
 	var name_edit := LineEdit.new()
-	name_edit.placeholder_text = "Anonym"
+	name_edit.placeholder_text = Loc.t("ui.anonymous")
 	name_edit.custom_minimum_size = Vector2(640, 46)
 	column.add_child(name_edit)
 
 	# Die Nutzungsbedingungen stehen als Hinweis daneben und sperren nichts mehr:
 	# das Kästchen vor dem Absenden ist entfernt. Wer nicht zustimmt, sendet
 	# trotzdem — die Bedingungen sind damit eine Information, keine Bedingung.
-	var terms := Ui.label("Nutzungsbedingungen: %s" % AppLegal.terms_url(), 14, UiTheme.TEXT_MUTED)
+	var terms := Ui.label(Loc.t("ui.suggest_terms", {"url": AppLegal.terms_url()}), 14, UiTheme.TEXT_MUTED)
 	terms.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	terms.custom_minimum_size = Vector2(640, 0)
 	column.add_child(terms)
@@ -144,8 +144,8 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 	actions.alignment = BoxContainer.ALIGNMENT_END
 	column.add_child(actions)
 
-	var send := Ui.button("Absenden", Vector2(160, 48), UiTheme.ACCENT)
-	var cancel := Ui.button("Schließen", Vector2(140, 48), UiTheme.PANEL_LIGHT, func() -> void:
+	var send := Ui.button(Loc.t("ui.suggest_send"), Vector2(160, 48), UiTheme.ACCENT)
+	var cancel := Ui.button(Loc.t("ui.close"), Vector2(140, 48), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		close()
 	)
@@ -158,21 +158,24 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 			text = text.substr(0, MAX_LENGTH)
 			text_area.text = text
 		if text.length() < 3:
-			status.text = "Bitte schreibe mindestens ein paar Worte."
+			status.text = Loc.t("ui.suggest_too_short")
 			status.add_theme_color_override("font_color", UiTheme.DANGER)
 			return
 		send.disabled = true
-		send.text = "Sende …"
+		send.text = Loc.t("ui.suggest_sending")
 		last_warning["text"] = ""
 		var author := name_edit.text.strip_edges().substr(0, 60)
+		# "Anonym" is a value for the backend, not screen text: it ends up on the
+		# dashboard next to other suggestions. Translating it would mint the same
+		# name in two languages.
 		var view := await Api.submit_suggestion(text, author if author != "" else "Anonym", source)
 		if view.is_empty():
 			status.add_theme_color_override("font_color", UiTheme.WARNING)
 			# Ein konkreter Grund aus der Warteschlange schlägt den allgemeinen
 			# Satz: „ältester Vorschlag verworfen“ ist wichtiger als „gespeichert“.
 			var reason := str(last_warning.get("text", ""))
-			status.text = reason if reason != "" else "Gespeichert, aber noch nicht an den Server geschickt. Die Idee wird gesendet, sobald du wieder online bist."
-			send.text = "Gespeichert ✓"
+			status.text = reason if reason != "" else Loc.t("ui.suggest_queued")
+			send.text = Loc.t("ui.suggest_stored")
 			_show_waiting(waiting)
 			Sfx.level_up()
 			return
@@ -181,9 +184,9 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 		var cluster := int(view.get("clusterSize", 1))
 		var extra := ""
 		if cluster > 1:
-			extra = " Ähnliche Vorschläge gibt es schon (Cluster mit %d Einträgen) — deine Stimme zählt dort mit." % cluster
-		status.text = "Danke! Dein Vorschlag läuft als #%d.%s" % [int(view.get("id", 0)), extra]
-		send.text = "Gesendet ✓"
+			extra = Loc.f("ui.suggest_cluster", [cluster])
+		status.text = Loc.f("ui.suggest_thanks", [int(view.get("id", 0)), extra])
+		send.text = Loc.t("ui.suggest_sent")
 		_show_waiting(waiting)
 	)
 

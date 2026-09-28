@@ -97,7 +97,7 @@ func _category_column(category: Dictionary) -> Control:
 	header.add_child(labels)
 	var text := Ui.vbox(0)
 	labels.add_child(text)
-	var head := Ui.label("%s  %s" % [category["icon"], category["name"]], 17, UiTheme.TEXT, true)
+	var head := Ui.label(Loc.f("%s  %s", [[category["icon"], category["name"]]]), 17, UiTheme.TEXT, true)
 	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	head.custom_minimum_size = Vector2(COLUMN_WIDTH - 10, 24)
 	text.add_child(head)
@@ -161,9 +161,13 @@ func _game_card(game: Dictionary, height: float) -> Control:
 	name_label.custom_minimum_size = Vector2(0, 22)
 	text.add_child(name_label)
 
-	var score_text := "▶ Spielen"
+	var score_text := Loc.t("ui.play")
 	if game.has("highscore_key"):
-		score_text = "Highscore: %d" % Game.highscore(str(game["highscore_key"]))
+		# `format_number` rather than `%d`: the card shows five-digit values, and
+		# `1.234` is a decimal number in English and French.
+		score_text = Loc.t("ui.highscore_of", {
+			"score": Ui.format_number(Game.highscore(str(game["highscore_key"]))),
+		})
 	var score_label := Ui.label(score_text, 12, Color(0.980, 0.800, 0.086))
 	text.add_child(score_label)
 	return card
@@ -190,11 +194,19 @@ func _build_footer() -> void:
 		Sfx.select()
 		Router.go_to("main_menu")
 	))
-	_muted_button = Ui.button("♪ Ton an" if not Game.muted else "♪ stumm", Vector2(140, 48), UiTheme.PANEL_LIGHT, func() -> void:
+	_muted_button = Ui.button(_mute_label(), Vector2(140, 48), UiTheme.PANEL_LIGHT, func() -> void:
 		Game.toggle_muted()
-		_muted_button.text = "♪ Ton an" if not Game.muted else "♪ stumm"
+		_muted_button.text = _mute_label()
 	)
 	row.add_child(_muted_button)
+
+	# As in the main menu: the language spelled out. This screen is the flat
+	# fallback for the 3D lobby and is used exactly when 3D is unavailable, so the
+	# setting must not live behind 3D.
+	row.add_child(Ui.button(Loc.t("ui.language_button"), Vector2(190, 48), UiTheme.PANEL_LIGHT, func() -> void:
+		Sfx.select()
+		SettingsDialog.open(self)
+	))
 
 	# Die Server-Adresse gehört auf den Hauptbildschirm, nicht in das Menü eines
 	# einzelnen Spiels: wer hier „Vorschlag“ tippt und keine Adresse eingetragen
@@ -206,7 +218,7 @@ func _build_footer() -> void:
 	)
 	row.add_child(_server_button)
 
-	var footer := Ui.label("Mehr Spiele folgen — reiche deine Idee ein!  ·  Content v%d" % Content.version, 14, UiTheme.TEXT_MUTED)
+	var footer := Ui.label(Loc.f("Mehr Spiele folgen — reiche deine Idee ein!  ·  Content v%d", [Content.version]), 14, UiTheme.TEXT_MUTED)
 	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(footer)
@@ -234,11 +246,15 @@ func _on_pending_changed(count: int) -> void:
 	_pending_label.visible = true
 	# Ohne Adresse ist die Diagnose eindeutig — sie zu verschweigen hieße, dem
 	# Spieler eine Datenlücke zu zeigen, wo er nur eine Einstellung ändern muss.
-	_pending_label.text = "%s — %s" % [
-		Api.pending_hint(),
-		"es fehlt die Server-Adresse" if not Game.has_server() else "Server nicht erreichbar",
-	]
+	_pending_label.text = Loc.t("ui.pending_reason", {
+		"pending": Api.pending_hint(),
+		"reason": Loc.t("ui.pending_no_server") if not Game.has_server() else Loc.t("ui.pending_unreachable"),
+	})
 	_pending_label.add_theme_color_override("font_color", UiTheme.WARNING)
+
+
+func _mute_label() -> String:
+	return Loc.t("ui.sound_on") if not Game.muted else Loc.t("ui.sound_off")
 
 
 func _refresh_server_button() -> void:

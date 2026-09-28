@@ -4,6 +4,18 @@ extends RefCounted
 ##
 ## Every screen in the game composes its interface from these so spacing,
 ## colours and font sizes stay identical across all thirteen subgames.
+##
+## ## Language
+##
+## `label`, `title`, `value_label` and `button` run their text through
+## `Loc.resolve()`. That is why being multi-language is decided in *one* place: a
+## German caption created through `Ui.label` is translatable without the call
+## site knowing anything about it. Whatever `Loc.resolve` does not know comes
+## back unchanged, so the call is free of risk and a new German sentence does not
+## fall off a cliff.
+##
+## Callers who want a key rather than a sentence write `Ui.label(Loc.t("ui.play"))`
+## — that is the case when one German sentence needs two translations.
 
 const FONT := "res://assets/fonts/DejaVuSans.ttf"
 const FONT_BOLD := "res://assets/fonts/DejaVuSans-Bold.ttf"
@@ -20,7 +32,7 @@ static func font_bold() -> Font:
 
 static func label(text: String, size: int = 18, color: Color = UiTheme.TEXT, bold: bool = false) -> Label:
 	var node := Label.new()
-	node.text = text
+	node.text = Loc.resolve(text)
 	node.add_theme_font_size_override("font_size", size)
 	node.add_theme_color_override("font_color", color)
 	node.add_theme_font_override("font", font_bold() if bold else font())
@@ -44,7 +56,7 @@ static func value_label(text: String, size: int = 30) -> Label:
 
 static func button(text: String, size: Vector2, accent: Color = UiTheme.PANEL_LIGHT, on_press: Callable = Callable()) -> Button:
 	var node := Button.new()
-	node.text = text
+	node.text = Loc.resolve(text)
 	node.custom_minimum_size = size
 	node.focus_mode = Control.FOCUS_NONE
 	node.add_theme_stylebox_override("normal", UiTheme.flat(accent, UiTheme.BORDER, 10))
@@ -151,13 +163,11 @@ static func format_time(ms: float) -> String:
 	return "%d:%02d" % [total / 60, total % 60]
 
 
+## Thousands separator for the active language.
+##
+## This used to be hard-coded to `.` — right for German, wrong for English and
+## French, and with a digit between the groups it is not even readable
+## (`1.234.567` instead of `1,234,567`). `Loc` reads the separators from the
+## catalogue, so it is decided in this one place and not at the 46 call sites.
 static func format_number(value: int) -> String:
-	var text := str(absi(value))
-	var out := ""
-	var count := 0
-	for i in range(text.length() - 1, -1, -1):
-		out = text[i] + out
-		count += 1
-		if count % 3 == 0 and i > 0:
-			out = "." + out
-	return ("-" if value < 0 else "") + out
+	return Loc.number(value)

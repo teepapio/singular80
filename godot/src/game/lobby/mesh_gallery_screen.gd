@@ -213,7 +213,7 @@ func _build_panels() -> void:
 		# Eine Sammlung ohne Meshes wäre eine Sackgasse — sie kommt gar nicht erst.
 		if AssetRegistry.keys_in_group(group_id_value).is_empty():
 			continue
-		var button := Ui.button("%s %s" % [str(group["icon"]), str(group["name"])], Vector2(112, 28), UiTheme.PANEL_LIGHT, func() -> void:
+		var button := Ui.button(Loc.f("%s %s", [[str(group["icon"]), str(group["name"])]]), Vector2(112, 28), UiTheme.PANEL_LIGHT, func() -> void:
 			_set_group(group_id_value)
 		)
 		button.add_theme_font_size_override("font_size", 12)
@@ -331,10 +331,10 @@ func _toggle_mark() -> void:
 	if bool(result["marked"]):
 		MeshGallery.set_marks(MeshGallery.set_tier(_marks(), key, tier))
 		Sfx.level_up()
-		notify("%s vorgemerkt" % AssetRegistry.display_name(key), 1.4)
+		notify(Loc.f("%s vorgemerkt", [AssetRegistry.display_name(key)]), 1.4)
 	else:
 		Sfx.select()
-		notify("%s wieder entfernt" % AssetRegistry.display_name(key), 1.2)
+		notify(Loc.f("%s wieder entfernt", [AssetRegistry.display_name(key)]), 1.2)
 	_refresh()
 
 

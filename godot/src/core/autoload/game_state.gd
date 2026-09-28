@@ -9,6 +9,7 @@ const KEY_WEAPON := "arena_weapon"
 const KEY_MODE := "arena_mode"
 const KEY_SERVER := "server_url"
 const KEY_TOUCH := "touch_controls"
+const KEY_LANGUAGE := "language"
 
 ## Well-known highscore keys. The `singular80_` prefix matches the dashboard and
 ## the web build, so a player's history stays consistent across both.
@@ -36,6 +37,11 @@ var arena_weapon: String = "pistol"
 var arena_mode: String = "classic"
 var server_url: String = ""
 var touch_controls: bool = true
+## The language the player chose, e.g. `"en"`. Empty means "no choice yet", and
+## `Loc` then goes by the device language. Deliberately not a `Loc` field: the
+## catalogues and the formatting belong to `Loc`, this file only holds what goes
+## into `user://singular80.cfg`.
+var language: String = ""
 
 var _highscores: Dictionary = {}
 var _numbers: Dictionary = {}
@@ -56,6 +62,7 @@ func load_settings() -> void:
 	arena_mode = str(_config.get_value("arena", KEY_MODE, "classic"))
 	server_url = str(_config.get_value("net", KEY_SERVER, ""))
 	touch_controls = bool(_config.get_value("input", KEY_TOUCH, true))
+	language = str(_config.get_value("text", KEY_LANGUAGE, ""))
 	for section in _config.get_sections():
 		if section == "highscore":
 			for key in _config.get_section_keys(section):
@@ -73,6 +80,7 @@ func save_settings() -> void:
 	_config.set_value("arena", KEY_MODE, arena_mode)
 	_config.set_value("net", KEY_SERVER, server_url)
 	_config.set_value("input", KEY_TOUCH, touch_controls)
+	_config.set_value("text", KEY_LANGUAGE, language)
 	for key in _highscores:
 		_config.set_value("highscore", key, int(_highscores[key]))
 	for key in _numbers:
@@ -104,6 +112,23 @@ func set_arena_weapon(id: String) -> void:
 
 func set_arena_mode(id: String) -> void:
 	arena_mode = id
+	save_settings()
+
+
+# --- language and input -----------------------------------------------------
+
+## The language the player picked, e.g. `"en"`. `Loc` is the only caller and
+## validates the value first — this just keeps the one config file in one place.
+func set_language(code: String) -> void:
+	language = code
+	save_settings()
+
+
+## The on-screen stick and action buttons. Read by every screen that shows a
+## world or a playfield; before this setter existed the flag could only be
+## hand-edited in `user://singular80.cfg`.
+func set_touch_controls(value: bool) -> void:
+	touch_controls = value
 	save_settings()
 
 

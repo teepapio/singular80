@@ -15,7 +15,7 @@ extends Node
 signal suggestion_sent(id: int, cluster_size: int)
 signal suggestion_failed(reason: String)
 ## Emitted whenever the number of queued suggestions changes, so a screen can
-## show "3 Vorschläge warten auf Netz".
+## show the pending hint.
 signal pending_changed(count: int)
 
 const TIMEOUT := 4.0
@@ -31,8 +31,8 @@ var _announced: int = 0
 
 func _ready() -> void:
 	process_priority = -40
-	# Der Inhalt von `user://` ist der ganze Sinn der Sache: die Liste kann seit
-	# dem letzten Start, seit einem Reboot oder seit einem Absturz liegen.
+	# The content of `user://` is the whole point: the list can have been
+	# sitting there since the last start, a reboot or a crash.
 	_queue = QueueClass.restore()
 	_timer = Timer.new()
 	_timer.one_shot = true
@@ -40,25 +40,25 @@ func _ready() -> void:
 	add_child(_timer)
 	_announce_pending()
 	if not _queue.is_empty():
-		# Der Start holt die Liste zügig nach. Ohne eingetragenen Server gibt es
-		# allerdings nichts zu prüfen, und der erste Kontakt (oder ein Resume)
-		# übernimmt das.
+		# Startup catches up with the list quickly. Without a configured server
+		# there is nothing to probe, and the first contact (or a resume) takes
+		# over.
 		_arm(0, 0.25 if Game.has_server() else 60.0)
 
 
 func _notification(what: int) -> void:
-	# Aufwachen vom Handy ist der Moment, in dem das Netz zurückkommt. Godot
-	# meldet das als Fenster-Fokus (Android ruft `OS_Android::main_loop_focusin`
-	# auf, was als `WINDOW_EVENT_FOCUS_IN` durch alle Kinder läuft) und je nach
-	# Plattform zusätzlich als Application-Fokus bzw. -Resume.
+	# Waking the phone is the moment the network comes back. Godot reports it
+	# as window focus (Android calls `OS_Android::main_loop_focusin`, which
+	# reaches every child as `WINDOW_EVENT_FOCUS_IN`) and, depending on the
+	# platform, additionally as application focus or resume.
 	if what == NOTIFICATION_WM_WINDOW_FOCUS_IN \
 			or what == NOTIFICATION_APPLICATION_FOCUS_IN \
 			or what == NOTIFICATION_APPLICATION_RESUMED:
 		wake()
 
 
-## Backoff zurücksetzen und sofort wieder versuchen. Nach dem Aufwachen vom
-## Handy ist das die ehrliche Reaktion: das Netz ist gerade erst da geworden.
+## Resets the backoff and retries at once. After the phone wakes up this is
+## the honest reaction: the network has only just come back.
 func wake() -> void:
 	if _queue.is_empty():
 		return
@@ -93,31 +93,31 @@ func get_content() -> Variant:
 ## `context` names the screen or area the idea came from; it is prepended to the
 ## text so the dashboard can group ideas without the author having to say it.
 func submit_suggestion(text: String, author: String, context: String = "") -> Dictionary:
-	# 1. Einpflegen und auf die Platte schreiben, **bevor** gesendet wird. Ab hier
-	#    überlebt die Idee einen Absturz, ein Beenden und einen Reboot.
+	# 1. Queue it and write it to disk **before** sending. From here on the
+	#    idea survives a crash, an exit and a reboot.
 	var item := QueueClass.make_item(SuggestionContext.compose(context, text), author, "game")
 	var dropped := QueueClass.push(_queue, item)
 	_save()
-	# `push()` hängt den Eintrag an und kann seinen Schlüssel korrigiert haben;
-	# maßgeblich ist deshalb der aus der Liste, nicht der aus `item`.
+	# `push()` appends the entry and may have corrected its key; what counts
+	# is therefore the one from the list, not the one from `item`.
 	var key := str((_queue[_queue.size() - 1] as Dictionary).get("clientKey", ""))
 	if not dropped.is_empty():
 		suggestion_failed.emit(QueueClass.cap_warning(dropped, QueueClass.MAX_ITEMS))
 	_announce_pending()
 	if not Game.has_server():
-		suggestion_failed.emit("Offline — Vorschlag lokal gespeichert.")
+		suggestion_failed.emit(Loc.t("ui.queue_saved_offline"))
 		_arm(0, 0.25)
 		return {}
 	if _busy:
-		# Ein Hintergrund-Flush läuft bereits. Der neue Eintrag ist gesichert
-		# und kommt mit dessen nächstem Durchlauf oder beim nächsten Backoff mit.
+		# A background flush is already running. The new entry is safe and
+		# goes with its next pass or the next backoff.
 		return {}
-	# 2. Einmal direkt senden — der Dialog wartet auf das Ergebnis.
+	# 2. Send once directly — the dialog waits for the result.
 	_busy = true
 	var view := await _deliver(key)
 	_busy = false
 	if view.is_empty():
-		suggestion_failed.emit("Server nicht erreichbar — Vorschlag lokal gespeichert.")
+		suggestion_failed.emit(Loc.t("ui.queue_saved_unreachable"))
 		_arm(1)
 		return {}
 	_announce_pending()
@@ -149,7 +149,7 @@ func pending_count() -> int:
 	return _queue.size()
 
 
-## The German text for the pending count, empty when nothing is waiting.
+## UI text for the pending count, empty when nothing is waiting.
 func pending_hint() -> String:
 	return QueueClass.pending_hint(pending_count())
 

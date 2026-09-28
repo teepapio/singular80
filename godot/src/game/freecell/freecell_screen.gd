@@ -487,7 +487,7 @@ func _check_win() -> void:
 	var column := Ui.vbox(14)
 	center.add_child(column)
 	column.add_child(Ui.title("🏆  GEWONNEN!", 52, Color("4ade80")))
-	column.add_child(Ui.label("Züge: %d\nPunkte: %d\nTipps: %d" % [moves, score, hints_used], 22, Color("e2e8f0")))
+	column.add_child(Ui.label(Loc.f("Züge: %d\nPunkte: %d\nTipps: %d", [[moves, score, hints_used]]), 22, Color("e2e8f0")))
 	column.add_child(Ui.button("Neues Spiel", Vector2(360, 56), UiTheme.ACCENT, func() -> void: new_deal()))
 	column.add_child(Ui.button("Lobby", Vector2(360, 56), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))
 

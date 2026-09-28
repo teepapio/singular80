@@ -29,13 +29,13 @@ func _ready_game() -> void:
 	if is_record:
 		column.add_child(Ui.label("★  Neuer Highscore!  ★", 24, Color(0.980, 0.800, 0.086), true))
 	else:
-		column.add_child(Ui.label("Highscore: %s" % Ui.format_number(Game.highscore(Game.HS_ARENA)), 20, UiTheme.TEXT_DIM, true))
+		column.add_child(Ui.label(Loc.f("Highscore: %s", [Ui.format_number(Game.highscore(Game.HS_ARENA))]), 20, UiTheme.TEXT_DIM, true))
 
 	column.add_child(Ui.spacer(Vector2(0, 10)))
 	column.add_child(Ui.label(
-		"Score: %s     ·     Kills: %d     ·     Level: %d     ·     Zeit: %s" % [
+		Loc.f("Score: %s     ·     Kills: %d     ·     Level: %d     ·     Zeit: %s", [[
 			Ui.format_number(score), kills, level, Ui.format_time(time_ms),
-		], 24, Color(0.886, 0.910, 0.941)))
+		]]), 24, Color(0.886, 0.910, 0.941)))
 	column.add_child(Ui.spacer(Vector2(0, 18)))
 
 	var row := Ui.hbox(16)

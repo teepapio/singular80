@@ -192,7 +192,7 @@ func _rebuild_dragons() -> void:
 			_dragon_page = wrapi(_dragon_page - 1, 0, pages)
 			_refresh()
 		))
-		nav.add_child(Ui.label("%d/%d" % [_dragon_page + 1, pages], 14, UiTheme.TEXT_MUTED))
+		nav.add_child(Ui.label(Loc.f("%d/%d", [[_dragon_page + 1, pages]]), 14, UiTheme.TEXT_MUTED))
 		nav.add_child(Ui.button("▶", Vector2(34, 30), UiTheme.PANEL_LIGHT, func() -> void:
 			_dragon_page = wrapi(_dragon_page + 1, 0, pages)
 			_refresh()
@@ -271,13 +271,13 @@ func _rebuild_upgrades() -> void:
 		var text := Ui.vbox(0)
 		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(text)
-		text.add_child(Ui.label("%s  (Stufe %d/%d)" % [str(upgrade["name"]), level, int(upgrade["max"])], 15, UiTheme.TEXT, true))
+		text.add_child(Ui.label(Loc.f("%s  (Stufe %d/%d)", [[str(upgrade["name"]), level, int(upgrade["max"])]]), 15, UiTheme.TEXT, true))
 		text.add_child(_wrap(str(upgrade["desc"]), 12, UiTheme.TEXT_MUTED))
 		if maxed:
 			row.add_child(Ui.label("MAX", 16, Color("fbbf24"), true))
 		else:
 			var affordable: bool = int(profile.get("gold", 0)) >= cost
-			row.add_child(Ui.button("%d ◈" % cost, Vector2(96, 40),
+			row.add_child(Ui.button(Loc.f("%d ◈", [cost]), Vector2(96, 40),
 				UiTheme.PANEL_LIGHT if affordable else UiTheme.PANEL, _on_buy.bind(id)))
 
 
@@ -308,14 +308,14 @@ func _level_card(n: int) -> Control:
 		Color(str(biome["accent"])) if unlocked else UiTheme.BORDER, 10)
 	var box := Ui.vbox(1)
 	panel.add_child(box)
-	box.add_child(Ui.label("%d" % n, 24, Color(str(biome["accent"])) if unlocked else UiTheme.TEXT_MUTED, true))
+	box.add_child(Ui.label(Loc.f("%d", [n]), 24, Color(str(biome["accent"])) if unlocked else UiTheme.TEXT_MUTED, true))
 	# The name wraps, so a long one can never widen the whole grid.
 	box.add_child(_wrap(str(level_def["name"]), 14, UiTheme.TEXT if unlocked else UiTheme.TEXT_MUTED))
 	box.add_child(Ui.label(str(biome["name"]), 11, UiTheme.TEXT_MUTED))
 	box.add_child(Ui.label("★".repeat(stars) + "☆".repeat(3 - stars), 14, Color("facc15")))
 	if not unlocked:
 		var need := DragonFlight.star_requirement(n)
-		box.add_child(Ui.label("· %d Sterne benötigt" % need if need > 0 else "· Level %d zuerst" % (n - 1), 12, UiTheme.TEXT_MUTED))
+		box.add_child(Ui.label(Loc.f("· %d Sterne benötigt", [need if need > 0 else "· Level %d zuerst" % (n - 1)]), 12, UiTheme.TEXT_MUTED))
 		return panel
 	panel.custom_minimum_size = CARD
 	var button := Button.new()

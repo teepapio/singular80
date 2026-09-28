@@ -346,7 +346,7 @@ func _palette_button(kind: String) -> Button:
 	var spec := Siedler.spec_of(kind)
 	var cost: Dictionary = spec["cost"]
 	var button := Ui.button(
-		"%s %s\nBauholz %d · Stein %d" % [spec["icon"], spec["name"], int(cost["planks"]), int(cost["stone"])],
+		Loc.f("%s %s\nBauholz %d · Stein %d", [[spec["icon"], spec["name"], int(cost["planks"]), int(cost["stone"])]]),
 		Vector2(182, 58), UiTheme.PANEL_LIGHT, func() -> void:
 			armed_kind = kind
 			_set_tool(Tool.SELECT)
@@ -568,7 +568,7 @@ func _tap_road(cell: int) -> void:
 	if bool(result["ok"]):
 		var flags := int(result["flags"])
 		if flags > 0:
-			notify("Straße gebaut · %d Fahnen" % flags)
+			notify(Loc.f("Straße gebaut · %d Fahnen", [flags]))
 		else:
 			notify("Straße gebaut")
 		_roads_dirty = true
@@ -1121,7 +1121,7 @@ func _update_advisor() -> void:
 	var row := Ui.hbox(8)
 	_advisor_body.add_child(row)
 	if list.size() > 1:
-		row.add_child(Ui.button("▸ alle (%d)" % list.size(), Vector2(112, 40),
+		row.add_child(Ui.button(Loc.f("▸ alle (%d)", [list.size()]), Vector2(112, 40),
 			UiTheme.PANEL_LIGHT, _show_all_advice))
 	var fix := str(top.get("fix", ""))
 	var target := int(top["building"])
@@ -1173,12 +1173,12 @@ func _run_fix(fix: String, target: int) -> void:
 		if not _can_pay(kind):
 			notify("Dafür fehlt der Burg das Baumaterial")
 			return
-		notify("%s wird gebaut — Feld antippen" % str(Siedler.spec_of(kind)["name"]))
+		notify(Loc.f("%s wird gebaut — Feld antippen", [str(Siedler.spec_of(kind)["name"])]))
 		return
 	if fix == "queueTool":
 		var tool_key := str(_advisor_top.get("good", ""))
 		if tool_key != "" and siedler.request_tool(tool_key):
-			notify("%s ist eingeplant" % Siedler.good_name(tool_key))
+			notify(Loc.f("%s ist eingeplant", [Siedler.good_name(tool_key)]))
 		else:
 			notify(siedler.notice if tool_key != "" else "Werkzeug unbekannt")
 		return
@@ -1233,10 +1233,10 @@ func _show_all_advice() -> void:
 		var head := Ui.hbox(8)
 		box.add_child(head)
 		head.add_child(Ui.label(
-			"■ %s" % str(entry["title"]), 15, _severity_color(int(entry["severity"])), true
+			Loc.f("■ %s", [str(entry["title"])]), 15, _severity_color(int(entry["severity"])), true
 		))
 		if int(entry["count"]) > 1:
-			head.add_child(Ui.label("×%d" % int(entry["count"]), 13, UiTheme.TEXT_MUTED))
+			head.add_child(Ui.label(Loc.f("×%d", [int(entry["count"])]), 13, UiTheme.TEXT_MUTED))
 		var text := Ui.label(str(entry["detail"]), 13, UiTheme.TEXT_DIM)
 		text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		text.custom_minimum_size = Vector2(600, 0)
@@ -1312,12 +1312,12 @@ func _rebuild_routes_sheet() -> void:
 		_routes_body.add_child(_route_row(entry))
 	if routes.size() > ROUTE_ROWS:
 		_routes_body.add_child(Ui.label(
-			"… und %d weitere Strecken mit Verkehr." % (routes.size() - ROUTE_ROWS), 12, UiTheme.TEXT_MUTED
+			Loc.f("… und %d weitere Strecken mit Verkehr.", [(routes.size() - ROUTE_ROWS)]), 12, UiTheme.TEXT_MUTED
 		))
 	_routes_body.add_child(Ui.label(
-		"%d Umschläge gemessen · %d Strecken mit Verkehr" % [
+		Loc.f("%d Umschläge gemessen · %d Strecken mit Verkehr", [[
 			siedler.measured_carriers(), routes.size(),
-		], 12, UiTheme.TEXT_MUTED
+		]]), 12, UiTheme.TEXT_MUTED
 	))
 
 
@@ -1339,7 +1339,7 @@ func _route_row(entry: Dictionary) -> Control:
 	var good := str(entry["top"])
 	var family := str(Siedler.GOOD_CLASS.get(good, "wood"))
 	head.add_child(Ui.label(
-		"▬ „%s“" % Siedler.good_name(good), 15,
+		Loc.f("▬ „%s“", [Siedler.good_name(good)]), 15,
 		Siedler.CLASS_COLORS.get(family, UiTheme.TEXT), true
 	))
 	if str(entry["kind"]) == "link":
@@ -1348,13 +1348,13 @@ func _route_row(entry: Dictionary) -> Control:
 		# das soll der Spieler beim Lesen der Zeile sofort sehen.
 		head.add_child(Ui.label("Anlieger", 12, UiTheme.TEXT_MUTED))
 	head.add_child(Ui.label(
-		"%d von %d" % [int(entry["top_count"]), int(entry["total"])], 12, UiTheme.TEXT_MUTED
+		Loc.f("%d von %d", [[int(entry["top_count"]), int(entry["total"])]]), 12, UiTheme.TEXT_MUTED
 	))
 	head.add_child(Ui.expander())
-	head.add_child(Ui.label("%.0f Felder · %d Träger · %.1f/min · Priorität %d" % [
+	head.add_child(Ui.label(Loc.f("%.0f Felder · %d Träger · %.1f/min · Priorität %d", [[
 		float(entry["length"]), int(entry["carriers"]),
 		float(entry["throughput"]), int(entry["priority"]),
-	], 12, UiTheme.TEXT_DIM))
+	]]), 12, UiTheme.TEXT_DIM))
 
 	var row := Ui.hbox(6)
 	box.add_child(row)
@@ -1376,7 +1376,7 @@ func _route_row(entry: Dictionary) -> Control:
 	var waiting := int(entry["waiting"])
 	var value := int(entry["value"])
 	row.add_child(Ui.label(
-		"wartet %d · Wert %d · Teilen bringt %d Träger" % [waiting, value, maxi(0, gain)],
+		Loc.f("wartet %d · Wert %d · Teilen bringt %d Träger", [[waiting, value, maxi(0, gain)]]),
 		12, UiTheme.TEXT_MUTED
 	))
 	box.add_child(_note_label(siedler.route_advice(entry), UiTheme.WARNING))
@@ -1433,7 +1433,7 @@ func _update_inspector() -> void:
 		child.queue_free()
 	_inspector.visible = true
 
-	_inspector_body.add_child(Ui.label("%s %s" % [spec["icon"], spec["name"]], 20, UiTheme.ACCENT, true))
+	_inspector_body.add_child(Ui.label(Loc.f("%s %s", [[spec["icon"], spec["name"]]]), 20, UiTheme.ACCENT, true))
 	_inspector_body.add_child(Ui.label(str(spec["desc"]), 12, UiTheme.TEXT_DIM))
 
 	var status_text := "Rivale" if rival else Siedler.status_text(str(building["status"]))
@@ -1496,7 +1496,7 @@ func _update_inspector() -> void:
 			suffix = ", Moral +%d %%" % int((morale - 1.0) * 100.0)
 		var target_id := selected_building
 		_inspector_body.add_child(Ui.button(
-			"⚔ Angreifen (%d Ritter%s)" % [siedler.knights, suffix],
+			Loc.f("⚔ Angreifen (%d Ritter%s)", [[siedler.knights, suffix]]),
 			Vector2(272, 46), UiTheme.DANGER, func() -> void:
 				if siedler.send_knights(target_id, siedler.knights):
 					notify("Ritter ausgelaufen!")
@@ -1568,19 +1568,19 @@ func _check_end() -> void:
 	)
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(sub)
-	var points := Ui.label("Punkte: %s" % Ui.format_number(value), 30, UiTheme.ACCENT, true)
+	var points := Ui.label(Loc.f("Punkte: %s", [Ui.format_number(value)]), 30, UiTheme.ACCENT, true)
 	points.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(points)
-	var best := Ui.label("Best: %s" % Ui.format_number(Game.highscore(Game.HS_SIEDLER)), 15, UiTheme.TEXT_DIM)
+	var best := Ui.label(Loc.f("Best: %s", [Ui.format_number(Game.highscore(Game.HS_SIEDLER))]), 15, UiTheme.TEXT_DIM)
 	best.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(best)
 	var done := 0
 	for building in siedler.buildings:
 		if str(building["owner"]) == "player" and str(building["state"]) == "done":
 			done += 1
-	var detail := Ui.label("Gebäude %d · Siedler %d · Territorium %d %%" % [
+	var detail := Ui.label(Loc.f("Gebäude %d · Siedler %d · Territorium %d %%", [[
 		done, siedler.current_serfs(), int(siedler.territory_share() * 100.0),
-	], 15, UiTheme.TEXT_DIM)
+	]]), 15, UiTheme.TEXT_DIM)
 	detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(detail)
 	var row := Ui.hbox(10)

@@ -804,7 +804,7 @@ func _announce_wave() -> void:
 	# A falling alarm tone. None of the named effects means "something is
 	# about to arrive above you", and this one cannot be mistaken for a shot.
 	Sfx.tone(760.0, 0.12, "square", -22.0, 240.0)
-	notify("Nachschub kündigt sich an — %s!" % Pang.wave_side_label(wave), 2.0)
+	notify(Loc.f("Nachschub kündigt sich an — %s!", [Pang.wave_side_label(wave)]), 2.0)
 
 
 ## Puts the announced batch on the board and hands the arena back to the player.
@@ -820,7 +820,7 @@ func _drop_wave() -> void:
 	_hide_wave_marker()
 	# The arrival is the one moment the level interrupts itself, so it says so —
 	# on screen, in the corner list and through the floor.
-	notify("Nachschub: %d Kugeln von %s" % [batch.size(), Pang.wave_side_label(wave)], 2.0)
+	notify(Loc.f("Nachschub: %d Kugeln von %s", [[batch.size(), Pang.wave_side_label(wave)]]), 2.0)
 	_effect_chip("☄  Nachschub!  %s" % ("Noch " + Pang.wave_label(waves_left) if waves_left > 0 else "Letzte Welle"), WAVE_ALERT, 2.4)
 	Sfx.tone(520.0, 0.18, "saw", -20.0, 160.0)
 	shake = maxf(shake, 0.18)
@@ -1427,7 +1427,7 @@ func _show_overlay(title: String, color: Color, lines: Array[String], offer_next
 	column.add_child(buttons)
 	if state == STATE_CLEARED and offer_next and level < Pang.TOTAL_LEVELS:
 		var next_level := level + 1
-		buttons.add_child(Ui.button("Weiter: Level %d" % next_level, Vector2(320, 54), UiTheme.ACCENT, func() -> void:
+		buttons.add_child(Ui.button(Loc.f("Weiter: Level %d", [next_level]), Vector2(320, 54), UiTheme.ACCENT, func() -> void:
 			_goto_level(next_level)))
 	buttons.add_child(Ui.button("Nochmal", Vector2(320, 54), UiTheme.PANEL_LIGHT, func() -> void:
 		_goto_level(level)))

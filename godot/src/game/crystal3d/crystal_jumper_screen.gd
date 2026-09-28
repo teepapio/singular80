@@ -440,7 +440,7 @@ func _build_ui() -> void:
 	_bag_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
 	hud_root.add_child(_bag_label)
 
-	_hint_label = Ui.label("%s  ·  Flusskette: schnell aufeinanderfolgende Funde zahlen mehr" % str(theme["hint"]), 15, UiTheme.TEXT_DIM)
+	_hint_label = Ui.label(Loc.f("%s  ·  Flusskette: schnell aufeinanderfolgende Funde zahlen mehr", [str(theme["hint"])]), 15, UiTheme.TEXT_DIM)
 	_hint_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	_hint_label.position = Vector2(0, -32)
 	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -633,7 +633,7 @@ func _pickup_flow(at: Vector3, tier: int) -> void:
 	flow_bonus += bonus
 	if not _record_announced and run_best_flow > best_flow and best_flow > 0:
 		_record_announced = true
-		notify("Neuer Kettenrekord: ×%d!" % run_best_flow)
+		notify(Loc.f("Neuer Kettenrekord: ×%d!", [run_best_flow]))
 	if bonus <= 0:
 		Sfx.hit()
 		return
@@ -869,24 +869,24 @@ func _show_summit_panel() -> void:
 	var column := Ui.vbox(10)
 	panel.add_child(column)
 
-	column.add_child(Ui.title("%s Gipfel erreicht!" % theme["icon"], 32, theme["accent"]))
-	column.add_child(Ui.label("%s · Level %d · Zeit: %s · Ziel: %s" % [
+	column.add_child(Ui.title(Loc.f("%s Gipfel erreicht!", [theme["icon"]]), 32, theme["accent"]))
+	column.add_child(Ui.label(Loc.f("%s · Level %d · Zeit: %s · Ziel: %s", [[
 		theme["title"], int(config["level"]), CrystalTower.format_time(summit_time), CrystalTower.format_time(float(config["targetMs"])),
-	], 16, UiTheme.TEXT_DIM))
+	]]), 16, UiTheme.TEXT_DIM))
 	if summit_within_target:
-		column.add_child(Ui.label("Ziel geschafft! %s" % ("Level %d ist freigeschaltet." % (int(config["level"]) + 1) if int(config["level"]) < CrystalTower.MAX_LEVEL else "Du bist auf der höchsten Stufe!"), 16, Color("facc15")))
+		column.add_child(Ui.label(Loc.f("Ziel geschafft! %s", [("Level %d ist freigeschaltet." % (int(config["level"]) + 1) if int(config["level"]) < CrystalTower.MAX_LEVEL else "Du bist auf der höchsten Stufe!")]), 16, Color("facc15")))
 	else:
-		column.add_child(Ui.label("Ziel verpasst (%s). Versuch es noch einmal!" % CrystalTower.format_time(float(config["targetMs"])), 16, UiTheme.WARNING))
+		column.add_child(Ui.label(Loc.f("Ziel verpasst (%s). Versuch es noch einmal!", [CrystalTower.format_time(float(config["targetMs"]))]), 16, UiTheme.WARNING))
 
 	# Was der Lauf wirklich gekostet hat: Inventar plus Flussbonus, und wie weit
 	# die längste Kette kam — der Teil, den der Spieler beim nächsten Versuch
 	# überbieten will.
-	column.add_child(Ui.label("Punkte: %d  =  Inventar %d  +  Flussbonus %d" % [
+	column.add_child(Ui.label(Loc.f("Punkte: %d  =  Inventar %d  +  Flussbonus %d", [[
 		CrystalTower.run_score(counts, flow_bonus), CrystalTower.inventory_value(counts), flow_bonus,
-	], 18, UiTheme.TEXT, true))
-	column.add_child(Ui.label("Beste Kette: ×%d %s  ·  Rekord: ×%d" % [
+	]]), 18, UiTheme.TEXT, true))
+	column.add_child(Ui.label(Loc.f("Beste Kette: ×%d %s  ·  Rekord: ×%d", [[
 		run_best_flow, CrystalTower.flow_title(run_best_flow), best_flow,
-	], 16, UiTheme.TEXT_DIM))
+	]]), 16, UiTheme.TEXT_DIM))
 	if flow_record:
 		column.add_child(Ui.label("Neuer Kettenrekord!", 16, UiTheme.WARNING))
 
@@ -899,25 +899,25 @@ func _show_summit_panel() -> void:
 		var color: Color = CrystalTower.crystal_tier_color(theme, tier)
 		var cell := Ui.hbox(6)
 		grid.add_child(cell)
-		cell.add_child(Ui.label("◆ %d× %s" % [int(counts[tier - 1]), CrystalTower.crystal_tier_name(theme, tier)], 16, color, true))
+		cell.add_child(Ui.label(Loc.f("◆ %d× %s", [[int(counts[tier - 1]), CrystalTower.crystal_tier_name(theme, tier)]]), 16, color, true))
 		if int(counts[tier - 1]) > 0:
 			var equip := Ui.button("Ausrüsten", Vector2(120, 34), UiTheme.PANEL_LIGHT, func() -> void: _equip(tier))
 			cell.add_child(equip)
 
 	var merge_count: int = (CrystalTower.plan_merges(counts)["steps"] as Array).size()
-	column.add_child(Ui.button("Verschmelzen (%d×)" % merge_count, Vector2(320, 46), UiTheme.ACCENT, start_merge).with_disabled(merge_phase != PHASE_IDLE or merge_count == 0))
-	column.add_child(Ui.label("Bisher verschmolzen: %d×  ·  Aktive Boni: +%d%% Tempo · +%d%% Sprung · %d Extrasprünge" % [
+	column.add_child(Ui.button(Loc.f("Verschmelzen (%d×)", [merge_count]), Vector2(320, 46), UiTheme.ACCENT, start_merge).with_disabled(merge_phase != PHASE_IDLE or merge_count == 0))
+	column.add_child(Ui.label(Loc.f("Bisher verschmolzen: %d×  ·  Aktive Boni: +%d%% Tempo · +%d%% Sprung · %d Extrasprünge", [[
 		summit_merges,
 		int(round((float(bonus["speedMult"]) - 1.0) * 100.0)),
 		int(round((float(bonus["jumpMult"]) - 1.0) * 100.0)),
 		int(bonus["extraJumps"]),
-	], 14, UiTheme.TEXT_MUTED))
+	]]), 14, UiTheme.TEXT_MUTED))
 
 	var actions := Ui.hbox(10)
 	actions.alignment = BoxContainer.ALIGNMENT_CENTER
 	column.add_child(actions)
 	if summit_within_target and int(config["level"]) < CrystalTower.MAX_LEVEL:
-		actions.add_child(Ui.button("Level %d" % (int(config["level"]) + 1), Vector2(200, 50), UiTheme.SUCCESS, func() -> void: _next_level()))
+		actions.add_child(Ui.button(Loc.f("Level %d", [(int(config["level"]) + 1)]), Vector2(200, 50), UiTheme.SUCCESS, func() -> void: _next_level()))
 	actions.add_child(Ui.button("Nochmal", Vector2(200, 50), UiTheme.PANEL_LIGHT, func() -> void: Router.go_to(screen_id)))
 	actions.add_child(Ui.button("Lobby", Vector2(200, 50), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))
 

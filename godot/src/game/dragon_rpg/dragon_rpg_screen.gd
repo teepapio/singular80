@@ -852,7 +852,7 @@ func _end_run() -> void:
 	var column := Ui.vbox(12)
 	center.add_child(column)
 	column.add_child(Ui.title("Gefallen", 46, Color("f87171")))
-	column.add_child(Ui.label("Welle %d · Level %d · Gold %s\nKills %d · Score %s" % [
-		wave, level, Ui.format_number(gold), kills, Ui.format_number(score)], 20, UiTheme.TEXT))
+	column.add_child(Ui.label(Loc.f("Welle %d · Level %d · Gold %s\nKills %d · Score %s", [[
+		wave, level, Ui.format_number(gold), kills, Ui.format_number(score)]]), 20, UiTheme.TEXT))
 	column.add_child(Ui.button("Nochmal", Vector2(340, 56), UiTheme.ACCENT, func() -> void: Router.go_to(screen_id)))
 	column.add_child(Ui.button("Lobby", Vector2(340, 56), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))

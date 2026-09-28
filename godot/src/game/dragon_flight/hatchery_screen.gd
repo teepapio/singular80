@@ -573,7 +573,7 @@ func _refresh_forecast(a: Dictionary, b: Dictionary) -> void:
 		head.add_child(Ui.label(str(entry["name"]) if not is_goal else "▶ " + str(entry["name"]),
 			14, Color(str(entry["hue"])), true))
 		head.add_child(Ui.spacer())
-		head.add_child(Ui.label("%d %%" % roundi(chance * 100.0), 14, Color.WHITE, true))
+		head.add_child(Ui.label(Loc.f("%d %%", [roundi(chance * 100.0)]), 14, Color.WHITE, true))
 		var bar := Ui.bar(Color(str(entry["hue"])), 8.0)
 		Ui.set_bar(bar, chance, Color(str(entry["hue"])))
 		row.add_child(bar)
@@ -583,7 +583,7 @@ func _refresh_forecast(a: Dictionary, b: Dictionary) -> void:
 		if bool(entry["b"]):
 			parents.append("B")
 		if not parents.is_empty():
-			row.add_child(Ui.label("trägt %s" % ", ".join(parents), 11, UiTheme.TEXT_MUTED))
+			row.add_child(Ui.label(Loc.f("trägt %s", [", ".join(parents)]), 11, UiTheme.TEXT_MUTED))
 
 
 ## The egg currency is spent here: every egg lands in a nest and hatches on its
@@ -640,7 +640,7 @@ func _refresh_breeds() -> void:
 		_breed_box.add_child(row)
 		row.add_child(Ui.label(str(breed["name"]), 14, Color(str(breed["body"])), true))
 		row.add_child(Ui.spacer())
-		row.add_child(Ui.button("%d ◈" % price, Vector2(88, 32),
+		row.add_child(Ui.button(Loc.f("%d ◈", [price]), Vector2(88, 32),
 			UiTheme.PANEL_LIGHT if affordable else UiTheme.PANEL, _on_buy_breed.bind(id)))
 
 
@@ -666,9 +666,9 @@ func _refresh_list() -> void:
 		_list.add_child(row)
 		var head := Ui.hbox(6)
 		row.add_child(head)
-		head.add_child(Ui.label("%s-Ei" % str(breed["name"]), 15, Color(str(breed["eggColor"])), true))
+		head.add_child(Ui.label(Loc.f("%s-Ei", [str(breed["name"])]), 15, Color(str(breed["eggColor"])), true))
 		head.add_child(Ui.spacer())
-		head.add_child(Ui.label("%ds" % roundi(remaining) if remaining > 0.0 else "bereit", 14,
+		head.add_child(Ui.label(Loc.f("%ds", [roundi(remaining) if remaining > 0.0 else "bereit"]), 14,
 			Color("22c55e") if remaining <= 0.0 else UiTheme.TEXT_DIM))
 		var bar := Ui.bar(Color("fbbf24"), 10.0)
 		Ui.set_bar(bar, DragonFlight.egg_progress(dragon, now), Color(str(breed["eggColor"])))
@@ -678,7 +678,7 @@ func _refresh_list() -> void:
 		_egg_readout_line(row, readout)
 		if remaining > 0.0:
 			var cost := DragonFlight.hatch_cost(dragon)
-			row.add_child(Ui.button("Ausbrüten für %d ◈" % cost, Vector2(400, 34), UiTheme.PANEL_LIGHT, func() -> void:
+			row.add_child(Ui.button(Loc.f("Ausbrüten für %d ◈", [cost]), Vector2(400, 34), UiTheme.PANEL_LIGHT, func() -> void:
 				_hatch_now(dragon, cost)
 			))
 		else:
@@ -766,7 +766,7 @@ func _on_buy_breed(id: String) -> void:
 		return
 	DragonFlight.save_profile(profile)
 	Sfx.coin()
-	notify("%s ist eingetroffen" % str(DragonFlight.breed_by_id(id)["name"]))
+	notify(Loc.f("%s ist eingetroffen", [str(DragonFlight.breed_by_id(id)["name"])]))
 	parent_a = 0
 	parent_b = 0
 	refresh()
@@ -791,7 +791,7 @@ func _on_pair() -> void:
 	profile["breeds"] = DragonFlight.unlocked_breeds(profile)
 	DragonFlight.save_profile(profile)
 	Sfx.level_up()
-	notify("Ei gelegt — %.0f s Brütezeit" % seconds)
+	notify(Loc.f("Ei gelegt — %.0f s Brütezeit", [seconds]))
 	parent_b = 0
 	refresh()
 
@@ -816,7 +816,7 @@ func _hatch_now(dragon: Dictionary, cost: int) -> void:
 	Sfx.level_up()
 	var breed := DragonFlight.breed_by_id(str(hatched["breed"]))
 	var traits := DragonFlight.expressed_traits(hatched.get("alleles", {}))
-	notify("%d schlüpft! Merkmale: %s" % [int(hatched["gen"]), ", ".join(_names(traits)) if not traits.is_empty() else "keine"])
+	notify(Loc.f("%d schlüpft! Merkmale: %s", [[int(hatched["gen"]), ", ".join(_names(traits)) if not traits.is_empty() else "keine"]]))
 	refresh()
 
 

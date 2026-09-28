@@ -412,7 +412,7 @@ func _graze() -> void:
 	Sfx.kill()
 	_chain_label.text = "%d · %s" % [chain, Ui.format_number(bonus)]
 	if chain == 1 or chain % 5 == 0:
-		notify("KNAPP VORBEI  ×%d   +%s" % [chain, Ui.format_number(bonus)], 1.3)
+		notify(Loc.f("KNAPP VORBEI  ×%d   +%s", [[chain, Ui.format_number(bonus)]]), 1.3)
 
 
 ## Bleeds one link per `CHAIN_HOLD` metres without a graze, so the bonus has to
@@ -502,7 +502,7 @@ func _end_run() -> void:
 	var column := Ui.vbox(12)
 	center.add_child(column)
 	column.add_child(Ui.title("Sturz", 48, Color("f87171")))
-	column.add_child(Ui.label("Strecke: %d m   ·   Punkte: %s   ·   Bestwert: %d m" % [int(distance), Ui.format_number(score), maxi(highscore, int(distance))], 20, UiTheme.TEXT))
-	column.add_child(Ui.label("Knapp vorbei: %d   ·   längste Kette: %d" % [grazes, best_chain], 18, Color("fb923c")))
+	column.add_child(Ui.label(Loc.f("Strecke: %d m   ·   Punkte: %s   ·   Bestwert: %d m", [[int(distance), Ui.format_number(score), maxi(highscore, int(distance))]]), 20, UiTheme.TEXT))
+	column.add_child(Ui.label(Loc.f("Knapp vorbei: %d   ·   längste Kette: %d", [[grazes, best_chain]]), 18, Color("fb923c")))
 	column.add_child(Ui.button("Nochmal", Vector2(340, 56), UiTheme.ACCENT, func() -> void: Router.go_to(screen_id)))
 	column.add_child(Ui.button("Lobby", Vector2(340, 56), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))

@@ -74,7 +74,7 @@ func _build_content() -> void:
 	tagline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	tagline.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(tagline)
-	var record := Ui.label("Highscore: %s   ·   Content v%d" % [Ui.format_number(Game.highscore(Game.HS_ARENA)), Content.version], 14, UiTheme.TEXT_MUTED)
+	var record := Ui.label(Loc.f("Highscore: %s   ·   Content v%d", [[Ui.format_number(Game.highscore(Game.HS_ARENA)), Content.version]]), 14, UiTheme.TEXT_MUTED)
 	record.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	record.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(record)
@@ -108,6 +108,13 @@ func _build_content() -> void:
 	))
 	_server_button = Ui.button(_server_label(), Vector2(230, 50), UiTheme.PANEL_LIGHT, _toggle_server)
 	actions.add_child(_server_button)
+	# The language is spelled out here rather than hiding behind the gear in the
+	# header: this is the screen a new player sees first, and a language they
+	# cannot find is a language they never get.
+	actions.add_child(Ui.button(Loc.t("ui.language_button"), Vector2(190, 50), UiTheme.PANEL_LIGHT, func() -> void:
+		Sfx.select()
+		SettingsDialog.open(self)
+	))
 	column.add_child(actions)
 
 	column.add_child(_spacer(6))
@@ -273,7 +280,7 @@ func _process(delta: float) -> void:
 func _load_implemented() -> void:
 	_ticker_items = await Api.implemented_suggestions(8)
 	if _ticker_items.is_empty():
-		_ticker.text = "Noch nichts umgesetzt — reiche den ersten Vorschlag ein!"
+		_ticker.text = Loc.t("ui.ticker_empty")
 		return
 	_ticker_index = 0
 	_show_ticker()
@@ -291,7 +298,7 @@ func _show_ticker() -> void:
 			detail = summary
 	if detail.length() > 90:
 		detail = detail.substr(0, 90) + "…"
-	_ticker.text = "✓ #%d umgesetzt: %s" % [int(item.get("id", 0)), detail]
+	_ticker.text = Loc.f("ui.ticker_item", [int(item.get("id", 0)), detail])
 
 
 ## Meldet den Vorschlag, den die Laufzeile gerade zeigt. Ohne Laufzeile gibt es
@@ -300,7 +307,7 @@ func _show_ticker() -> void:
 func _report_current() -> void:
 	Sfx.select()
 	if _ticker_items.is_empty():
-		_ticker.text = "Es läuft gerade kein Vorschlag — nichts zu melden."
+		_ticker.text = Loc.t("ui.ticker_nothing_to_report")
 		return
 	var item: Dictionary = _ticker_items[_ticker_index % _ticker_items.size()]
 	var text := str(item.get("text", ""))

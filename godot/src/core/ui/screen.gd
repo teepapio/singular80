@@ -91,12 +91,20 @@ func _build_top_bar() -> Control:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(spacer)
 
-	bar.add_child(Ui.button("◀ Lobby", Vector2(120, 40), UiTheme.PANEL_LIGHT, func() -> void:
+	bar.add_child(Ui.button(Loc.t("ui.back_to_lobby"), Vector2(120, 40), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		Router.to_lobby()
 	))
-	bar.add_child(Ui.button("Vorschlag", Vector2(150, 40), UiTheme.PANEL_LIGHT, func() -> void:
+	bar.add_child(Ui.button(Loc.t("ui.suggestion"), Vector2(150, 40), UiTheme.PANEL_LIGHT, func() -> void:
 		SuggestDialog.open(self)
+	))
+	# The language has to be reachable from *every* screen, not just the lobby:
+	# someone playing Tetris who taps "English" should not have to go back to the
+	# menu first. This gear is the same dialog the lobby opens, and `⚙` is in
+	# DejaVu Sans — an emoji would render as an empty box.
+	bar.add_child(Ui.button(Loc.t("ui.settings_short"), Vector2(60, 40), UiTheme.PANEL_LIGHT, func() -> void:
+		Sfx.select()
+		SettingsDialog.open(self)
 	))
 	var mute: Button
 	mute = Ui.button(_mute_label(), Vector2(110, 40), UiTheme.PANEL_LIGHT, func() -> void:
@@ -108,7 +116,7 @@ func _build_top_bar() -> Control:
 
 
 func _mute_label() -> String:
-	return "♪ Ton an" if not Game.muted else "♪ stumm"
+	return Loc.t("ui.sound_on") if not Game.muted else Loc.t("ui.sound_off")
 
 
 ## Container for adaptive, full-window layouts (menus, lobbies).
@@ -122,10 +130,14 @@ func stage() -> Control:
 
 
 ## Shows a transient message in the middle of the screen.
+##
+## The text goes through `Loc.resolve` like every other caption: a toast is the one
+## place where a sentence appears without a `Ui.*` call in sight, and an
+## untranslated one would be the most conspicuous text in the game.
 func show_toast(text: String, seconds: float = 2.2) -> void:
 	if _toast == null:
 		return
-	_toast.text = text
+	_toast.text = Loc.resolve(text)
 	_toast.visible = true
 	_toast_timer = seconds
 

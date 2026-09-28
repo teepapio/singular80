@@ -142,7 +142,7 @@ func _row(index: int, key: String) -> Control:
 		_rebuild()
 	))
 
-	var meta := Ui.label("%s   ·   %s Dreiecke" % [key, AssetRegistry.tri_text(key, str(entry.get("tier", "low")))], 12, UiTheme.TEXT_MUTED)
+	var meta := Ui.label(Loc.f("%s   ·   %s Dreiecke", [[key, AssetRegistry.tri_text(key, str(entry.get("tier", "low")))]]), 12, UiTheme.TEXT_MUTED)
 	column.add_child(meta)
 
 	var note := TextEdit.new()
@@ -183,7 +183,7 @@ func _submit() -> void:
 		show_toast("Offline gespeichert — der Vorschlag geht raus, sobald du wieder online bist.", 3.5)
 		return
 	_submit_button.text = "Gesendet ✓"
-	show_toast("Danke! Vorschlag #%d ist im Dashboard." % int(result.get("id", 0)), 3.0)
+	show_toast(Loc.f("Danke! Vorschlag #%d ist im Dashboard.", [int(result.get("id", 0))]), 3.0)
 	Sfx.level_up()
 	# Delivered: the work is done, so the list starts empty again.
 	MeshGallery.set_marks(MeshGallery.clear_marks())

@@ -1253,10 +1253,10 @@ func _show_game_over(payload: Dictionary) -> void:
 	column.add_child(Ui.title("Netz kollabiert", 42, UiTheme.DANGER))
 	var station_id := int(payload.get("station", -1))
 	if station_id >= 0 and station_id < metro.stations.size():
-		var sub := Ui.label("%s war zu lange überfüllt." % Metro.type_name(int(metro.stations[station_id]["type"])), 17, UiTheme.TEXT_DIM)
+		var sub := Ui.label(Loc.f("%s war zu lange überfüllt.", [Metro.type_name(int(metro.stations[station_id]["type"]))]), 17, UiTheme.TEXT_DIM)
 		sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		column.add_child(sub)
-	var money_label := Ui.label("Einnahmen: %s $" % Ui.format_number(int(payload.get("money", 0))), 30, Color("4ade80"), true)
+	var money_label := Ui.label(Loc.f("Einnahmen: %s $", [Ui.format_number(int(payload.get("money", 0)))]), 30, Color("4ade80"), true)
 	money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(money_label)
 	if record:
@@ -1789,7 +1789,7 @@ func _say(text: String, color: Color = UiTheme.TEXT) -> void:
 		glyph = "\u2713"
 	elif color == UiTheme.WARNING:
 		glyph = "\u2605"
-	notify("%s  %s" % [glyph, text], 2.4)
+	notify(Loc.f("%s  %s", [[glyph, text]]), 2.4)
 
 
 # --- loop -------------------------------------------------------------------

@@ -13,13 +13,15 @@ extends RefCounted
 ## Warteschlange wird sofort angestoßen. Sonst wartet sie bis zu `BACKOFF_MAX`
 ## Sekunden, obwohl die Adresse jetzt längst stimmt.
 
-const _HINT := "Ohne Adresse läuft das Spiel mit den mitgelieferten Inhalten, und Vorschläge bleiben lokal, bis du sie hier einträgst."
-
-
 ## Opens the dialog on `host` and applies the new address on confirm.
 static func open(host: Node) -> void:
 	var dialog := AcceptDialog.new()
-	dialog.title = "Server-Adresse"
+	# Godot's `AcceptDialog` brings its own buttons, whose captions live in
+	# `TranslationServer`. They are not in play here: `Loc` does not register its
+	# catalogues under Godot's `ok`/`cancel` names, and a button that says "OK" in
+	# every language is the smallest crack in this dialog.
+	dialog.ok_button_text = Loc.t("ui.ok")
+	dialog.title = Loc.t("ui.server_title")
 	dialog.dialog_hide_on_ok = true
 	var row := VBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
@@ -28,7 +30,7 @@ static func open(host: Node) -> void:
 	edit.text = Game.server_url
 	edit.custom_minimum_size = Vector2(400, 42)
 	row.add_child(edit)
-	var hint := Ui.label(_HINT, 14, UiTheme.TEXT_DIM)
+	var hint := Ui.label(Loc.t("ui.server_hint"), 14, UiTheme.TEXT_DIM)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.custom_minimum_size = Vector2(400, 52)
 	row.add_child(hint)
@@ -53,6 +55,13 @@ static func apply(url: String) -> void:
 	Api.wake()
 
 
-## The German text for the button that opens this dialog.
+## The caption of the button that opens this dialog.
+##
+## `Loc.t` with a `{state}` placeholder rather than `"… %s" % url`: the address is
+## substituted *after* the template has been translated, so a language that puts
+## the word in front of the colon still reads correctly. The address itself stays
+## untranslated, which is the point — `192.168.1.20:8787` is not prose.
 static func label() -> String:
-	return "Server: %s" % (Game.server_url if Game.has_server() else "offline")
+	return Loc.t("ui.server_caption", {
+		"state": Loc.t("ui.server_offline") if not Game.has_server() else Game.server_url,
+	})

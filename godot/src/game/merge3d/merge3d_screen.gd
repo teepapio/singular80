@@ -211,7 +211,7 @@ func _build_ui() -> void:
 	hud_root.add_child(frame)
 	column.position = Vector2(26, 76)
 
-	var title := Ui.label("%s  %s" % [theme["icon"], theme["title"]], 22, UiTheme.TEXT, true)
+	var title := Ui.label(Loc.f("%s  %s", [[theme["icon"], theme["title"]]]), 22, UiTheme.TEXT, true)
 	column.add_child(title)
 	_score_label = _hud_value(column, "Punkte", "0", Color("facc15"))
 	_best_label = _hud_value(column, "Bestwert", str(highscore), Color("facc15"))
@@ -314,7 +314,7 @@ func _show_hint(loud: bool = true) -> void:
 	_hint_label.text = "Tipp: %s" % Merge3D.hint_text(theme, board, cells)
 	_hint_label.add_theme_color_override("font_color", Merge3D.tier_color(theme, tier).lightened(0.4))
 	if loud:
-		notify("Tipp: %s" % Merge3D.tier_name(theme, tier))
+		notify(Loc.f("Tipp: %s", [Merge3D.tier_name(theme, tier)]))
 		Sfx.select()
 	_refresh()
 
@@ -551,6 +551,6 @@ func _end_run() -> void:
 	var column := Ui.vbox(14)
 	center.add_child(column)
 	column.add_child(Ui.title("Kein Platz mehr", 44, Color("f87171")))
-	column.add_child(Ui.label("Punkte: %s" % Ui.format_number(score), 24, UiTheme.TEXT))
+	column.add_child(Ui.label(Loc.f("Punkte: %s", [Ui.format_number(score)]), 24, UiTheme.TEXT))
 	column.add_child(Ui.button("Neues Spiel", Vector2(340, 56), UiTheme.ACCENT, func() -> void: Router.go_to(screen_id)))
 	column.add_child(Ui.button("Lobby", Vector2(340, 56), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))

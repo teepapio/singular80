@@ -284,7 +284,7 @@ func _build_ui() -> void:
 	_hud.add_theme_constant_override("separation", 3)
 	hud_root.add_child(_hud)
 
-	_label_level = Ui.label("Level %d · %s" % [level_n, str(level_def["name"])], 21, Color(str(DragonFlight.biome_by_id(str(level_def["biome"]))["accent"])), true)
+	_label_level = Ui.label(Loc.f("Level %d · %s", [[level_n, str(level_def["name"])]]), 21, Color(str(DragonFlight.biome_by_id(str(level_def["biome"]))["accent"])), true)
 	_hud.add_child(_label_level)
 
 	_hp_bar = Ui.bar(Color("ef4444"), 16.0)
@@ -926,15 +926,15 @@ func _show_result(survived: bool, stars: int, summary: Dictionary, gold_delta: i
 	var column := Ui.vbox(10)
 	center.add_child(column)
 	column.add_child(Ui.title("Geschafft" if survived else "Abgestürzt", 46, Color("22c55e") if survived else Color("f87171")))
-	column.add_child(Ui.label("%d / 3 Sternen" % stars, 30, Color("facc15")))
-	column.add_child(Ui.label("Strecke %d m · Abschüsse %d · Punkte %s" % [int(distance), kills, Ui.format_number(score)], 19, UiTheme.TEXT))
-	column.add_child(Ui.label("Beute: %d Gold · %d Gold gesamt" % [gold, int(profile.get("gold", 0))], 19, UiTheme.TEXT_DIM))
+	column.add_child(Ui.label(Loc.f("%d / 3 Sternen", [stars]), 30, Color("facc15")))
+	column.add_child(Ui.label(Loc.f("Strecke %d m · Abschüsse %d · Punkte %s", [[int(distance), kills, Ui.format_number(score)]]), 19, UiTheme.TEXT))
+	column.add_child(Ui.label(Loc.f("Beute: %d Gold · %d Gold gesamt", [[gold, int(profile.get("gold", 0))]]), 19, UiTheme.TEXT_DIM))
 	if gold_delta > 0:
-		column.add_child(Ui.label("Dazu %d Gold aus dem Level" % gold_delta, 18, Color("fbbf24")))
+		column.add_child(Ui.label(Loc.f("Dazu %d Gold aus dem Level", [gold_delta]), 18, Color("fbbf24")))
 	if int(summary.get("unlocked", level_n)) > level_n:
-		column.add_child(Ui.label("Level %d freigeschaltet!" % int(summary["unlocked"]), 21, Color("38bdf8")))
+		column.add_child(Ui.label(Loc.f("Level %d freigeschaltet!", [int(summary["unlocked"])]), 21, Color("38bdf8")))
 	if eggs_found > 0:
-		column.add_child(Ui.label("%d Ei(er) wartet in der Zucht" % eggs_found, 18, Color("fbbf24")))
+		column.add_child(Ui.label(Loc.f("%d Ei(er) wartet in der Zucht", [eggs_found]), 18, Color("fbbf24")))
 	column.add_child(Ui.spacer(Vector2(0, 10)))
 	column.add_child(Ui.button("Nochmal", Vector2(340, 54), UiTheme.ACCENT, func() -> void:
 		Router.go_to("dragonflight_run", {"level": level_n})

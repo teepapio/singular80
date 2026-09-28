@@ -236,7 +236,7 @@ func _on_win() -> void:
 	var column := Ui.vbox(14)
 	center.add_child(column)
 	column.add_child(Ui.title("2048 erreicht!", 44, Color("edc22e")))
-	column.add_child(Ui.label("Punkte: %s" % Ui.format_number(score), 24, UiTheme.TEXT))
+	column.add_child(Ui.label(Loc.f("Punkte: %s", [Ui.format_number(score)]), 24, UiTheme.TEXT))
 	column.add_child(Ui.button("Weiter spielen", Vector2(360, 56), UiTheme.ACCENT, func() -> void:
 		keep_playing = true
 		close_modals()
@@ -257,7 +257,7 @@ func _on_game_over() -> void:
 	var column := Ui.vbox(14)
 	center.add_child(column)
 	column.add_child(Ui.title("Kein Zug mehr", 44, Color("f87171")))
-	column.add_child(Ui.label("Punkte: %s   ·   Beste Kachel: %d" % [Ui.format_number(score), best], 22, UiTheme.TEXT))
+	column.add_child(Ui.label(Loc.f("Punkte: %s   ·   Beste Kachel: %d", [[Ui.format_number(score), best]]), 22, UiTheme.TEXT))
 	column.add_child(Ui.button("Neu starten", Vector2(360, 56), UiTheme.ACCENT, func() -> void: reset_game()))
 	column.add_child(Ui.button("Lobby", Vector2(360, 56), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))
 

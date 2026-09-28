@@ -550,7 +550,7 @@ func _refresh_panel(zone: Dictionary) -> void:
 	_panel_games_list = []
 	for game in zone["games"]:
 		var entry: Dictionary = game
-		var button := Ui.button("%s  %s" % [entry["icon"], entry["name"]], Vector2(0, 40), Color(0.043, 0.071, 0.125, 0.95), func() -> void:
+		var button := Ui.button(Loc.f("%s  %s", [[entry["icon"], entry["name"]]]), Vector2(0, 40), Color(0.043, 0.071, 0.125, 0.95), func() -> void:
 			Sfx.level_up()
 			_start(entry)
 		)

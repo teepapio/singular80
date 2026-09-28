@@ -38,6 +38,18 @@ const SCREEN_SCRIPTS := {
 	"candy3d": "res://src/game/candy_match3/candy_match3_screen.gd",
 }
 
+## Screens that can be rebuilt without losing anything.
+##
+## A language change re-renders the current screen so the player sees the new
+## language right away instead of after the next navigation. That is only free
+## for a menu: rebuilding a running game throws the round away, and no setting is
+## worth that. Everything not listed here — every playfield, every result screen
+## — keeps its state and picks the new language up on the next switch.
+const REBUILD_SAFE: Array[String] = [
+	"lobby", "lobby_list", "main_menu", "mesh_gallery", "mesh_review",
+	"pang_menu", "dragonflight", "dragonflight_hatchery",
+]
+
 ## Set for one frame after a switch so games can react to the change.
 var current_id: String = ""
 var current_screen: Node = null
@@ -111,6 +123,12 @@ func play(game_id: String) -> void:
 
 func to_lobby() -> void:
 	go_to("lobby")
+
+
+## True when re-entering the current screen costs the player nothing — a menu
+## rather than a game in progress. `SettingsDialog` asks before it rebuilds.
+func rebuild_safe() -> bool:
+	return current_id != "" and REBUILD_SAFE.has(current_id) and not transitioning
 
 
 func _fade(target_alpha: float) -> void:

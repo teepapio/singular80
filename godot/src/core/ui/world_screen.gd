@@ -116,24 +116,34 @@ func _build_hud_layer() -> void:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(spacer)
 
-	bar.add_child(Ui.button("◀ Lobby", Vector2(120, 42), UiTheme.PANEL_LIGHT, func() -> void:
+	bar.add_child(Ui.button(Loc.t("ui.back_to_lobby"), Vector2(120, 42), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		Router.to_lobby()
 	))
-	bar.add_child(Ui.button("Vorschlag", Vector2(150, 42), UiTheme.PANEL_LIGHT, func() -> void:
+	bar.add_child(Ui.button(Loc.t("ui.suggestion"), Vector2(150, 42), UiTheme.PANEL_LIGHT, func() -> void:
 		SuggestDialog.open_world(self)
 	))
+	# See `Screen._build_top_bar`: the language is reachable from every screen so
+	# nobody has to walk back to the menu for it.
+	bar.add_child(Ui.button(Loc.t("ui.settings_short"), Vector2(60, 42), UiTheme.PANEL_LIGHT, func() -> void:
+		Sfx.select()
+		SettingsDialog.open(self)
+	))
 	var mute: Button
-	mute = Ui.button("♪ Ton an" if not Game.muted else "♪ stumm", Vector2(110, 42), UiTheme.PANEL_LIGHT, func() -> void:
+	mute = Ui.button(_mute_label(), Vector2(110, 42), UiTheme.PANEL_LIGHT, func() -> void:
 		Game.toggle_muted()
-		mute.text = "♪ Ton an" if not Game.muted else "♪ stumm"
+		mute.text = _mute_label()
 	)
 	bar.add_child(mute)
 
-	_loading_label = Ui.title("Singular 80 lädt …", 26, UiTheme.TEXT_DIM)
+	_loading_label = Ui.title(Loc.t("ui.loading"), 26, UiTheme.TEXT_DIM)
 	_loading_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_loading_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hud_root.add_child(_loading_label)
+
+
+func _mute_label() -> String:
+	return Loc.t("ui.sound_on") if not Game.muted else Loc.t("ui.sound_off")
 
 
 func hide_loading() -> void:
@@ -162,7 +172,7 @@ func notify(text: String, seconds: float = 2.2) -> void:
 		_notify_label.add_theme_color_override("font_outline_color", Color("020617"))
 		_notify_label.modulate.a = 0.0
 		hud_root.add_child(_notify_label)
-	_notify_label.text = text
+	_notify_label.text = Loc.resolve(text)
 	_notify_label.modulate.a = 1.0
 	_notify_time = seconds
 

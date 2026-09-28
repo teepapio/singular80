@@ -622,7 +622,7 @@ func _kill_enemy(enemy: Enemy) -> void:
 		_drop_gem(pos, extra_xp, Color("facc15"))
 	if bool(chain["milestone"]):
 		chain_milestone = 1.0
-		show_toast("Kette ×%d!" % mini(int(chain["chain"]), ArenaRuns.CHAIN_CAP), 1.1)
+		show_toast(Loc.f("Kette ×%d!", [mini(int(chain["chain"]), ArenaRuns.CHAIN_CAP)]), 1.1)
 	_drop_gem(pos, enemy.xp_value)
 	for mechanic in mechanics:
 		mechanic.on_enemy_killed(self, enemy)
@@ -753,7 +753,7 @@ func _spawn_boss(wave: int) -> void:
 		_boss_banner.text = "☠  %s erscheint  ☠" % boss_banner_name
 		_boss_banner.add_theme_color_override("font_color", Color("f87171"))
 		_boss_banner.modulate.a = 1.0
-	show_toast("%s ist aufgetaucht" % boss_banner_name, 2.0)
+	show_toast(Loc.f("%s ist aufgetaucht", [boss_banner_name]), 2.0)
 	shake_camera(220.0, 0.005)
 
 
@@ -871,7 +871,7 @@ func _show_upgrade_choices() -> void:
 
 	var column := Ui.vbox(18)
 	center.add_child(column)
-	column.add_child(Ui.title("Level %d — Upgrade wählen" % stats.level, 32))
+	column.add_child(Ui.title(Loc.f("Level %d — Upgrade wählen", [stats.level]), 32))
 
 	# What the draft is worth, in one line, before a single card is read.
 	var headline := ArenaRuns.draft_headline(pending_choices, stats)
