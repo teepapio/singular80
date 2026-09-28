@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { isDisplayText, collect, readAll, coverage, SOURCE } from '../scripts/locale.mjs';
+import {
+  isDisplayText, collect, readAll, coverage, identicalSet, SOURCE,
+} from '../scripts/locale.mjs';
 
 /**
  * Tests for the language catalogues and the script that maintains them.
@@ -17,12 +19,9 @@ const read = (p: string) => JSON.parse(readFileSync(join(root, p), 'utf8'));
 const all = readAll();
 const source = all.get(SOURCE)!;
 
-/** The entries `identical.json` says stay the same in every language. */
-function identicalKeys(): Set<string> {
-  const file = join(root, 'locale', 'identical.json');
-  if (!existsSync(file)) return new Set();
-  const parsed = JSON.parse(readFileSync(file, 'utf8'));
-  return new Set([...(parsed.keys ?? []), ...(parsed.text ?? [])]);
+/** The entries `identical.json` says one language keeps equal on purpose. */
+function identicalFor(code: string): Set<string> {
+  return identicalSet(readAll(), code);
 }
 
 /** `%` placeholders, the way GDScript counts them. */
@@ -80,10 +79,12 @@ describe('Kataloge', () => {
   });
 
   it('ist in jeder Sprache übersetzt, was übersetzbar ist', () => {
-    const identical = identicalKeys();
+    // Per language, because "honest" is a property of one language: "Bonbonland"
+    // is the French name of the Candy world, so only the English catalogue is
+    // asked to translate it.
     for (const [code, catalogue] of all) {
       if (code === SOURCE) continue;
-      const c = coverage(catalogue, source, identical);
+      const c = coverage(catalogue, source, identicalFor(code));
       expect(c.open, `${code} hat ${c.open} offene Einträge`).toBe(0);
       expect(c.percent).toBeGreaterThanOrEqual(0.999);
     }
@@ -97,20 +98,14 @@ describe('Kataloge', () => {
     //
     // Equal in only *one* language is not on the list: that one is genuinely
     // untranslated, and the coverage report has to keep saying so.
-    const identical = identicalKeys();
-    const targets = [...all.keys()].filter((c) => c !== SOURCE);
-    for (const section of ['keys', 'text'] as const) {
-      for (const key of Object.keys(source[section])) {
-        const everywhere = targets.every((code) => JSON.stringify(all.get(code)![section][key])
-          === JSON.stringify(source[section][key]));
-        expect(identical.has(key), `'${key}' ist überall gleich, steht aber nicht in identical.json`)
-          .toBe(everywhere);
-        for (const code of targets) {
-          const same = JSON.stringify(all.get(code)![section][key]) === JSON.stringify(source[section][key]);
-          if (same && !everywhere) {
-            // Flagged by the coverage report instead, which is the point.
-            expect(identical.has(key)).toBe(false);
-          }
+    for (const [code, catalogue] of all) {
+      if (code === SOURCE) continue;
+      const locked = identicalFor(code);
+      for (const section of ['keys', 'text'] as const) {
+        for (const [key, value] of Object.entries(catalogue[section])) {
+          const same = JSON.stringify(value) === JSON.stringify(source[section][key]);
+          expect(locked.has(key), `${code}: "${key}" ist gleich — steht aber nicht in identical.json (${code})`)
+            .toBe(same);
         }
       }
     }
