@@ -271,7 +271,7 @@ export function gameIds() {
 
 const staticScopes = {
   tooling: {
-    agent: 'merge',
+    agent: 'agent-merge',
     label: 'Werkzeuge & Manifest',
     // Every game agent has to touch `scopes.mjs` to register its new suites,
     // so an unowned manifest would flag the step it requires.
@@ -329,7 +329,7 @@ const staticScopes = {
     shared: ['package.json'],
   },
   meshes: {
-    agent: 'meshes',
+    agent: 'agent-mesh',
     label: 'Meshes & LOD-Stufen',
     own: [
       'godot/assets/meshes/**',
@@ -340,13 +340,13 @@ const staticScopes = {
     shared: [],
   },
   dashboard: {
-    agent: 'dashboard',
+    agent: 'agent-api',
     label: 'Dashboard & Server',
     own: ['server/**', 'src/dashboard/**', 'src/shared/**', 'dashboard.html', 'vite.config.ts', 'index.html'],
     shared: ['package.json'],
   },
   lobby: {
-    agent: 'lobby',
+    agent: 'agent-ui',
     label: 'Lobby & Kategorien',
     own: [
       'godot/src/game/lobby/**',
@@ -358,7 +358,7 @@ const staticScopes = {
     shared: ['godot/src/core/logic/game_registry.gd', 'godot/src/core/logic/asset_registry.gd'],
   },
   tests: {
-    agent: 'build',
+    agent: 'agent-probe',
     label: 'Test-Harness',
     // Only the harness itself. `godot/tests/test_<spiel>.gd` belongs to the game
     // of that name, so two games never append to the same file.
@@ -373,7 +373,7 @@ const staticScopes = {
       'godot/tests/test_screens.gd', 'godot/tests/test_improvements.gd'],
   },
   core: {
-    agent: 'build',
+    agent: 'agent-ui',
     label: 'Kernlogik & Basisklassen',
     own: [
       'godot/src/core/logic/mechanics/**',
@@ -425,7 +425,7 @@ const staticScopes = {
     shared: ['godot/src/core/autoload/game_state.gd', 'godot/src/core/logic/game_registry.gd'],
   },
   content: {
-    agent: 'game',
+    agent: 'agent-content',
     label: 'Content-Packs (Gegner, Waffen, Modi)',
     // The mirror under `godot/assets/content/` belongs here and not to a game:
     // it is written by `npm run content:sync` from `content/*.json` and
@@ -474,7 +474,7 @@ export function buildScopes() {
       ...logic.flatMap((file) => [file, `${file}.uid`]),
     ];
     scopes.set(base, {
-      agent: 'game',
+      agent: 'agent-game',
       label: `Spiel ${base}`,
       dir,
       own,
@@ -629,6 +629,29 @@ export function validate(scopes = buildScopes()) {
   // Every registry game needs a scope.
   for (const id of gameIds()) if (!scopes.has(id)) problems.push(`Spiel '${id}' hat keinen Scope`);
 
+  // Every scope must name an agent that exists, and every agent must be on
+  // someone's desk. Without this the manifest is internally consistent while
+  // three desks have nobody at them — which is exactly the state this check
+  // was written for.
+  const employed = agentDefinitions();
+  for (const [name, scope] of scopes) {
+    if (!employed.has(scope.agent)) {
+      problems.push(
+        `Scope '${name}' verweist auf Agent '${scope.agent}', den es nicht gibt — `
+        + `vorhanden: ${[...employed].sort().join(', ')}`,
+      );
+    }
+  }
+  for (const agent of [...employed].sort()) {
+    if (ROSTER_WITHOUT_DESK.has(agent)) continue;
+    const desks = [...scopes].filter(([, s]) => s.agent === agent).map(([id]) => id);
+    if (!desks.length) problems.push(`Agent '${agent}' sitzt an keinem Schreibtisch — er wird nie gerufen`);
+  }
+  for (const [agent, why] of ROSTER_WITHOUT_DESK) {
+    if (!employed.has(agent)) problems.push(`ROSTER_WITHOUT_DESK nennt '${agent}', den es nicht gibt`);
+    void why;
+  }
+
   // Every name must really exist, or the scope silently tests nothing and the
   // agent believes it is green.
   for (const [name, scope] of scopes) {
@@ -753,9 +776,44 @@ function repoFiles() {
   return trackedCache === false ? null : trackedCache;
 }
 
+/**
+ * Agents that legitimately sit at no scope, each with the reason.
+ *
+ * The reverse check — every agent must be on somebody's desk — is only true for
+ * the agents that own a file tree. A reviewer, an architect, a grader and the
+ * device lab own nothing on purpose: their power is the deny list. Listing them
+ * here rather than dropping the check keeps the rule honest in both directions
+ * and keeps the exception list short enough that someone re-reads it.
+ *
+ * The last three lines are not a category, they are an overlap that is still
+ * open: their file tree currently belongs to a scope owned by somebody else.
+ * See `docs` in the commit message; they are named, not hidden.
+ */
+export const ROSTER_WITHOUT_DESK = new Map([
+  ['agent-arch', 'schreibt Spezifikationen, besitzt keinen Code'],
+  ['agent-grade', 'schreibt Prüfprogramme, besitzt keinen Spielcode — genau das ist die Wand'],
+  ['agent-rev', 'liest und meldet, schreibt nie'],
+  ['agent-device', 'misst auf dem Gerät, schreibt nur Repro-Dateien'],
+  ['agent-hire', 'besitzt den Personalbestand selbst'],
+  ['agent-android', 'der Export ist eine Release-Stufe; `godot/project.godot` ist geteilte tooling-Fläche'],
+  ['agent-dev', 'der Generalist: der Aufrufer nennt den Scope, die Fachagenten sind seine Ausprägungen'],
+  ['agent-locale', '`locale/**` liegt heute im Scope `core` — die Dateien gehören core, der Katalog locale'],
+  ['agent-web', '`src/dashboard/**` liegt heute im Scope `dashboard` — geteilt mit agent-api'],
+]);
+
+/** Every agent definition that exists, as the bare name: `agent-game.md` → `agent-game`. */
+export function agentDefinitions() {
+  const dir = join(root, '.opencode', 'agents');
+  if (!existsSync(dir)) return new Set();
+  return new Set(
+    readdirSync(dir)
+      .filter((name) => name.endsWith('.md'))
+      .map((name) => name.slice(0, -3)),
+  );
+}
+
 /** Test files that define a suite, i.e. everything but the shared TestKit. */
-function suiteFiles() {
-  const dir = join(root, 'godot/tests');
+function suiteFiles() {  const dir = join(root, 'godot/tests');
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter((n) => n.startsWith('test_') && n.endsWith('.gd'))

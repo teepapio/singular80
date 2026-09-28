@@ -179,7 +179,7 @@ export function scopeForSuggestion(suggestion: Suggestion, siblings: Suggestion[
     // `agent: game` alone is not enough: the `content` scope belongs to a game
     // agent too. Only a scope derived from the game registry has a `dir`, and
     // only those describe an actual game a suggestion can name.
-    if (scope.agent !== 'game' || scope.aliasOf || !scope.dir) continue;
+    if (scope.agent !== 'agent-game' || scope.aliasOf || !scope.dir) continue;
     if (matchesAnyGame(text, id, scope.dir)) games.push(id);
   }
   // Longest id first: "candy3d" must not win over a longer registry id.

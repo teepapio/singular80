@@ -232,7 +232,7 @@ export function manifestHeadline(manifest: ScopeManifest | null): string {
   }
   // Defensive: the page can outlive a server that answered with an older shape.
   const scopes = manifest.scopes ?? [];
-  const games = scopes.filter((s) => s.agent === 'game').length;
+  const games = scopes.filter((s) => s.agent === 'agent-game').length;
   const base = `${scopes.length} Scopes, davon ${games} Spiel-Scopes · `;
   if (manifest.problems.length === 0) return `${base}Manifest ist konsistent.`;
   return `${base}${manifest.problems.length} Manifest-Problem(e): ${manifest.problems[0]}`;

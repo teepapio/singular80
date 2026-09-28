@@ -241,7 +241,7 @@ describe('scopeWarning', () => {
   const audit = (overrides: Partial<ScopeAudit>): ScopeAudit => ({
     runId: 'run_1',
     scopes: ['tetris'],
-    agent: 'game',
+    agent: 'agent-game',
     ok: true,
     violations: [],
     shared: [],
@@ -296,7 +296,7 @@ describe('scopeLabel', () => {
     error: null,
     sharedFiles: [],
     problems: [],
-    scopes: [{ id: 'tetris', agent: 'game', label: 'Spiel tetris', own: [], shared: [], suites: [], screens: [], aliasOf: null }],
+    scopes: [{ id: 'tetris', agent: 'agent-game', label: 'Spiel tetris', own: [], shared: [], suites: [], screens: [], aliasOf: null }],
   } as ScopeManifest;
 
   it('nutzt das Label aus dem Manifest', () => {
@@ -316,7 +316,7 @@ describe('manifestHeadline', () => {
       error: null,
       sharedFiles: [],
       problems: [],
-      scopes: Array.from({ length: 4 }, (_, i) => ({ id: `s${i}`, agent: i === 0 ? 'game' : 'build' })),
+      scopes: Array.from({ length: 4 }, (_, i) => ({ id: `s${i}`, agent: i === 0 ? 'agent-game' : 'build' })),
     } as unknown as ScopeManifest;
     expect(manifestHeadline(manifest)).toBe('4 Scopes, davon 1 Spiel-Scopes · Manifest ist konsistent.');
   });

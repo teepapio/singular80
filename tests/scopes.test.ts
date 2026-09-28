@@ -51,9 +51,9 @@ describe('Manifest-Brücke', () => {
     expect(manifest.status).toBe('ok');
     expect(manifest.scopes.length).toBeGreaterThan(15);
     const byId = new Map(manifest.scopes.map((s) => [s.id, s]));
-    expect(byId.get('tetris')?.agent).toBe('game');
-    expect(byId.get('meshes')?.agent).toBe('meshes');
-    expect(byId.get('dashboard')?.agent).toBe('dashboard');
+    expect(byId.get('tetris')?.agent).toBe('agent-game');
+    expect(byId.get('meshes')?.agent).toBe('agent-mesh');
+    expect(byId.get('dashboard')?.agent).toBe('agent-api');
     // The game scope owns its directory exclusively.
     expect(byId.get('tetris')?.own).toContain('godot/src/game/tetris/**');
     expect(byId.get('meshes')?.own).toContain('godot/assets/meshes/**');
@@ -163,7 +163,7 @@ describe('auditScope', () => {
     expect(audit.violations[0]).toContain('asset_registry.gd');
     expect(audit.violations[0]).toContain('meshes');
     expect(audit.violations.some((v) => v.includes('tetris_screen.gd'))).toBe(false);
-    expect(audit.agent).toBe('game');
+    expect(audit.agent).toBe('agent-game');
   });
 
   it('meldet geteilte Dateien als geteilt, nicht als Verstoß', () => {
