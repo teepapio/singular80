@@ -4,6 +4,28 @@ Godot-4-Spiel (Android) + Fastify-Backend + Web-Dashboard. Die App läuft offlin
 komplett; mit konfigurierter Server-Adresse holt sie Content und Vorschläge vom
 Backend.
 
+> **Eigene HTML-Seiten im Firefox des Besitzers zeigen:** Das Browser-Werkzeug des
+> Agenten braucht ein verbundenes Desktop-Fenster und lehnt `file://` ab. Der Weg,
+> der immer geht, ist ein statischer Server auf `127.0.0.1` plus das Firefox, das
+> dem Besitzer ohnehin offen ist:
+>
+> ```bash
+> cd .opencode && nohup python3 -m http.server 8731 --bind 127.0.0.1 >/tmp/opencode/httpd.log 2>&1 &
+> setsid firefox --new-window "http://127.0.0.1:8731/firma-organigramm.html" >/tmp/opencode/ff.log 2>&1 < /dev/null &
+> ```
+>
+> Nur Verzeichnisse ohne Geheimnisse servieren und immer an `127.0.0.1` binden: der
+> Server ist zum Ansehen da, nicht als Netzwerkdienst. `setsid` bei Firefox, weil
+> der Aufruf sonst den Prozess mit beendet. Die PID des Servers merken und ihn damit
+> beenden — `pgrep -f http.server` oder ein `kill` mit Namensmuster ist hier
+> verboten (siehe „Keine Prozesse nach Namensmuster töten"). Für den Besitzer zählt
+> nur, dass es sich öffnet; die PID gehört in den Bericht.
+>
+> **Und bevor es gezeigt wird, prüfen, dass es rendert.** Ohne verbundenes
+> Browser-Fenster sieht das kein Auge, sondern `node`: Tags balancieren, jedes
+> `var(--x)` in `:root` definiert, jede Klasse mit einer CSS-Regel. Ein
+> `</div` statt `</div>` fällt dort auf — im Firefox als kaputter Kasten.
+
 > **Achtung, gemeinsamer Arbeitsbaum:** Der Runner (`server/runner.ts`) startet für
 > eingereichte Vorschläge einen zweiten Agenten im selben Verzeichnis. Vor dem
 > Commit `git status` prüfen und nur die eigenen Dateien stagen — fremde, halb
