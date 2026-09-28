@@ -25,7 +25,7 @@ permissions:
     resource: "src/shared/**"
     effect: allow
   - action: edit
-    resource: "dashboard.html"
+    resource: "dashboard.html"   # nur noch der Weiterleiter für alte Links
     effect: allow
   - action: edit
     resource: "vite.config.ts"

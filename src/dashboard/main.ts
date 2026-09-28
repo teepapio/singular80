@@ -55,6 +55,13 @@ interface DashboardState {
   backup: BackupState | null;
   /** True while an operator order is being sent, so the button cannot double-fire. */
   taskSending: boolean;
+  /**
+   * Last failure of a *background* load, `null` while everything works. It is
+   * shown once in the top bar and never as a toast: the page refreshes itself
+   * every few seconds, and a toast per attempt is a wall of identical text that
+   * says nothing the status line does not.
+   */
+  loadError: string | null;
 }
 
 /** What the dashboard knows about `backup/dashboard.json` in the repository. */
@@ -102,6 +109,7 @@ const state: DashboardState = {
   splitFor: null,
   backup: null,
   taskSending: false,
+  loadError: null,
 };
 
 /** Newest live event per run id; an empty array means "nothing seen yet". */
@@ -194,7 +202,17 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body != null && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  const res = await fetch(path, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(path, { ...init, headers });
+  } catch {
+    // `fetch` wirft bei jedem Netzfehler ein englisches "Failed to fetch". Das
+    // stand unten im Fenster, im Acht-Sekunden-Takt, solange der Server weg
+    // war: eine Meldung, die dem Betreiber nichts sagte, was „getrennt“ nicht
+    // schon sagt. Eine fehlgeschlagene *Aktion* meldet ihren Fehler weiterhin
+    // per Toast — nur der Hintergrund-Ladevorgang ist jetzt still.
+    throw new Error('Server nicht erreichbar');
+  }
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `HTTP ${res.status}`);
@@ -966,14 +984,44 @@ async function loadSettings(): Promise<void> {
     : 'Noch kein Webhook gesetzt — Vorschläge werden nicht an Discord gesendet.';
 }
 
+/**
+ * Loads everything and re-renders. Deliberately quiet: this is what the page
+ * calls on a timer, so a failure here is a *state*, not an event. The last good
+ * data stays on screen — a dashboard that empties itself because a server is
+ * restarting has thrown away the information the operator is looking for.
+ */
 async function refreshAll(): Promise<void> {
   try {
     await Promise.all([loadSuggestions(), loadRuns(), loadQueue(), loadManifest()]);
+    setLoadError(null);
     render();
     void maybeAutoReconcile();
   } catch (err) {
-    toast((err as Error).message, 'error');
+    setLoadError((err as Error).message);
   }
+}
+
+/** Records the background-load state and paints it into the top bar. */
+function setLoadError(message: string | null): void {
+  if (state.loadError === message) return;
+  state.loadError = message;
+  renderApiState();
+}
+
+/**
+ * The server's own state, next to the stream's. They are different things and
+ * the old single chip blurred them: the live stream can be up while every
+ * request fails, and then nothing at all said so.
+ */
+function renderApiState(): void {
+  const el = $('#api-state');
+  if (!el) return;
+  const offline = state.loadError !== null;
+  el.hidden = !offline;
+  el.className = offline ? 'connection api-down' : 'connection';
+  el.textContent = offline
+    ? `${state.loadError} — lädt nach, sobald er wieder da ist`
+    : '';
 }
 
 function splitTasksFromArea(): string[] {
@@ -1092,6 +1140,7 @@ function connectEvents(): void {
   let hadConnection = false;
   source.onopen = () => {
     state.connected = true;
+    renderApiState();
     const el = $('#connection');
     el.classList.add('online');
     el.classList.remove('offline');
@@ -1341,7 +1390,9 @@ async function main(): Promise<void> {
   void loadBackup();
   connectEvents();
   setInterval(() => {
-    if (!state.connected) void refreshAll();
+    // Auch bei stehendem Ladefehler weiter versuchen: der Server kann längst
+    // wieder da sein, während die Seite auf seinen nächsten Versuch wartet.
+    if (!state.connected || state.loadError !== null) void refreshAll();
   }, 8000);
   // Keep the "last output" indicator ticking while a run is active.
   setInterval(() => {

@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Singular 80
+GenericName=Spiel-Dashboard
+Comment=Backend und Dashboard starten, dann das Dashboard im Browser öffnen
+# `Terminal=false` ist der ganze Punkt: ohne diese Zeile öffnet der Doppelklick
+# ein Terminalfenster, das nie wieder zugeht, weil der Dev-Server darin läuft.
+# `start.sh` hängt den Server an `setsid`, deshalb überlebt er das Fenster.
+Terminal=false
+Exec=/bin/bash -c 'cd "$(dirname "%k")" 2>/dev/null; exec bash ./start.sh'
+Path=
+Icon=applications-games
+StartupNotify=true
+StartupWMClass=Singular80
+Categories=Game;Development;
+Keywords=Singular 80;Dashboard;Godot;

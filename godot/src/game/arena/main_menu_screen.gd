@@ -244,32 +244,19 @@ func _style_mode(button: Button, selected: bool) -> void:
 
 
 func _server_label() -> String:
-	return "Server: %s" % (Game.server_url if Game.has_server() else "offline")
+	return ServerDialog.label()
 
 
 func _toggle_server() -> void:
-	var dialog := AcceptDialog.new()
-	dialog.title = "Server-Adresse"
-	dialog.dialog_hide_on_ok = true
-	var row := VBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
-	var edit := LineEdit.new()
-	edit.placeholder_text = "http://192.168.1.20:8787"
-	edit.text = Game.server_url
-	edit.custom_minimum_size = Vector2(400, 42)
-	row.add_child(edit)
-	var hint := Ui.label("Leer lassen = offline. Die App läuft dann mit den mitgelieferten Inhalten.", 14, UiTheme.TEXT_DIM)
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.custom_minimum_size = Vector2(400, 40)
-	row.add_child(hint)
-	dialog.add_child(row)
-	dialog.confirmed.connect(func() -> void:
-		Game.set_server_url(edit.text)
-		Content.reload_remote.call_deferred()
+	ServerDialog.open(self)
+	# Der Dialog schließt sich vor dem nächsten Frame; der Knopf bekommt seinen
+	# Text danach über `_refresh_server_button`, sonst stünde hier noch der alte.
+	_refresh_server_button.call_deferred()
+
+
+func _refresh_server_button() -> void:
+	if is_instance_valid(_server_button):
 		_server_button.text = _server_label()
-	)
-	add_child(dialog)
-	dialog.popup_centered()
 
 
 func _process(delta: float) -> void:

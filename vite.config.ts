@@ -15,9 +15,12 @@ export default defineConfig({
     target: 'es2022',
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
+      // `index.html` *ist* das Dashboard, `dashboard.html` nur noch der
+      // Weiterleiter für alte Links. Beide müssen als Einstieg benannt werden,
+      // sonst baut Vite die Weiterleitung nicht mit.
       input: {
-        main: 'index.html',
-        dashboard: 'dashboard.html',
+        dashboard: 'index.html',
+        redirect: 'dashboard.html',
       },
     },
   },

@@ -97,6 +97,16 @@ textarea {
   box-shadow: 0 0 8px var(--green);
 }
 
+/* Der Server selbst antwortet nicht — getrennt vom Zustand des Datenstroms. */
+.connection.api-down {
+  color: var(--amber);
+  border-color: var(--amber);
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ghost {
   background: transparent;
   color: var(--text);

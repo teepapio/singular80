@@ -19,6 +19,10 @@ const QueueClass := preload("res://src/core/logic/suggestion_queue.gd")
 ## is already part of every screen's load path.
 const LegalClass := preload("res://src/core/logic/app_legal.gd")
 
+## By path, like every other module here: `--script` mode does not refresh the
+## global class cache, so a `class_name` added today would not resolve.
+const ServerDialogClass := preload("res://src/core/ui/server_dialog.gd")
+
 ## A private file, so the suite never touches the queue a real run would use.
 const TEST_PATH := "user://test_suggestions.json"
 
@@ -39,6 +43,7 @@ func run(kit: TestKit, scene_tree: SceneTree) -> void:
 	_close()
 	await _delivery()
 	_legal()
+	_server_address()
 
 
 func _close() -> void:
@@ -411,4 +416,59 @@ func _legal() -> void:
 	t.equal(LegalClass.report_message(7, "Beleidigung", "Grund", "n"),
 		LegalClass.report_body(7, "Beleidigung", "Grund", "n"),
 		"Zwischenablage und Mail tragen denselben Text")
+	t.suite_done()
+
+# --- Server-Adresse ----------------------------------------------------------
+
+## Der Dialog, ueber den die Adresse des Backends eingetragen wird.
+##
+## Er lag vorher fest im Menue des Arena-Spiels und war damit von jedem anderen
+## Bildschirm aus unerreichbar. Wer auf dem Hauptbildschirm einen Vorschlag
+## abschickte, ohne die Adresse je eingetragen zu haben, sah die Idee in
+## `user://` liegen und bekam nichts zu sehen — sie war "gespeichert" und kam
+## trotzdem nie an. Diese Suite sichert beide Haelften: dass die Adresse von
+## ueberall erreichbar beschriftet wird und dass sie eine wartende Schlange
+## sofort anstoesst.
+func _server_address() -> void:
+	t.suite("Server-Adresse")
+
+	# Ohne Adresse sagt der Knopf das auch. Ein Knopf, der "Server: offline"
+	# anzeigt, braucht keine weitere Erklaerung — er *ist* die Erklaerung.
+	t.equal(ServerDialogClass.label(), "Server: offline",
+		"Ohne Adresse steht 'offline' im Knopf")
+
+	# Eine wartende Schlange, wie sie nach einem Offline-Vorschlag aussieht.
+	var pending: Array[Dictionary] = []
+	QueueClass.push(pending, {
+		"text": "Der Knopf des Siedlers ist auf dem Tablet verdeckt.",
+		"author": "Test",
+		"createdAt": 1,
+	})
+	Api._queue = pending
+	t.equal(Api.pending_count(), 1, "Der Vorschlag liegt in der Warteschlange")
+
+	# Der teuerste Fall: der Zaehler ist so weit gelaufen, dass die Backoff-Zeit
+	# am Deckel klebt. Genau hier wartet eine Idee fuenf Minuten, obwohl der
+	# Spieler die Adresse jederzeit eintragen koennte.
+	Api._attempt = 8
+	Api._arm(8)
+	t.check(Api._timer.wait_time >= 290.0,
+		"Ohne Adresse wartet die Schlange die maximale Backoff-Zeit")
+
+	# Und jetzt die Adresse — der Moment, in dem die Idee raus muss.
+	ServerDialogClass.apply("http://127.0.0.1:8787")
+	t.equal(Game.server_url, "http://127.0.0.1:8787", "Die Adresse ist gesetzt")
+	t.check(ServerDialogClass.label().ends_with("http://127.0.0.1:8787"),
+		"Der Knopf zeigt die Adresse statt 'offline'")
+	t.equal(Api._attempt, 0, "Der Zaehler der Warteversuche ist zurueckgesetzt")
+	t.check(Api._timer.wait_time <= 1.0,
+		"Die Schlange wird sofort wieder angestoßen, nicht in fuenf Minuten")
+
+	# Aufraeumen: die restlichen Suiten und Screens gehen von "ohne Server" aus.
+	ServerDialogClass.apply("")
+	Api._queue.clear()
+	Api._attempt = 0
+	Api._arm(0)
+	t.equal(ServerDialogClass.label(), "Server: offline",
+		"Eine leere Adresse stellt den Offline-Zustand wieder her")
 	t.suite_done()

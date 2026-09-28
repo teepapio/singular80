@@ -3,65 +3,163 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Singular 80</title>
-    <style>
-      :root { color-scheme: dark; }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: radial-gradient(circle at 30% 20%, #0f172a, #05070d 70%);
-        color: #e2e8f0;
-        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-        padding: 24px;
-      }
-      main { max-width: 640px; text-align: center; }
-      h1 {
-        margin: 0 0 8px;
-        font-size: clamp(36px, 8vw, 64px);
-        letter-spacing: 0.02em;
-        color: #f8fafc;
-        text-shadow: 0 0 24px rgba(14, 165, 233, 0.45);
-      }
-      p.tagline { margin: 0 0 28px; color: #7dd3fc; font-size: 18px; }
-      ul { text-align: left; color: #cbd5e1; line-height: 1.7; margin: 0 0 28px; }
-      a.button {
-        display: inline-block;
-        padding: 14px 26px;
-        border-radius: 10px;
-        background: #0ea5e9;
-        color: #04121f;
-        font-weight: 700;
-        text-decoration: none;
-        margin: 0 6px;
-      }
-      a.button.ghost { background: #1e293b; color: #e2e8f0; border: 1px solid #475569; }
-      footer { margin-top: 32px; color: #64748b; font-size: 13px; }
-    </style>
+    <title>Singular 80 · Dashboard</title>
+    <!--
+      Diese Seite *ist* die Startseite: `/` öffnet das Dashboard. Vorher lag
+      davor eine Landingpage mit Spieleliste und einem „Dashboard öffnen“-Knopf,
+      also genau der Vorspann, den man beim Start nicht haben will.
+    -->
   </head>
   <body>
-    <main>
-      <h1>SINGULAR 80</h1>
-      <p class="tagline">Ein Spiel, das von seinen Spielern gebaut wird.</p>
-      <ul>
-        <li>🏟️ Arena-Survival mit Wellen, XP und Upgrades</li>
-        <li>🧱 Tetris · 🃏 Texas Hold'em · 🃏 FreeCell · ⚫ Dame</li>
-        <li>🔢 2048</li>
-        <li>💎 Crystal Jumper 3D · 🎄 Weihnachts-Merge 3D · 🎃 Halloween-Merge 3D</li>
-        <li>🏇 Pferde-Parcours 3D · 🐉 Drachen-RPG 3D</li>
-      </ul>
-      <p>
-        Das Spiel läuft als native Android-App (Godot 4) auf Handy und Tablet.
-        Diese Seite hostet das Vorschlags-Dashboard.
-      </p>
-      <p>
-        <a class="button" href="/dashboard.html">📊 Dashboard öffnen</a>
-        <a class="button ghost" href="/api/health">API-Status</a>
-      </p>
-      <footer>Singular 80 · Content v1 · <a href="/dashboard.html" style="color:#38bdf8">Ideen einreichen</a></footer>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">◆</span>
+        <div>
+          <h1>Singular 80</h1>
+          <p>Spieler-Vorschläge · priorisiert · ein Klick zur Umsetzung</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span id="connection" class="connection offline"><span class="dot"></span> getrennt</span>
+        <span id="api-state" class="connection api-down" hidden></span>
+        <button id="reload-content" class="ghost" title="Content-Dateien neu einlesen">⟳ Content</button>
+        <button id="open-settings" class="ghost">⚙ Einstellungen</button>
+        <a class="ghost" href="/api/health" target="_blank" rel="noreferrer">⟳ API-Status</a>
+      </div>
+    </header>
+
+    <section class="stats" id="stats"></section>
+
+    <section class="toolbar">
+      <nav class="tabs" id="tabs">
+        <button data-tab="queue" class="active">🚀 Queue</button>
+        <button data-tab="new">🆕 Neu</button>
+        <button data-tab="top">🏆 Top</button>
+        <button data-tab="cluster">🧩 Cluster</button>
+        <button data-tab="done">✅ Erledigt</button>
+      </nav>
+      <div class="filters">
+        <input id="search" type="search" placeholder="Suchen …" />
+        <div class="chips" id="categories"></div>
+      </div>
+    </section>
+
+    <main class="layout">
+      <section class="list-panel">
+        <div id="list" class="list"></div>
+        <div id="empty" class="empty" hidden>Keine Vorschläge in dieser Ansicht.</div>
+      </section>
+
+      <aside class="run-panel">
+        <div class="panel-header">
+          <h2>OpenCode Runs</h2>
+          <div class="panel-header-actions">
+            <button id="toggle-pause" class="ghost small" title="Warteschlange anhalten bzw. fortsetzen">⏸</button>
+            <button id="cleanup-runs" class="ghost small" title="Runs aufräumen, deren Prozess nicht mehr läuft">🧹</button>
+            <button id="refresh-runs" class="ghost small" title="Aktualisieren">⟳</button>
+          </div>
+        </div>
+        <div id="queue-state" class="queue-state"></div>
+        <form id="task-form" class="task-form">
+          <label for="task-text">Direkter Auftrag an OpenCode</label>
+          <textarea
+            id="task-text"
+            rows="3"
+            spellcheck="false"
+            placeholder="z. B. „Der Siedler-Knopf zum Zurücksetzen ist auf dem Tablet verdeckt — mach ihn größer“"
+          ></textarea>
+          <div class="task-row">
+            <small id="task-hint" class="run-sub">Der Auftrag landet sofort in der Warteschlange, ohne Abstimmung.</small>
+            <button type="submit" id="task-send" class="primary">🚀 Auftrag starten</button>
+          </div>
+        </form>
+        <div id="active-run" class="active-run"></div>
+        <div id="run-history" class="run-history"></div>
+        <details id="backup-panel" class="scope-panel">
+          <summary>Backup im Repository</summary>
+          <p id="backup-headline" class="run-sub">Backup-Status wird geladen …</p>
+          <div class="card-actions">
+            <button type="button" id="backup-write" class="ghost small">⬇ Ins Repo schreiben</button>
+            <button type="button" id="backup-read" class="ghost small">⬆ Aus Repo lesen</button>
+          </div>
+          <small class="run-sub"
+            >Alle Vorschläge, Entscheidungen, Stimmen und Runs liegen als JSON im Repository. Nach einem
+            `git commit` ist die Historie auf jeder Maschine wieder da.</small
+          >
+        </details>
+        <details id="scope-panel" class="scope-panel">
+          <summary>Scopes &amp; Agenten</summary>
+          <p id="scope-headline" class="run-sub"></p>
+          <div id="scope-list" class="scope-list"></div>
+        </details>
+      </aside>
     </main>
+
+    <dialog id="settings-dialog">
+      <form method="dialog" class="settings-form">
+        <h2>Einstellungen</h2>
+        <label>Discord-Webhook-URL
+          <input id="setting-webhook" type="text" placeholder="https://discord.com/api/webhooks/…" />
+          <small id="webhook-state"></small>
+        </label>
+        <label>Modell für Runs (leer = Standard)
+          <input id="setting-model" type="text" placeholder="z. B. opencode-go/deepseek-v4.1-flash" />
+        </label>
+        <label>Zusätzliche Anweisungen für den Umsetzungs-Agenten
+          <textarea id="setting-instructions" rows="3"></textarea>
+        </label>
+        <label class="row">
+          <input id="setting-autoapprove" type="checkbox" />
+          Auto-Genehmigung ab Score
+          <input id="setting-autoscore" type="number" min="0" max="200" step="1" class="number" />
+        </label>
+        <h3>Runner</h3>
+        <label class="row">
+          Zeitlimit je Run (Minuten, 0 = aus)
+          <input id="setting-timeout" type="number" min="0" max="1440" step="1" class="number" />
+        </label>
+        <label class="row">
+          Wiederholungen bei Fehlschlag (0 = keine)
+          <input id="setting-retries" type="number" min="0" max="5" step="1" class="number" />
+        </label>
+        <label class="row">
+          Wartezeit vor der ersten Wiederholung (Sekunden)
+          <input id="setting-backoff" type="number" min="0" max="3600" step="5" class="number" />
+        </label>
+        <label class="row">
+          Spuren (gleichzeitige OpenCode-Sitzungen, 1 = nacheinander)
+          <input id="setting-lanes" type="number" min="1" max="8" step="1" class="number" />
+        </label>
+        <small class="run-sub">Nach Ablauf des Zeitlimits wird der Prozess beendet und der Run als fehlgeschlagen
+          vermerkt. Eine Wiederholung ist ein eigener Run in der Historie — es entsteht dadurch kein zweiter
+          Commit für denselben Vorschlag.<br />
+          Zwei Spuren teilen sich nur den Baum, wenn ihre Scopes sich nicht überschneiden: ein Run wartet
+          auf eine freie Spur, statt einem belegten Scope zu schreiben.</small>
+        <div class="settings-actions">
+          <button type="button" id="test-webhook" class="ghost">Testnachricht senden</button>
+          <button type="button" id="save-settings" class="primary">Speichern</button>
+          <button type="button" id="close-settings" class="ghost">Schließen</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="split-dialog">
+      <form method="dialog" class="settings-form">
+        <h2>Auftrag aufteilen</h2>
+        <p id="split-parent" class="split-parent"></p>
+        <label>Einzelaufträge — eine Zeile pro Auftrag
+          <textarea id="split-tasks" rows="8" spellcheck="false"></textarea>
+        </label>
+        <small id="split-count" class="split-count"></small>
+        <div class="settings-actions">
+          <button type="button" id="split-auto" class="ghost">🤖 Automatisch aufteilen</button>
+          <button type="button" id="split-cancel" class="ghost">Abbrechen</button>
+          <button type="button" id="split-create" class="primary">Aufträge anlegen</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toasts" class="toasts"></div>
+    <script type="module" src="/src/dashboard/main.ts"></script>
   </body>
 </html>

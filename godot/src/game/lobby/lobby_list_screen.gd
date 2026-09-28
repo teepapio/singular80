@@ -15,6 +15,8 @@ const LIST_BOTTOM := 600.0
 const BUTTON_GAP := 9.0
 
 var _muted_button: Button
+var _server_button: Button
+var _pending_label: Label
 
 
 func _ready_game() -> void:
@@ -194,7 +196,51 @@ func _build_footer() -> void:
 	)
 	row.add_child(_muted_button)
 
+	# Die Server-Adresse gehört auf den Hauptbildschirm, nicht in das Menü eines
+	# einzelnen Spiels: wer hier „Vorschlag“ tippt und keine Adresse eingetragen
+	# hat, sieht die Idee sonst in `user://` verschwinden, ohne etwas zu
+	# bemerken. Der Dialog ist derselbe wie im Arena-Menü.
+	_server_button = Ui.button(ServerDialog.label(), Vector2(230, 48), UiTheme.PANEL_LIGHT, func() -> void:
+		ServerDialog.open(self)
+		_refresh_server_button.call_deferred()
+	)
+	row.add_child(_server_button)
+
 	var footer := Ui.label("Mehr Spiele folgen — reiche deine Idee ein!  ·  Content v%d" % Content.version, 14, UiTheme.TEXT_MUTED)
 	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(footer)
+
+	# Der ehrliche Zustand: wie viele Vorschläge gerade auf eine Zustellung
+	# warten. Vorher stand diese Zahl nirgends, obwohl `Api` sie seit Jahren
+	# sendet — ein Vorschlag, der liegen bleibt, sah einfach aus, als wäre er
+	# angekommen.
+	_pending_label = Ui.label("", 14, UiTheme.TEXT_MUTED)
+	_pending_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_pending_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.add_child(_pending_label)
+	Api.pending_changed.connect(_on_pending_changed)
+	_on_pending_changed(Api.pending_count())
+
+
+## Zeigt den Wartestand, mit dem Zusatz, der die Ursache nennt.
+func _on_pending_changed(count: int) -> void:
+	if not is_instance_valid(_pending_label):
+		return
+	if count <= 0:
+		_pending_label.text = ""
+		_pending_label.visible = false
+		return
+	_pending_label.visible = true
+	# Ohne Adresse ist die Diagnose eindeutig — sie zu verschweigen hieße, dem
+	# Spieler eine Datenlücke zu zeigen, wo er nur eine Einstellung ändern muss.
+	_pending_label.text = "%s — %s" % [
+		Api.pending_hint(),
+		"es fehlt die Server-Adresse" if not Game.has_server() else "Server nicht erreichbar",
+	]
+	_pending_label.add_theme_color_override("font_color", UiTheme.WARNING)
+
+
+func _refresh_server_button() -> void:
+	if is_instance_valid(_server_button):
+		_server_button.text = ServerDialog.label()

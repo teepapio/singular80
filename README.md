@@ -27,7 +27,7 @@ Sockel stellen, `E` drücken.
 ```bash
 npm install
 
-# Backend + Dashboard im Browser (http://localhost:5173/dashboard.html)
+# Backend + Dashboard im Browser (http://localhost:5173/)
 npm run dev
 
 # Android-APK bauen  →  build/singular80.apk
@@ -36,10 +36,12 @@ adb install -r build/singular80.apk
 ```
 
 Die App startet ohne Server im **Offline-Modus** mit den mitgelieferten Inhalten.
-Damit Vorschläge und Live-Content funktionieren, im Hauptmenü auf
-`Server: offline` tippen und die Adresse des Backends eintragen
-(z. B. `http://192.168.1.20:8787`). Offline eingereichte Vorschläge werden
-nachgeholt, sobald wieder ein Server erreichbar ist.
+Damit Vorschläge und Live-Content funktionieren, auf dem Hauptbildschirm unten
+auf `Server: offline` tippen und die Adresse des Backends eintragen
+(z. B. `http://192.168.1.20:8787`). Offline eingereichte Vorschläge bleiben auf
+dem Gerät und gehen raus, sobald die Adresse eingetragen ist oder wieder ein
+Server erreichbar wird — der Hauptbildschirm sagt beide Male, wie viele
+warten.
 
 ## Vorschläge sagen von selbst, woher sie kommen
 

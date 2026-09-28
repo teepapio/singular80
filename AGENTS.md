@@ -170,7 +170,8 @@ das Auswerten von Logcat gibt es die Agenten `apk` und `device-debug`.
 - `godot/` — das gesamte Spiel (GDScript). Siehe unten.
 - `server/` — Fastify-API, SQLite, Discord, OpenCode-Runner. **Nicht ändern**,
   außer der Vorschlag verlangt es ausdrücklich.
-- `src/dashboard/`, `dashboard.html` — Web-Dashboard, möglichst unverändert.
+- `src/dashboard/`, `index.html` — Web-Dashboard, möglichst unverändert. `/` ist
+  das Dashboard; `dashboard.html` ist nur noch der Weiterleiter für alte Links.
 - `src/shared/` — geteilte Typen/Sortierung. Nicht ändern.
 - `content/*.json` — **einzige** Quelle für Spieldaten.
 - `godot/assets/content/` — Spiegel davon für die App (nie direkt editieren).
@@ -288,6 +289,15 @@ Level-Schlüssel ist die globale Levelnummer (`"7"`), das Tageslevel `"daily:JJJ
 vorangestellt (`SuggestionContext.compose`), damit niemand „geht um Tetris“
 tippen muss. `Api.submit_suggestion(text, author, kontext)` macht das gleiche für
 Aufrufe außerhalb des Dialogs.
+
+**Ohne eingetragene Server-Adresse geht ein Vorschlag nirgends hin**, er landet
+in `user://` und wartet. Die Adresse ist deshalb über `ServerDialog`
+(`godot/src/core/ui/server_dialog.gd`) von **jedem** Bildschirm aus erreichbar —
+sie lag vorher nur im Menü des Arena-Spiels, also genau nicht dort, wo jemand
+sie braucht, der Tetris spielt. `ServerDialog.apply()` setzt die Adresse **und
+stößt die Warteschlange sofort an**; ohne das `Api.wake()` wartet die Idee noch
+bis zu `BACKOFF_MAX` (5 Minuten), obwohl die Adresse längst stimmt. Der
+Hauptbildschirm zeigt die wartende Zahl samt Grund an.
 
 ### Performance-Regeln
 
