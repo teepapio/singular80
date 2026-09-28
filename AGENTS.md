@@ -62,17 +62,171 @@ genau dort, und ein geparkter Branch ist der richtige Ort dafür, nicht `main`.
 
 ## Sprache im Code
 
-**Kommentare auf Englisch.** Der Besitzer liest den Code nicht, aber er
-bezahlt für ihn, und ein deutscher Kommentar in einer englischen Codebasis
-sieht nach einer zweiten Sprache aus, die niemand mehr pflegt. Doc-Kommentare
-(`## …`) und `//`-Zeilen auf Englisch, im Tonfall der vorhandenen englischen
-Kommentare. **Die Oberfläche des Spiels bleibt deutsch** — das ist etwas
-anderes: `Ui.label("Server: %s")`, `toast('Run gestartet')` und alle
-Meldungstexte gehören dem Spieler, nicht dem Code.
+**Code und Kommentare auf Englisch — und mit ihnen jeder spielersichtbare Text
+in der Quelle.** Der Besitzer liest den Code nicht, aber er bezahlt für ihn, und
+ein deutscher Kommentar in einer englischen Codebasis sieht nach einer zweiten
+Sprache aus, die niemand mehr pflegt. Doc-Kommentare (`## …`) und `//`-Zeilen
+auf Englisch, im Tonfall der vorhandenen englischen Kommentare.
+
+Die Oberfläche des Spiels ist **genauso** englisch:
+`Ui.label(Loc.f("Points: %s", [score]))`, `toast("Not enough gold")` und alle
+Meldungstexte sind Quelltext, aus dem `locale/en.json` erzeugt wird. **Deutsch
+ist die Sprache, in der das Spiel ausgeliefert wird** — für den Besitzer und
+für die Spieler, die es so wollen — und wird als Übersetzung in
+`locale/de.json` gepflegt, nicht im Code. Der ganze Apparat steht unter
+„Sprache"; hier nur die drei Regeln, die man beim Schreiben trifft.
 
 Ausnahmen, in denen Deutsch im Kommentar richtig ist: ein Zitat aus dem
 Spiel, ein deutscher Terminus technicus, oder ein Kommentar, der eine
 deutsche Bedienoberfläche erklärt.
+
+- **Ein neuer spielersichtbarer String wird auf Englisch geschrieben** und
+  bekommt seinen Katalogeintrag über `npm run locale:sync`. Ein deutsches
+  Literal bedeutet nicht „deutsche Oberfläche", sondern *übersetzbarer String
+  ohne Übersetzung*: Er steht in `en.json` unter seinem deutschen Text, und
+  `npm run locale:check` nennt ihn beim nächsten Lauf — samt String, damit die
+  Meldung jemanden erreicht, der ihn wiedererkennt.
+- **Was nicht durch `Loc` geht, braucht eine ausdrückliche Auflösung.**
+  `label.text = "…"` per Zuweisung, ein `Label3D`, `draw_string(…)` und
+  `LineEdit.placeholder_text` setzen ihren Text direkt am Knoten. Der Extraktor
+  in `scripts/locale.mjs` findet solche Stellen, `Ui.label`/`Ui.button`/
+  `Ui.title`/`Loc.resolve` finden sie zur Laufzeit nicht. Also
+  `Ui.label(Loc.f("Points: %s", [n]))` oder `node.text = Loc.resolve("…")`
+  schreiben, nie `node.text = "…"` mit einem Satz darin. Eine Prüfung 2026 fand
+  26 Beschriftungen in genau dieser Form; mehrere davon standen bereits im
+  Katalog und wurden zur Laufzeit trotzdem ignoriert.
+
+## Sprache
+
+Das Spiel liefert **auf Deutsch, Englisch und Französisch** aus. Das ist eine
+Eigenschaft des Produkts, kein Werkzeug — aber die Art, wie sie gebaut ist, ist
+eine Entscheidung, die man nicht täglich neu trifft, sondern nur einmal richtig
+oder einmal falsch.
+
+**Die Quellsprache ist Englisch, und das heißt: jedes Literal in `godot/src`
+ist englisch.** `content/*.json` ist englisch, die Doc-Kommentare sind
+englisch, und `Ui.label(Loc.f("Points: %s", [score]))` ist englisch.
+`locale/en.json` wird von `npm run locale:sync` aus genau diesen Literalen
+erzeugt und **nie von Hand editiert**; `de.json` und `fr.json` sind Übersetzungen
+und werden von Hand gepflegt. Die Richtung war vorher umgekehrt, und das war
+falsch: ein gettext-Katalog ist eine Liste von msgids, die alle im Projekt lesen
+können — eine msgid, die keiner lesen kann, ist eine, die keiner reparieren
+kann. Wer aus einem deutschen Schlüssel übersetzt, muss erraten, was der Satz
+heißen soll, und die Wahrheit liegt in einer Datei, die der Rest des
+Repositories nicht lesen kann.
+
+Damit ist Deutsch eine Sprache des Spiels wie jede andere: `de.json` ist
+genauso eine Übersetzung wie `fr.json`, und es ist die, die der Besitzer
+ausgeliefert bekommt. Stand heute:
+
+```
+de  Deutsch    100.0 %   605/605 übersetzt  ·  69 gleich  ·  0 offen  (keys 60/60, text 545/545)
+en  Quelle   674 Einträge
+fr  Français   100.0 %   613/613 übersetzt  ·  61 gleich  ·  0 offen  (keys 62/62, text 551/551)
+```
+
+**Es gibt zwei Arten von Schlüssel, und die Wahl ist nicht Geschmack.** `keys`
+sind handgeschriebene Bezeichner (`ui.close`, `legal.reason.insult`): stabil,
+wenn der Satz umformuliert wird, und *eine* Übersetzung je Kontext — nötig
+überall dort, wo derselbe Satz zweimal anders gesagt werden muss oder wo sich
+der Wortlaut noch ändert. `text` sind **die englischen Quellstrings als
+Schlüssel** (`"◀ Lobby"`, `"Points: %s"`). Genau das ist der Grund, warum die
+rund 550 Aufrufstellen von `Ui.label`, `Ui.title`, `Ui.button`, `show_toast`
+und `notify` übersetzen, ohne dass eine einzige umgeschrieben wurde:
+`Ui.label` läuft durch `Loc.resolve`, und das schlägt den übergebenen String im
+`text`-Abschnitt nach.
+
+Neue **Bezeichner** legt man von Hand in die `keys`-Karte aller drei Kataloge;
+`npm run locale:check` sagt „Kennung '…' wird benutzt, fehlt aber in en.json",
+wenn eine davon fehlt. Ein reiner Anzeigetext braucht keinen Bezeichner, er ist
+selbst einer — das spart die Entscheidung, wie er später heißen soll.
+
+**`Loc.t` für Bezeichner, `Loc.f` für Vorlagen, und die Bedingung bleibt
+draußen.** `Loc.f` übersetzt die Vorlage und formatiert *danach*;
+`Loc.f("Points: %s", [n])` ist richtig, `Ui.label("Points: %s" % n)` ist es
+nicht, weil dort der Katalog einen fertigen Satz mit eingebackener Zahl führen
+müsste. Der Fehler, den die Regel wirklich verhindert, ist ein anderer. In
+`"TEMP" % n if n > 0 else "OTHER"` bindet `%` stärker als die Bedingung; wer
+das `%` in die Argumentliste von `Loc.f` zieht, reicht einem `%d` einen String
+und Godot meldet zur Laufzeit `String formatting error: a number is required` —
+mitten im Level, in der Sprache, die der Spieler gerade gewählt hat. Eine
+Datei, die parst, ist keine Datei, die formatiert. `scripts/locale.mjs` zählt
+deshalb die Platzhalter einer `Loc.f`-Vorlage gegen ihre Werte, hängt die
+Meldung an `check` und damit an `npm test`. Und ehrlich gesagt: genau diese
+Bedingungsform sieht der Lint nicht, er überspringt sie absichtlich, weil ein
+Zweig je einen anderen Aufbau haben kann und das keine Frage ist, die ein
+Prüfprogramm beantworten kann. Die Suite deckt es nicht ab, also bleibt das
+Augenmaß.
+
+**Eine Sprache hinzuzufügen** ist eine Datei und ein Durchlauf:
+
+1. `locale/<code>.json` anlegen: `code`, `name`, `native`, `numbers`, `keys`,
+   `text`.
+2. `npm run locale:check` nennt jede Kennung und jeden Quellstring, der fehlt —
+   die Liste, mit der man arbeitet.
+3. Die Einträge füllen. Alles, was absichtlich der Quelle gleich bleiben soll,
+   nicht übersetzen, sondern in Schritt 4 markieren.
+4. `npm run locale:lock` schreibt `locale/identical.json` neu: alles, was noch
+   gleich ist, kommt auf die Liste. Die Liste ist je Sprache, weil „Bonbonland"
+   der französische Name der Candy-Welt ist und „Candy Land" der englische —
+   eine gemeinsame Liste müsste eines von beidem als unübersetzt melden. Nach
+   einer Übersetzung gehört der Eintrag wieder von der Liste, sonst ist sie ein
+   Versteck für einen Satz, den niemand übersetzt hat.
+5. `npm run locale:sync` — schreibt den Katalog, spiegelt nach
+   `godot/assets/locale/` und ergänzt die anderen Kataloge um den neuen Stand.
+6. Committen, Spiegel mit.
+
+Bei Schritt 1 ist `native` Pflicht und nicht Kosmetik: die Sprachauswahl zeigt
+den Namen, den sich die Sprache selbst gibt — „Deutsch", „English",
+„Français". `fr` auf einer französischen Oberfläche hilft niemandem. Und keine
+Flagge: `⚑` steht in DejaVu Sans, `🌐` nicht, und ein Emoji, das die Schrift
+nicht hat, ist auf dem Gerät ein leeres Kästchen.
+
+**Nicht übersetzt wird**, und jeweils aus einem Grund, den man nicht wegargumentieren
+kann:
+
+- `REASONS`, `report_subject`, `report_body` in `app_legal.gd`. Sie gehen in
+  die Melde-Mail an die Moderationsadresse, und das ist ein internes Dokument,
+  kein Spieltext. Was der Spieler im Menü liest, ist `REASON_LOC_KEYS` plus
+  `reason_label()` — dieselbe Liste zweimal, weil der Postfach-Eingang sie
+  sorbieren und klassifizieren muss.
+- `"Anonym"` in `suggest_dialog.gd` und `suggestion_queue.gd`. Das ist ein Wert
+  für das Backend, kein Satz; übersetzt wäre er eine andere Person im
+  Dashboard.
+- Ein Satz, den ein Kommentar zitiert, um eine Zeile GDScript zu erklären.
+- Alles in `locale/exclude.json`. Der Generator kann das nicht entscheiden: ein
+  einzelner Buchstabe wie `"W"` ist in der U-Bahn ein Linienzeichen und in
+  „Vorschlag" ein Wortanfang, und eine Übersetzung wäre beides falsch. Jede
+  Zeile dort ist eine bewusste Entscheidung, kein Versehen.
+
+**Es gibt zwei Suiten, und sie prüfen verschiedene Dinge.**
+`godot/tests/test_loc.gd` (sieben Suites: Kataloge, Auflösung, Platzhalter,
+Plural, Zahlen, Wechsel, Oberfläche) prüft die *Laufzeit*. `tests/locale.test.ts`
+(28 Tests) prüft die *Daten und den Extraktor*. Die zweite Suite gibt es, weil
+die erste beweist, dass der Motor richtig läuft, und **nichts** bemerken würde,
+wenn ein Katalog einen Commit hinterher ist, eine Übersetzung einen Platzhalter
+verloren hat oder ein Filter plötzlich Mesh-Kennungen als Sätze einreiht.
+
+**`run_tests.gd` pinnt die Sprache auf `de`, und diese Zeilen zu löschen sieht
+nach Aufräumen aus, ist aber keines.** `Loc` folgt beim ersten Start dem
+Gerät, und die halbe Suite prüft deutsche Strings — die Warteschlangen-Anzeige,
+der Melde-Dialog, die Dateipfade. Auf einem französischen Laptop schlüge sie an
+einem Grund fehl, der mit dem Code nichts zu tun hat, und die Suite wäre genau
+auf der Maschine grün, auf der sie geschrieben wurde. `Loc.reset()` und
+`Loc.set_code("de")` stehen deshalb ganz oben, vor allem anderen. Nebenbei ein
+zweiter Grund, sie nicht anzufassen: `Loc` schreibt in einem `--script`-Lauf
+nicht in `user://singular80.cfg`, sonst hätte ein grüner Lauf dem Entwickler
+Sprache, Ton, Serveradresse und Hochscores hinter dem Rücken überschrieben.
+
+`godot/src/main.gd` ruft `Loc.boot()`, bevor es den ersten Screen gibt, und
+`SettingsDialog` — Sprache, Ton, Touch-Steuerung, Serveradresse, wartende
+Vorschläge, erreichbar über den `⚙`-Knopf in der Top-Bar jedes Screens — ist
+der einzige Ort, an dem `Loc.set_code` aufgerufen wird. Ein Wechsel rendert den
+aktuellen Screen nur dann sofort neu, wenn `Router.rebuild_safe()` das erlaubt:
+`REBUILD_SAFE` kennt `lobby`, `lobby_list`, `main_menu`, `mesh_gallery`,
+`pang_menu` und `dragonflight`. Alles andere nimmt die neue Sprache beim
+nächsten Bildschirmwechsel mit, und der Dialog sagt dem Spieler vorher, welche
+von beiden gerade gilt.
 
 ## Changelog
 
@@ -162,14 +316,15 @@ Beispiel für denselben Auftrag mit einem offenen Punkt:
 
 > - Telegram: `/task` nimmt freie Aufträge an und startet sie sofort
 > - Changelog: Zeile pro Auftrag, eigener Commit, wird gepusht
-> - `npm run typecheck` schlägt fehl: die neue `locale.ts` fehlt noch in
->   `tsconfig.json` — das ist die Aufgabe der Sitzung, die sie geschrieben hat
+> - `npm run typecheck` schlägt fehl: die neue `scripts/locale.d.mts` steht
+>   noch nicht in `tsconfig.json` — das ist die Aufgabe der Sitzung, die sie
+>   geschrieben hat
 > - Offen: der Android-Build ist nicht neu, der neue Dialog ist im Gerät noch
 >   nicht sichtbar
 
 ## Vor der ersten Änderung
 
-Drei Sekunden, die in dieser Sitzung einen halben Tag ersetzt haben:
+Vier Sekunden, die in dieser Sitzung einen halben Tag ersetzt haben:
 
 1. **`git status` lesen.** Der Runner kann eine Arbeit halbfertig liegen lassen
    und dabei den Index ruinieren. Der Zustand, der hier auftrat: acht Dateien
@@ -186,6 +341,11 @@ Drei Sekunden, die in dieser Sitzung einen halben Tag ersetzt haben:
 3. **`godot --headless --path godot --import`**, sobald du eine neue Datei mit
    `class_name` angelegt hast. Siehe unten — das ist der teuerste Fehler
    überhaupt.
+4. **Ein neuer spielersichtbarer String:** englisch schreiben, dann
+   `npm run locale:sync`, und den Spiegel unter `godot/assets/locale/` mit
+   committen. Ohne den Spiegel übersetzt das Gerät einen Katalog, den das
+   Repository nicht hat — und `npm run locale:check` fällt bei genau dem
+   Unterschied um.
 
 ## Neue `class_name` → sofort importieren
 
@@ -258,12 +418,24 @@ das Auswerten von Logcat gibt es die Agenten `apk` und `device-debug`.
 ## Befehle
 
 - `npm run typecheck` — `tsc --noEmit`, muss fehlerfrei sein.
-- `npm test` — prüft zuerst den Content-Sync, dann `vitest run` (Server/Dashboard).
+- `npm test` — prüft zuerst den Content-Sync, dann `locale:check` (Kataloge
+  gegen den Code, Platzhalter gegen Werte, Spiegel gegen Quelle), dann
+  `vitest run` (Server/Dashboard).
 - `npm run test:game` — **headless GDScript-Suite** (Regeln *und* echte Screens).
 - `npm run build` — Vite-Build des Dashboards.
 - `npm run content:sync` — `content/*.json` nach `godot/assets/content/` spiegeln
   (Pflicht vor jedem Godot-Build; `npm test` schlägt bei Abweichung fehl).
-- `npm run godot:import` — Content spiegeln + Godot-Import der Assets.
+- `npm run locale:sync` — `locale/*.json` erzeugen/ergänzen und nach
+  `godot/assets/locale/` spiegeln. **`locale/en.json` wird dabei überschrieben
+  und darf nie von Hand editiert werden.**
+- `npm run locale:check` — Drift, Platzhalter, Struktur, Spiegel, `identical`;
+  Teil von `npm test`.
+- `npm run locale:list` — Deckung je Sprache, der Stand zum Zitieren.
+- `npm run locale:lock` — schreibt `locale/identical.json`: die Einträge, die
+  absichtlich der Quelle gleich bleiben, je Sprache.
+- `npm run godot:import` — Content **und** Locale spiegeln, dann Godot-Import
+  der Assets. Ohne den Locale-Schritt überlebt ein veralteter Spiegel den
+  Import, und das Gerät übersetzt einen Katalog, den das Repository nicht hat.
 - `npm run godot:apk` — Debug-APK, `npm run godot:apk:release` — signiertes Release.
 - `npm run godot:android-template` — Godot-Android-Build-Template installieren
   (läuft in `godot:apk*` automatisch mit).
@@ -282,6 +454,9 @@ das Auswerten von Logcat gibt es die Agenten `apk` und `device-debug`.
 - `src/shared/` — geteilte Typen/Sortierung. Nicht ändern.
 - `content/*.json` — **einzige** Quelle für Spieldaten.
 - `godot/assets/content/` — Spiegel davon für die App (nie direkt editieren).
+- `locale/*.json` — Sprachkataloge, **einzige** Quelle für die Texte; `en.json`
+  wird erzeugt, `de.json`/`fr.json` von Hand gepflegt (siehe „Sprache").
+- `godot/assets/locale/` — Spiegel davon für die App (nie direkt editieren).
 - `scripts/blender/` — headless Blender-Generator für die 3D-Meshes.
 - `backup/dashboard.json` — **gehört ins Git**: die Historie des Dashboards
   (Vorschläge, Entscheidungen, Stimmen, Runs mit Commit). Siehe unten.
@@ -306,6 +481,15 @@ auf `content/` oder `core/` zeigen. Der Scope-Audit meldet es pro Run
 (`shared: [...]`), und das Panel beschriftet ein solches Paar
 (`laneRisks` in `src/dashboard/queueControls.ts`). Ein Run ohne bekannten Scope
 oder mit breitem primären Scope bekommt den Baum immer allein.
+
+**Scopes der Sprachschicht.** Der `core`-Scope besitzt
+`godot/src/core/logic/loc.gd`, `godot/src/core/ui/**` (also
+`settings_dialog.gd` mit), `godot/tests/test_loc.gd` sowie `locale/**` und
+`godot/assets/locale/**`; der `tooling`-Scope besitzt `scripts/locale.mjs` und
+`scripts/locale.d.mts`. Zwei Agenten dürfen deshalb nie gleichzeitig an
+Katalog und Werkzeug arbeiten — aber sie dürfen es auch nicht versuchen,
+`locale/**` zu fassen, um an `content/` zu kommen: das sind zwei verschiedene
+Bäume.
 
 **Direkte Aufträge.** `POST /api/tasks` (im Panel: „Direkter Auftrag an OpenCode")
 legt eine Empfehlung mit `source: 'operator'` an und stellt sie sofort in die
@@ -332,14 +516,16 @@ godot/
 ├── assets/
 │   ├── meshes/               Low-Poly-GLBs (+ med/, high/, lod.json)
 │   ├── content/              gespiegelte content/*.json
+│   ├── locale/               gespiegelte locale/*.json (Kataloge)
 │   └── fonts/                DejaVu Sans (normal + fett)
 ├── src/
-│   ├── main.gd               Boot, Backend-Probe im Hintergrund
+│   ├── main.gd               Boot, Loc.boot(), Backend-Probe im Hintergrund
 │   ├── core/
 │   │   ├── autoload/         InputSetup, Game, Content, Sfx, Api, Router
 │   │   ├── logic/            reine Spiellogik (Renderer-frei, testbar)
 │   │   │   ├── asset_registry.gd    Mesh-Keys, Kategorien, LOD-Stufen
 │   │   │   ├── game_registry.gd     Kategorien + alle Spiele
+│   │   │   ├── loc.gd               Sprachkataloge, Loc.t/tn/f/resolve, Zahlen
 │   │   │   ├── mesh_gallery.gd      Galerie-Geometrie, Merkliste, Vorschlag
 │   │   │   ├── suggestion_context.gd  Herkunft eines Vorschlags
 │   │   │   ├── tetris_rules.gd      T-Spins, Punkte, B2B, Brettgefahr
@@ -349,7 +535,9 @@ godot/
 │   │   │   ├── inventory.gd         generisches Inventarsystem
 │   │   │   └── …                    Karten, 2048, Merge, Kristall, Drache …
 │   │   └── ui/                Screen/WorldScreen-Basis, Theme, Widgets,
-│   │                          VirtualStick, Kartenrenderer, Dialoge
+│   │                          VirtualStick, Kartenrenderer, Dialoge und
+│   │                          settings_dialog.gd (Sprache, Ton, Touch,
+│   │                          Serveradresse — der ⚙-Knopf jedes Screens)
 │   └── game/<spiel>/          ein Verzeichnis je Spiel (s. u.)
 └── tests/                    TestKit, Regel-, Verbesserungs- und Screentests
 ```
@@ -398,13 +586,15 @@ tippen muss. `Api.submit_suggestion(text, author, kontext)` macht das gleiche f�
 Aufrufe außerhalb des Dialogs.
 
 **Ohne eingetragene Server-Adresse geht ein Vorschlag nirgends hin**, er landet
-in `user://` und wartet. Die Adresse ist deshalb über `ServerDialog`
-(`godot/src/core/ui/server_dialog.gd`) von **jedem** Bildschirm aus erreichbar —
-sie lag vorher nur im Menü des Arena-Spiels, also genau nicht dort, wo jemand
-sie braucht, der Tetris spielt. `ServerDialog.apply()` setzt die Adresse **und
-stößt die Warteschlange sofort an**; ohne das `Api.wake()` wartet die Idee noch
-bis zu `BACKOFF_MAX` (5 Minuten), obwohl die Adresse längst stimmt. Der
-Hauptbildschirm zeigt die wartende Zahl samt Grund an.
+in `user://` und wartet. Die Adresse ist deshalb über den `⚙`-Knopf in der
+Top-Bar **jedes** Screens erreichbar, und der Knopf öffnet `SettingsDialog`
+(`godot/src/core/ui/settings_dialog.gd`) — dort steht sie neben Sprache, Ton
+und Touch-Steuerung. Vorher lag sie nur im Menü des Arena-Spiels, also genau
+nicht dort, wo jemand sie braucht, der Tetris spielt. `ServerDialog.apply()`
+setzt die Adresse **und stößt die Warteschlange sofort an**; ohne das
+`Api.wake()` wartet die Idee noch bis zu `BACKOFF_MAX` (5 Minuten), obwohl die
+Adresse längst stimmt. Der Hauptbildschirm zeigt die wartende Zahl samt Grund
+an, `SettingsDialog` dieselbe Zahl.
 
 ### Performance-Regeln
 

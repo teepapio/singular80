@@ -43,6 +43,20 @@ dem Gerät und gehen raus, sobald die Adresse eingetragen ist oder wieder ein
 Server erreichbar wird — der Hauptbildschirm sagt beide Male, wie viele
 warten.
 
+## Drei Sprachen, ein Zahnrad
+
+Das Spiel spricht **Deutsch, Englisch und Französisch**. Umgestellt wird über den
+`⚙`-Knopf oben in der Leiste jedes Bildschirms — dort stehen neben der Sprache
+auch Ton, Touch-Steuerung und die Server-Adresse. Jeder Bildschirm benennt sich
+in der eingestellten Sprache, das Menü zeigt „Deutsch", „English",
+„Français".
+
+Die Texte liegen in `locale/*.json` und werden wie `content/` in die App
+gespiegelt. Der Code selbst ist englisch, und `locale/en.json` wird aus ihm
+erzeugt — Deutsch ist die Sprache, in der das Spiel ausgeliefert wird, und
+genauso eine Übersetzung wie Französisch. Der ganze Apparat steht in
+`AGENTS.md`.
+
 ## Vorschläge sagen von selbst, woher sie kommen
 
 Jeder Vorschlag trägt den Bildschirm, aus dem er abgeschickt wurde — im Dialog
@@ -99,7 +113,7 @@ npm run backup -- read    # Datei einlesen und mit der Datenbank zusammenführen
 
 ```bash
 npm run typecheck   # Server + Dashboard
-npm test            # Vitest (Server, Dashboard, Backup) + Content-Sync-Prüfung
+npm test            # Vitest (Server, Dashboard, Backup) + Content-Sync + Sprachkataloge
 npm run test:game   # GDScript-Suite: Regeln *und* echte Screens, headless
 ```
 
@@ -117,7 +131,8 @@ server/           Fastify-API, SQLite, Discord, OpenCode-Runner
 src/dashboard/    Web-Dashboard
 backup/           Dashboard-Historie als JSON (gehört ins Git)
 content/          einzige Quelle der Spieldaten (wird in die App gespiegelt)
-scripts/          Content-Sync, Android-Template, API-Smoke, Blender-Meshes
+locale/           Sprachkataloge, einzige Quelle der Texte (wird in die App gespiegelt)
+scripts/          Content-Sync, Sprachkataloge, Android-Template, API-Smoke, Blender-Meshes
 tests/            Vitest für Server und Dashboard
 ```
 
