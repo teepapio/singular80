@@ -14,3 +14,7 @@ session. Written by the runner on success, or by
 - **#4** Telegram messages are down to the number and the suggestion — no emoji, no dashboard link.
 - **#5** `CHANGELOG.md` gets a line for every implemented suggestion, committed and pushed on its own.
 - **edi:** Work from a normal session now gets its own changelog line, marked `edi:` so it stays apart from a suggestion number.
+
+## 2026-09-28
+
+- **#6** …erührt. Jetzt die Prüfungen:Typecheck ist sauber. Jetzt die Test-Suite:5 Tests sind fehlgeschlagen… — `47740e5`
