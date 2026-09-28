@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Singular 80 — Organigramm der Firma</title>
+<style>
+  :root{
+    --bg:#0b0f16; --panel:#121826; --panel2:#0f1421; --line:#243044;
+    --ink:#e6ecf7; --ink-dim:#8b9ab4; --ink-faint:#5d6b85;
+    --po:#e2e8f0; --machine:#64748b; --dev:#38bdf8; --review:#2dd4bf;
+    --qa:#f97316; --releng:#34d399; --relmgr:#a855f7; --support:#fb7185;
+    --gap:#ef4444; --ok:#86efac;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.55 "DejaVu Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+    padding:32px 24px 80px;
+  }
+  header{max-width:1560px;margin:0 auto 26px}
+  h1{font-size:26px;margin:0 0 8px;letter-spacing:.2px}
+  .sub{color:var(--ink-dim);font-size:14px;max-width:105ch;margin:0 0 14px}
+  .wrap{max-width:1560px;margin:0 auto}
+  code,.mono{font-family:"DejaVu Sans Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+
+  /* the invariant, stated once, above everything */
+  .invariant{
+    background:linear-gradient(180deg,#151d2c,#0f1421);
+    border:1px solid #33425c; border-left:3px solid var(--ok);
+    border-radius:10px; padding:13px 16px; font-size:14px; color:var(--ink-dim);
+  }
+  .invariant b{color:var(--ink)}
+  .invariant .why{font-size:12.5px;color:var(--ink-faint);margin-top:6px;max-width:120ch}
+
+  /* ---------- tiers ---------- */
+  section{margin-top:40px}
+  h2{font-size:17px;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+  h2 .bar{width:3px;height:16px;background:var(--ink-faint);border-radius:2px}
+  .note{color:var(--ink-dim);font-size:13px;margin:0 0 16px;max-width:118ch}
+  .tier{margin-bottom:6px}
+  .tier-label{
+    font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);
+    margin:0 0 7px;
+  }
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:stretch}
+  .spine{
+    width:2px;height:16px;background:var(--line);margin:0 auto;
+  }
+
+  .card{
+    background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border:1px solid var(--line); border-radius:10px;
+    padding:12px 14px; min-width:240px; text-align:left; flex:1 1 240px;
+  }
+  .card .kicker{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+  .card .name{font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px;margin-top:2px}
+  .card .role{color:var(--ink-dim);font-size:12.5px;margin-top:4px}
+  .card ul{margin:8px 0 0;padding:0;list-style:none;font-size:12px;color:var(--ink-faint)}
+  .card li{padding:1px 0}
+  .card li b{color:var(--ink-dim);font-weight:600}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none;box-shadow:0 0 0 3px rgba(255,255,255,.05)}
+
+  /* tier: owner */
+  .c-po{border-top:2px solid var(--po);min-width:340px}
+  .c-machine{border:1px dashed #3b4a63;border-top:2px dashed var(--machine);background:linear-gradient(180deg,#141a26,#0e121b)}
+  .c-machinelabel{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--machine);margin-bottom:5px}
+
+  /* ---------- departments ---------- */
+  .depts{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(268px,1fr))}
+  .dept{
+    background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;
+  }
+  .dept .head{padding:11px 14px 9px;border-top:2px solid var(--line)}
+  .dept .head .rname{font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:8px}
+  .dept .head .rdesc{color:var(--ink-dim);font-size:12px;margin-top:4px}
+  .dept .body{padding:0 14px 12px;display:flex;flex-direction:column;gap:8px;flex:1}
+  .dept .foot{
+    margin-top:auto;padding:8px 14px;border-top:1px solid var(--line);
+    font-size:11.5px;color:var(--ink-faint);
+  }
+
+  .pill{
+    font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
+    border:1px solid var(--line);border-radius:999px;padding:1px 7px;color:var(--ink-faint);
+  }
+  .pill.live{border-color:#2f4a3a;color:var(--ok);background:#12211a}
+  .pill.hire{border-color:#5b2b2b;color:#fca5a5;background:#241416}
+  .pill.mach{border-color:#3b4a63;color:#a8b6cc}
+
+  .person{
+    border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#0e131d;
+  }
+  .person .pname{font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .person .pdesk{font-size:11.5px;color:var(--ink-faint);margin-top:3px}
+  .person .pmodel{font-size:11px;color:var(--ink-faint);margin-top:2px}
+  .person.placeholder{border-style:dashed;opacity:.85}
+  .person .pwhy{font-size:11.5px;color:var(--ink-dim);margin-top:4px}
+
+  .can,.cant{display:grid;grid-template-columns:auto 1fr;gap:3px 8px;font-size:11.5px;margin-top:2px}
+  .can div:nth-child(odd),.cant div:nth-child(odd){color:var(--ink-faint)}
+  .y{color:var(--ok)} .n{color:#fca5a5}
+
+  /* ---------- tables ---------- */
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--ink-faint);font-weight:600;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase}
+  tr:last-child td{border-bottom:0}
+  td.mono{color:var(--ink-dim)}
+  .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:7px;vertical-align:1px}
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:10px;padding:4px 6px}
+
+  /* ---------- flows ---------- */
+  .flow{display:flex;align-items:stretch;flex-wrap:wrap;gap:0}
+  .flow .step{
+    background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    padding:8px 11px;font-size:12.5px;color:var(--ink-dim);min-width:132px;flex:1 1 132px;
+  }
+  .flow .step b{display:block;color:var(--ink);font-size:12.5px;margin-bottom:2px}
+  .flow .step.machine{border-style:dashed}
+  .flow .step.gate{border-color:#4c3a6b;background:#16122620}
+  .flow .arrow{display:flex;align-items:center;padding:0 7px;color:var(--ink-faint)}
+
+  .lanes{display:grid;grid-template-columns:1fr 54px 1fr;gap:0;align-items:stretch;margin-top:4px}
+  .lane-col{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:linear-gradient(180deg,var(--panel),var(--panel2))}
+  .lane-col h4{margin:0 0 3px;font-size:13.5px;display:flex;align-items:center;gap:8px}
+  .lane-col .lsum{font-size:12px;color:var(--ink-faint);margin-bottom:10px}
+  .lane-col ol{margin:0;padding-left:18px;font-size:12.5px;color:var(--ink-dim)}
+  .lane-col ol li{margin:3px 0}
+  .artifact{
+    display:flex;align-items:center;justify-content:center;text-align:center;
+    font-size:11.5px;color:var(--ink-faint);padding:0 6px;
+  }
+  .artifact .box{
+    border:1px dashed #3b4a63;border-radius:8px;padding:8px 6px;width:100%;
+  }
+  .artifact .box b{display:block;color:var(--ink-dim);font-size:12px;margin-bottom:3px}
+  .verdict{
+    margin-top:12px;border:1px solid var(--line);border-left:3px solid var(--relmgr);
+    border-radius:8px;padding:10px 13px;font-size:12.5px;color:var(--ink-dim);background:#121826;
+  }
+  .verdict b{color:var(--ink)}
+
+  /* ---------- findings ---------- */
+  .finding{
+    border:1px solid var(--line);border-left:3px solid var(--gap);border-radius:9px;
+    padding:11px 14px;margin-bottom:10px;background:#121826;
+  }
+  .finding h4{margin:0 0 4px;font-size:13.5px;color:#fca5a5}
+  .finding p{margin:0;font-size:12.5px;color:var(--ink-dim);max-width:120ch}
+  .finding .fix{color:var(--ink-faint);font-size:12px;margin-top:5px}
+
+  /* ---------- governance ---------- */
+  .gov{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+  .gov .card{min-width:0}
+  .ok{color:var(--ok)} .dim{color:var(--ink-dim)} .faint{color:var(--ink-faint)}
+  footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--line);color:var(--ink-faint);font-size:12.5px;max-width:110ch}
+</style>
+</head>
+<body>
+<header>
+  <h1>Singular 80 Software — Organigramm</h1>
+  <p class="sub">
+    Wie die Agenten als Firma organisiert sind: Rollen, Menschen, Maschinen, und die zwei
+    Wege, die eine Arbeit vom Vorschlag bis zum Gerät nimmt. Gestrichelt = gibt es noch
+    nicht. Rot = Befund, der heute offen ist.
+  </p>
+  <div class="invariant">
+    <b>Die eine Regel:</b> Die Firma besitzt ein Repository, nicht ein Verzeichnis.
+    Jede Arbeit ist ein Zweig, bevor sie eine Änderung ist. Nur die Rolle
+    <b>Release Manager</b> fasst <code>main</code> an, und nur über das Gate.
+    <div class="why">
+      Aus dieser Regel fallen die meisten Regeln in <code>AGENTS.md</code> von selbst weg:
+      kein <code>git add -A</code> mehr, kein „Tests gehören der Leitsitzung", kein
+      „Parken statt Merge" — geparkt ist bereits alles, und Tests laufen im eigenen Auscheckout.
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ============================ DIE FIRMA ============================ -->
+<section>
+  <h2><span class="bar"></span>Die Firma</h2>
+  <p class="note">
+    Oben die Menschen, darunter die Maschinen, darunter die Rollen — und unter jeder Rolle
+    die Menschen, die sie heute besetzen. Die Zuordnung ist Daten, nicht Text: eine Rolle
+    ohne Besetzung ist ein offener Posten, kein fehlendes Dokument.
+  </p>
+
+  <div class="tier">
+    <p class="tier-label">Tier 0 — Board</p>
+    <div class="row">
+      <div class="card c-po">
+        <div class="kicker">Mensch · Vetorecht</div>
+        <div class="name"><span class="dot" style="background:var(--po)"></span>Product Owner</div>
+        <div class="role">Der Besitzer. Was die Spieler wollen, in Reihenfolge.</div>
+        <ul>
+          <li><b>Veto</b> auf allem, ohne Begründungspflicht</li>
+          <li>liest <b>keinen</b> Diff — das ist nicht seine Rolle</li>
+          <li>bekommt einen Wochenbericht: was rausging, was blockiert, was es kostete</li>
+        </ul>
+      </div>
+      <div class="card c-po">
+        <div class="kicker">Mensch · derselbe Besitzer, anderer Modus</div>
+        <div class="name"><span class="dot" style="background:var(--po)"></span>Leitsitzung</div>
+        <div class="role">Interaktiver Schreibtisch. Verteilt, entscheidet, dokumentiert.</div>
+        <ul>
+          <li>eigener Zweig wie jeder andere — er ist selbst eine Lane</li>
+          <li><code>AGENTS.md</code>, Regeln, Preflight</li>
+          <li>ruft die <code>merge</code>-, <code>apk</code>-, <code>device-debug</code>-Agenten</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="spine"></div>
+
+  <div class="tier">
+    <p class="tier-label">Tier 1 — Maschinen (keine Agenten, nicht verhandelbar)</p>
+    <div class="row">
+      <div class="card c-machine">
+        <div class="c-machinelabel">Maschine</div>
+        <div class="name">Resource Manager</div>
+        <div class="role">Wer arbeitet woran, in welcher Reihenfolge, auf welchem Schreibtisch.</div>
+        <ul>
+          <li><code>runner.ts</code>: <code>pump()</code>, Lanes, <code>scopesConflict</code></li>
+          <li>Backoff, Wiederholung, Aufnahme nach Neustart</li>
+          <li>entscheidet <b>nicht</b>, ob Code gut ist</li>
+        </ul>
+      </div>
+      <div class="card c-machine">
+        <div class="c-machinelabel">Maschine</div>
+        <div class="name">Continuous Integration</div>
+        <div class="role">Bevor etwas <code>main</code> wird.</div>
+        <ul>
+          <li><code>npm run test:game -- --isolated</code> — Wegwerf-Worktree, 11 s Import</li>
+          <li><code>typecheck</code>, <code>npm test</code></li>
+          <li>muss <b>unarguierbar</b> sein, sonst ist es kein CI</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="spine"></div>
+
+  <div class="tier">
+    <p class="tier-label">Tier 2 — Rollen und ihre Besetzung</p>
+    <div class="depts">
+
+      <div class="dept" style="border-top-color:var(--dev)">
+        <div class="head">
+          <div class="rname"><span class="dot" style="background:var(--dev)"></span>Developer</div>
+          <div class="rdesc">Schreibt Code, in einem Zweig, mit gezieltem Testlauf.</div>
+        </div>
+        <div class="body">
+          <div class="can">
+            <div>darf</div><div class="y">eigenen Scope ändern, committen, Tests schreiben</div>
+            <div>darf nicht</div><div class="n"><code>main</code> anfassen, fremde Scopes, selbst mergen</div>
+          </div>
+          <div class="person">
+            <div class="pname">game <span class="pill live">im Dienst</span></div>
+            <div class="pdesk">Schreibtisch: ein Spiel-Scope, aus der Registry-ID abgeleitet</div>
+            <div class="pmodel">space-bunny-free#high</div>
+          </div>
+          <div class="person">
+            <div class="pname">meshes <span class="pill live">im Dienst</span></div>
+            <div class="pdesk">Schreibtisch: Meshes, LOD, Blender-Skripte</div>
+            <div class="pmodel">space-bunny-free#high</div>
+          </div>
+          <div class="person">
+            <div class="pname">dashboard <span class="pill live">im Dienst</span></div>
+            <div class="pdesk">Schreibtisch: Server, API, Web-Dashboard</div>
+            <div class="pmodel">space-bunny-free#high</div>
+          </div>
+        </div>
+        <div class="foot">3 Personen, 1 Rolle. Ein Schreibtisch je Person.</div>
+      </div>
+
+      <div class="dept" style="border-top-color:var(--review)">
+        <div class="head">
+          <div class="rname"><span class="dot" style="background:var(--review)"></span>Reviewer</div>
+          <div class="rdesc">Liest den Diff, bevor er echt werden darf.</div>
+        </div>
+        <div class="body">
+          <div class="can">
+            <div>darf</div><div class="y">Diff lesen, Suites und Scopes prüfen, ablehnen</div>
+            <div>darf nicht</div><div class="n">selber schreiben, selbst mergen</div>
+          </div>
+          <div class="person placeholder">
+            <div class="pname">review <span class="pill hire">einstellen</span></div>
+            <div class="pwhy">
+              Fängt, was eine Maschine nicht kann: falsch verstandenen Code im eigenen
+              Scope, fehlende Testregistrierung, Allokation pro Frame, deutscher Kommentar,
+              eine Changelog-Zeile, die mehr verspricht als der Diff hergibt.
+            </div>
+          </div>
+        </div>
+        <div class="foot">Die billigste Einstellung mit dem höchsten Ertrag. Ohne sie ist es kein Unternehmen, sondern eine Einzelarbeit mit Besprechungen.</div>
+      </div>
+
+      <div class="dept" style="border-top-color:var(--qa)">
+        <div class="head">
+          <div class="rname"><span class="dot" style="background:var(--qa)"></span>QA / Device Lab</div>
+          <div class="rdesc">Misst auf echtem Gerät. Schreibt den Reproduktionsfall.</div>
+        </div>
+        <div class="body">
+          <div class="can">
+            <div>darf</div><div class="y">Gerät, Logcat, Bildrate, Speicher, Spielstand, Tasten</div>
+            <div>darf nicht</div><div class="n">Code ändern — <b>das ist der ganze Punkt</b></div>
+          </div>
+          <div class="person">
+            <div class="pname">device-debug <span class="pill live">im Dienst</span></div>
+            <div class="pdesk">Geräte: Xiaomi Pad 5, 11T Pro · über <code>scripts/adb-device.sh</code></div>
+            <div class="pwhy">
+              Heute misst und repariert dieselbe Sitzung — deshalb ist „der Fix ist grün"
+              eine Behauptung. Ab hier: misst, liefert <code>scripts/repro/&lt;id&gt;.json</code>, repariert nicht.
+            </div>
+          </div>
+        </div>
+        <div class="foot">Abnahmetest: ein Fremder muss den Fehler aus der Repro-Datei allein auslösen können.</div>
+      </div>
+
+      <div class="dept" style="border-top-color:var(--releng)">
+        <div class="head">
+          <div class="rname"><span class="dot" style="background:var(--releng)"></span>Release Engineer</div>
+          <div class="rdesc">Baut das Artefakt und legt es auf das Gerät.</div>
+        </div>
+        <div class="body">
+          <div class="can">
+            <div>darf</div><div class="y">APK bauen, installieren, Spiegel, Messwerte anhängen</div>
+            <div>darf nicht</div><div class="n">entscheiden, was ausgeliefert wird</div>
+          </div>
+          <div class="person">
+            <div class="pname">apk <span class="pill live">im Dienst</span></div>
+            <div class="pdesk">Export-Preset, Inhaltsprüfung des Pakets, <code>adb install -r</code></div>
+          </div>
+        </div>
+        <div class="foot">Getrennt vom Release Manager, weil sonst ein Build-Schritt auch Politik macht.</div>
+      </div>
+
+      <div class="dept" style="border-top-color:var(--relmgr)">
+        <div class="head">
+          <div class="rname"><span class="dot" style="background:var(--relmgr)"></span>Release Manager</div>
+          <div class="rdesc">Der einzige, der <code>main</code> anfasst.</div>
+        </div>
+        <div class="body">
+          <div class="can">
+            <div>darf</div><div class="y">Gate auslösen, mergen, prüfen, fast-forwarden, pushen</div>
+            <div>darf nicht</div><div class="n">einen roten Lauf überstimmt, um weiterzukommen</div>
+          </div>
+          <div class="person">
+            <div class="pname">merge <span class="pill live">im Dienst</span></div>
+            <div class="pdesk"><code>npm run gate</code> → <code>scripts/merge-gate.mjs</code></div>
+            <div class="pwhy">Beschreibt jetzt das Gate. Vorher stand dort ein Hand-Rebase, den es nicht mehr gibt.</div>
+          </div>
+        </div>
+        <div class="foot">Ein roter Lauf kostet einen Worktree, nicht den Zweig eines Spielers.</div>
+      </div>
+
+      <div class="dept" style="border-top-color:var(--support)">
+        <div class="head">
+          <div class="rname"><span class="dot" style="background:var(--support)"></span>Support / Watchtower</div>
+          <div class="rdesc">Passt auf, was in Produktion passiert.</div>
+        </div>
+        <div class="body">
+          <div class="can">
+            <div>darf</div><div class="y">Logcat- und Absturztr sweeps, Regressionen melden, Dead Letters sehen</div>
+            <div>darf nicht</div><div class="n">still etwas glätten — ein Fehler, den niemand meldet, wird nicht kleiner</div>
+          </div>
+          <div class="person placeholder">
+            <div class="pname">watchtower <span class="pill hire">einstellen</span></div>
+            <div class="pwhy">
+              Der <code>checkrunner</code> ist heute der statische Arm und läuft unbeaufsichtigt.
+              Der Gerätearm fehlt: „stürzt auf meinem Tablet ab" kommt als Vorschlag statt als Vorfall.
+            </div>
+          </div>
+        </div>
+        <div class="foot">Hier entstehen die Tickets, aus denen der QA-Arm arbeitet.</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ============================ ZWEI WEGE ============================ -->
+<section>
+  <h2><span class="bar"></span>Weg A — ein Vorschlag bis zum Gerät</h2>
+  <p class="note">
+    Linear und streng geordnet. Der Beweis für „fertig" ist der Lauf gegen das
+    <em>gemergte</em> Ergebnis, nicht der gegen den eigenen Zweig.
+  </p>
+  <div class="flow">
+    <div class="step"><b>Backlog</b>Spielerwunsch, Telegram, Discord</div><div class="arrow">→</div>
+    <div class="step"><b>Triage</b>teilen, schätzen, Schreibtisch benennen</div><div class="arrow">→</div>
+    <div class="step machine"><b>Resource Manager</b>besetzt die Lane</div><div class="arrow">→</div>
+    <div class="step"><b>Developer</b>Zweig <code>agent/suggestion-n</code>, gezielter Testlauf</div><div class="arrow">→</div>
+    <div class="step"><b>Reviewer</b>liest den Diff</div><div class="arrow">→</div>
+    <div class="step machine"><b>CI</b>isolierter Lauf, typecheck, npm test</div><div class="arrow">→</div>
+    <div class="step gate"><b>Release Manager</b>Gate: mergen · Spiegel neu erzeugen · voller Lauf · fast-forward · push</div><div class="arrow">→</div>
+    <div class="step"><b>Changelog</b>eine Zeile, mitgepullt vom Zweig</div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="bar"></span>Weg B — ein Gerätefehler, mit zwei Lanes nebeneinander</h2>
+  <p class="note">
+    Das ist der Parallelismus, um den es ging. Er funktioniert, weil QA nicht schreibt und
+    der Developer das Gerät nicht anfasst: zwischen beiden liegt eine Datei, kein Gespräch.
+  </p>
+
+  <div class="lanes">
+    <div class="lane-col" style="border-top:2px solid var(--qa)">
+      <h4><span class="dot" style="background:var(--qa)"></span>QA-Lane</h4>
+      <div class="lsum">misst, verändert nichts</div>
+      <ol>
+        <li>Sweep über die Geräteziele, zuerst der billige statische Arm</li>
+        <li>Fehler reproduzieren, Zahlen festhalten: Bildrate, Speicher, Logcat</li>
+        <li><code>scripts/repro/&lt;id&gt;.json</code> schreiben — Befund und Vermutung getrennt</li>
+        <li>Befund in die Warteschlange geben, <b>nicht</b> selbst reparieren</li>
+        <li>später denselben Repro auf demselben Gerät fahren</li>
+      </ol>
+    </div>
+
+    <div class="artifact">
+      <div class="box">
+        <b>APK</b>
+        das Artefakt,<br>das die Grenze<br>bildet
+      </div>
+    </div>
+
+    <div class="lane-col" style="border-top:2px solid var(--dev)">
+      <h4><span class="dot" style="background:var(--dev)"></span>Developer-Lane</h4>
+      <div class="lsum>schreibt, sieht das Gerät nie</div>
+      <ol>
+        <li>Zweig <code>agent/fix-&lt;id&gt;</code> vom aktuellen Stand</li>
+        <li>liest den Befund, verwirft die Vermutung, wenn sie falsch ist</li>
+        <li>committet — <b>das</b> ist der Übergabepunkt</li>
+        <li>eine weitere Runde, während QA noch die vorige prüft</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="verdict">
+    <b>Urteil:</b> gefixt → der Zweig geht ins Gate. Weiter kaputt und Runde &lt; 2 → nächste
+    Developer-Runde. Nach zwei Runden entscheidet ein Mensch. Sonst frisst ein Gerätefehler
+    die ganze Warteschlange.
+    <div class="faint" style="margin-top:6px;font-size:12px">
+      Der Test dafür, ob die Trennung echt ist: <b>kein Fehler darf zweimal „gefixt" heißen</b>,
+      weil zwei verschiedene Sessions es gemessen haben — eine mit dem Gerät, eine mit dem Diff.
+    </div>
+  </div>
+</section>
+
+<!-- ============================ ROLLEN ============================ -->
+<section>
+  <h2><span class="bar"></span>Die Rollen im Manifest</h2>
+  <p class="note">
+    Was jede Rolle besitzt, verändert sie nicht — das ist der Job. Und der Job steht in
+    <code>scripts/scopes.mjs</code>, nicht in der Agentendatei.
+  </p>
+  <div class="panel">
+    <table>
+      <thead>
+        <tr>
+          <th>Rolle</th><th>Besetzung heute</th><th>Eigener Bestand</th><th>Darf nie</th><th>Steht in</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="swatch" style="background:var(--dev)"></span><b>Developer</b></td>
+          <td><code>game</code>, <code>meshes</code>, <code>dashboard</code></td>
+          <td>ein Spiel-Scope bzw. Meshes bzw. Server + Dashboard</td>
+          <td class="n">Registry-Zeilen, <code>main</code>, fremde Scopes</td>
+          <td class="mono">scripts/scopes.mjs → 16 Spiel-Scopes, meshes, dashboard</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--qa)"></span><b>QA</b></td>
+          <td><code>device-debug</code></td>
+          <td>keinen — besitzt keine Datei</td>
+          <td class="n">Code ändern</td>
+          <td class="mono">.opencode/agents/device-debug.md · server/checks/</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--releng)"></span><b>Release Engineer</b></td>
+          <td><code>apk</code></td>
+          <td>Export-Preset, Paketinhalt, Gerät</td>
+          <td class="n">Release-Entscheidung treffen</td>
+          <td class="mono">.opencode/agents/apk.md · export_presets.cfg</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--relmgr)"></span><b>Release Manager</b></td>
+          <td><code>merge</code></td>
+          <td><code>scripts/merge-gate.mjs</code>, <code>main</code></td>
+          <td class="n">einen roten Lauf überstimmen</td>
+          <td class="mono">.opencode/agents/merge.md · scripts/merge-gate.mjs</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--review)"></span><b>Reviewer</b></td>
+          <td class="n">—</td>
+          <td>keinen — liest nur</td>
+          <td class="n">schreiben, mergen</td>
+          <td class="mono">einzustellen</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--support)"></span><b>Support</b></td>
+          <td class="n">—</td>
+          <td>keinen — meldet</td>
+          <td class="n">Fehler glätten</td>
+          <td class="mono">einzustellen</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================ PERSONAL ============================ -->
+<section>
+  <h2><span class="bar"></span>Personal — austauschbar, Rollen nicht</h2>
+  <p class="note">
+    Heute ist in jeder Agentendatei <em>Rolle und Person in einem Dokument</em>. Deshalb kostet
+    jede neue Fähigkeit eine große Datei, und die gleiche Anweisung wird kopiert und driftet.
+    Getrennt: die Rolle beschreibt den Job, die Person nennt nur Rolle, Schreibtisch und Modell.
+  </p>
+  <div class="panel">
+    <table>
+      <thead>
+        <tr><th>Datei</th><th>Rolle</th><th>Schreibtisch</th><th>Modell</th><th>Zustand</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="mono">game.md</td><td>Developer</td><td>ein Spiel-Scope</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">meshes.md</td><td>Developer</td><td>Meshes + LOD</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">dashboard.md</td><td>Developer</td><td>Server + Dashboard</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">apk.md</td><td>Release Engineer</td><td>Gerät + Paket</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">device-debug.md</td><td>QA / Device Lab</td><td>— (misst nur)</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst, <span class="n">darf aber noch schreiben</span></td></tr>
+        <tr><td class="mono">merge.md</td><td>Release Manager</td><td><code>main</code></td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">review.md</td><td>Reviewer</td><td>—</td><td class="faint">günstiger genügt</td><td class="n">nicht eingestellt</td></tr>
+        <tr><td class="mono">watchtower.md</td><td>Support</td><td>—</td><td class="faint">günstiger genügt</td><td class="n">nicht eingestellt</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note" style="margin-top:14px">
+    Und warum das trägt: eine neue Fähigkeit = eine Rollenkarte + eine kleine Personendatei.
+    Ein anderes Modell = <b>eine Zeile</b>. Eine Rolle fällt weg = Karte löschen, und das Manifest
+    sagt, wen das ohne Job lässt. Und die Regel, die das nicht verhindert:
+    <code>validate()</code> schlägt fehl, wenn eine Person eine Rolle nennt, die es nicht gibt —
+    <b>man kann niemanden in einen Job einstellen, der nicht auf dem Ordner liegt.</b>
+  </p>
+</section>
+
+<!-- ============================ BEFUNDE ============================ -->
+<section>
+  <h2><span class="bar"></span>Was das Organigramm heute zuerst reparieren muss</h2>
+  <p class="note">
+    Drei Befunde aus dem Abgleich zwischen Manifest, Agentendateien und Code. Alle drei sind
+    keine Vermutung, alle drei stehen in genau einer Datei.
+  </p>
+
+  <div class="finding">
+    <h4>Zwei Schreibtische haben niemanden</h4>
+    <p>
+      <code>scripts/scopes.mjs</code> benennt für <code>lobby</code>, <code>core</code> und
+      <code>tests</code> die Agenten <code>lobby</code> und <code>build</code> — Agentendateien
+      mit diesen Namen existieren nicht. Die Bereiche werden also einem Besitzer zugerechnet,
+      den es nicht gibt, und niemand merkt es, weil die Prüfung nur <b>Eigentümerschaft</b>
+      kennt, nicht <b>Besetzung</b>.
+    </p>
+    <div class="fix">Lösung: Rollen und Personen trennen, und dieselbe Prüfung für beides laufen lassen.</div>
+  </div>
+
+  <div class="finding">
+    <h4>Der Server nennt ein Skript, das es nicht gibt</h4>
+    <p>
+      <code>server/index.ts:36</code> sagt dem Besitzer nach dem Start:
+      „zusammenführen mit: <code>npm run merge-gate</code>". Das Skript heißt <code>gate</code>.
+      Der Satz erscheint genau dann, wenn die isolierten Läufe an sind — also in dem Moment,
+      in dem jemand das Gate suchen muss.
+    </p>
+    <div class="fix">Einwortkorrektur, aber sie steht im Moment, in dem sie am meisten auffällt.</div>
+  </div>
+
+  <div class="finding">
+    <h4><code>main</code> kann rot sein, ohne dass irgendetwas es merkt</h4>
+    <p>
+      <code>npm test</code> prüft Content-Sync, Kataloge und Vitest — aber kein
+      <code>typecheck</code>. Ein Lauf, der <code>server/db.ts</code> auf
+      <code>RunRecord.worktreePath</code> schreibt, während <code>src/shared/types.ts</code> das
+      Feld noch nicht kennt, ist grün in <code>npm test</code> und rot in <code>tsc</code>.
+      Das Gate würde es sehen — das Gate ist ein Kommando, das niemand aufruft.
+    </p>
+    <div class="fix"><code>typecheck</code> gehört in <code>npm test</code>. Ein Build, der unbemerkt rot werden kann, ist ein CI, das an nichts angeschlossen ist.</div>
+  </div>
+</section>
+
+<!-- ============================ GOVERNANCE ============================ -->
+<section>
+  <h2><span class="bar"></span>Governance</h2>
+  <div class="gov">
+    <div class="card" style="border-top:2px solid var(--po)">
+      <div class="name"><span class="dot" style="background:var(--po)"></span>Das Budget</div>
+      <div class="role">Eine Einstellung im Dashboard, neben <code>maxParallelRuns</code>.</div>
+      <ul>
+        <li>monatliche Obergrenze in derselben Währung, die die Läufe schon führen
+          (<code>RunRecord.cost</code>)</li>
+        <li>ist sie leer, besetzt der Resource Manager niemanden mehr</li>
+        <li>niemand merkt eine fehlende Funktion, alle merken ein leeres Konto</li>
+      </ul>
+    </div>
+    <div class="card" style="border-top:2px solid var(--review)">
+      <div class="name"><span class="dot" style="background:var(--review)"></span>Der Wochenbericht</div>
+      <div class="role">Vier Zeilen, an den Product Owner. Mehr nicht.</div>
+      <ul>
+        <li>was rausging, was blockiert, was es gekostet hat, was fault</li>
+        <li>keine Dateinamen, keine Commit-Hashes, kein Teststatus</li>
+        <li>dieselbe Regel wie im Abschlussbericht: ein Stichpunkt, ein Satz</li>
+      </ul>
+    </div>
+    <div class="card" style="border-top:2px solid var(--support)">
+      <div class="name"><span class="dot" style="background:var(--support)"></span>Der Bereitschaftsdienst</div>
+      <div class="role">Eine Regel, und sie ist die einzige Ausnahme von der Reihenfolge.</div>
+      <ul>
+        <li>ein <b>Vorfall</b> wartet nicht hinter neun Aufgaben</li>
+        <li>der Resource Manager hebt ihn hoch und besetzt sofort</li>
+        <li>die QA-Lane ist ohnehin heiß, der Developer wird an Ort und Stelle eingestellt</li>
+      </ul>
+    </div>
+    <div class="card" style="border-top:2px solid var(--relmgr)">
+      <div class="name"><span class="dot" style="background:var(--relmgr)"></span>Der Einstellungsweg</div>
+      <div class="role">Einstellen ist eine Personalentscheidung, und sie sieht auch so aus.</div>
+      <ul>
+        <li><b>Postkarte</b>: Rolle, Grund, Kosten, erste Aufgabe — noch kein Agent</li>
+        <li><b>Probezeit</b>: echte Aufgaben, beurteilt nach Diff, Ehrlichkeit, Schreibtisch</li>
+        <li><b>Beförderung</b>: dieselbe Person, mehr Verantwortung, ausdrücklich vermerkt</li>
+        <li><b>Entlassung</b>: eine Fähigkeit, die ihr Geld nicht mehr verdient</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p style="margin:0 0 6px">
+    <b>Was als Erstes gebaut würde:</b> die Trennung von Rolle und Person samt
+    <code>validate()</code>-Regel. Sie ist klein, sie fasst keinen Laufzeitcode an, und sie ist
+    die Voraussetzung für jede spätere Einstellung — die erste davon ist der Reviewer.
+  </p>
+  <p style="margin:0">
+    Das Organigramm ist ein Entwurf, kein Zustand. Belegt ist, was oben als „im Dienst" steht;
+    alles Gestrichelte ist Vorschlag. Quelle: <code>.opencode/agents/</code>,
+    <code>scripts/scopes.mjs</code>, <code>server/runner.ts</code>, <code>server/isolation.ts</code>,
+    <code>scripts/merge-gate.mjs</code>, <code>server/checks/</code>.
+  </p>
+</footer>
+
+</div>
+</body>
+</html>
