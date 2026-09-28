@@ -345,7 +345,54 @@ Vier Sekunden, die in dieser Sitzung einen halben Tag ersetzt haben:
    `npm run locale:sync`, und den Spiegel unter `godot/assets/locale/` mit
    committen. Ohne den Spiegel übersetzt das Gerät einen Katalog, den das
    Repository nicht hat — und `npm run locale:check` fällt bei genau dem
-   Unterschied um.
+   Unterschied um. Steht man dabei als Agent in einer Unterteilung, ist
+   `sync` Sache der Leitsitzung: siehe „Tests gehören der Leitsitzung".
+
+## Tests gehören der Leitsitzung
+
+**Ein Agent aus einer Unterteilung prüft nichts. Das Testen ist die Arbeit der
+Leitsitzung, die den Auftrag verteilt hat.**
+
+Das ist keine Formalie, und der Grund ist nicht die Laufzeit. Der Arbeitsbaum
+wird geteilt, und zwei Prüfungen desselben Baums sind keine zwei Prüfungen,
+sondern ein Rennen:
+
+- **Die Suites sind überschneidend.** Zwei Agenten, die zur selben Zeit
+  `npm run test:game` starten, sehen beide denselben Zwischenstand — auch wenn
+  beide nur ihre *eigenen* Dateien geändert haben. Der Fehlschlag, den der eine
+  meldet, gehört dann zu der halben Arbeit des anderen, und beide Teile
+  verlieren Zeit an derselben Diagnose.
+- **Zwei der Werkzeuge schreiben.** `npm run locale:sync` überschreibt
+  `godot/assets/locale/`, und `npm run locale:lock` schreibt
+  `locale/identical.json`. Ein Agent, der `lock` nebenbei laufen lässt, während
+  jemand anderes gerade übersetzt, schreibt den unübersetzten englischen Satz
+  auf die Liste der absichtlich gleichen Einträge — und der Zähler, der ihn
+  eben noch als offen gemeldet hat, meldet danach 100 %. Das ist die
+  gefährlichste Folge: aus einer echten Lücke wird eine grüne Zahl, und niemand
+  hat etwas kaputtgemacht, es ist nur unsichtbar geworden.
+- **Ein Fehlschlag, den man nicht verursacht hat, wird zum Auftrag.** Der Agent,
+  der ihn sieht, fängt an, fremden Code zu reparieren, und beide Änderungen
+  landen am Ende in einem Commit, den niemand mehr zuordnen kann.
+
+**Was ein Agent stattdessen tut:** die eigene Änderung liest, den Pfad und die
+Zeile nennt, und im Bericht **den Befehl aufschreiben, den die Leitsitzung
+fahren soll** — nicht das Ergebnis behaupten. „`Loc.f` in
+`mesh_gallery_screen.gd:409` ist jetzt aufgelöst, `npm run locale:check` war
+vor dieser Änderung grün und sollte es danach auch sein" ist ein brauchbarer
+Befund. „Der Test ist grün" ist keiner, wenn drei andere Agenten zur selben
+Zeit am selben Baum arbeiten.
+
+Ausgenommen ist das **Lesen** von Dateien und das Nachschlagen in Ausgaben,
+die schon da sind: `git status`, `git diff`, `git log`, `grep`, und das Lesen
+eines Katalogs. Das kostet niemanden etwas und verändert nichts. Die Grenze
+verläuft genau dort, wo ein Befehl den Baum anfasst — und `sync` und `lock`
+fassen ihn an, auch wenn sie nach Kontrolle aussehen.
+
+**Die Leitsitzung prüft einmal, am Ende, für alle.** Das ist nicht nur billiger,
+sondern das einzige, was eine Aussage wert ist: ein Lauf, der nach allen
+Agenten kommt, sieht einen Baum, den niemand mehr anfasst. Wer die Prüfungen
+verstreut, bekommt am Ende fünf Teilergebnisse, von denen keines aussagt, ob der
+Stand als Ganzes stimmt.
 
 ## Neue `class_name` → sofort importieren
 
@@ -380,6 +427,12 @@ registriert, bis beides gilt:
 eine `test_*.gd` nicht geladen wird — diese Lücke war lange offen und hat
 gleichzeitig sechs nicht registrierte Suites und eine nie geladene Testdatei
 durchgewunken.
+
+**Beide Stellen eintragen und dann aufhören.** Der Lauf, der bestätigt, dass die
+Suite angekommen ist, ist Sache der Leitsitzung — siehe „Tests gehören der
+Leitsitzung". Wer als Agent in einer Unterteilung `npm test` fährt, prüft einen
+Baum, an dem gerade jemand anderes arbeitet, und lernt daraus nichts über die
+eigene Suite.
 
 ## Exportieren und Artefakte prüfen
 
