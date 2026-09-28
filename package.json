@@ -15,6 +15,7 @@
     "scopes": "node scripts/scopes.mjs list",
     "scopes:check": "node scripts/scopes.mjs list",
     "backup": "tsx scripts/backup.ts",
+    "changelog": "tsx scripts/changelog.ts",
     "smoke": "tsx scripts/smoke.ts",
     "godot:import": "node scripts/sync-content.mjs && godot --headless --path godot --import",
     "godot:check": "godot --headless --path godot --quit-after 240",

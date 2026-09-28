@@ -1,4 +1,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { SuggestionView } from '../src/shared/types';
 import {
   buildSuggestionText,
@@ -331,6 +334,66 @@ describe('Das Ergebnis eines Laufs', () => {
   });
 });
 
+describe('Der Offset überlebt einen Neustart', () => {
+  // The bug this guards: `offset` used to be a plain field, so it was 0 again
+  // after every restart and Telegram replayed every unconfirmed command.
+  // `tsx watch` restarts the server on every save, so a `/run 12` could be
+  // executed twice — two OpenCode sessions for one suggestion.
+  it('führt einen Befehl nach dem Neustart nicht erneut aus', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const root = mkdtempSync(join(tmpdir(), 's80-tgbot-restart-'));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = makeBot({ projectRoot: root, startRun: () => ({ ok: true, runId: 'run_1' }) });
+    await first.handle(update('/run 12'));
+
+    // Same folder, brand-new instance: what a server restart looks like.
+    const started: number[] = [];
+    const second = makeBot({
+      projectRoot: root,
+      startRun: () => (started.push(12), { ok: true, runId: 'run_2' }),
+    });
+    await second.handle(update('/run 12'));
+
+    expect(started).toEqual([]);
+  });
+
+  it('merkt sich den offset auf der Platte, nicht nur im Speicher', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const root = mkdtempSync(join(tmpdir(), 's80-tgbot-state-'));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) }));
+    makeBot({ projectRoot: root }).handle(update('/help'));
+    const state = JSON.parse(readFileSync(join(root, 'data', 'telegram-bot.json'), 'utf8'));
+    expect(state.offset).toBeGreaterThan(0);
+    expect(state.seen.length).toBeGreaterThan(0);
+  });
+
+  it('schweigt bei einem Dauerfehler, statt ihn alle paar Sekunden zu wiederholen', async () => {
+    // A polling error repeats for as long as it lasts. Ten identical lines tell
+    // the owner no more than the first, and hide the line that says something.
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const root = mkdtempSync(join(tmpdir(), 's80-tgbot-noise-'));
+    const errors: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false, status: 409, text: async () => '{"description":"Conflict"}' }),
+    );
+    const bot = makeBot({ projectRoot: root });
+    (bot as unknown as { deps: { onError: (e: Error) => void } }).deps.onError = (e) => errors.push(e.message);
+    const loop = (bot as unknown as { loop: () => Promise<void> }).loop.bind(bot);
+    void loop();
+    await new Promise((r) => setTimeout(r, 400));
+    await (bot as unknown as { stop: () => Promise<void> }).stop();
+    const unique = new Set(errors);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(unique.size).toBe(1);
+  });
+});
+
 describe('getUpdates', () => {
   it('fragt nicht ab, solange kein Token gesetzt ist', async () => {
     const fetchMock = vi.fn();
@@ -353,13 +416,16 @@ describe('getUpdates', () => {
 /** Minimale Attrappe: der Bot braucht nur diese fünf Dinge. */
 type StartRun = (id: number) => { ok: boolean; runId?: string; error?: string };
 
-function makeBot(overrides: { startRun?: StartRun; paused?: boolean } = {}) {
+function makeBot(overrides: { startRun?: StartRun; paused?: boolean; projectRoot?: string } = {}) {
   const runner = {
     isPaused: () => overrides.paused ?? false,
     queueState: () => ({ queue: [], activeRuns: [] }),
     capacity: () => 3,
   };
   return new TelegramBot({
+    // A temp dir per bot, so the persisted offset of one test cannot leak into
+    // the next — that leak would make a command look "already handled".
+    projectRoot: overrides.projectRoot ?? mkdtempSync(join(tmpdir(), 's80-tgbot-')),
     store: { listSuggestions: () => [], listRuns: () => [] } as never,
     runner: runner as never,
     bus: { on: () => {}, emit: () => false } as never,

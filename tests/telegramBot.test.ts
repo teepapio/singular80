@@ -1,4 +1,5 @@
 import { describe, expect, it, afterEach, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -143,6 +144,14 @@ describe('Bot und Dashboard teilen sich die Wahrheit', () => {
       await app.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('legt den Telegram-Zustand neben die Datenbank, nicht ins Repository', async () => {
+    // The polling state is per-machine bookkeeping. In `data/` it is ignored
+    // and disposable; committed, every machine would fight over one offset.
+    const ROOT = join(import.meta.dirname, '..');
+    // `check-ignore` exits 0 when the path *is* ignored, which is what we want here.
+    expect(spawnSync('git', ['-C', ROOT, 'check-ignore', '-q', 'data/telegram-bot.json']).status).toBe(0);
   });
 
   it('meldet Telegram nur als eingerichtet oder nicht — nie mit Token', async () => {

@@ -778,6 +778,7 @@ export function createApp(options: AppOptions): FastifyInstance {
   // passiert hier nichts — ein Spielstand ohne Chatbedienung soll nicht an
   // einem leeren Bot hängen.
   const bot = new TelegramBot({
+    projectRoot: options.projectRoot,
     store,
     runner: runner ?? null,
     bus,
