@@ -116,6 +116,17 @@ describe('Leichtes APK — Export-Presets', () => {
     }
   });
 
+  it('nimmt *.json mit — Godot importiert .json nicht', () => {
+    // The translation catalogues are `.json`, and Godot does not import `.json`:
+    // it reaches the package only through `include_filter`. A missing one has no
+    // symptom in the game — the export reports success, the APK boots, and `Loc`
+    // silently falls back to English. Same trap `lod.json` fell into, so the
+    // catalogues ride on the same line and get the same assertion.
+    for (const name of ['Android', 'Android (Leicht)', 'Google Play (AAB)']) {
+      expect(section(name), name).toContain('include_filter="*.json"');
+    }
+  });
+
   it('hat in beiden Presets Kommentare mit ";" — ConfigFile bricht bei "#" ab', () => {
     // A `#` comment containing `=` is not a comment to Godot's ConfigFile; that
     // mistake once made the Play preset invisible.

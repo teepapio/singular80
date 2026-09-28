@@ -300,6 +300,20 @@ check(leaked.length === 0, `Keines der ${rich.length} med-/high-Meshes ist im Pa
 const lodEntry = [...inApk].find((e) => e.endsWith('lod.json'));
 check(Boolean(lodEntry), `lod.json ist dabei (${lodEntry}).`, 'lod.json fehlt — die Galerie zeigt keine Dreieckszahlen.');
 
+// The language catalogues are `.json` too, so they ride on the same
+// `include_filter="*.json"`. A missing one is invisible: `Loc` falls back and the
+// export reported success. `endsWith` rather than a fixed prefix, because the
+// entries sit under `assets/` + the res:// path.
+const localeDir = join(GODOT_DIR, 'assets', 'locale');
+const catalogues = existsSync(localeDir) ? readdirSync(localeDir).filter((n) => n.endsWith('.json')) : [];
+check(catalogues.length > 0, `${catalogues.length} Sprachkataloge im Projekt.`, 'Unter godot/assets/locale liegt keine .json — "npm run locale:sync".');
+const missingLocale = catalogues.filter((name) => ![...inApk].some((e) => e.endsWith(`assets/locale/${name}`)));
+check(
+  missingLocale.length === 0,
+  `Alle ${catalogues.length} Sprachkataloge sind im Paket.`,
+  `${missingLocale.join(', ')} fehlt im Paket — include_filter="*.json" fehlt im Preset, das Spiel bliebe auf Englisch.`,
+);
+
 // No raw .glb is ever shipped unchanged — Godot imports them.
 const raw = [...inApk].filter((e) => /assets\/meshes\/.*\.glb$/.test(e));
 check(raw.length === 0, 'Keine Roh-GLB im Paket (nur die importierten).', `${raw.length} Roh-GLB im Paket — der Export hat die Quellen mitgenommen.`);

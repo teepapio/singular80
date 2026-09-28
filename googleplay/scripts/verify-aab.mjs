@@ -47,6 +47,20 @@ const entries = listing.out
 check(entries.includes('BundleConfig.pb'), 'BundleConfig.pb → es ist ein AAB.', 'Kein BundleConfig.pb → das ist ein APK. Play nimmt für neue Apps nur AAB.');
 check(entries.some((e) => e.startsWith('base/manifest/')), 'Basis-Modul vorhanden.', 'base/manifest/ fehlt.');
 check(entries.some((e) => e.startsWith('base/lib/arm64-v8a/')), 'arm64-v8a-Libs im Basis-Modul.', 'Keine arm64-v8a-Libs.');
+// The language catalogues are plain `.json` and ride along only via
+// `include_filter="*.json"`. Without them the bundle is acceptable to Play and
+// the game is silently monolingual — the one defect nothing else reports. In an
+// AAB the entries sit under `assetPackInstallTime/assets/assets/locale/`, so a
+// fixed prefix would be right for the APK and wrong here.
+const localeDir = join(GODOT_DIR, 'assets', 'locale');
+const catalogues = existsSync(localeDir) ? readdirSync(localeDir).filter((n) => n.endsWith('.json')) : [];
+const missingLocale = catalogues.filter((name) => !entries.some((e) => e.endsWith(`assets/locale/${name}`)));
+check(
+  catalogues.length > 0 && missingLocale.length === 0,
+  `Sprachkataloge im Bundle (${catalogues.join(', ')}).`,
+  `${missingLocale.length ? `${missingLocale.join(', ')} fehlt` : 'Unter godot/assets/locale liegt keine .json'} im Bundle — include_filter="*.json" fehlt im Preset, das Spiel bliebe auf Englisch.`,
+);
+
 for (const [abi, on] of Object.entries(cfg.android.architectures)) {
   const present = entries.some((e) => e.startsWith(`base/lib/${abi}/`));
   if (on && !present) {

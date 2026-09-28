@@ -40,8 +40,7 @@ const SCREEN_SCRIPTS := {
 ## A language change re-renders the current screen: free for a menu, ruinous for
 ## a playfield. Everything not listed picks the new language up on the next switch.
 const REBUILD_SAFE: Array[String] = [
-	"lobby", "lobby_list", "main_menu", "mesh_gallery", "mesh_review",
-	"pang_menu", "dragonflight", "dragonflight_hatchery",
+	"lobby", "lobby_list", "main_menu", "mesh_gallery", "pang_menu", "dragonflight",
 ]
 
 var current_id: String = ""
