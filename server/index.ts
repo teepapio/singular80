@@ -27,13 +27,13 @@ if (process.env.S80_TERMINAL === '0') {
 /**
  * One worktree and one branch per run. Off unless `S80_ISOLATE_RUNS=1`, because
  * it changes where a finished run's commits are: they land on
- * `agent/suggestion-<id>`, and `npm run merge-gate` merges them into `main`,
+ * `agent/suggestion-<id>`, and `npm run gate` merges them into `main`,
  * runs the suites there and pushes. Off means every run keeps working in the
  * shared tree with the scope lanes, exactly as before.
  */
 const isolateRuns = process.env.S80_ISOLATE_RUNS === '1';
 if (isolateRuns) {
-  console.log('[singular80] Läufe arbeiten in eigenen Worktrees (S80_ISOLATE_RUNS=1) — zusammenführen mit: npm run merge-gate');
+  console.log('[singular80] Läufe arbeiten in eigenen Worktrees (S80_ISOLATE_RUNS=1) — zusammenführen mit: npm run gate');
 }
 
 const app = createApp({

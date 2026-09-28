@@ -526,15 +526,23 @@
       <thead>
         <tr><th>Datei</th><th>Rolle</th><th>Schreibtisch</th><th>Modell</th><th>Zustand</th></tr>
       </thead>
-      <tbody>
-        <tr><td class="mono">game.md</td><td>Developer</td><td>ein Spiel-Scope</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
-        <tr><td class="mono">meshes.md</td><td>Developer</td><td>Meshes + LOD</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
-        <tr><td class="mono">dashboard.md</td><td>Developer</td><td>Server + Dashboard</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
-        <tr><td class="mono">apk.md</td><td>Release Engineer</td><td>Gerät + Paket</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
-        <tr><td class="mono">device-debug.md</td><td>QA / Device Lab</td><td>— (misst nur)</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst, <span class="n">darf aber noch schreiben</span></td></tr>
-        <tr><td class="mono">merge.md</td><td>Release Manager</td><td><code>main</code></td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
-        <tr><td class="mono">review.md</td><td>Reviewer</td><td>—</td><td class="faint">günstiger genügt</td><td class="n">nicht eingestellt</td></tr>
-        <tr><td class="mono">watchtower.md</td><td>Support</td><td>—</td><td class="faint">günstiger genügt</td><td class="n">nicht eingestellt</td></tr>
+              <tbody>
+        <tr><td class="mono">agent-arch.md</td><td>Architekt</td><td>docs/acceptance/</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">agent-grade.md</td><td>Prüfer</td><td>scripts/grade/ — sieht nie den Code</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">agent-dev.md</td><td>Entwickler</td><td>der Generalist, Scope vom Aufrufer</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">agent-game.md</td><td>Entwickler</td><td>ein Spiel-Scope</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">agent-ui.md</td><td>Entwickler</td><td>Basisklassen, Screen-Bau, Widgets</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">agent-locale.md</td><td>Katalogführer</td><td>locale/ und Spiegel</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">agent-content.md</td><td>Spieldesigner</td><td>content/</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">agent-mesh.md</td><td>Bildhauer</td><td>Meshes, LOD, Blender</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">agent-api.md</td><td>Serverentwickler</td><td>server/, src/shared/</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">agent-web.md</td><td>Frontendentwickler</td><td>src/dashboard/</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">agent-rev.md</td><td>Reviewer</td><td>— (liest nur, leerer Kontext)</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">agent-probe.md</td><td>Testläufer</td><td>— (gibt nur Fehler zurück)</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">agent-device.md</td><td>Geräteprüfer</td><td>— (misst, schreibt nie Code)</td><td class="mono">space-bunny-free#high</td><td class="">im Dienst, <span class="n">darf aber nicht mehr schreiben</span></td></tr>
+        <tr><td class="mono">agent-android.md</td><td>Android-Entwickler</td><td>APK, Gerät, Export</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
+        <tr><td class="mono">agent-merge.md</td><td>Torwächter</td><td>main, das Gate</td><td class="mono">space-bunny-free#high</td><td class="">im Dienst, <span class="n">löst keine Konflikte mehr</span></td></tr>
+        <tr><td class="mono">agent-hire.md</td><td>Personalführer</td><td>.opencode/agents/</td><td class="mono">space-bunny-free#high</td><td class="ok">im Dienst</td></tr>
       </tbody>
     </table>
   </div>
@@ -551,12 +559,27 @@
 <section>
   <h2><span class="bar"></span>Was das Organigramm heute zuerst reparieren muss</h2>
   <p class="note">
-    Drei Befunde aus dem Abgleich zwischen Manifest, Agentendateien und Code. Alle drei sind
-    keine Vermutung, alle drei stehen in genau einer Datei.
+    Vier Befunde aus dem Abgleich zwischen Manifest, Agentendateien und Code. Zwei sind behoben,
+    zwei stehen noch offen — und die beiden offenen stehen je in genau einer Datei.
   </p>
 
   <div class="finding">
-    <h4>Zwei Schreibtische haben niemanden</h4>
+    <h4>Die Grenzen waren vermutlich nie scharf — behoben und nachgewiesen</h4>
+    <p>
+      Alle sechs alten Agentendateien schrieben <code>permissions:</code> mit einer Policy-Form.
+      <code>AgentConfig</code> definiert aber <code>permission</code> (singular) mit
+      <code>additionalProperties: false</code>, und der Schlüssel des Shell-Werkzeugs heißt
+      <code>shell</code>, nicht <code>bash</code>. Vier Proben mit einem Testagenten haben es
+      entschieden: <code>"*": deny</code> schlägt das projektweite <code>bash: allow</code> aus
+      <code>opencode.json</code>, ein pfadspezifisches <code>deny</code> schlägt ein
+      <code>"*": allow</code>, und <code>read: {pfad: allow}</code> greift. Damit sind die Wände
+      jetzt mechanisch und nicht nur beschrieben.
+    </p>
+    <div class="fix">Das ist die Grundlage von allem anderen hier: eine Spezialisierung, deren Grenze nicht greift, ist ein Kostüm.</div>
+  </div>
+
+  <div class="finding" style="border-left-color:var(--ok)">
+    <h4 style="color:var(--ok)">Zwei Schreibtische hatten niemanden — behoben</h4>
     <p>
       <code>scripts/scopes.mjs</code> benennt für <code>lobby</code>, <code>core</code> und
       <code>tests</code> die Agenten <code>lobby</code> und <code>build</code> — Agentendateien
@@ -564,18 +587,18 @@
       den es nicht gibt, und niemand merkt es, weil die Prüfung nur <b>Eigentümerschaft</b>
       kennt, nicht <b>Besetzung</b>.
     </p>
-    <div class="fix">Lösung: Rollen und Personen trennen, und dieselbe Prüfung für beides laufen lassen.</div>
+    <div class="fix">Behoben: <code>validate()</code> sagt jetzt beides — ein Scope muss einen existierenden Agenten nennen, und ein Agent muss an einem Schreibtisch sitzen. Neun Agenten ohne Schreibtisch stehen mit Grund in <code>ROSTER_WITHOUT_DESK</code>.</div>
   </div>
 
-  <div class="finding">
-    <h4>Der Server nennt ein Skript, das es nicht gibt</h4>
+  <div class="finding" style="border-left-color:var(--ok)">
+    <h4 style="color:var(--ok)">Der Server nannte ein Skript, das es nicht gibt — behoben</h4>
     <p>
       <code>server/index.ts:36</code> sagt dem Besitzer nach dem Start:
       „zusammenführen mit: <code>npm run merge-gate</code>". Das Skript heißt <code>gate</code>.
       Der Satz erscheint genau dann, wenn die isolierten Läufe an sind — also in dem Moment,
       in dem jemand das Gate suchen muss.
     </p>
-    <div class="fix">Einwortkorrektur, aber sie steht im Moment, in dem sie am meisten auffällt.</div>
+    <div class="fix">Behoben: <code>server/index.ts</code> nennt jetzt <code>npm run gate</code>.</div>
   </div>
 
   <div class="finding">
