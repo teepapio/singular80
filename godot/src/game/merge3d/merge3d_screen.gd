@@ -211,7 +211,7 @@ func _build_ui() -> void:
 	hud_root.add_child(frame)
 	column.position = Vector2(26, 76)
 
-	var title := Ui.label(Loc.f("%s  %s", [[theme["icon"], theme["title"]]]), 22, UiTheme.TEXT, true)
+	var title := Ui.label(Loc.f("%s  %s", [theme["icon"], theme["title"]]), 22, UiTheme.TEXT, true)
 	column.add_child(title)
 	_score_label = _hud_value(column, "Punkte", "0", Color("facc15"))
 	_best_label = _hud_value(column, "Bestwert", str(highscore), Color("facc15"))
@@ -223,17 +223,17 @@ func _build_ui() -> void:
 	_mode_label.position = Vector2(24, -64)
 	hud_root.add_child(_mode_label)
 
-	var merge_button := Ui.button("Verschmelzen", Vector2(190, 52), UiTheme.SUCCESS, _try_merge)
+	var merge_button := Ui.button("Merge", Vector2(190, 52), UiTheme.SUCCESS, _try_merge)
 	merge_button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	merge_button.position = Vector2(228, -64)
 	hud_root.add_child(merge_button)
 
-	_hint_button = Ui.button("Tipp", Vector2(190, 52), UiTheme.PANEL_LIGHT, _show_hint)
+	_hint_button = Ui.button("Hint", Vector2(190, 52), UiTheme.PANEL_LIGHT, _show_hint)
 	_hint_button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	_hint_button.position = Vector2(432, -64)
 	hud_root.add_child(_hint_button)
 
-	var clear_button := Ui.button("Auswahl aufheben", Vector2(200, 52), UiTheme.PANEL_LIGHT, func() -> void:
+	var clear_button := Ui.button("Clear selection", Vector2(200, 52), UiTheme.PANEL_LIGHT, func() -> void:
 		selected = PackedInt32Array()
 		_clear_hint()
 		_refresh()
@@ -302,7 +302,7 @@ func _show_hint(loud: bool = true) -> void:
 		_hint_label.text = "Gerade nichts zu mergen — es kommen laufend neue Items."
 		_hint_label.add_theme_color_override("font_color", UiTheme.TEXT_MUTED)
 		if loud:
-			notify("Kein Merge möglich — kurz warten")
+			notify("No merge possible — wait a moment")
 			Sfx.select()
 		return
 	var tier: int = board[cells[0]]
@@ -312,7 +312,7 @@ func _show_hint(loud: bool = true) -> void:
 	_hint_label.text = "Tipp: %s" % Merge3D.hint_text(theme, board, cells)
 	_hint_label.add_theme_color_override("font_color", Merge3D.tier_color(theme, tier).lightened(0.4))
 	if loud:
-		notify(Loc.f("Tipp: %s", [Merge3D.tier_name(theme, tier)]))
+		notify(Loc.f("Hint: %s", [Merge3D.tier_name(theme, tier)]))
 		Sfx.select()
 	_refresh()
 
@@ -547,7 +547,7 @@ func _end_run() -> void:
 	layer.add_child(center)
 	var column := Ui.vbox(14)
 	center.add_child(column)
-	column.add_child(Ui.title("Kein Platz mehr", 44, Color("f87171")))
-	column.add_child(Ui.label(Loc.f("Punkte: %s", [Ui.format_number(score)]), 24, UiTheme.TEXT))
-	column.add_child(Ui.button("Neues Spiel", Vector2(340, 56), UiTheme.ACCENT, func() -> void: Router.go_to(screen_id)))
+	column.add_child(Ui.title("No space left", 44, Color("f87171")))
+	column.add_child(Ui.label(Loc.f("Points: %s", [Ui.format_number(score)]), 24, UiTheme.TEXT))
+	column.add_child(Ui.button("New game", Vector2(340, 56), UiTheme.ACCENT, func() -> void: Router.go_to(screen_id)))
 	column.add_child(Ui.button("Lobby", Vector2(340, 56), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))

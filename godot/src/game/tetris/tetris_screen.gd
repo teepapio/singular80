@@ -185,13 +185,13 @@ func _build_ui() -> void:
 	_perfect_bonus.modulate.a = 0.0
 	layer.add_child(_perfect_bonus)
 
-	var preview_caption := Ui.label("VORSCHAU", 15, UiTheme.TEXT_DIM)
+	var preview_caption := Ui.label("PREVIEW", 15, UiTheme.TEXT_DIM)
 	preview_caption.position = Vector2(970, 68)
 	preview_caption.size = Vector2(180, 20)
 	preview_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(preview_caption)
 
-	var hold_caption := Ui.label("HALTEN", 15, UiTheme.TEXT_DIM)
+	var hold_caption := Ui.label("HOLD", 15, UiTheme.TEXT_DIM)
 	hold_caption.position = Vector2(970, 500)
 	hold_caption.size = Vector2(180, 20)
 	hold_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -207,7 +207,7 @@ func _build_ui() -> void:
 
 	# The full control reference lives in the pause overlay; on-screen players
 	# only need the essentials.
-	var hint := Ui.label("← →  bewegen   ·   ↓  sanft fallen   ·   ↑  drehen   ·   Leertaste  hart   ·   C  halten   ·   ESC  Pause", 13, UiTheme.TEXT_MUTED)
+	var hint := Ui.label("← →  move   ·   ↓  soft drop   ·   ↑  rotate   ·   Space  hard drop   ·   C  hold   ·   ESC  pause", 13, UiTheme.TEXT_MUTED)
 	hint.position = Vector2(170, 692)
 	hint.size = Vector2(810, 20)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -256,7 +256,7 @@ func _build_touch_controls(layer: Control) -> void:
 	drop.position = Vector2(20, 650)
 	layer.add_child(drop)
 
-	var hold := Ui.button("Halt", Vector2(100, 58), UiTheme.PANEL_LIGHT, func() -> void:
+	var hold := Ui.button("Stop", Vector2(100, 58), UiTheme.PANEL_LIGHT, func() -> void:
 		_hold_piece()
 		_refresh()
 	)

@@ -174,18 +174,18 @@ const KEYS: Array[String] = [
 
 ## Sections of the gallery, in walking order.
 const GROUPS: Array[Dictionary] = [
-	{"id": "helden", "name": "Helden & Waffen", "icon": "⚔", "color": Color("94a3b8")},
-	{"id": "drachen", "name": "Drachen", "icon": "☄", "color": Color("f472b6")},
-	{"id": "metro", "name": "Stadt & Metro", "icon": "▣", "color": Color("38bdf8")},
-	{"id": "sammeln", "name": "Beute & Ausrüstung", "icon": "◆", "color": Color("fbbf24")},
-	{"id": "natur", "name": "Natur", "icon": "❦", "color": Color("4ade80")},
-	{"id": "ruinen", "name": "Ruinen & Props", "icon": "▣", "color": Color("a78bfa")},
-	{"id": "zucht", "name": "Zucht & Eier", "icon": "✦", "color": Color("f472b6")},
-	{"id": "gegner", "name": "Gegner", "icon": "◉", "color": Color("f87171")},
-	{"id": "pang", "name": "Pang-Objekte", "icon": "⇈", "color": Color("fbbf24")},
-	{"id": "merge", "name": "Merge- & Kristallstufen", "icon": "✦", "color": Color("38bdf8")},
-	{"id": "siedler", "name": "Siedler-Dorf", "icon": "⌂", "color": Color("84cc16")},
-	{"id": "candy", "name": "Candy-Crush-Steine", "icon": "✦", "color": Color("f472b6")},
+	{"id": "helden", "name": "Heroes & weapons", "icon": "⚔", "color": Color("94a3b8")},
+	{"id": "drachen", "name": "Dragons", "icon": "☄", "color": Color("f472b6")},
+	{"id": "metro", "name": "City & Metro", "icon": "▣", "color": Color("38bdf8")},
+	{"id": "sammeln", "name": "Loot & gear", "icon": "◆", "color": Color("fbbf24")},
+	{"id": "natur", "name": "Nature", "icon": "❦", "color": Color("4ade80")},
+	{"id": "ruinen", "name": "Ruins & props", "icon": "▣", "color": Color("a78bfa")},
+	{"id": "zucht", "name": "Breeding & eggs", "icon": "✦", "color": Color("f472b6")},
+	{"id": "gegner", "name": "Enemies", "icon": "◉", "color": Color("f87171")},
+	{"id": "pang", "name": "Pang objects", "icon": "⇈", "color": Color("fbbf24")},
+	{"id": "merge", "name": "Merge & crystal tiers", "icon": "✦", "color": Color("38bdf8")},
+	{"id": "siedler", "name": "Settler village", "icon": "⌂", "color": Color("84cc16")},
+	{"id": "candy", "name": "Candy crush tiles", "icon": "✦", "color": Color("f472b6")},
 ]
 
 ## Breeding props of the hatchery.

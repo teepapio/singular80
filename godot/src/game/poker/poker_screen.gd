@@ -125,7 +125,7 @@ func _build_ui() -> void:
 	_message_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(_message_label)
 
-	_raise_label = Ui.label("Erhöhen auf: 0", 16, Color("7dd3fc"))
+	_raise_label = Ui.label("Raise to: 0", 16, Color("7dd3fc"))
 	_raise_label.position = Vector2(540, 596)
 	_raise_label.size = Vector2(200, 24)
 	_raise_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

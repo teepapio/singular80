@@ -37,9 +37,8 @@ var arena_weapon: String = "pistol"
 var arena_mode: String = "classic"
 var server_url: String = ""
 var touch_controls: bool = true
-## The language the player chose, e.g. `"en"`. Empty means "no choice yet" and
-## `Loc` then goes by the device language. Not a `Loc` field: this file holds
-## only what belongs into `user://singular80.cfg`.
+## The language the player chose, e.g. `"en"`. Empty means "no choice yet", and
+## `Loc` then follows the device language.
 var language: String = ""
 
 var _highscores: Dictionary = {}
@@ -116,8 +115,8 @@ func set_arena_mode(id: String) -> void:
 
 # --- language and input -----------------------------------------------------
 
-## The language the player picked, e.g. `"en"`. `Loc` is the only caller and
-## validates the value first — this just keeps the one config file in one place.
+## The language the player picked. `Loc` is the only caller and validates the
+## value first; this just keeps the one config file in one place.
 func set_language(code: String) -> void:
 	language = code
 	save_settings()
@@ -190,8 +189,8 @@ func submit_stars(game_id: String, level_key: String, value: int) -> bool:
 	return true
 
 
-## Reads a whole set of level keys in one go — used by the level select to build
-## its star map without 240 individual settings reads per redraw.
+## Reads a whole set of level keys in one go, so the level select does not do 240
+## settings reads per redraw.
 func star_map(game_id: String, level_keys: Array) -> Dictionary:
 	var out := {}
 	for key in level_keys:

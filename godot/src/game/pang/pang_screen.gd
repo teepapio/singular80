@@ -1,20 +1,11 @@
 class_name PangScreen
 extends WorldScreen
-## Pang 3D — the 1990 arcade original as a 3D diorama.
-##
-## Faithful to the source: balls fall and bounce, the player runs left and
-## right along the floor and shoots harpoons straight up, and the level is over
-## when the last ball is gone. No heroes, no abilities, no orbiting spacecraft.
-## Every rule lives in `Pang` (`core/logic/pang.gd`); this file builds the
-## stage, draws it and feeds it input.
-##
-## The arena is a shallow stage — balls and harpoons share one Z plane, the
-## scenery sits behind and in front of them — so the side-on readability of the
-## original survives while every prop is a real mesh.
-##
-## Levels ship more balls than the original did: a crowd of small ones right
-## away, and from the middle of the campaign on reinforcement waves that drop in
-## while the level runs. Both arrive through the same pooled spawn as the
+## Pang 3D — the 1990 arcade original as a 3D diorama, faithful to the source:
+## no heroes, no abilities, no orbiting spacecraft. Rules live in `Pang`
+## (`core/logic/pang.gd`); this file builds the stage, draws it and feeds input.
+## Balls and harpoons share one Z plane with scenery in front and behind, so the
+## side-on readability of the original survives while every prop is a real mesh.
+## Reinforcement waves from mid-campaign use the same pooled spawn as the
 ## opening layout, so a wave costs no allocation and no new node.
 
 ## The ball pool is sized from the rules, not guessed: see `Pang.ORB_SAFE_CAP`.
@@ -509,7 +500,7 @@ func _build_ui() -> void:
 	_effect_box.add_theme_constant_override("separation", 2)
 	hud_root.add_child(_effect_box)
 
-	var hint := Ui.label("Stick oder ◀ ▶ laufen · ⇈ Haken · ‖ Pause", 15, UiTheme.TEXT_DIM)
+	var hint := Ui.label("Stick or ◀ ▶ to run · ⇈ hook · ‖ pause", 15, UiTheme.TEXT_DIM)
 	hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	hint.position = Vector2(0, -172)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -804,7 +795,7 @@ func _announce_wave() -> void:
 	# A falling alarm tone. None of the named effects means "something is
 	# about to arrive above you", and this one cannot be mistaken for a shot.
 	Sfx.tone(760.0, 0.12, "square", -22.0, 240.0)
-	notify(Loc.f("Nachschub kündigt sich an — %s!", [Pang.wave_side_label(wave)]), 2.0)
+	notify(Loc.f("Reinforcements are coming — %s!", [Pang.wave_side_label(wave)]), 2.0)
 
 
 ## Puts the announced batch on the board and hands the arena back to the player.
@@ -820,7 +811,7 @@ func _drop_wave() -> void:
 	_hide_wave_marker()
 	# The arrival is the one moment the level interrupts itself, so it says so —
 	# on screen, in the corner list and through the floor.
-	notify(Loc.f("Nachschub: %d Kugeln von %s", [[batch.size(), Pang.wave_side_label(wave)]]), 2.0)
+	notify(Loc.f("Reinforcements: %d balls from %s", [batch.size(), Pang.wave_side_label(wave)]), 2.0)
 	_effect_chip("☄  Nachschub!  %s" % ("Noch " + Pang.wave_label(waves_left) if waves_left > 0 else "Letzte Welle"), WAVE_ALERT, 2.4)
 	Sfx.tone(520.0, 0.18, "saw", -20.0, 160.0)
 	shake = maxf(shake, 0.18)
@@ -1427,11 +1418,11 @@ func _show_overlay(title: String, color: Color, lines: Array[String], offer_next
 	column.add_child(buttons)
 	if state == STATE_CLEARED and offer_next and level < Pang.TOTAL_LEVELS:
 		var next_level := level + 1
-		buttons.add_child(Ui.button(Loc.f("Weiter: Level %d", [next_level]), Vector2(320, 54), UiTheme.ACCENT, func() -> void:
+		buttons.add_child(Ui.button(Loc.f("Next: level %d", [next_level]), Vector2(320, 54), UiTheme.ACCENT, func() -> void:
 			_goto_level(next_level)))
-	buttons.add_child(Ui.button("Nochmal", Vector2(320, 54), UiTheme.PANEL_LIGHT, func() -> void:
+	buttons.add_child(Ui.button("Again", Vector2(320, 54), UiTheme.PANEL_LIGHT, func() -> void:
 		_goto_level(level)))
-	buttons.add_child(Ui.button("Level-Auswahl", Vector2(320, 50), UiTheme.PANEL_LIGHT, func() -> void:
+	buttons.add_child(Ui.button("Level select", Vector2(320, 50), UiTheme.PANEL_LIGHT, func() -> void:
 		Router.go_to("pang_menu")))
 	buttons.add_child(Ui.button("Lobby", Vector2(320, 50), UiTheme.PANEL_LIGHT, func() -> void:
 		Router.to_lobby()))

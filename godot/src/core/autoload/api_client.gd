@@ -2,17 +2,13 @@ extends Node
 ## Thin HTTP client for the Singular 80 backend.
 ##
 ## Every call is fire-and-forget with a short timeout: on a phone the game must
-## never block on a missing server. Without `Game.server_url` the calls resolve
-## to an empty result and callers fall back to bundled data.
-##
-## A suggestion reaches the persistent `SuggestionQueue` **before** any send is
-## attempted, keeps the same `clientKey` across every retry, and leaves the queue
-## only after the server confirmed it.
+## never block on a missing server.
+## A suggestion is persisted to `user://` before any send, keeps one `clientKey`
+## across retries, and leaves the queue only after the server confirmed it.
 
 signal suggestion_sent(id: int, cluster_size: int)
 signal suggestion_failed(reason: String)
-## Emitted whenever the number of queued suggestions changes, so a screen can
-## show the pending hint.
+## Emitted when the queued count changes, so a screen can show the pending hint.
 signal pending_changed(count: int)
 
 const TIMEOUT := 4.0
@@ -28,8 +24,7 @@ var _announced: int = 0
 
 func _ready() -> void:
 	process_priority = -40
-	# The `user://` content is the whole point: the list can have been sitting
-	# there since the last start, a reboot or a crash.
+	# Restored from `user://`: the list survives a crash or a reboot.
 	_queue = QueueClass.restore()
 	_timer = Timer.new()
 	_timer.one_shot = true
@@ -37,24 +32,21 @@ func _ready() -> void:
 	add_child(_timer)
 	_announce_pending()
 	if not _queue.is_empty():
-		# Startup catches up quickly. Without a configured server there is nothing
-		# to probe; the first contact or a resume takes over.
+		# Startup catches up quickly; without a server the first contact takes over.
 		_arm(0, 0.25 if Game.has_server() else 60.0)
 
 
 func _notification(what: int) -> void:
-	# Waking the phone is the moment the network comes back. Godot reports that
-	# as window focus (Android's `OS_Android::main_loop_focusin` reaches every
-	# child as `WINDOW_EVENT_FOCUS_IN`) and, per platform, additionally as
-	# application focus or resume.
+	# Waking the phone is when the network comes back. Godot reports that as window
+	# focus (on Android every child gets `WINDOW_EVENT_FOCUS_IN`) and, per platform,
+	# additionally as application focus or resume.
 	if what == NOTIFICATION_WM_WINDOW_FOCUS_IN \
 			or what == NOTIFICATION_APPLICATION_FOCUS_IN \
 			or what == NOTIFICATION_APPLICATION_RESUMED:
 		wake()
 
 
-## Resets the backoff and retries at once. After the phone wakes up this is
-## the honest reaction: the network has only just come back.
+## Resets the backoff and retries at once: the network has only just come back.
 func wake() -> void:
 	if _queue.is_empty():
 		return
@@ -89,13 +81,12 @@ func get_content() -> Variant:
 ## `context` names the screen or area the idea came from; it is prepended to the
 ## text so the dashboard can group ideas without the author having to say it.
 func submit_suggestion(text: String, author: String, context: String = "") -> Dictionary:
-	# 1. Queue it and write it to disk **before** sending. From here on the
-	#    idea survives a crash, an exit and a reboot.
+	# 1. Queue it and write it to disk **before** sending: from here on the idea
+	#    survives a crash, an exit and a reboot.
 	var item := QueueClass.make_item(SuggestionContext.compose(context, text), author, "game")
 	var dropped := QueueClass.push(_queue, item)
 	_save()
-	# `push()` appends the entry and may correct its key, so the authoritative
-	# one is the entry in the list, not the one in `item`.
+	# `push()` may correct the key, so read it back from the list, not from `item`.
 	var key := str((_queue[_queue.size() - 1] as Dictionary).get("clientKey", ""))
 	if not dropped.is_empty():
 		suggestion_failed.emit(QueueClass.cap_warning(dropped, QueueClass.MAX_ITEMS))
@@ -105,8 +96,7 @@ func submit_suggestion(text: String, author: String, context: String = "") -> Di
 		_arm(0, 0.25)
 		return {}
 	if _busy:
-		# A background flush is already running. The new entry is safe and goes
-		# out with its next pass or the next backoff.
+		# A flush is already running; the new entry goes out with its next pass.
 		return {}
 	# 2. Send once directly — the dialog waits for the result.
 	_busy = true
@@ -150,16 +140,14 @@ func pending_hint() -> String:
 	return QueueClass.pending_hint(pending_count())
 
 
-## Sends everything that is still queued. Safe to call at any time: it is what
-## the startup path and the resume path use. What does not go through stays in
-## the queue and is retried with backoff.
+## Sends everything that is still queued. What does not go through stays in the
+## queue and is retried with backoff.
 func flush_queue() -> void:
 	if _busy or _queue.is_empty():
 		_arm(0)
 		return
 	if not Game.has_server():
-		# Without a configured server there is nothing to probe; `_arm` keeps the
-		# attempt alive in case the address is set while the game is running.
+		# Nothing to probe, but the address may still be set while the game runs.
 		_arm(_attempt)
 		return
 	_busy = true
@@ -168,8 +156,7 @@ func flush_queue() -> void:
 	for entry in _queue.duplicate():
 		var view := await _deliver(str((entry as Dictionary).get("clientKey", "")))
 		if view.is_empty():
-			# The first failure speaks for all the others: continuing would
-			# mean waiting out the full timeout N times.
+			# The first failure speaks for all; continuing would wait out N timeouts.
 			failed = true
 			break
 	_busy = false
@@ -181,9 +168,8 @@ func flush_queue() -> void:
 		_arm(0)
 
 
-## Sends one queued item. Returns the parsed view, or `{}` when the item stays in
-## the queue. It is removed **only** after the server confirmed it: a lost
-## response then costs a retry with the same `clientKey`, not the idea.
+## Sends one queued item; `{}` means it stays queued. Removal happens **only** after
+## the server confirmed it, so a lost response costs a retry, not the idea.
 func _deliver(client_key: String) -> Dictionary:
 	var item := QueueClass.find(_queue, client_key)
 	if item.is_empty():
@@ -205,8 +191,7 @@ func _on_timer() -> void:
 	if _queue.is_empty():
 		return
 	if not Game.has_server():
-		# Nothing to probe, but the address may still be set while the game is
-		# running — the backoff stays the clock.
+		# Nothing to probe, but the address may still be set while the game runs.
 		_arm(_attempt + 1)
 		return
 	_attempt_queue()
@@ -217,8 +202,7 @@ func _attempt_queue() -> void:
 		_arm(_attempt)
 		return
 	_busy = true
-	# The health endpoint first: a forced POST exactly when the device has no
-	# network is what drains the battery. The probe costs almost nothing.
+	# Health endpoint first: a forced POST with no network drains the battery.
 	var reachable: bool = await probe()
 	_busy = false
 	if not reachable:
@@ -239,8 +223,7 @@ func _arm(attempt: int, wait: float = -1.0) -> void:
 		return
 	if wait < 0.0:
 		wait = QueueClass.backoff_seconds(_attempt)
-	# Never 0 s: a timer restarted at once fires in the same frame and empties
-	# the queue once a second from a certain length.
+	# Never 0 s: a timer restarted at once fires in the same frame.
 	_timer.wait_time = maxf(wait, 0.25)
 	_timer.start()
 
@@ -253,8 +236,7 @@ func _announce_pending() -> void:
 	pending_changed.emit(count)
 
 
-## Writes the queue to disk. Callers must do this **before** the server's
-## response: what is here is what a crash survives.
+## Writes the queue to disk; callers must do this **before** the server answers.
 func _save() -> void:
 	QueueClass.persist(QueueClass.PATH, _queue)
 

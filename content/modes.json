@@ -1,8 +1,8 @@
 [
   {
     "id": "classic",
-    "name": "Klassisch",
-    "description": "Ausgewogene Wellen, endlos.",
+    "name": "Classic",
+    "description": "Balanced waves, endless.",
     "enemyHpMult": 1,
     "enemySpeedMult": 1,
     "spawnRateMult": 1,
@@ -10,8 +10,8 @@
   },
   {
     "id": "chill",
-    "name": "Entspannt",
-    "description": "Gemütlicher Modus: schwächere und langsamere Gegner, weniger Spawns.",
+    "name": "Relaxed",
+    "description": "Cosy mode: weaker and slower enemies, fewer spawns.",
     "enemyHpMult": 0.7,
     "enemySpeedMult": 0.9,
     "spawnRateMult": 0.8,
@@ -19,8 +19,8 @@
   },
   {
     "id": "swarm",
-    "name": "Schwarm",
-    "description": "Mehr, aber schwächere Gegner.",
+    "name": "Swarm",
+    "description": "More enemies, but weaker ones.",
     "enemyHpMult": 0.75,
     "enemySpeedMult": 1.05,
     "spawnRateMult": 1.7,
@@ -29,7 +29,7 @@
   {
     "id": "hardcore",
     "name": "Hardcore",
-    "description": "Zähere und schnellere Gegner.",
+    "description": "Tougher and faster enemies.",
     "enemyHpMult": 1.5,
     "enemySpeedMult": 1.18,
     "spawnRateMult": 1.1,

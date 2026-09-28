@@ -113,10 +113,6 @@ func _run() -> void:
 		TestDragonFlight.new().run(kit)
 	if _wants_class("res://tests/test_candy_match3.gd", only):
 		TestCandyMatch3.new().run(kit)
-	if _wants_class("res://tests/test_devfarm.gd", only):
-		var devfarm_suite: GDScript = load("res://tests/test_devfarm.gd")
-		if devfarm_suite != null:
-			await devfarm_suite.new().run(kit, self)
 	if _wants_class("res://tests/test_tetris.gd", only):
 		var tetris_suite: GDScript = load("res://tests/test_tetris.gd")
 		if tetris_suite != null:

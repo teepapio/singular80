@@ -10,9 +10,8 @@ extends RefCounted
 ## Opens the dialog on `host` and applies the new address on confirm.
 static func open(host: Node) -> void:
 	var dialog := AcceptDialog.new()
-	# `AcceptDialog` brings its own buttons, whose captions come from
-	# `TranslationServer`. `Loc` does not register its catalogues under Godot's
-	# `ok`/`cancel` names, and an "OK" in every language is the smallest crack here.
+	# `AcceptDialog`'s own buttons take their captions from `TranslationServer`;
+	# `Loc` does not register our catalogues under Godot's `ok`/`cancel` keys.
 	dialog.ok_button_text = Loc.t("ui.ok")
 	dialog.title = Loc.t("ui.server_title")
 	dialog.dialog_hide_on_ok = true
@@ -36,10 +35,8 @@ static func open(host: Node) -> void:
 
 
 ## Sets the address and everything that has to follow it.
-##
-## `Api.wake()` is the easy part to forget and expensive to skip: without it a
-## waiting queue sits out its backoff — up to `BACKOFF_MAX`, five minutes —
-## although the address was correct the whole time.
+## `Api.wake()` is the easy part to forget and expensive to skip: the queue would
+## sit out its backoff (up to `BACKOFF_MAX`, five minutes) with the address right.
 static func apply(url: String) -> void:
 	Game.set_server_url(url)
 	Content.reload_remote.call_deferred()
@@ -47,11 +44,8 @@ static func apply(url: String) -> void:
 
 
 ## The caption of the button that opens this dialog.
-##
-## `Loc.t` with a `{state}` placeholder rather than `"… %s" % url`: the address
-## is substituted *after* translation, so a language that puts the word in front
-## of the colon still reads right. The address itself stays untranslated —
-## `192.168.1.20:8787` is not prose.
+## `Loc.t` with a `{state}` placeholder rather than `"… %s" % url`, so a language
+## that puts the word in front of the colon still reads right.
 static func label() -> String:
 	return Loc.t("ui.server_caption", {
 		"state": Loc.t("ui.server_offline") if not Game.has_server() else Game.server_url,

@@ -67,11 +67,11 @@ func _build_content() -> void:
 	var title := Ui.title("SINGULAR 80", 64)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(title)
-	var tagline := Ui.label("Ein Spiel, das von seinen Spielern gebaut wird.", 19, Color(0.490, 0.827, 0.988))
+	var tagline := Ui.label("A game built by its own players.", 19, Color(0.490, 0.827, 0.988))
 	tagline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	tagline.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(tagline)
-	var record := Ui.label(Loc.f("Highscore: %s   ·   Content v%d", [[Ui.format_number(Game.highscore(Game.HS_ARENA)), Content.version]]), 14, UiTheme.TEXT_MUTED)
+	var record := Ui.label(Loc.f("High score: %s   ·   Content v%d", [Ui.format_number(Game.highscore(Game.HS_ARENA)), Content.version]), 14, UiTheme.TEXT_MUTED)
 	record.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	record.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(record)
@@ -84,7 +84,7 @@ func _build_content() -> void:
 	column.add_child(_mode_row())
 	column.add_child(_spacer(10))
 
-	var start := Ui.button("▶  Spiel starten", Vector2(420, 66), UiTheme.ACCENT, func() -> void:
+	var start := Ui.button("▶  Start game", Vector2(420, 66), UiTheme.ACCENT, func() -> void:
 		Sfx.level_up()
 		Router.go_to("arena", {"weaponId": weapon_id, "modeId": mode_id})
 	)
@@ -96,7 +96,7 @@ func _build_content() -> void:
 	column.add_child(_spacer(4))
 	var actions := Ui.hbox(10)
 	actions.alignment = BoxContainer.ALIGNMENT_CENTER
-	actions.add_child(Ui.button("Vorschlag einreichen", Vector2(250, 50), UiTheme.PANEL_LIGHT, func() -> void:
+	actions.add_child(Ui.button("Submit a suggestion", Vector2(250, 50), UiTheme.PANEL_LIGHT, func() -> void:
 		SuggestDialog.open(self)
 	))
 	actions.add_child(Ui.button("Lobby", Vector2(170, 50), UiTheme.PANEL_LIGHT, func() -> void:
@@ -115,7 +115,7 @@ func _build_content() -> void:
 	column.add_child(actions)
 
 	column.add_child(_spacer(6))
-	var help := Ui.label("Stick / WASD bewegen  ·  Zielen mit Finger oder Maus  ·  Auto-Feuer  ·  Dash  ·  ESC Pause", 14, Color(0.278, 0.341, 0.412))
+	var help := Ui.label("Stick / WASD to move  ·  Aim with finger or mouse  ·  Auto-fire  ·  Dash  ·  ESC pause", 14, Color(0.278, 0.341, 0.412))
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	help.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(help)
@@ -130,7 +130,7 @@ func _build_content() -> void:
 	_ticker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_ticker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ticker_row.add_child(_ticker)
-	ticker_row.add_child(Ui.button("Inhalt melden", Vector2(150, 30), UiTheme.PANEL_LIGHT,
+	ticker_row.add_child(Ui.button("Report content", Vector2(150, 30), UiTheme.PANEL_LIGHT,
 		func() -> void: _report_current()))
 	column.add_child(ticker_row)
 

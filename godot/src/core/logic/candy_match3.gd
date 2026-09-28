@@ -940,8 +940,8 @@ const LAYOUTS: Array = [
 ## Every world: six board colours, six Blender meshes and a mood.
 const WORLDS: Array[Dictionary] = [
 	{
-		"id": "candy", "name": "Bonbonland", "icon": "✦",
-		"tagline": "Zuckerwatte, Karamell und Schokolade",
+		"id": "candy", "name": "Candy Land", "icon": "✦",
+		"tagline": "Marshmallow, caramel and chocolate",
 		"palette": ["ef4444", "facc15", "38bdf8", "22c55e", "f472b6", "a855f7"],
 		"background": "2a1039", "plate": ["4c1d95", "3b0764"], "accent": "f472b6",
 		"pieceAssets": [
@@ -957,8 +957,8 @@ const WORLDS: Array[Dictionary] = [
 		],
 	},
 	{
-		"id": "crystals", "name": "Kristallbruch", "icon": "◆",
-		"tagline": "Splitter, Prismen und leuchtende Kerne",
+		"id": "crystals", "name": "Crystal Quarry", "icon": "◆",
+		"tagline": "Shards, prisms and glowing cores",
 		"palette": ["22d3ee", "34d399", "fbbf24", "f472b6", "60a5fa", "c084fc"],
 		"background": "08172e", "plate": ["1e3a5f", "15294a"], "accent": "22d3ee",
 		"pieceAssets": ["crystal", "crystal1", "crystal2", "crystal3", "crystal4", "crystal5"],
@@ -971,8 +971,8 @@ const WORLDS: Array[Dictionary] = [
 		],
 	},
 	{
-		"id": "flowers", "name": "Blütenmeer", "icon": "❦",
-		"tagline": "Rosen, Tulpen und Seerosen im Wind",
+		"id": "flowers", "name": "Blossom Sea", "icon": "❦",
+		"tagline": "Roses, tulips and water lilies in the wind",
 		"palette": ["fb7185", "fde047", "f9a8d4", "ffffff", "86efac", "c4b5fd"],
 		"background": "14301f", "plate": ["1f5133", "173d26"], "accent": "fb7185",
 		"pieceAssets": [
@@ -988,8 +988,8 @@ const WORLDS: Array[Dictionary] = [
 		],
 	},
 	{
-		"id": "halloween", "name": "Kürbiskirmes", "icon": "◑",
-		"tagline": "Zuckerwatte, Kürbisse und Geister",
+		"id": "halloween", "name": "Pumpkin Fair", "icon": "◑",
+		"tagline": "Marshmallow, pumpkins and ghosts",
 		"palette": ["fb923c", "4ade80", "a78bfa", "f87171", "fef3c7", "22d3ee"],
 		"background": "1b0b2e", "plate": ["3b0764", "2e0a4f"], "accent": "f97316",
 		"pieceAssets": [
@@ -1005,8 +1005,8 @@ const WORLDS: Array[Dictionary] = [
 		],
 	},
 	{
-		"id": "xmas", "name": "Weihnachtsmarkt", "icon": "✧",
-		"tagline": "Zuckerstangen, Glaskugeln und Stollensterne",
+		"id": "xmas", "name": "Christmas Market", "icon": "✧",
+		"tagline": "Candy canes, baubles and gingerbread stars",
 		"palette": ["ef4444", "22c55e", "facc15", "7dd3fc", "fda4af", "a16207"],
 		"background": "0b1a2f", "plate": ["14406b", "0e2f50"], "accent": "ef4444",
 		"pieceAssets": [
@@ -1023,8 +1023,8 @@ const WORLDS: Array[Dictionary] = [
 		],
 	},
 	{
-		"id": "gems", "name": "Schatzgrube", "icon": "◈",
-		"tagline": "Amulette, Ringe und gekrönte Schätze",
+		"id": "gems", "name": "Treasure Vault", "icon": "◈",
+		"tagline": "Amulets, rings and crowned treasures",
 		"palette": ["38bdf8", "4ade80", "fb7185", "c084fc", "fbbf24", "e2e8f0"],
 		"background": "1c1206", "plate": ["5b3d0f", "452d0b"], "accent": "fbbf24",
 		"pieceAssets": [
@@ -1177,9 +1177,9 @@ static func total_level_count() -> int:
 
 ## Star milestones of a world; every reached milestone keeps paying out.
 const WORLD_MILESTONES: Array[Dictionary] = [
-	{"stars": 10, "label": "+3 Züge in jedem Level", "moves": 3, "undos": 0, "bomb": false},
-	{"stars": 25, "label": "Start-Farbbombe", "moves": 0, "undos": 0, "bomb": true},
-	{"stars": 45, "label": "+2 Züge und +1 Undo", "moves": 2, "undos": 1, "bomb": true},
+	{"stars": 10, "label": "+3 moves in every level", "moves": 3, "undos": 0, "bomb": false},
+	{"stars": 25, "label": "Starting colour bomb", "moves": 0, "undos": 0, "bomb": true},
+	{"stars": 45, "label": "+2 moves and +1 undo", "moves": 2, "undos": 1, "bomb": true},
 ]
 
 
@@ -1529,19 +1529,19 @@ static func run_moments(state: Dictionary) -> Array:
 	var best := highlights(state)
 	var moments: Array = []
 	if int(best["chain"]) >= 2:
-		moments.append({"icon": "✦", "label": "Längste Kette", "value": int(best["chain"]),
+		moments.append({"icon": "✦", "label": "Longest chain", "value": int(best["chain"]),
 			"unit": "Treffer in Folge", "move": 0})
 	if int(best["clear"]) >= 4:
-		moments.append({"icon": "◼", "label": "Größter Match", "value": int(best["clear"]),
+		moments.append({"icon": "◼", "label": "Biggest match", "value": int(best["clear"]),
 			"unit": "Bonbons auf einmal", "move": 0})
 	if int(best["comboBest"]) > 0:
-		moments.append({"icon": "✹", "label": "Kombination: %s" % str(best["comboName"]),
+		moments.append({"icon": "✹", "label": "Combination: %s" % str(best["comboName"]),
 			"value": int(best["comboBest"]), "unit": "Bonbons auf einmal", "move": int(best["comboMove"])})
 	if int(best["specials"]) > 0:
-		moments.append({"icon": "◆", "label": "Spezialbonbons", "value": int(best["specials"]),
+		moments.append({"icon": "◆", "label": "Special candies", "value": int(best["specials"]),
 			"unit": "gebildet", "move": 0})
 	if int(best["step"]) > 0:
-		moments.append({"icon": "★", "label": "Bester Zug", "value": int(best["step"]),
+		moments.append({"icon": "★", "label": "Best move", "value": int(best["step"]),
 			"unit": "Punkte", "move": int(best["stepMove"])})
 	return moments
 

@@ -19,11 +19,11 @@ const THEME_CHRISTMAS := "christmas"
 const THEME_HALLOWEEN := "halloween"
 
 const CRYSTAL_TIERS := [
-	{"tier": 1, "name": "Splitter", "color": Color("93c5fd"), "value": 1, "asset": "crystal1"},
-	{"tier": 2, "name": "Kristall", "color": Color("22d3ee"), "value": 3, "asset": "crystal2"},
-	{"tier": 3, "name": "Juwel", "color": Color("34d399"), "value": 9, "asset": "crystal3"},
-	{"tier": 4, "name": "Prisma", "color": Color("fbbf24"), "value": 27, "asset": "crystal4"},
-	{"tier": 5, "name": "Sternenkern", "color": Color("f472b6"), "value": 81, "asset": "crystal5"},
+	{"tier": 1, "name": "Shard", "color": Color("93c5fd"), "value": 1, "asset": "crystal1"},
+	{"tier": 2, "name": "Crystal", "color": Color("22d3ee"), "value": 3, "asset": "crystal2"},
+	{"tier": 3, "name": "Jewel", "color": Color("34d399"), "value": 9, "asset": "crystal3"},
+	{"tier": 4, "name": "Prism", "color": Color("fbbf24"), "value": 27, "asset": "crystal4"},
+	{"tier": 5, "name": "Starcore", "color": Color("f472b6"), "value": 81, "asset": "crystal5"},
 ]
 
 const THEMES := {
@@ -48,11 +48,11 @@ const THEMES := {
 		"particle": Color("8fc7ff"),
 		"particleFall": false,
 		"keyPrefix": "singular80_crystal3d",
-		"hint": "Stick bewegen · Sprung-Taste · Gipfel erreichen!",
+		"hint": "Move the stick · jump button · reach the summit!",
 	},
 	THEME_CHRISTMAS: {
 		"id": THEME_CHRISTMAS,
-		"title": "Crystal Jumper — Weihnachten",
+		"title": "Crystal Jumper — Christmas",
 		"icon": "✧",
 		"tierNames": ["Tannenzapfen", "Zuckerstange", "Glaskugel", "Lebkuchenstern", "Christstern"],
 		"tierColors": [Color("b45309"), Color("ef4444"), Color("7dd3fc"), Color("d97706"), Color("facc15")],
@@ -71,7 +71,7 @@ const THEMES := {
 		"particle": Color("ffffff"),
 		"particleFall": true,
 		"keyPrefix": "singular80_crystal3d_christmas",
-		"hint": "Fröhliches Klettern! Sammle Weihnachtsschmuck und erreiche den Gipfel.",
+		"hint": "Happy climbing! Collect Christmas decorations and reach the summit.",
 	},
 	THEME_HALLOWEEN: {
 		"id": THEME_HALLOWEEN,
@@ -94,7 +94,7 @@ const THEMES := {
 		"particle": Color("fb923c"),
 		"particleFall": false,
 		"keyPrefix": "singular80_crystal3d_halloween",
-		"hint": "Sammle Kürbisse bei Nacht und klettere zum Geistergipfel.",
+		"hint": "Collect pumpkins at night and climb to the ghost summit.",
 	},
 }
 

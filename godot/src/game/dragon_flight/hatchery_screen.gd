@@ -1,12 +1,10 @@
 class_name DragonFlightHatcheryScreen
 extends WorldScreen
-## The Drachenflug hatchery — a 3D breeding valley.
-##
-## Dragons stand on pedestals, eggs lie in nests and breeding is done by pairing
-## two of them. The interesting part is genetics: every dragon carries two
-## alleles per gene, a child inherits one from each parent, and a recessive
-## gene only shows when both parents carry it. So a rare dragon has to be bred
-## out of two carriers, which is what the pedigree view is for.
+## The Drachenflug hatchery — a 3D breeding valley. Dragons stand on pedestals,
+## eggs lie in nests, breeding pairs two of them. Genetics: every dragon carries
+## two alleles per gene, the child inherits one from each parent, and a recessive
+## gene only shows when both parents carry it — so a rare dragon must be bred out
+## of two carriers, which is what the pedigree view is for.
 
 const PEDESTALS := 6
 const NEST_SPOTS := 4
@@ -175,7 +173,7 @@ func _build_ui() -> void:
 	hud_root.add_child(panel)
 	var box := Ui.vbox(6)
 	panel.add_child(box)
-	_label_title = Ui.label("ZUCHTALLEE", 24, UiTheme.ACCENT, true)
+	_label_title = Ui.label("BREEDING ALLEY", 24, UiTheme.ACCENT, true)
 	box.add_child(_label_title)
 
 	# Everything below scrolls, so a long breed list can never reach the button.
@@ -196,13 +194,13 @@ func _build_ui() -> void:
 	_label_pedigree = Ui.label("", 13, UiTheme.TEXT_MUTED)
 	_label_pedigree.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.add_child(_label_pedigree)
-	_pair_button = Ui.button("Paaren", Vector2(400, 48), UiTheme.ACCENT, _on_pair)
+	_pair_button = Ui.button("Breed", Vector2(400, 48), UiTheme.ACCENT, _on_pair)
 	body.add_child(_pair_button)
 
 	# Zuchtziel: which trait this pairing is bred for. The chips are the whole
 	# breeding plan in one block, and the list below answers "which two of my
 	# dragons can actually produce it".
-	body.add_child(Ui.label("Zuchtziel", 16, UiTheme.TEXT, true))
+	body.add_child(Ui.label("Breeding goal", 16, UiTheme.TEXT, true))
 	_target_grid = GridContainer.new()
 	_target_grid.columns = 3
 	_target_grid.add_theme_constant_override("h_separation", 4)
@@ -215,16 +213,16 @@ func _build_ui() -> void:
 	body.add_child(_candidate_box)
 
 	# Zuchtvorhersage: what the pair that is actually selected will produce.
-	body.add_child(Ui.label("Zuchtvorhersage", 16, UiTheme.TEXT, true))
+	body.add_child(Ui.label("Breeding forecast", 16, UiTheme.TEXT, true))
 	_forecast_box = Ui.vbox(2)
 	body.add_child(_forecast_box)
 
-	body.add_child(Ui.label("Eier im Nest", 17, UiTheme.TEXT, true))
+	body.add_child(Ui.label("Eggs in the nest", 17, UiTheme.TEXT, true))
 	_list = Ui.vbox(4)
 	body.add_child(_list)
 
 	# Egg currency and the breeds that are still missing.
-	_lay_button = Ui.button("Ei legen", Vector2(400, 44), UiTheme.PANEL_LIGHT, _on_lay_egg)
+	_lay_button = Ui.button("Lay egg", Vector2(400, 44), UiTheme.PANEL_LIGHT, _on_lay_egg)
 	body.add_child(_lay_button)
 	_breed_box = Ui.vbox(3)
 	body.add_child(_breed_box)
@@ -237,7 +235,7 @@ func _build_ui() -> void:
 	back.position = Vector2(-184, -96)
 	hud_root.add_child(back)
 
-	var hint := Ui.label("Tippe einen Sockel an, um ihn als Elternteil zu wählen", 15, UiTheme.TEXT_DIM)
+	var hint := Ui.label("Tap a pedestal to pick it as a parent", 15, UiTheme.TEXT_DIM)
 	hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	hint.position = Vector2(0, -104)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -468,7 +466,7 @@ func _refresh_candidates() -> void:
 		child.queue_free()
 	var candidates := DragonFlight.target_candidates(profile, target_trait, 5)
 	if candidates.is_empty():
-		_candidate_box.add_child(Ui.label("Keine Drachen im Stall.", 13, UiTheme.TEXT_MUTED))
+		_candidate_box.add_child(Ui.label("No dragons in the stable.", 13, UiTheme.TEXT_MUTED))
 		return
 	var hue := Color(str(DragonFlight.trait_by_id(target_trait)["hue"]))
 	for entry in candidates:
@@ -542,7 +540,7 @@ func _refresh_forecast(a: Dictionary, b: Dictionary) -> void:
 	for child in _forecast_box.get_children():
 		child.queue_free()
 	if a.is_empty() or b.is_empty() or parent_a == parent_b:
-		_forecast_box.add_child(Ui.label("Noch kein Paar gewählt.", 14, UiTheme.TEXT_MUTED))
+		_forecast_box.add_child(Ui.label("No pair selected yet.", 14, UiTheme.TEXT_MUTED))
 		return
 	var forecast := DragonFlight.breeding_forecast(a, b)
 	# The goal the player picked comes first, the rest stays sorted by chance:
@@ -583,7 +581,7 @@ func _refresh_forecast(a: Dictionary, b: Dictionary) -> void:
 		if bool(entry["b"]):
 			parents.append("B")
 		if not parents.is_empty():
-			row.add_child(Ui.label(Loc.f("trägt %s", [", ".join(parents)]), 11, UiTheme.TEXT_MUTED))
+			row.add_child(Ui.label(Loc.f("carries %s", [", ".join(parents)]), 11, UiTheme.TEXT_MUTED))
 
 
 ## The egg currency is spent here: every egg lands in a nest and hatches on its
@@ -608,7 +606,7 @@ func _free_nest() -> int:
 func _on_lay_egg() -> void:
 	var price := DragonFlight.egg_cost(profile)
 	if int(profile.get("eggs", 0)) < 1 or int(profile.get("gold", 0)) < price:
-		notify("Nicht genug Eier oder Gold")
+		notify("Not enough eggs or gold")
 		return
 	profile["eggs"] = int(profile["eggs"]) - 1
 	profile["gold"] = int(profile["gold"]) - price
@@ -616,7 +614,7 @@ func _on_lay_egg() -> void:
 	dragon["egg"]["ready_at"] = now + 45.0
 	DragonFlight.save_profile(profile)
 	Sfx.coin()
-	notify("Ein Ei liegt im Nest")
+	notify("One egg is in the nest")
 	refresh()
 
 
@@ -629,9 +627,9 @@ func _refresh_breeds() -> void:
 		if not DragonFlight.has_breed(profile, str(breed["id"])):
 			missing.append(breed)
 	if missing.is_empty():
-		_breed_box.add_child(Ui.label("Alle Rassen im Stall.", 14, UiTheme.SUCCESS))
+		_breed_box.add_child(Ui.label("Every breed is in the stable.", 14, UiTheme.SUCCESS))
 		return
-	_breed_box.add_child(Ui.label("Rassen kaufen", 16, UiTheme.TEXT, true))
+	_breed_box.add_child(Ui.label("Buy breeds", 16, UiTheme.TEXT, true))
 	for breed in missing:
 		var id := str(breed["id"])
 		var price := DragonFlight.breed_price(id)
@@ -657,7 +655,7 @@ func _refresh_list() -> void:
 	_progress.clear()
 	var eggs := DragonFlight.eggs_of(profile)
 	if eggs.is_empty():
-		_list.add_child(Ui.label("Keine Eier im Nest. Fliege level und sammle welche.", 14, UiTheme.TEXT_MUTED))
+		_list.add_child(Ui.label("No eggs in the nest. Fly a level and collect some.", 14, UiTheme.TEXT_MUTED))
 		return
 	for dragon in eggs:
 		var breed := DragonFlight.breed_by_id(str(dragon["breed"]))
@@ -668,7 +666,7 @@ func _refresh_list() -> void:
 		row.add_child(head)
 		head.add_child(Ui.label(Loc.f("%s-Ei", [str(breed["name"])]), 15, Color(str(breed["eggColor"])), true))
 		head.add_child(Ui.spacer())
-		head.add_child(Ui.label(Loc.f("%ds", [roundi(remaining) if remaining > 0.0 else "bereit"]), 14,
+		head.add_child(Ui.label(Loc.f("%ds", [roundi(remaining)]) if remaining > 0.0 else Loc.t("ui.ready"), 14,
 			Color("22c55e") if remaining <= 0.0 else UiTheme.TEXT_DIM))
 		var bar := Ui.bar(Color("fbbf24"), 10.0)
 		Ui.set_bar(bar, DragonFlight.egg_progress(dragon, now), Color(str(breed["eggColor"])))
@@ -678,11 +676,11 @@ func _refresh_list() -> void:
 		_egg_readout_line(row, readout)
 		if remaining > 0.0:
 			var cost := DragonFlight.hatch_cost(dragon)
-			row.add_child(Ui.button(Loc.f("Ausbrüten für %d ◈", [cost]), Vector2(400, 34), UiTheme.PANEL_LIGHT, func() -> void:
+			row.add_child(Ui.button(Loc.f("Hatch for %d ◈", [cost]), Vector2(400, 34), UiTheme.PANEL_LIGHT, func() -> void:
 				_hatch_now(dragon, cost)
 			))
 		else:
-			row.add_child(Ui.button("Schlüpfen lassen", Vector2(400, 34), UiTheme.SUCCESS, func() -> void:
+			row.add_child(Ui.button("Let them hatch", Vector2(400, 34), UiTheme.SUCCESS, func() -> void:
 				_hatch_now(dragon, 0)
 			))
 
@@ -695,7 +693,7 @@ func _egg_readout_line(row: VBoxContainer, readout: Dictionary) -> void:
 	var shown: Array[String] = readout.get("traits", [])
 	var carriers: Array[String] = readout.get("carriers", [])
 	if shown.is_empty() and carriers.is_empty():
-		row.add_child(Ui.label("schlüpft ohne Merkmale", 12, UiTheme.TEXT_MUTED))
+		row.add_child(Ui.label("hatches without traits", 12, UiTheme.TEXT_MUTED))
 		return
 	var parts: Array[String] = []
 	if not shown.is_empty():
@@ -762,11 +760,11 @@ func _pick_at(screen_point: Vector2) -> void:
 
 func _on_buy_breed(id: String) -> void:
 	if DragonFlight.buy_breed(profile, id).is_empty():
-		notify("Zu wenig Gold")
+		notify("Not enough gold")
 		return
 	DragonFlight.save_profile(profile)
 	Sfx.coin()
-	notify(Loc.f("%s ist eingetroffen", [str(DragonFlight.breed_by_id(id)["name"])]))
+	notify(Loc.f("%s has arrived", [str(DragonFlight.breed_by_id(id)["name"])]))
 	parent_a = 0
 	parent_b = 0
 	refresh()
@@ -779,7 +777,7 @@ func _on_pair() -> void:
 		return
 	var cost := DragonFlight.pairing_cost(a, b)
 	if int(profile.get("gold", 0)) < cost:
-		notify("Zu wenig Gold")
+		notify("Not enough gold")
 		return
 	profile["gold"] = int(profile["gold"]) - cost
 	var child := DragonFlight.breed_parents(a, b, DragonFlight.next_uid(profile))
@@ -791,14 +789,14 @@ func _on_pair() -> void:
 	profile["breeds"] = DragonFlight.unlocked_breeds(profile)
 	DragonFlight.save_profile(profile)
 	Sfx.level_up()
-	notify(Loc.f("Ei gelegt — %.0f s Brütezeit", [seconds]))
+	notify(Loc.f("Egg laid — %.0f s to hatch", [seconds]))
 	parent_b = 0
 	refresh()
 
 
 func _hatch_now(dragon: Dictionary, cost: int) -> void:
 	if int(profile.get("gold", 0)) < cost:
-		notify("Zu wenig Gold")
+		notify("Not enough gold")
 		return
 	profile["gold"] = int(profile["gold"]) - cost
 	var list: Array = profile.get("dragons", [])
@@ -816,7 +814,7 @@ func _hatch_now(dragon: Dictionary, cost: int) -> void:
 	Sfx.level_up()
 	var breed := DragonFlight.breed_by_id(str(hatched["breed"]))
 	var traits := DragonFlight.expressed_traits(hatched.get("alleles", {}))
-	notify(Loc.f("%d schlüpft! Merkmale: %s", [[int(hatched["gen"]), ", ".join(_names(traits)) if not traits.is_empty() else "keine"]]))
+	notify(Loc.f("%d hatched! Traits: %s", [int(hatched["gen"]), ", ".join(_names(traits)) if not traits.is_empty() else "keine"]))
 	refresh()
 
 

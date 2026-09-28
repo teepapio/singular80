@@ -1,8 +1,8 @@
 [
   {
     "id": "pistol",
-    "name": "Pistole",
-    "description": "Ausgewogen, ein Schuss nach dem anderen.",
+    "name": "Pistol",
+    "description": "Balanced, one shot at a time.",
     "damage": 7,
     "cooldown": 420,
     "projectileSpeed": 540,
@@ -15,8 +15,8 @@
   },
   {
     "id": "smg",
-    "name": "Maschinenpistole",
-    "description": "Schnelle, schwache Schüsse.",
+    "name": "Machine Pistol",
+    "description": "Fast, weak shots.",
     "damage": 3.5,
     "cooldown": 150,
     "projectileSpeed": 640,
@@ -29,8 +29,8 @@
   },
   {
     "id": "shotgun",
-    "name": "Schrotflinte",
-    "description": "Vier Projektile mit Streuung, kurze Reichweite.",
+    "name": "Shotgun",
+    "description": "Four projectiles in a spread, short range.",
     "damage": 5,
     "cooldown": 820,
     "projectileSpeed": 470,
@@ -44,7 +44,7 @@
   {
     "id": "railgun",
     "name": "Railgun",
-    "description": "Langsam, aber durchschlägt ganze Reihen.",
+    "description": "Slow, but pierces whole rows.",
     "damage": 28,
     "cooldown": 1350,
     "projectileSpeed": 950,
@@ -57,8 +57,8 @@
   },
   {
     "id": "burst",
-    "name": "Burst-Kanone",
-    "description": "Drei Schüsse gleichzeitig in engem Fächer.",
+    "name": "Burst Cannon",
+    "description": "Three shots at once in a tight spread.",
     "damage": 4.5,
     "cooldown": 600,
     "projectileSpeed": 580,

@@ -1,18 +1,9 @@
 class_name CandyMatch3Screen
 extends WorldScreen
 ## "Candy Crush 3D" — a match-3 with six themed worlds and 240 generated levels.
-##
-## Swap two neighbours to line up three candies; matches clear, the board refills
-## and cascades score more the longer they chain. Four in a row creates a striped
-## candy, an L/T a wrapped one and five in a row a colour bomb. Swapping two
-## special candies into each other combines them — the rules live in
-## `candy_match3.gd`, this screen only draws them and feeds the input. It also
-## shows what a combination would clear while the player holds one of them, so
-## the table can be read off the board instead of guessed.
-##
-## The board stands upright in the XY plane (like a board game) with the camera in
-## front of it — that keeps the pieces readable on a phone and lets the touch
-## picking be a single ray/plane intersection.
+## Rules live in `candy_match3.gd`; this screen only draws them and feeds input.
+## The board stands upright in the XY plane with the camera in front of it — that
+## keeps the pieces readable on a phone and makes touch picking one ray/plane hit.
 
 const CELL := 1.0
 const PIECE_SCALE := 0.74
@@ -577,13 +568,13 @@ func _build_hud() -> void:
 	column.add_child(_world_label)
 	var score_row := Ui.hbox(10)
 	column.add_child(score_row)
-	score_row.add_child(Ui.label("Punkte", 15, UiTheme.TEXT_DIM))
+	score_row.add_child(Ui.label("Points", 15, UiTheme.TEXT_DIM))
 	score_row.add_child(Ui.spacer(Vector2(0, 0)))
 	_score_label = Ui.label("0", 19, Color("facc15"), true)
 	score_row.add_child(_score_label)
 	var moves_row := Ui.hbox(10)
 	column.add_child(moves_row)
-	moves_row.add_child(Ui.label("Züge", 15, UiTheme.TEXT_DIM))
+	moves_row.add_child(Ui.label("Moves", 15, UiTheme.TEXT_DIM))
 	moves_row.add_child(Ui.spacer(Vector2(0, 0)))
 	_moves_label = Ui.label("0", 19, UiTheme.TEXT, true)
 	moves_row.add_child(_moves_label)
@@ -638,7 +629,7 @@ func _refresh() -> void:
 		var text := Ui.label(CandyMatch3.goal_text(goal), 13, Color("86efac") if bool(progress["done"]) else UiTheme.TEXT_DIM)
 		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(text)
-		row.add_child(Ui.label(Loc.f("%d/%d", [[int(progress["current"]), int(progress["target"])]]), 13, UiTheme.TEXT))
+		row.add_child(Ui.label(Loc.f("%d/%d", [int(progress["current"]), int(progress["target"])]), 13, UiTheme.TEXT))
 		var bar := Ui.bar(CandyMatch3.palette_color(CandyMatch3.world_by_id(world_id), 0), 6.0)
 		Ui.set_bar(bar, float(progress["current"]) / maxf(1.0, float(progress["target"])), Color("86efac") if bool(progress["done"]) else UiTheme.TEXT)
 		_goals_box.add_child(bar)
@@ -715,19 +706,17 @@ func _rebuild_level_select(active: String = "") -> void:
 
 	var header := Ui.hbox(10)
 	_select_body.add_child(header)
-	header.add_child(Ui.label("✦ 240 Level in 6 Welten", 26, UiTheme.TEXT, true))
+	header.add_child(Ui.label("✦ 240 levels in 6 worlds", 26, UiTheme.TEXT, true))
 	header.add_child(Ui.spacer())
-	header.add_child(Ui.label(Loc.f("★ %d · Bestwert %s", [[_total_stars(), Ui.format_number(Game.highscore(Game.HS_CANDY))]]), 15, Color("facc15")))
+	header.add_child(Ui.label(Loc.f("★ %d · best %s", [_total_stars(), Ui.format_number(Game.highscore(Game.HS_CANDY))]), 15, Color("facc15")))
 	header.add_child(Ui.button("✕", Vector2(64, 44), UiTheme.PANEL_LIGHT, func() -> void: _select_root.visible = false))
 
 	var daily := CandyMatch3.daily_level(Game.today())
 	var daily_row := Ui.hbox(10)
 	_select_body.add_child(daily_row)
 	var daily_button := Ui.button(
-		Loc.f("📅  Tageslevel %s   —   %s", [[
-			"★".repeat(daily_stars) + "☆".repeat(3 - daily_stars),
-			"Serie: %d Tage" % streak,
-		]]),
+		Loc.f("📅  Daily level %s   —   %s", ["★".repeat(daily_stars) + "☆".repeat(3 - daily_stars),
+			"Serie: %d Tage" % streak,]),
 		Vector2(0, 52), UiTheme.ACCENT, func() -> void: _start_level(daily))
 	daily_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	daily_row.add_child(daily_button)
@@ -739,7 +728,7 @@ func _rebuild_level_select(active: String = "") -> void:
 		var id := str(def["id"])
 		var stars_here := _world_stars(id)
 		var color := UiTheme.ACCENT if id == world else UiTheme.PANEL_LIGHT
-		var tab := Ui.button(Loc.f("%s %s  %d★", [[str(def["icon"]), str(def["name"]), stars_here]]), Vector2(0, 44), color,
+		var tab := Ui.button(Loc.f("%s %s  %d★", [str(def["icon"]), str(def["name"]), stars_here]), Vector2(0, 44), color,
 			func() -> void: _rebuild_level_select(id))
 		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		tabs.add_child(tab)
@@ -764,10 +753,10 @@ func _rebuild_level_select(active: String = "") -> void:
 		pip.custom_minimum_size = Vector2(26, 8)
 		track.add_child(pip)
 	var milestone_row := Ui.hbox(10)
-	milestone_row.add_child(Ui.label(Loc.f("★ %d  %s", [[stars_here, milestone_text]]), 14, UiTheme.TEXT_DIM))
+	milestone_row.add_child(Ui.label(Loc.f("★ %d  %s", [stars_here, milestone_text]), 14, UiTheme.TEXT_DIM))
 	milestone_row.add_child(Ui.spacer())
 	if not bonus_text.is_empty():
-		milestone_row.add_child(Ui.label(Loc.f("Aktiv: %s", [", ".join(PackedStringArray(bonus_text))]), 14, Color("86efac")))
+		milestone_row.add_child(Ui.label(Loc.f("Active: %s", [", ".join(PackedStringArray(bonus_text))]), 14, Color("86efac")))
 	milestone_row.add_child(track)
 	_select_body.add_child(milestone_row)
 
@@ -1133,26 +1122,26 @@ func _show_result(won: bool) -> void:
 	var column := Ui.vbox(10)
 	center.add_child(column)
 	var daily_key := str(level.get("dailyKey", ""))
-	column.add_child(Ui.title("Tageslevel geschafft!" if daily_key != "" and won else ("Level geschafft!" if won else "Keine Züge mehr"), 40,
+	column.add_child(Ui.title("Daily level done!" if daily_key != "" and won else ("Level geschafft!" if won else "Keine Züge mehr"), 40,
 		Color("facc15") if won else Color("f87171")))
 	if won:
 		column.add_child(Ui.label("★".repeat(stars) + "☆".repeat(3 - stars), 32, Color("facc15")))
 	column.add_child(Ui.label(str(level["title"]), 20, UiTheme.TEXT))
-	column.add_child(Ui.label(Loc.f("Punkte: %s", [Ui.format_number(int(state["score"]))]), 20, UiTheme.TEXT))
-	column.add_child(Ui.label(Loc.f("Züge: %d", [(int(level["moves"]) - int(state["movesLeft"]))]), 16, UiTheme.TEXT_DIM))
+	column.add_child(Ui.label(Loc.f("Points: %s", [Ui.format_number(int(state["score"]))]), 20, UiTheme.TEXT))
+	column.add_child(Ui.label(Loc.f("Moves: %d", [(int(level["moves"]) - int(state["movesLeft"]))]), 16, UiTheme.TEXT_DIM))
 	# What the level actually felt like: the peaks of the run and what is still
 	# missing for the next star. Two stars without a reason is a dead end.
 	_build_moments(column)
 	if not unlocked.is_empty():
-		column.add_child(Ui.label(Loc.f("Belohnung: %s", [", ".join(PackedStringArray(unlocked))]), 16, Color("86efac")))
+		column.add_child(Ui.label(Loc.f("Reward: %s", [", ".join(PackedStringArray(unlocked))]), 16, Color("86efac")))
 	var next_level := CandyMatch3.level_for(str(level["worldId"]), int(level["index"]) + 1)
 	var has_next: bool = daily_key == "" and int(level["index"]) < CandyMatch3.LEVELS_PER_WORLD
 	if has_next:
-		column.add_child(Ui.button("▶ Nächstes Level", Vector2(340, 56), UiTheme.ACCENT,
+		column.add_child(Ui.button("▶ Next level", Vector2(340, 56), UiTheme.ACCENT,
 			func() -> void: _dismiss(layer, func() -> void: _start_level(next_level))))
-	column.add_child(Ui.button("🔁 Nochmal", Vector2(340, 56), UiTheme.PANEL_LIGHT,
+	column.add_child(Ui.button("🔁 Again", Vector2(340, 56), UiTheme.PANEL_LIGHT,
 		func() -> void: _dismiss(layer, func() -> void: _start_level(level))))
-	column.add_child(Ui.button("☰ Levelwahl", Vector2(340, 56), UiTheme.PANEL_LIGHT,
+	column.add_child(Ui.button("☰ Level select", Vector2(340, 56), UiTheme.PANEL_LIGHT,
 		func() -> void: _dismiss(layer, _show_level_select)))
 
 
@@ -1185,11 +1174,10 @@ func _build_moments(column: VBoxContainer) -> void:
 			value += "  ·  Zug %d" % int(moment["move"])
 		row.add_child(Ui.label(value, 15, UiTheme.TEXT))
 	if gap.is_empty():
-		box.add_child(Ui.label("★ Alle drei Sterne", 16, Color("86efac")))
+		box.add_child(Ui.label("★ All three stars", 16, Color("86efac")))
 	else:
-		box.add_child(Ui.label(Loc.f("Noch %s Punkte bis %s", [[
-			Ui.format_number(int((gap as Dictionary)["missing"])),
-			CandyMatch3.star_ordinal(int((gap as Dictionary)["stars"]))]]), 16, Color("facc15")))
+		box.add_child(Ui.label(Loc.f("%s points to %s", [Ui.format_number(int((gap as Dictionary)["missing"])),
+			CandyMatch3.star_ordinal(int((gap as Dictionary)["stars"]))]), 16, Color("facc15")))
 
 
 # --- loop -------------------------------------------------------------------

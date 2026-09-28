@@ -21,7 +21,7 @@ const THEME_HALLOWEEN := "halloween"
 const THEMES := {
 	THEME_CHRISTMAS: {
 		"id": THEME_CHRISTMAS,
-		"title": "Weihnachts-Merge 3D",
+		"title": "Christmas Merge 3D",
 		"icon": "✦",
 		"tierNames": ["Tannenzapfen", "Zuckerstange", "Glaskugel", "Lebkuchenstern", "Christstern"],
 		"tierColors": [Color("b45309"), Color("ef4444"), Color("7dd3fc"), Color("d97706"), Color("facc15")],
@@ -37,7 +37,7 @@ const THEMES := {
 	},
 	THEME_HALLOWEEN: {
 		"id": THEME_HALLOWEEN,
-		"title": "Halloween-Merge 3D",
+		"title": "Halloween Merge 3D",
 		"icon": "☽",
 		"tierNames": ["Kürbiskern", "Süßigkeit", "Mini-Kürbis", "Kürbis", "Geisterkürbis"],
 		"tierColors": [Color("fef3c7"), Color("f472b6"), Color("fb923c"), Color("ea580c"), Color("a7f3d0")],

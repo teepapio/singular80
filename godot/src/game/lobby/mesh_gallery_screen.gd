@@ -184,7 +184,7 @@ func _build_panels() -> void:
 	left.add_theme_constant_override("separation", 4)
 	hud_root.add_child(left)
 
-	left.add_child(Ui.label("◈  MESH-GALERIE", 24, UiTheme.ACCENT, true))
+	left.add_child(Ui.label("◈  MESH GALLERY", 24, UiTheme.ACCENT, true))
 	_tier_label = Ui.label("", 14, UiTheme.TEXT_DIM)
 	_tier_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_tier_label.custom_minimum_size = Vector2(360, 0)
@@ -210,7 +210,7 @@ func _build_panels() -> void:
 		# An empty collection would be a dead end, so it gets no button.
 		if AssetRegistry.keys_in_group(group_id_value).is_empty():
 			continue
-		var button := Ui.button(Loc.f("%s %s", [[str(group["icon"]), str(group["name"])]]), Vector2(112, 28), UiTheme.PANEL_LIGHT, func() -> void:
+		var button := Ui.button(Loc.f("%s %s", [str(group["icon"]), str(group["name"])]), Vector2(112, 28), UiTheme.PANEL_LIGHT, func() -> void:
 			_set_group(group_id_value)
 		)
 		button.add_theme_font_size_override("font_size", 12)
@@ -262,17 +262,17 @@ func _build_panels() -> void:
 	_info_note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_info_note.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	note_row.add_child(_info_note)
-	_mark_button = Ui.button("Vormerken", Vector2(190, 34), UiTheme.ACCENT, _toggle_mark)
+	_mark_button = Ui.button("Shortlist", Vector2(190, 34), UiTheme.ACCENT, _toggle_mark)
 	note_row.add_child(_mark_button)
 
 	var actions := Ui.hbox(8)
 	actions.alignment = BoxContainer.ALIGNMENT_END
 	info_column.add_child(actions)
-	actions.add_child(Ui.button("Notiz schreiben", Vector2(220, 40), UiTheme.PANEL_LIGHT, func() -> void:
+	actions.add_child(Ui.button("Write a note", Vector2(220, 40), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		Router.go_to("mesh_review")
 	))
-	actions.add_child(Ui.button("Vorschlag einreichen", Vector2(260, 40), UiTheme.ACCENT, func() -> void:
+	actions.add_child(Ui.button("Submit a suggestion", Vector2(260, 40), UiTheme.ACCENT, func() -> void:
 		Sfx.select()
 		Router.go_to("mesh_review")
 	))
@@ -328,10 +328,10 @@ func _toggle_mark() -> void:
 	if bool(result["marked"]):
 		MeshGallery.set_marks(MeshGallery.set_tier(_marks(), key, tier))
 		Sfx.level_up()
-		notify(Loc.f("%s vorgemerkt", [AssetRegistry.display_name(key)]), 1.4)
+		notify(Loc.f("%s shortlisted", [AssetRegistry.display_name(key)]), 1.4)
 	else:
 		Sfx.select()
-		notify(Loc.f("%s wieder entfernt", [AssetRegistry.display_name(key)]), 1.2)
+		notify(Loc.f("%s removed again", [AssetRegistry.display_name(key)]), 1.2)
 	_refresh()
 
 

@@ -254,16 +254,16 @@ func _build_ui() -> void:
 	column.custom_minimum_size = Vector2(280, 0)
 	column.add_theme_constant_override("separation", 2)
 	hud_root.add_child(column)
-	var title := Ui.label("♞  PFERDE-PARCOURS 3D", 22, UiTheme.TEXT, true)
+	var title := Ui.label("♞  HORSE COURSE 3D", 22, UiTheme.TEXT, true)
 	column.add_child(title)
 	_score_label = _value(column, "Strecke", "0 m", SCORE_COLOR)
 	_points_label = _value(column, "Punkte", "0", SCORE_COLOR)
 	_speed_label = _value(column, "Tempo", "0.0", UiTheme.TEXT)
 	_chain_label = _value(column, "Kette", NO_CHAIN, Color("f97316"))
 
-	var hint := Ui.label("Stick oder ◀ ▶ zum Spurwechsel · ▲ springen", 15, UiTheme.TEXT_DIM)
+	var hint := Ui.label("Stick or ◀ ▶ to switch lane · ▲ jump", 15, UiTheme.TEXT_DIM)
 	_hint(hint, -164)
-	var graze_hint := Ui.label("Knapp vorbei an einem Block zahlt Punkte und baut die Kette", 15, Color("fb923c"))
+	var graze_hint := Ui.label("Missing a block by a hair scores points and builds the chain", 15, Color("fb923c"))
 	_hint(graze_hint, -132)
 
 
@@ -412,7 +412,7 @@ func _graze() -> void:
 	Sfx.kill()
 	_chain_label.text = "%d · %s" % [chain, Ui.format_number(bonus)]
 	if chain == 1 or chain % 5 == 0:
-		notify(Loc.f("KNAPP VORBEI  ×%d   +%s", [[chain, Ui.format_number(bonus)]]), 1.3)
+		notify(Loc.f("SO CLOSE  ×%d   +%s", [chain, Ui.format_number(bonus)]), 1.3)
 
 
 ## Bleeds one link per `CHAIN_HOLD` metres without a graze, so the bonus has to
@@ -501,8 +501,8 @@ func _end_run() -> void:
 	_over_layer.add_child(center)
 	var column := Ui.vbox(12)
 	center.add_child(column)
-	column.add_child(Ui.title("Sturz", 48, Color("f87171")))
-	column.add_child(Ui.label(Loc.f("Strecke: %d m   ·   Punkte: %s   ·   Bestwert: %d m", [[int(distance), Ui.format_number(score), maxi(highscore, int(distance))]]), 20, UiTheme.TEXT))
-	column.add_child(Ui.label(Loc.f("Knapp vorbei: %d   ·   längste Kette: %d", [[grazes, best_chain]]), 18, Color("fb923c")))
-	column.add_child(Ui.button("Nochmal", Vector2(340, 56), UiTheme.ACCENT, func() -> void: Router.go_to(screen_id)))
+	column.add_child(Ui.title("Dive", 48, Color("f87171")))
+	column.add_child(Ui.label(Loc.f("Distance: %d m   ·   Points: %s   ·   Best: %d m", [int(distance), Ui.format_number(score), maxi(highscore, int(distance))]), 20, UiTheme.TEXT))
+	column.add_child(Ui.label(Loc.f("So close: %d   ·   longest chain: %d", [grazes, best_chain]), 18, Color("fb923c")))
+	column.add_child(Ui.button("Again", Vector2(340, 56), UiTheme.ACCENT, func() -> void: Router.go_to(screen_id)))
 	column.add_child(Ui.button("Lobby", Vector2(340, 56), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))

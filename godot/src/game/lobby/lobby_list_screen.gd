@@ -60,7 +60,7 @@ func _build_header() -> void:
 	var title := Ui.title("SINGULAR 80", 54)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(title)
-	var subtitle := Ui.label("Lobby — Spieleübersicht nach Kategorie", 20, Color(0.490, 0.827, 0.988))
+	var subtitle := Ui.label("Lobby — all games by category", 20, Color(0.490, 0.827, 0.988))
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	subtitle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(subtitle)
@@ -96,7 +96,7 @@ func _category_column(category: Dictionary) -> Control:
 	header.add_child(labels)
 	var text := Ui.vbox(0)
 	labels.add_child(text)
-	var head := Ui.label(Loc.f("%s  %s", [[category["icon"], category["name"]]]), 17, UiTheme.TEXT, true)
+	var head := Ui.label(Loc.f("%s  %s", [category["icon"], category["name"]]), 17, UiTheme.TEXT, true)
 	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	head.custom_minimum_size = Vector2(COLUMN_WIDTH - 10, 24)
 	text.add_child(head)
@@ -182,14 +182,14 @@ func _build_footer() -> void:
 	var row := Ui.hbox(10)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	column.add_child(row)
-	row.add_child(Ui.button("🧭  3D-Lobby", Vector2(200, 48), UiTheme.ACCENT, func() -> void:
+	row.add_child(Ui.button("🧭  3D lobby", Vector2(200, 48), UiTheme.ACCENT, func() -> void:
 		Sfx.select()
 		Router.go_to("lobby")
 	))
-	row.add_child(Ui.button("Vorschlag", Vector2(190, 48), UiTheme.PANEL_LIGHT, func() -> void:
+	row.add_child(Ui.button("Suggestion", Vector2(190, 48), UiTheme.PANEL_LIGHT, func() -> void:
 		SuggestDialog.open(self)
 	))
-	row.add_child(Ui.button("Waffen & Modus", Vector2(210, 48), UiTheme.PANEL_LIGHT, func() -> void:
+	row.add_child(Ui.button("Weapons & mode", Vector2(210, 48), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		Router.go_to("main_menu")
 	))
@@ -214,7 +214,7 @@ func _build_footer() -> void:
 	)
 	row.add_child(_server_button)
 
-	var footer := Ui.label(Loc.f("Mehr Spiele folgen — reiche deine Idee ein!  ·  Content v%d", [Content.version]), 14, UiTheme.TEXT_MUTED)
+	var footer := Ui.label(Loc.f("More games to come — send in your idea!  ·  Content v%d", [Content.version]), 14, UiTheme.TEXT_MUTED)
 	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(footer)

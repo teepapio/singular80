@@ -1,10 +1,10 @@
 extends Node
 ## Loads the data-driven game content.
 ##
-## The bundled JSON in `res://assets/content/` is always available, so the app
-## works fully offline. When a backend is configured the pack is refreshed from
-## `GET /api/content` on start, which is how content changes reach players
-## without an app update.
+## The bundled JSON in `res://assets/content/` always works, so the app is
+## playable offline. With a backend configured the pack is refreshed from
+## `GET /api/content` on start — that is how content reaches players without an
+## app update.
 
 signal content_reloaded
 
@@ -29,7 +29,7 @@ func reload() -> void:
 	_load_bundled()
 
 
-## Refreshes from the backend when one is configured. Called in the background
+## Refreshes from the backend when one is configured; runs in the background
 ## after startup so the app is playable immediately.
 func reload_remote() -> void:
 	if not Game.has_server():

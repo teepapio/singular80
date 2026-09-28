@@ -53,14 +53,14 @@ func _build_hangar() -> void:
 
 	var header := Ui.hbox(12)
 	column.add_child(header)
-	_title = Ui.label("DRACHENFLUG", 28, UiTheme.ACCENT, true)
+	_title = Ui.label("DRAGON FLIGHT", 28, UiTheme.ACCENT, true)
 	_title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header.add_child(_title)
 	header.add_child(Ui.spacer())
 	_gold_label = Ui.label("", 20, Color("fbbf24"), true)
 	_gold_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header.add_child(_gold_label)
-	header.add_child(Ui.button("Zucht", Vector2(140, 42), UiTheme.PANEL_LIGHT, func() -> void:
+	header.add_child(Ui.button("Breeding", Vector2(140, 42), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		Router.go_to("dragonflight_hatchery")
 	))
@@ -85,8 +85,7 @@ func _build_hangar() -> void:
 
 
 func _panel(title: String, width: float) -> Array:
-	"""A titled panel plus its VBox, ready to be filled. The width is fixed and
-	the content wraps, so a long trait text can never widen the layout."""
+	"""A titled panel plus its VBox, ready to be filled. The width is fixed and\n	the content wraps, so a long trait text can never widen the layout."""
 	var panel := Ui.panel(UiTheme.PANEL, UiTheme.BORDER, 12)
 	panel.custom_minimum_size = Vector2(width, 0)
 	panel.size_flags_horizontal = Control.SIZE_FILL
@@ -166,7 +165,7 @@ func _rebuild_dragons() -> void:
 		child.queue_free()
 	var owned := DragonFlight.dragons_of(profile)
 	if owned.is_empty():
-		_dragon_row.add_child(Ui.label("Noch kein Drach", 16, UiTheme.TEXT_DIM))
+		_dragon_row.add_child(Ui.label("No dragon yet", 16, UiTheme.TEXT_DIM))
 		return
 	var per_page := DRAGONS_PER_PAGE
 	var pages: int = maxi(1, int(ceil(float(owned.size()) / float(per_page))))
@@ -192,7 +191,7 @@ func _rebuild_dragons() -> void:
 			_dragon_page = wrapi(_dragon_page - 1, 0, pages)
 			_refresh()
 		))
-		nav.add_child(Ui.label(Loc.f("%d/%d", [[_dragon_page + 1, pages]]), 14, UiTheme.TEXT_MUTED))
+		nav.add_child(Ui.label(Loc.f("%d/%d", [_dragon_page + 1, pages]), 14, UiTheme.TEXT_MUTED))
 		nav.add_child(Ui.button("▶", Vector2(34, 30), UiTheme.PANEL_LIGHT, func() -> void:
 			_dragon_page = wrapi(_dragon_page + 1, 0, pages)
 			_refresh()
@@ -205,7 +204,7 @@ func _refresh_stats() -> void:
 		child.queue_free()
 	var dragon := DragonFlight.dragon_by_uid(profile, selected_dragon)
 	if dragon.is_empty():
-		_stats.add_child(Ui.label("Wähle einen Drachen.", 16, UiTheme.TEXT_DIM))
+		_stats.add_child(Ui.label("Choose a dragon.", 16, UiTheme.TEXT_DIM))
 		return
 	var breed := DragonFlight.breed_by_id(str(dragon["breed"]))
 	var stats := DragonFlight.resolve_stats(dragon, profile.get("upgrades", {}))
@@ -220,7 +219,7 @@ func _refresh_stats() -> void:
 	_stat_row("Größe", "×%.2f" % DragonFlight.visual_scale(dragon), Color("a855f7"))
 	var traits: Array = stats.get("traits", [])
 	if traits.is_empty():
-		_stats.add_child(Ui.label("Keine vererbten Merkmale", 14, UiTheme.TEXT_MUTED))
+		_stats.add_child(Ui.label("No inherited traits", 14, UiTheme.TEXT_MUTED))
 	else:
 		for id in traits:
 			var gene := DragonFlight.trait_by_id(str(id))
@@ -271,7 +270,7 @@ func _rebuild_upgrades() -> void:
 		var text := Ui.vbox(0)
 		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(text)
-		text.add_child(Ui.label(Loc.f("%s  (Stufe %d/%d)", [[str(upgrade["name"]), level, int(upgrade["max"])]]), 15, UiTheme.TEXT, true))
+		text.add_child(Ui.label(Loc.f("%s  (tier %d/%d)", [str(upgrade["name"]), level, int(upgrade["max"])]), 15, UiTheme.TEXT, true))
 		text.add_child(_wrap(str(upgrade["desc"]), 12, UiTheme.TEXT_MUTED))
 		if maxed:
 			row.add_child(Ui.label("MAX", 16, Color("fbbf24"), true))
@@ -284,7 +283,7 @@ func _rebuild_upgrades() -> void:
 ## Buys one upgrade step and reports a failure as a toast.
 func _on_buy(id: String) -> void:
 	if DragonFlight.buy_upgrade(id, profile) < 0:
-		show_toast("Zu wenig Gold")
+		show_toast("Not enough gold")
 		return
 	DragonFlight.save_profile(profile)
 	Sfx.coin()
@@ -315,7 +314,12 @@ func _level_card(n: int) -> Control:
 	box.add_child(Ui.label("★".repeat(stars) + "☆".repeat(3 - stars), 14, Color("facc15")))
 	if not unlocked:
 		var need := DragonFlight.star_requirement(n)
-		box.add_child(Ui.label(Loc.f("· %d Sterne benötigt", [need if need > 0 else "· Level %d zuerst" % (n - 1)]), 12, UiTheme.TEXT_MUTED))
+		# The condition stays outside the format: `"…%d…" % n if n > 0 else "…"`
+		# means "format n, or show the other text", and folding the `%` into the
+		# argument made a `%d` receive a string. Both branches are translated, so
+		# neither is a German leftover.
+		var need_text := Loc.f("· needs %d stars", [need]) if need > 0 else Loc.f("· Level %d first", [n - 1])
+		box.add_child(Ui.label(need_text, 12, UiTheme.TEXT_MUTED))
 		return panel
 	panel.custom_minimum_size = CARD
 	var button := Button.new()

@@ -93,8 +93,7 @@ func _build_top_bar() -> Control:
 	bar.add_child(Ui.button(Loc.t("ui.suggestion"), Vector2(150, 40), UiTheme.PANEL_LIGHT, func() -> void:
 		SuggestDialog.open(self)
 	))
-	# Language is reachable from every screen, so nobody has to walk back to a
-	# menu for it. `⚙` is in DejaVu Sans — an emoji would render as an empty box.
+	# `⚙` is in DejaVu Sans; an emoji here would render as an empty box.
 	bar.add_child(Ui.button(Loc.t("ui.settings_short"), Vector2(60, 40), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		SettingsDialog.open(self)
@@ -123,9 +122,7 @@ func stage() -> Control:
 
 
 ## Shows a transient message in the middle of the screen.
-##
-## Text goes through `Loc.resolve` like every other caption: a toast is the one
-## place where a sentence appears without a `Ui.*` call in sight.
+## Text goes through `Loc.resolve`; a toast is the one caption with no `Ui.*` call.
 func show_toast(text: String, seconds: float = 2.2) -> void:
 	if _toast == null:
 		return

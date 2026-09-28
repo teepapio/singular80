@@ -1,8 +1,7 @@
 extends Node
 ## Owns the screen stack: the 3D world host, the 2D UI host and the transitions
-## between them. Screens build their own tree, so a switch is just "free the old
-## node, instantiate the new one".
-## 3D screens go into `world_host`, 2D screens into `screen_host`.
+## between them. 3D screens go into `world_host`, 2D screens into `screen_host`;
+## a switch frees the old node and instantiates the new one.
 
 signal screen_changed(screen_id: String)
 
@@ -38,10 +37,8 @@ const SCREEN_SCRIPTS := {
 
 ## Screens that can be rebuilt without losing anything.
 ##
-## A language change re-renders the current screen so the new language shows up
-## right away. Free for a menu; for a playfield it would throw the round away,
-## and no setting is worth that. Everything not listed picks the new language up
-## on the next switch.
+## A language change re-renders the current screen: free for a menu, ruinous for
+## a playfield. Everything not listed picks the new language up on the next switch.
 const REBUILD_SAFE: Array[String] = [
 	"lobby", "lobby_list", "main_menu", "mesh_gallery", "mesh_review",
 	"pang_menu", "dragonflight", "dragonflight_hatchery",
@@ -49,9 +46,8 @@ const REBUILD_SAFE: Array[String] = [
 
 var current_id: String = ""
 var current_screen: Node = null
-## True while a fade or screen swap is in flight. `go_to` ignores requests during
-## a transition, so anything that sequences screen switches — the test sweep, a
-## scripted intro — waits for this to clear instead of guessing a delay.
+## True while a fade or swap is in flight. Sequenced switches (test sweep, scripted
+## intro) wait for this instead of guessing a delay.
 var transitioning: bool = false
 
 var world_host: Node3D
@@ -121,8 +117,8 @@ func to_lobby() -> void:
 	go_to("lobby")
 
 
-## True when re-entering the current screen costs the player nothing — a menu
-## rather than a game in progress. `SettingsDialog` asks before it rebuilds.
+## True when re-entering the current screen costs the player nothing.
+## `SettingsDialog` asks before it rebuilds.
 func rebuild_safe() -> bool:
 	return current_id != "" and REBUILD_SAFE.has(current_id) and not transitioning
 

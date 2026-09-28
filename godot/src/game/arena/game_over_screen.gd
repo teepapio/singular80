@@ -27,25 +27,23 @@ func _ready_game() -> void:
 
 	column.add_child(Ui.title("GAME OVER", 66, Color(0.973, 0.443, 0.443)))
 	if is_record:
-		column.add_child(Ui.label("★  Neuer Highscore!  ★", 24, Color(0.980, 0.800, 0.086), true))
+		column.add_child(Ui.label("★  New high score!  ★", 24, Color(0.980, 0.800, 0.086), true))
 	else:
-		column.add_child(Ui.label(Loc.f("Highscore: %s", [Ui.format_number(Game.highscore(Game.HS_ARENA))]), 20, UiTheme.TEXT_DIM, true))
+		column.add_child(Ui.label(Loc.f("High score: %s", [Ui.format_number(Game.highscore(Game.HS_ARENA))]), 20, UiTheme.TEXT_DIM, true))
 
 	column.add_child(Ui.spacer(Vector2(0, 10)))
 	column.add_child(Ui.label(
-		Loc.f("Score: %s     ·     Kills: %d     ·     Level: %d     ·     Zeit: %s", [[
-			Ui.format_number(score), kills, level, Ui.format_time(time_ms),
-		]]), 24, Color(0.886, 0.910, 0.941)))
+		Loc.f("Score: %s     ·     Kills: %d     ·     Level: %d     ·     Time: %s", [Ui.format_number(score), kills, level, Ui.format_time(time_ms),]), 24, Color(0.886, 0.910, 0.941)))
 	column.add_child(Ui.spacer(Vector2(0, 18)))
 
 	var row := Ui.hbox(16)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	column.add_child(row)
-	row.add_child(Ui.button("🔁  Nochmal", Vector2(320, 62), UiTheme.ACCENT, func() -> void:
+	row.add_child(Ui.button("🔁  Again", Vector2(320, 62), UiTheme.ACCENT, func() -> void:
 		Sfx.select()
 		Router.go_to("arena", {"weaponId": weapon_id, "modeId": mode_id})
 	))
-	row.add_child(Ui.button("Vorschlag", Vector2(320, 62), UiTheme.PANEL_LIGHT, func() -> void:
+	row.add_child(Ui.button("Suggestion", Vector2(320, 62), UiTheme.PANEL_LIGHT, func() -> void:
 		SuggestDialog.open(self)
 	))
 	row.add_child(Ui.button("◀  Lobby", Vector2(320, 62), UiTheme.PANEL_LIGHT, func() -> void:
@@ -54,5 +52,5 @@ func _ready_game() -> void:
 
 	column.add_child(Ui.spacer(Vector2(0, 14)))
 	column.add_child(Ui.label(
-		"Dir ist etwas eingefallen? Reiche es ein — vielleicht ist es beim nächsten Mal schon im Spiel.",
+		"Just thought of something? Submit it — maybe it is in the game next time.",
 		15, UiTheme.TEXT_MUTED))

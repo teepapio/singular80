@@ -104,124 +104,124 @@ const RES_NAMES := {
 ## the deposit it binds and drains, `hungry` marks a worker that eats extra.
 const SPECS: Array[Dictionary] = [
 	{
-		"kind": "castle", "name": "Burg", "icon": "♜", "cost": {"planks": 0, "stone": 0},
+		"kind": "castle", "name": "Castle", "icon": "♜", "cost": {"planks": 0, "stone": 0},
 		"tool": "", "workers": 0, "inputs": {}, "outputs": {}, "cycle": 1.0,
 		"requires": "grass", "harvest": "", "hungry": false, "territory": 0,
-		"desc": "Hauptquartier. Hier lagern Bauholz, Eisen und die Werkzeuge — und hier werden Siedler für freie Arbeitsplätze ausgebildet.",
+		"desc": "Headquarters. Planks, iron and the tools are stored here — and settlers are trained here for free jobs.",
 	},
 	{
-		"kind": "warehouse", "name": "Lager", "icon": "⌂", "cost": {"planks": 6, "stone": 0},
+		"kind": "warehouse", "name": "Warehouse", "icon": "⌂", "cost": {"planks": 6, "stone": 0},
 		"tool": "", "workers": 0, "inputs": {}, "outputs": {}, "cycle": 1.0,
 		"requires": "grass", "harvest": "", "hungry": false, "territory": 0,
-		"desc": "Erhöht die Siedler-Obergrenze um 6 und räumt 200 Lagerplätze in der Burg. Ohne Lager ist die Vorratskammer irgendwann voll, und eine volle Burg nimmt keine Lieferung mehr an.",
+		"desc": "Raises the settler cap by 6 and clears 200 storage slots in the castle. Without storage the pantry fills up eventually, and a full castle stops accepting deliveries.",
 	},
 	{
-		"kind": "woodcutter", "name": "Holzfäller", "icon": "⚔", "cost": {"planks": 2, "stone": 0},
+		"kind": "woodcutter", "name": "Woodcutter", "icon": "⚔", "cost": {"planks": 2, "stone": 0},
 		"tool": "axe", "workers": 1, "inputs": {}, "outputs": {"logs": 1}, "cycle": 3.2,
 		"requires": "forest", "harvest": "forest", "hungry": false, "territory": 0,
-		"desc": "Fällt Bäume und liefert Baumstämme. Braucht eine Axt aus der Schlosserei.",
+		"desc": "Fells trees and delivers logs. Needs an axe from the toolshop.",
 	},
 	{
-		"kind": "forester", "name": "Förster", "icon": "❦", "cost": {"planks": 2, "stone": 0},
+		"kind": "forester", "name": "Forester", "icon": "❦", "cost": {"planks": 2, "stone": 0},
 		"tool": "", "workers": 1, "inputs": {}, "outputs": {}, "cycle": 6.0,
 		"requires": "grass", "harvest": "", "hungry": false, "territory": 0,
-		"desc": "Pflanzt nach, was der Holzfäller gefällt hat. Ohne Förster ist der Wald irgendwann leer — und ohne Holz steht die ganze Siedlung still.",
+		"desc": "Replants what the woodcutter felled. Without a forester the forest runs out eventually — and without wood the whole settlement grinds to a halt.",
 	},
 	{
-		"kind": "sawmill", "name": "Schreiner", "icon": "⌸", "cost": {"planks": 4, "stone": 2},
+		"kind": "sawmill", "name": "Joiner", "icon": "⌸", "cost": {"planks": 4, "stone": 2},
 		"tool": "saw", "workers": 1, "inputs": {"logs": 2}, "outputs": {"planks": 2}, "cycle": 3.4,
 		"requires": "grass", "harvest": "", "hungry": false, "territory": 0,
-		"desc": "Wandelt Baumstämme in Bauholz. Jedes Gebäude kostet Bauholz.",
+		"desc": "Turns logs into planks. Every building costs planks.",
 	},
 	{
-		"kind": "quarry", "name": "Steinmetz", "icon": "◭", "cost": {"planks": 3, "stone": 0},
+		"kind": "quarry", "name": "Mason", "icon": "◭", "cost": {"planks": 3, "stone": 0},
 		"tool": "pickaxe", "workers": 1, "inputs": {}, "outputs": {"stone": 1}, "cycle": 4.0,
 		"requires": "stone", "harvest": "stone", "hungry": false, "territory": 0,
-		"desc": "Bricht Bausteine aus dem Steinbruch.",
+		"desc": "Cuts building stone out of the quarry.",
 	},
 	{
-		"kind": "farm", "name": "Getreidefarm", "icon": "❀", "cost": {"planks": 3, "stone": 0},
+		"kind": "farm", "name": "Grain Farm", "icon": "❀", "cost": {"planks": 3, "stone": 0},
 		"tool": "scythe", "workers": 1, "inputs": {}, "outputs": {"grain": 3}, "cycle": 3.4,
 		"requires": "grass", "harvest": "", "hungry": false, "territory": 0,
-		"desc": "Baut Korn an — Ausgangspunkt der gesamten Nahrungskette.",
+		"desc": "Grows grain — the starting point of the entire food chain.",
 	},
 	{
-		"kind": "pigFarm", "name": "Schweinefarm", "icon": "◕", "cost": {"planks": 4, "stone": 2},
+		"kind": "pigFarm", "name": "Pig Farm", "icon": "◕", "cost": {"planks": 4, "stone": 2},
 		"tool": "", "workers": 1, "inputs": {"grain": 1}, "outputs": {"pork": 1}, "cycle": 5.0,
 		"requires": "grass", "harvest": "", "hungry": true, "territory": 0,
-		"desc": "Füttert Schweine mit Korn.",
+		"desc": "Feeds pigs with grain.",
 	},
 	{
-		"kind": "windmill", "name": "Windmühle", "icon": "✳", "cost": {"planks": 5, "stone": 2},
+		"kind": "windmill", "name": "Windmill", "icon": "✳", "cost": {"planks": 5, "stone": 2},
 		"tool": "", "workers": 1, "inputs": {"grain": 2}, "outputs": {"flour": 2}, "cycle": 3.0,
 		"requires": "grass", "harvest": "", "hungry": false, "territory": 0,
-		"desc": "Mahlt Korn zu Mehl. Dreht sich nur, wenn sie Korn bekommt.",
+		"desc": "Grinds grain into flour. Only turns when it is fed grain.",
 	},
 	{
-		"kind": "butcher", "name": "Metzger", "icon": "⚒", "cost": {"planks": 4, "stone": 2},
+		"kind": "butcher", "name": "Butcher", "icon": "⚒", "cost": {"planks": 4, "stone": 2},
 		"tool": "cleaver", "workers": 1, "inputs": {"pork": 1}, "outputs": {"ham": 1}, "cycle": 3.2,
 		"requires": "grass", "harvest": "", "hungry": true, "territory": 0,
-		"desc": "Zerlegt Schweine zu Schinken.",
+		"desc": "Turns pigs into ham.",
 	},
 	{
-		"kind": "bakery", "name": "Bäckerei", "icon": "◑", "cost": {"planks": 5, "stone": 2},
+		"kind": "bakery", "name": "Bakery", "icon": "◑", "cost": {"planks": 5, "stone": 2},
 		"tool": "", "workers": 1, "inputs": {"flour": 2}, "outputs": {"bread": 2}, "cycle": 2.2,
 		"requires": "grass", "harvest": "", "hungry": false, "territory": 0,
-		"desc": "Backt Mehl zu Brot. Ohne Brot stehen die Minen still.",
+		"desc": "Bakes flour into bread. Without bread the mines grind to a halt.",
 	},
 	{
-		"kind": "fishery", "name": "Fischerhütte", "icon": "❧", "cost": {"planks": 4, "stone": 0},
+		"kind": "fishery", "name": "Fisher’s Hut", "icon": "❧", "cost": {"planks": 4, "stone": 0},
 		"tool": "rod", "workers": 1, "inputs": {}, "outputs": {"fish": 1}, "cycle": 3.4,
 		"requires": "water", "harvest": "water", "hungry": false, "territory": 0,
-		"desc": "Fischt auf offenen Wasser. Braucht eine Angel.",
+		"desc": "Fishes on open water. Needs a fishing rod.",
 	},
 	{
-		"kind": "coalMine", "name": "Kohlemine", "icon": "●", "cost": {"planks": 4, "stone": 2},
+		"kind": "coalMine", "name": "Coal Mine", "icon": "●", "cost": {"planks": 4, "stone": 2},
 		"tool": "pickaxe", "workers": 1, "inputs": {}, "outputs": {"coal": 1}, "cycle": 4.4,
 		"requires": "coal", "harvest": "coal", "hungry": true, "territory": 0,
-		"desc": "Fördert Kohle. Braucht Spitzhacke und Nahrung für den Bergmann.",
+		"desc": "Mines coal. Needs a pickaxe and food for the miner.",
 	},
 	{
-		"kind": "ironMine", "name": "Eisenmine", "icon": "◐", "cost": {"planks": 4, "stone": 2},
+		"kind": "ironMine", "name": "Iron Mine", "icon": "◐", "cost": {"planks": 4, "stone": 2},
 		"tool": "pickaxe", "workers": 1, "inputs": {}, "outputs": {"ironOre": 1}, "cycle": 4.8,
 		"requires": "iron", "harvest": "iron", "hungry": true, "territory": 0,
-		"desc": "Fördert Eisenerz. Braucht Spitzhacke und Nahrung.",
+		"desc": "Mines iron ore. Needs a pickaxe and food.",
 	},
 	{
-		"kind": "goldMine", "name": "Goldmine", "icon": "○", "cost": {"planks": 5, "stone": 3},
+		"kind": "goldMine", "name": "Gold Mine", "icon": "○", "cost": {"planks": 5, "stone": 3},
 		"tool": "pickaxe", "workers": 1, "inputs": {}, "outputs": {"goldOre": 1}, "cycle": 5.4,
 		"requires": "gold", "harvest": "gold", "hungry": true, "territory": 0,
-		"desc": "Fördert Golderz für die Goldschmiede.",
+		"desc": "Mines gold ore for the goldsmith.",
 	},
 	{
-		"kind": "smelter", "name": "Schmelze", "icon": "▲", "cost": {"planks": 5, "stone": 4},
+		"kind": "smelter", "name": "Smelter", "icon": "▲", "cost": {"planks": 5, "stone": 4},
 		"tool": "", "workers": 1, "inputs": {"ironOre": 1, "coal": 1}, "outputs": {"iron": 1}, "cycle": 4.2,
 		"requires": "grass", "harvest": "", "hungry": false, "territory": 0,
-		"desc": "Schmilzt Eisenerz mit Kohle zu Eisen — der Grundstein jeder Schlosserei.",
+		"desc": "Smelts iron ore with coal into iron — the foundation of every toolshop.",
 	},
 	{
-		"kind": "toolsmith", "name": "Schlosserei", "icon": "⚒", "cost": {"planks": 6, "stone": 4},
+		"kind": "toolsmith", "name": "Toolsmith", "icon": "⚒", "cost": {"planks": 6, "stone": 4},
 		"tool": "hammer", "workers": 1, "inputs": {"iron": 1, "logs": 1}, "outputs": {}, "cycle": 2.6,
 		"requires": "grass", "harvest": "", "hungry": false, "territory": 0,
-		"desc": "Schmiedet aus 1 Eisen + 1 Holz beliebige Werkzeuge. Über die Werkzeugknöpfe steuerst du die Reihenfolge selbst!",
+		"desc": "Forges any tool from 1 iron + 1 wood. You control the order yourself with the tool buttons!",
 	},
 	{
-		"kind": "goldsmith", "name": "Goldschmiede", "icon": "◉", "cost": {"planks": 5, "stone": 4},
+		"kind": "goldsmith", "name": "Goldsmith", "icon": "◉", "cost": {"planks": 5, "stone": 4},
 		"tool": "pliers", "workers": 1, "inputs": {"goldOre": 1, "coal": 1}, "outputs": {"goldBar": 1}, "cycle": 5.2,
 		"requires": "grass", "harvest": "", "hungry": false, "territory": 0,
-		"desc": "Schmilzt Golderz mit Kohle zu Goldbarren. Gold hebt die Moral deiner Ritter im Angriff.",
+		"desc": "Smelts gold ore with coal into ingots. Gold raises your knights’ morale in the attack.",
 	},
 	{
-		"kind": "blacksmith", "name": "Schmiede", "icon": "⚑", "cost": {"planks": 6, "stone": 4},
+		"kind": "blacksmith", "name": "Blacksmith", "icon": "⚑", "cost": {"planks": 6, "stone": 4},
 		"tool": "pliers", "workers": 1, "inputs": {"iron": 1, "coal": 1}, "outputs": {"sword": 1, "shield": 1}, "cycle": 5.0,
 		"requires": "grass", "harvest": "", "hungry": false, "territory": 0,
-		"desc": "Fertigt Schwert und Schild. Damit rüstest du Ritter für den Wachturm aus.",
+		"desc": "Forges swords and shields. Use them to equip knights for the watchtower.",
 	},
 	{
-		"kind": "watchtower", "name": "Wachturm", "icon": "⌂", "cost": {"planks": 5, "stone": 6},
+		"kind": "watchtower", "name": "Watchtower", "icon": "⌂", "cost": {"planks": 5, "stone": 6},
 		"tool": "", "workers": 0, "inputs": {}, "outputs": {}, "cycle": 1.0,
 		"requires": "grass", "harvest": "", "hungry": false, "territory": 7,
-		"desc": "Erweitert das Territorium, solange mindestens 1 Ritter stationiert ist.",
+		"desc": "Expands your territory as long as at least 1 knight is garrisoned.",
 	},
 ]
 
@@ -825,19 +825,19 @@ func can_place(kind: String, cell: int) -> Dictionary:
 		"stone": maxi(0, int(spec["cost"]["stone"]) - int(store.get("stone", 0))),
 	}
 	if cell < 0 or cell >= cells.size():
-		return {"ok": false, "reason": "Kein gültiges Feld", "missing": missing}
+		return {"ok": false, "reason": "Not a valid tile", "missing": missing}
 	var map_cell: Dictionary = cells[cell]
 	if int(map_cell["building"]) >= 0:
-		return {"ok": false, "reason": "Feld ist bereits bebaut", "missing": missing}
+		return {"ok": false, "reason": "Tile is already built on", "missing": missing}
 	var requires := str(spec["requires"])
 	if str(map_cell["res"]) == "water" and requires != "water":
-		return {"ok": false, "reason": "Kein Bauen auf Wasser", "missing": missing}
+		return {"ok": false, "reason": "Cannot build on water", "missing": missing}
 	if requires != "" and str(map_cell["res"]) != requires:
-		return {"ok": false, "reason": "Braucht %s" % RES_NAMES[requires], "missing": missing}
+		return {"ok": false, "reason": "Needs %s" % RES_NAMES[requires], "missing": missing}
 	if str(spec["harvest"]) == "" and not is_flat(cell):
-		return {"ok": false, "reason": "Gelände zu steil — Planierer nötig", "missing": missing}
+		return {"ok": false, "reason": "Ground too steep — a bulldozer is needed", "missing": missing}
 	if not in_territory(cell):
-		return {"ok": false, "reason": "Außerhalb des Territoriums", "missing": missing}
+		return {"ok": false, "reason": "Outside your territory", "missing": missing}
 	return {"ok": true, "reason": "", "missing": missing}
 
 
@@ -928,9 +928,9 @@ const FLAG_NEAR := 3.2
 ## walks around buildings and existing structures instead of dead-ending.
 func build_road(from_cell: int, to_cell: int, priority: int = 3) -> Dictionary:
 	if from_cell == to_cell:
-		return {"ok": false, "reason": "Start und Ziel sind identisch", "flags": 0}
+		return {"ok": false, "reason": "Start and target are the same", "flags": 0}
 	if from_cell < 0 or to_cell < 0 or from_cell >= cells.size() or to_cell >= cells.size():
-		return {"ok": false, "reason": "Kein gültiges Feld", "flags": 0}
+		return {"ok": false, "reason": "Not a valid tile", "flags": 0}
 	# The two endpoints may hold a building *or* be water — a fishery is built
 	# out on the lake, and drawing a road to it is the whole point.
 	var passable := func(index: int) -> bool:

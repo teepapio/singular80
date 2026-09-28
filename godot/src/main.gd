@@ -7,13 +7,12 @@ extends Node
 
 func _ready() -> void:
 	RenderingServer.set_default_clear_color(UiTheme.BG)
-	# Landscape on phones and tablets — the lobby and every action game are
-	# designed around a wide viewport.
+	# Landscape on phones and tablets — lobby and action games want width.
 	DisplayServer.screen_set_orientation(DisplayServer.SCREEN_LANDSCAPE)
 
-	# Before anything else: load the language. `Ui` translates every caption as it
-	# is created and the first screen is created right now — without this call the
-	# lobby header would be in the device language and the rest in the stored one.
+	# Language first: `Ui` translates captions as they are created, and the first
+	# screen is created right now. Without this, its header would use the device
+	# language while the rest of the game uses the stored one.
 	Loc.boot()
 
 	Content.reload()

@@ -14,7 +14,10 @@ const DIR := "res://assets/locale"
 const IDENTICAL_FILE := "identical.json"
 ## Language the source text is written in. Fallback for every other language,
 ## so it must always have a catalogue.
-const SOURCE := "de"
+##
+## The language the *code* is written in, and the pivot of the catalogues.
+## German is a translation like any other, in `de.json`.
+const SOURCE := "en"
 
 static var _booted := false
 static var _code := ""

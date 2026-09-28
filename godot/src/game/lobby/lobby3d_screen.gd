@@ -381,7 +381,7 @@ func _build_hud_panels() -> void:
 	var interact := add_action_button("E", 70.0, "interact")
 	interact.position = interact.position + Vector2(0, -84)
 
-	var list_button := Ui.button("Lüste", Vector2(110, 40), UiTheme.PANEL_LIGHT, func() -> void:
+	var list_button := Ui.button("Lust", Vector2(110, 40), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		Router.go_to("lobby_list")
 	)
@@ -389,7 +389,7 @@ func _build_hud_panels() -> void:
 	list_button.position = Vector2(_stick.size.x + 40.0, -52.0)
 	hud_root.add_child(list_button)
 
-	var gallery_button := Ui.button("◈ Galerie", Vector2(150, 40), UiTheme.PANEL_LIGHT, func() -> void:
+	var gallery_button := Ui.button("◈ Gallery", Vector2(150, 40), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		Router.go_to("mesh_gallery")
 	)
@@ -550,7 +550,7 @@ func _refresh_panel(zone: Dictionary) -> void:
 	_panel_games_list = []
 	for game in zone["games"]:
 		var entry: Dictionary = game
-		var button := Ui.button(Loc.f("%s  %s", [[entry["icon"], entry["name"]]]), Vector2(0, 40), Color(0.043, 0.071, 0.125, 0.95), func() -> void:
+		var button := Ui.button(Loc.f("%s  %s", [entry["icon"], entry["name"]]), Vector2(0, 40), Color(0.043, 0.071, 0.125, 0.95), func() -> void:
 			Sfx.level_up()
 			_start(entry)
 		)

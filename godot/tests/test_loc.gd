@@ -7,9 +7,15 @@ extends RefCounted
 ## separator that is wrong in every language except German would all have gone
 ## through a green run and shown up as a screen full of `ui.back_to_lobby`.
 
-## The language the assertions below are written in. Every suite switches back
-## to it, so the rest of the test run is unaffected by what happens in here.
-const SOURCE := "de"
+## The pivot: the language the *code* is written in, and therefore the source
+## catalogue. `godot/src` holds English literals, `sync` derives `en.json` from
+## them, and `de.json` / `fr.json` translate that — German is a language of the
+## game like any other, not the one it is written in.
+const SOURCE := "en"
+
+## The language the rest of the suite asserts on. `run_tests.gd` pins it before
+## anything runs, because `Loc` otherwise follows the device.
+const PINNED := "de"
 
 var t: TestKit
 var tree: SceneTree
@@ -31,7 +37,7 @@ func run(kit: TestKit, scene: SceneTree) -> void:
 ## Puts the language back, whatever happened above.
 func _restore() -> void:
 	Loc.reset()
-	Loc.set_code(SOURCE)
+	Loc.set_code(PINNED)
 
 
 func _catalogue() -> void:
@@ -55,11 +61,15 @@ func _catalogue() -> void:
 	# The source is what every other language falls back to, so it has to answer
 	# with its own text. `missing(SOURCE)` is deliberately not the measure here:
 	# that function compares a catalogue against the source, and for the source
-	# every entry looks untranslated — it would report all 673 as missing.
+	# every entry looks untranslated — it would report all 674 as missing.
 	Loc.set_code(SOURCE)
-	t.equal(Loc.t("ui.close"), "Schließen", "Die Quelle antwortet mit ihrem eigenen Text")
-	t.equal(Loc.resolve("Gefallen"), "Gefallen", "…auch bei einem Quellstring")
+	t.equal(Loc.t("ui.close"), "Close", "Die Quelle antwortet mit ihrem eigenen Text")
+	t.equal(Loc.resolve("Felled"), "Felled", "…auch bei einem Quellstring")
 	t.equal(Loc.t("ui.gibt.es.nicht"), "ui.gibt.es.nicht", "…und erfindet nichts für einen unbekannten Schlüssel")
+	# German is a translation now, and it is the one the game defaults to, so it
+	# has to be reachable and complete like any other.
+	Loc.set_code(PINNED)
+	t.equal(Loc.t("ui.close"), "Schließen", "Deutsch antwortet mit dem Deutschen")
 	for code in Loc.codes():
 		if code == SOURCE:
 			continue

@@ -2,11 +2,9 @@ class_name ReportDialog
 extends RefCounted
 ## In-app report for a flagged suggestion.
 ##
-## Google Play requires a reporting path *in the game* for user-generated
-## content; the report button sits where the suggestions are listed.
-##
-## `mailto:` does not reliably open on Android, so the mail is additionally
-## copied to the clipboard. Static overlay, `Ui` helpers, like `SuggestDialog`.
+## Google Play requires a reporting path *in the game* for user-generated content.
+## `mailto:` does not reliably open on Android, so the mail is also copied to the
+## clipboard. Static overlay, `Ui` helpers, like `SuggestDialog`.
 
 static var _layer: CanvasLayer = null
 
@@ -69,8 +67,7 @@ static func _build(tree: SceneTree, id: int, text: String) -> void:
 
 	column.add_child(Ui.label(Loc.t("ui.report_reason"), 17, UiTheme.TEXT_DIM, true))
 	var reasons := OptionButton.new()
-	# Displayed is the translation, reported is the German text from `REASONS` —
-	# see `AppLegal.reason_label`.
+	# Displayed is the translation, reported is the German text from `REASONS`.
 	for index in AppLegal.REASONS.size():
 		reasons.add_item(AppLegal.reason_label(index))
 	column.add_child(reasons)
@@ -87,8 +84,7 @@ static func _build(tree: SceneTree, id: int, text: String) -> void:
 	column.add_child(status)
 
 	if not AppLegal.is_configured():
-		# Honest: without an address no report goes out, and that beats an
-		# address nobody listens to.
+		# No address means no report goes out, which beats one nobody reads.
 		status.add_theme_color_override("font_color", UiTheme.WARNING)
 		status.text = Loc.t("ui.report_unconfigured")
 

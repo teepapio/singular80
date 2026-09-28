@@ -246,7 +246,7 @@ func _build_panels() -> void:
 		button.tooltip_text = str(entry[2])
 		tool_row.add_child(button)
 		_tool_buttons[mode] = button
-	tool_row.add_child(Ui.button("⌂ Bau", Vector2(78, 52), UiTheme.ACCENT, func() -> void:
+	tool_row.add_child(Ui.button("⌂ Build", Vector2(78, 52), UiTheme.ACCENT, func() -> void:
 		_open_build_sheet()
 	))
 
@@ -267,10 +267,10 @@ func _build_panels() -> void:
 	# Die Handelswege gehören neben die Hilfe, nicht in die Werkzeugleiste:
 	# dort stehen schon drei Werkzeuge und der Bogen, und ein fünfter Knopf
 	# würde auf dem Telefon die halbe Breite fressen.
-	help_row.add_child(Ui.button("⇄ Wege", Vector2(96, 48), UiTheme.PANEL_LIGHT, func() -> void:
+	help_row.add_child(Ui.button("⇄ Routes", Vector2(96, 48), UiTheme.PANEL_LIGHT, func() -> void:
 		_open_routes_sheet()
 	))
-	help_row.add_child(Ui.button("? Hilfe", Vector2(78, 48), UiTheme.PANEL_LIGHT, func() -> void:
+	help_row.add_child(Ui.button("? Help", Vector2(78, 48), UiTheme.PANEL_LIGHT, func() -> void:
 		_show_help()
 	))
 	help_row.add_child(Ui.button("✕", Vector2(48, 48), UiTheme.PANEL_LIGHT, func() -> void:
@@ -313,7 +313,7 @@ func _open_build_sheet() -> void:
 	center.add_child(panel)
 	var column := Ui.vbox(8)
 	panel.add_child(column)
-	column.add_child(Ui.title("Gebäude bauen", 26, UiTheme.ACCENT))
+	column.add_child(Ui.title("Build buildings", 26, UiTheme.ACCENT))
 
 	var groups := [
 		["Material", ["woodcutter", "forester", "sawmill", "quarry"]],
@@ -332,11 +332,11 @@ func _open_build_sheet() -> void:
 		for kind in group[1]:
 			grid.add_child(_palette_button(str(kind)))
 	column.add_child(Ui.label(
-		"Tipp: erst Schlosserei, dann Minen — ohne Eisen gibt es keine Werkzeuge.",
+		"Hint: toolshop first, then mines — without iron there are no tools.",
 		13, UiTheme.WARNING
 	))
 	var close_row := CenterContainer.new()
-	close_row.add_child(Ui.button("Schließen", Vector2(170, 46), UiTheme.PANEL_LIGHT, func() -> void:
+	close_row.add_child(Ui.button("Close", Vector2(170, 46), UiTheme.PANEL_LIGHT, func() -> void:
 		_close_modal()
 	))
 	column.add_child(close_row)
@@ -346,13 +346,13 @@ func _palette_button(kind: String) -> Button:
 	var spec := Siedler.spec_of(kind)
 	var cost: Dictionary = spec["cost"]
 	var button := Ui.button(
-		Loc.f("%s %s\nBauholz %d · Stein %d", [[spec["icon"], spec["name"], int(cost["planks"]), int(cost["stone"])]]),
+		Loc.f("%s %s\nPlanks %d · Stone %d", [spec["icon"], spec["name"], int(cost["planks"]), int(cost["stone"])]),
 		Vector2(182, 58), UiTheme.PANEL_LIGHT, func() -> void:
 			armed_kind = kind
 			_set_tool(Tool.SELECT)
 			_close_modal()
 			Sfx.select()
-			notify("%s wird gebaut — Feld antippen" % spec["name"])
+			notify("%s is being built — tap a tile" % spec["name"])
 	)
 	button.add_theme_font_size_override("font_size", 12)
 	button.tooltip_text = str(spec["desc"])
@@ -539,7 +539,7 @@ func _on_tap(cell: int) -> void:
 		return
 	if tool == Tool.FLAG:
 		if siedler.add_flag(cell):
-			notify("Fahne gesetzt — mehr Träger auf dieser Straße")
+			notify("Banner placed — more carriers on this road")
 			_roads_dirty = true
 			Sfx.select()
 		else:
@@ -562,15 +562,15 @@ func _on_tap(cell: int) -> void:
 func _tap_road(cell: int) -> void:
 	if road_from < 0:
 		road_from = cell
-		notify("Startfeld gewählt — jetzt das Ziel antippen")
+		notify("Start tile chosen — now tap the target")
 		return
 	var result := siedler.build_road(road_from, cell, 4)
 	if bool(result["ok"]):
 		var flags := int(result["flags"])
 		if flags > 0:
-			notify(Loc.f("Straße gebaut · %d Fahnen", [flags]))
+			notify(Loc.f("Road built · %d banners", [flags]))
 		else:
-			notify("Straße gebaut")
+			notify("Road built")
 		_roads_dirty = true
 		_slow_timer = 1.0
 		Sfx.select()
@@ -1121,7 +1121,7 @@ func _update_advisor() -> void:
 	var row := Ui.hbox(8)
 	_advisor_body.add_child(row)
 	if list.size() > 1:
-		row.add_child(Ui.button(Loc.f("▸ alle (%d)", [list.size()]), Vector2(112, 40),
+		row.add_child(Ui.button(Loc.f("▸ all (%d)", [list.size()]), Vector2(112, 40),
 			UiTheme.PANEL_LIGHT, _show_all_advice))
 	var fix := str(top.get("fix", ""))
 	var target := int(top["building"])
@@ -1130,7 +1130,7 @@ func _update_advisor() -> void:
 			UiTheme.ACCENT, _run_fix.bind(fix)))
 	row.add_child(Ui.expander())
 	if target >= 0 and target < siedler.buildings.size():
-		row.add_child(Ui.button("⌖ zeigen", Vector2(112, 40), UiTheme.PANEL_LIGHT,
+		row.add_child(Ui.button("⌖ show", Vector2(112, 40), UiTheme.PANEL_LIGHT,
 			func() -> void:
 				selected_building = target
 				Sfx.select()
@@ -1171,25 +1171,25 @@ func _run_fix(fix: String, target: int) -> void:
 		armed_kind = kind
 		_set_tool(Tool.SELECT)
 		if not _can_pay(kind):
-			notify("Dafür fehlt der Burg das Baumaterial")
+			notify("The castle is short of building material for that")
 			return
-		notify(Loc.f("%s wird gebaut — Feld antippen", [str(Siedler.spec_of(kind)["name"])]))
+		notify(Loc.f("%s is being built — tap a tile", [str(Siedler.spec_of(kind)["name"])]))
 		return
 	if fix == "queueTool":
 		var tool_key := str(_advisor_top.get("good", ""))
 		if tool_key != "" and siedler.request_tool(tool_key):
-			notify(Loc.f("%s ist eingeplant", [Siedler.good_name(tool_key)]))
+			notify(Loc.f("%s is scheduled", [Siedler.good_name(tool_key)]))
 		else:
-			notify(siedler.notice if tool_key != "" else "Werkzeug unbekannt")
+			notify(siedler.notice if tool_key != "" else "Unknown tool")
 		return
 	if fix.begins_with("road:"):
 		_set_tool(Tool.ROAD)
 		road_from = int(siedler.buildings[siedler.castle_id]["cell"])
-		notify("Startfeld: die Burg — jetzt das Ziel antippen")
+		notify("Start tile: the castle — now tap the target")
 		return
 	if fix.begins_with("flag:"):
 		_set_tool(Tool.FLAG)
-		notify("Fahne dort antippen, wo das Quadrat blinkt")
+		notify("Tap a banner where the square flashes")
 		return
 	if fix.begins_with("select:"):
 		selected_building = fix.substr(7).to_int()
@@ -1223,10 +1223,10 @@ func _show_all_advice() -> void:
 	center.add_child(panel)
 	var column := Ui.vbox(8)
 	panel.add_child(column)
-	column.add_child(Ui.title("Was bremst deine Siedlung?", 24, UiTheme.ACCENT))
+	column.add_child(Ui.title("What is holding your settlement back?", 24, UiTheme.ACCENT))
 	var list := siedler.bottlenecks()
 	if list.is_empty():
-		column.add_child(Ui.label("Nichts — jedes Gebäude arbeitet.", 15, UiTheme.SUCCESS))
+		column.add_child(Ui.label("Nothing — every building is working.", 15, UiTheme.SUCCESS))
 	for entry in list:
 		var box := Ui.vbox(2)
 		column.add_child(box)
@@ -1242,7 +1242,7 @@ func _show_all_advice() -> void:
 		text.custom_minimum_size = Vector2(600, 0)
 		box.add_child(text)
 	var close_row := CenterContainer.new()
-	close_row.add_child(Ui.button("Zurück zur Siedlung", Vector2(230, 46),
+	close_row.add_child(Ui.button("Back to the settlement", Vector2(230, 46),
 		UiTheme.PANEL_LIGHT, func() -> void:
 			_close_modal()
 	))
@@ -1267,9 +1267,9 @@ func _open_routes_sheet() -> void:
 	center.add_child(panel)
 	var column := Ui.vbox(8)
 	panel.add_child(column)
-	column.add_child(Ui.title("Handelswege", 26, UiTheme.ACCENT))
+	column.add_child(Ui.title("Trade routes", 26, UiTheme.ACCENT))
 	var lead := Ui.label(
-		"Gezählt wird jeder Umschlag seit dem letzten Straßenbau. Die Karte misst, der Optimierer handelt.",
+		"Every trip since the last road is counted. The map measures, the optimiser decides.",
 		12, UiTheme.TEXT_DIM
 	)
 	lead.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1281,14 +1281,14 @@ func _open_routes_sheet() -> void:
 
 	var actions := Ui.hbox(8)
 	column.add_child(actions)
-	actions.add_child(Ui.button("⇄ Optimieren", Vector2(190, 46), UiTheme.ACCENT, func() -> void:
+	actions.add_child(Ui.button("⇄ Optimise", Vector2(190, 46), UiTheme.ACCENT, func() -> void:
 		_run_optimizer()
 	))
-	actions.add_child(Ui.button("↻ Neu messen", Vector2(160, 46), UiTheme.PANEL_LIGHT, func() -> void:
+	actions.add_child(Ui.button("↻ Measure again", Vector2(160, 46), UiTheme.PANEL_LIGHT, func() -> void:
 		_rebuild_routes_sheet()
 	))
 	actions.add_child(Ui.expander())
-	actions.add_child(Ui.button("Zurück", Vector2(150, 46), UiTheme.PANEL_LIGHT, func() -> void:
+	actions.add_child(Ui.button("Back", Vector2(150, 46), UiTheme.PANEL_LIGHT, func() -> void:
 		_close_modal()
 	))
 
@@ -1305,19 +1305,17 @@ func _rebuild_routes_sheet() -> void:
 	var routes := siedler.trade_report()
 	if routes.is_empty():
 		_routes_body.add_child(Ui.label(
-			"Noch kein Verkehr gemessen. Baue eine Straße von der Burg zu einem Erzeuger und lass die Träger fahren.",
+			"No traffic measured yet. Build a road from the castle to a producer and let the carriers run.",
 			14, UiTheme.TEXT_DIM
 		))
 	for entry in routes.slice(0, ROUTE_ROWS):
 		_routes_body.add_child(_route_row(entry))
 	if routes.size() > ROUTE_ROWS:
 		_routes_body.add_child(Ui.label(
-			Loc.f("… und %d weitere Strecken mit Verkehr.", [(routes.size() - ROUTE_ROWS)]), 12, UiTheme.TEXT_MUTED
+			Loc.f("… and %d more busy lines.", [(routes.size() - ROUTE_ROWS)]), 12, UiTheme.TEXT_MUTED
 		))
 	_routes_body.add_child(Ui.label(
-		Loc.f("%d Umschläge gemessen · %d Strecken mit Verkehr", [[
-			siedler.measured_carriers(), routes.size(),
-		]]), 12, UiTheme.TEXT_MUTED
+		Loc.f("%d trips measured · %d busy lines", [siedler.measured_carriers(), routes.size(),]), 12, UiTheme.TEXT_MUTED
 	))
 
 
@@ -1339,22 +1337,20 @@ func _route_row(entry: Dictionary) -> Control:
 	var good := str(entry["top"])
 	var family := str(Siedler.GOOD_CLASS.get(good, "wood"))
 	head.add_child(Ui.label(
-		Loc.f("▬ „%s“", [Siedler.good_name(good)]), 15,
+		Loc.f("▬ “%s”", [Siedler.good_name(good)]), 15,
 		Siedler.CLASS_COLORS.get(family, UiTheme.TEXT), true
 	))
 	if str(entry["kind"]) == "link":
 		# Der Stummel zwischen Haus und Fahne trägt die halbe Lieferung einer
 		# jungen Siedlung. Er steht im Bericht, aber er ist kein Handelsweg, und
 		# das soll der Spieler beim Lesen der Zeile sofort sehen.
-		head.add_child(Ui.label("Anlieger", 12, UiTheme.TEXT_MUTED))
+		head.add_child(Ui.label("Neighbour", 12, UiTheme.TEXT_MUTED))
 	head.add_child(Ui.label(
-		Loc.f("%d von %d", [[int(entry["top_count"]), int(entry["total"])]]), 12, UiTheme.TEXT_MUTED
+		Loc.f("%d of %d", [int(entry["top_count"]), int(entry["total"])]), 12, UiTheme.TEXT_MUTED
 	))
 	head.add_child(Ui.expander())
-	head.add_child(Ui.label(Loc.f("%.0f Felder · %d Träger · %.1f/min · Priorität %d", [[
-		float(entry["length"]), int(entry["carriers"]),
-		float(entry["throughput"]), int(entry["priority"]),
-	]]), 12, UiTheme.TEXT_DIM))
+	head.add_child(Ui.label(Loc.f("%.0f tiles · %d carriers · %.1f/min · priority %d", [float(entry["length"]), int(entry["carriers"]),
+		float(entry["throughput"]), int(entry["priority"]),]), 12, UiTheme.TEXT_DIM))
 
 	var row := Ui.hbox(6)
 	box.add_child(row)
@@ -1368,7 +1364,7 @@ func _route_row(entry: Dictionary) -> Control:
 	))
 	var cell := int(entry["cell"])
 	if cell >= 0:
-		row.add_child(Ui.button("⚑ Strecke teilen", Vector2(160, 36), UiTheme.ACCENT, func() -> void:
+		row.add_child(Ui.button("⚑ Share line", Vector2(160, 36), UiTheme.ACCENT, func() -> void:
 			_split_road(cell)
 		))
 	row.add_child(Ui.expander())
@@ -1376,7 +1372,7 @@ func _route_row(entry: Dictionary) -> Control:
 	var waiting := int(entry["waiting"])
 	var value := int(entry["value"])
 	row.add_child(Ui.label(
-		Loc.f("wartet %d · Wert %d · Teilen bringt %d Träger", [[waiting, value, maxi(0, gain)]]),
+		Loc.f("waiting %d · worth %d · sharing brings %d carriers", [waiting, value, maxi(0, gain)]),
 		12, UiTheme.TEXT_MUTED
 	))
 	box.add_child(_note_label(siedler.route_advice(entry), UiTheme.WARNING))
@@ -1392,7 +1388,7 @@ func _road_priority(edge_id: int, priority: int) -> void:
 
 func _split_road(cell: int) -> void:
 	if siedler.add_flag(cell):
-		notify("Fahne gesetzt — mehr Träger auf dieser Straße")
+		notify("Banner placed — more carriers on this road")
 		_roads_dirty = true
 		Sfx.select()
 	else:
@@ -1433,7 +1429,7 @@ func _update_inspector() -> void:
 		child.queue_free()
 	_inspector.visible = true
 
-	_inspector_body.add_child(Ui.label(Loc.f("%s %s", [[spec["icon"], spec["name"]]]), 20, UiTheme.ACCENT, true))
+	_inspector_body.add_child(Ui.label(Loc.f("%s %s", [spec["icon"], spec["name"]]), 20, UiTheme.ACCENT, true))
 	_inspector_body.add_child(Ui.label(str(spec["desc"]), 12, UiTheme.TEXT_DIM))
 
 	var status_text := "Rivale" if rival else Siedler.status_text(str(building["status"]))
@@ -1496,10 +1492,10 @@ func _update_inspector() -> void:
 			suffix = ", Moral +%d %%" % int((morale - 1.0) * 100.0)
 		var target_id := selected_building
 		_inspector_body.add_child(Ui.button(
-			Loc.f("⚔ Angreifen (%d Ritter%s)", [[siedler.knights, suffix]]),
+			Loc.f("⚔ Attack (%d knight%s)", [siedler.knights, suffix]),
 			Vector2(272, 46), UiTheme.DANGER, func() -> void:
 				if siedler.send_knights(target_id, siedler.knights):
-					notify("Ritter ausgelaufen!")
+					notify("Knights have run out!")
 					Sfx.select()
 				else:
 					notify(siedler.notice)
@@ -1517,7 +1513,7 @@ func _update_inspector() -> void:
 			var key := tool_key
 			var button := Ui.button(Siedler.good_name(key).substr(0, 2), Vector2(29, 32), UiTheme.PANEL_LIGHT, func() -> void:
 				if siedler.request_tool(key):
-					notify("%s ist eingeplant" % Siedler.good_name(key))
+					notify("%s is scheduled" % Siedler.good_name(key))
 				else:
 					notify(siedler.notice)
 			)
@@ -1559,16 +1555,16 @@ func _check_end() -> void:
 	var column := Ui.vbox(8)
 	center.add_child(column)
 	column.add_child(Ui.title(
-		"Die Siedlung steht!" if siedler.won else "Die Burg ist gefallen",
+		"The settlement stands!" if siedler.won else "The castle has fallen",
 		38, UiTheme.SUCCESS if siedler.won else UiTheme.DANGER
 	))
 	var sub := Ui.label(
-		"Alle Rivalenburgen gehören dir." if siedler.won else "Deine Rivalen haben deine Burg erobert.",
+		"All rival castles belong to you." if siedler.won else "Your rivals have taken your castle.",
 		17, UiTheme.TEXT_DIM
 	)
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(sub)
-	var points := Ui.label(Loc.f("Punkte: %s", [Ui.format_number(value)]), 30, UiTheme.ACCENT, true)
+	var points := Ui.label(Loc.f("Points: %s", [Ui.format_number(value)]), 30, UiTheme.ACCENT, true)
 	points.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(points)
 	var best := Ui.label(Loc.f("Best: %s", [Ui.format_number(Game.highscore(Game.HS_SIEDLER))]), 15, UiTheme.TEXT_DIM)
@@ -1578,16 +1574,14 @@ func _check_end() -> void:
 	for building in siedler.buildings:
 		if str(building["owner"]) == "player" and str(building["state"]) == "done":
 			done += 1
-	var detail := Ui.label(Loc.f("Gebäude %d · Siedler %d · Territorium %d %%", [[
-		done, siedler.current_serfs(), int(siedler.territory_share() * 100.0),
-	]]), 15, UiTheme.TEXT_DIM)
+	var detail := Ui.label(Loc.f("Buildings %d · Settlers %d · Territory %d %%", [done, siedler.current_serfs(), int(siedler.territory_share() * 100.0),]), 15, UiTheme.TEXT_DIM)
 	detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(detail)
 	var row := Ui.hbox(10)
 	var center_row := CenterContainer.new()
 	center_row.add_child(row)
 	column.add_child(center_row)
-	row.add_child(Ui.button("Neues Dorf", Vector2(180, 48), UiTheme.ACCENT, func() -> void:
+	row.add_child(Ui.button("New village", Vector2(180, 48), UiTheme.ACCENT, func() -> void:
 		Router.go_to("siedler")
 	))
 	row.add_child(Ui.button("◀ Lobby", Vector2(150, 48), UiTheme.PANEL_LIGHT, func() -> void:
@@ -1606,7 +1600,7 @@ func _show_help() -> void:
 	center.add_child(panel)
 	var column := Ui.vbox(8)
 	panel.add_child(column)
-	column.add_child(Ui.title("Siedler 3D", 28, UiTheme.ACCENT))
+	column.add_child(Ui.title("Settlers 3D", 28, UiTheme.ACCENT))
 	var texts := [
 		["Die Fahnen", "Jede türkise Fahne ist ein Verkehrsknoten. Zwei Fahnen trägt genau ein Träger, der eine Last schleppt und sie an der nächsten Fahne abgibt. Viele Fahnen auf derselben Straße = viele Träger = mehr Durchsatz. Zu wenige Fahnen = die Ware staut sich."],
 		["Handelswege", "„⇄ Wege“ zählt mit, welche Ware über welche Straße läuft, und nennt dir pro Strecke den nächsten Griff. „⇄ Optimieren“ macht ihn automatisch: zu lange Strecken werden in der Mitte geteilt, und die Priorität wird auf die Ware gehoben, auf die ein fertiges Gebäude wartet. Er nimmt dir nichts weg — Prioritäten steigen nur, und ein zweiter Durchgang ändert nichts mehr."],
@@ -1619,7 +1613,7 @@ func _show_help() -> void:
 		column.add_child(Ui.label(str(entry[0]), 17, UiTheme.WARNING, true))
 		column.add_child(Ui.label(str(entry[1]), 13, UiTheme.TEXT))
 	var close_row := CenterContainer.new()
-	close_row.add_child(Ui.button("Verstanden", Vector2(170, 46), UiTheme.ACCENT, func() -> void:
+	close_row.add_child(Ui.button("Got it", Vector2(170, 46), UiTheme.ACCENT, func() -> void:
 		_close_modal()
 	))
 	column.add_child(close_row)

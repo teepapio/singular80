@@ -34,17 +34,17 @@ func _ready_game() -> void:
 
 	var header := Ui.hbox(12)
 	root.add_child(header)
-	header.add_child(Ui.label("✎  Mesh-Improvements", 30, UiTheme.ACCENT, true))
+	header.add_child(Ui.label("✎  Mesh improvements", 30, UiTheme.ACCENT, true))
 	var spacer := Ui.spacer()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(spacer)
-	header.add_child(Ui.button("◈ Zur Galerie", Vector2(190, 44), UiTheme.PANEL_LIGHT, func() -> void:
+	header.add_child(Ui.button("◈ To the gallery", Vector2(190, 44), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		Router.go_to("mesh_gallery")
 	))
 
 	var intro := Ui.label(
-		"Alle vorgemerkten Meshes kommen in einen einzigen Vorschlag. Der Text unten ist bereits ausgefüllt — ändere nur, was du anders willst.",
+		"Every shortlisted mesh goes into a single suggestion. The text below is already filled in — change only what you want differently.",
 		15, UiTheme.TEXT_DIM)
 	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	root.add_child(intro)
@@ -60,7 +60,7 @@ func _ready_game() -> void:
 	columns.add_child(list_panel)
 	var list_column := Ui.vbox(8)
 	list_panel.add_child(list_column)
-	list_column.add_child(Ui.label("Vorgemerkte Meshes", 19, UiTheme.TEXT, true))
+	list_column.add_child(Ui.label("Shortlisted meshes", 19, UiTheme.TEXT, true))
 	_summary = Ui.label("", 15, UiTheme.TEXT_DIM)
 	list_column.add_child(_summary)
 	var scroll := ScrollContainer.new()
@@ -76,8 +76,8 @@ func _ready_game() -> void:
 	columns.add_child(draft_panel)
 	var draft_column := Ui.vbox(8)
 	draft_panel.add_child(draft_column)
-	draft_column.add_child(Ui.label("Fertiger Vorschlag", 19, UiTheme.TEXT, true))
-	draft_column.add_child(Ui.label("Wird so an das Dashboard geschickt:", 13, UiTheme.TEXT_MUTED))
+	draft_column.add_child(Ui.label("Finished suggestion", 19, UiTheme.TEXT, true))
+	draft_column.add_child(Ui.label("This is what goes to the dashboard:", 13, UiTheme.TEXT_MUTED))
 	_draft = TextEdit.new()
 	_draft.custom_minimum_size = Vector2(410, 300)
 	_draft.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
@@ -87,16 +87,16 @@ func _ready_game() -> void:
 	var draft_actions := Ui.hbox(8)
 	draft_actions.alignment = BoxContainer.ALIGNMENT_END
 	draft_column.add_child(draft_actions)
-	draft_actions.add_child(Ui.button("Liste leeren", Vector2(170, 46), UiTheme.PANEL_LIGHT, func() -> void:
+	draft_actions.add_child(Ui.button("Clear list", Vector2(170, 46), UiTheme.PANEL_LIGHT, func() -> void:
 		MeshGallery.set_marks(MeshGallery.clear_marks())
 		Sfx.select()
 		_rebuild()
 	))
-	draft_actions.add_child(Ui.button("Übernehmen", Vector2(180, 46), UiTheme.PANEL_LIGHT, func() -> void:
+	draft_actions.add_child(Ui.button("Apply", Vector2(180, 46), UiTheme.PANEL_LIGHT, func() -> void:
 		_draft.text = MeshGallery.draft(_marks())
 		Sfx.select()
 	))
-	_submit_button = Ui.button("Vorschlag einreichen", Vector2(250, 46), UiTheme.ACCENT, _submit)
+	_submit_button = Ui.button("Submit a suggestion", Vector2(250, 46), UiTheme.ACCENT, _submit)
 	draft_actions.add_child(_submit_button)
 
 	_rebuild()
@@ -139,7 +139,7 @@ func _row(index: int, key: String) -> Control:
 		_rebuild()
 	))
 
-	var meta := Ui.label(Loc.f("%s   ·   %s Dreiecke", [[key, AssetRegistry.tri_text(key, str(entry.get("tier", "low")))]]), 12, UiTheme.TEXT_MUTED)
+	var meta := Ui.label(Loc.f("%s   ·   %s triangles", [key, AssetRegistry.tri_text(key, str(entry.get("tier", "low")))]), 12, UiTheme.TEXT_MUTED)
 	column.add_child(meta)
 
 	var note := TextEdit.new()
@@ -166,7 +166,7 @@ func _row(index: int, key: String) -> Control:
 func _submit() -> void:
 	var text := _draft.text.strip_edges()
 	if text.length() < 3:
-		show_toast("Der Vorschlag ist noch leer.")
+		show_toast("The suggestion is still empty.")
 		return
 	_submit_button.disabled = true
 	_submit_button.text = "Sende …"
@@ -177,10 +177,10 @@ func _submit() -> void:
 		# the text, and `Liste leeren` clears it if they are done.
 		_submit_button.text = "Gespeichert ✓"
 		_submit_button.disabled = false
-		show_toast("Offline gespeichert — der Vorschlag geht raus, sobald du wieder online bist.", 3.5)
+		show_toast("Saved offline — the suggestion goes out as soon as you are online again.", 3.5)
 		return
 	_submit_button.text = "Gesendet ✓"
-	show_toast(Loc.f("Danke! Vorschlag #%d ist im Dashboard.", [int(result.get("id", 0))]), 3.0)
+	show_toast(Loc.f("Thank you! Suggestion #%d is on the dashboard.", [int(result.get("id", 0))]), 3.0)
 	Sfx.level_up()
 	# Delivered: the work is done, so the list starts empty again.
 	MeshGallery.set_marks(MeshGallery.clear_marks())

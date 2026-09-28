@@ -153,8 +153,6 @@ static func format_time(ms: float) -> String:
 
 
 ## Thousands separator for the active language.
-##
-## `Loc` reads the separators from the catalogue; a hard-coded `.` would be wrong
-## for English and French, and unreadable where a group is four digits wide.
+## `Loc` owns the separators: a hard-coded `.` is wrong for English and French.
 static func format_number(value: int) -> String:
 	return Loc.number(value)

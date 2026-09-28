@@ -284,7 +284,7 @@ func _build_ui() -> void:
 	_hud.add_theme_constant_override("separation", 3)
 	hud_root.add_child(_hud)
 
-	_label_level = Ui.label(Loc.f("Level %d · %s", [[level_n, str(level_def["name"])]]), 21, Color(str(DragonFlight.biome_by_id(str(level_def["biome"]))["accent"])), true)
+	_label_level = Ui.label(Loc.f("Level %d · %s", [level_n, str(level_def["name"])]), 21, Color(str(DragonFlight.biome_by_id(str(level_def["biome"]))["accent"])), true)
 	_hud.add_child(_label_level)
 
 	_hp_bar = Ui.bar(Color("ef4444"), 16.0)
@@ -308,7 +308,7 @@ func _build_ui() -> void:
 	_banner.modulate.a = 0.0
 	hud_root.add_child(_banner)
 
-	var hint := Ui.label("Stick lenkt · ◈ feuert", 15, UiTheme.TEXT_DIM)
+	var hint := Ui.label("Stick steers · ◈ fires", 15, UiTheme.TEXT_DIM)
 	hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	hint.position = Vector2(0, -132)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -925,21 +925,21 @@ func _show_result(survived: bool, stars: int, summary: Dictionary, gold_delta: i
 	_over.add_child(center)
 	var column := Ui.vbox(10)
 	center.add_child(column)
-	column.add_child(Ui.title("Geschafft" if survived else "Abgestürzt", 46, Color("22c55e") if survived else Color("f87171")))
-	column.add_child(Ui.label(Loc.f("%d / 3 Sternen", [stars]), 30, Color("facc15")))
-	column.add_child(Ui.label(Loc.f("Strecke %d m · Abschüsse %d · Punkte %s", [[int(distance), kills, Ui.format_number(score)]]), 19, UiTheme.TEXT))
-	column.add_child(Ui.label(Loc.f("Beute: %d Gold · %d Gold gesamt", [[gold, int(profile.get("gold", 0))]]), 19, UiTheme.TEXT_DIM))
+	column.add_child(Ui.title("Done" if survived else "Crashed", 46, Color("22c55e") if survived else Color("f87171")))
+	column.add_child(Ui.label(Loc.f("%d / 3 stars", [stars]), 30, Color("facc15")))
+	column.add_child(Ui.label(Loc.f("Distance %d m · dives %d · points %s", [int(distance), kills, Ui.format_number(score)]), 19, UiTheme.TEXT))
+	column.add_child(Ui.label(Loc.f("Loot: %d gold · %d gold total", [gold, int(profile.get("gold", 0))]), 19, UiTheme.TEXT_DIM))
 	if gold_delta > 0:
-		column.add_child(Ui.label(Loc.f("Dazu %d Gold aus dem Level", [gold_delta]), 18, Color("fbbf24")))
+		column.add_child(Ui.label(Loc.f("Plus %d gold from the level", [gold_delta]), 18, Color("fbbf24")))
 	if int(summary.get("unlocked", level_n)) > level_n:
-		column.add_child(Ui.label(Loc.f("Level %d freigeschaltet!", [int(summary["unlocked"])]), 21, Color("38bdf8")))
+		column.add_child(Ui.label(Loc.f("Level %d unlocked!", [int(summary["unlocked"])]), 21, Color("38bdf8")))
 	if eggs_found > 0:
-		column.add_child(Ui.label(Loc.f("%d Ei(er) wartet in der Zucht", [eggs_found]), 18, Color("fbbf24")))
+		column.add_child(Ui.label(Loc.f("%d egg(s) waiting in the nursery", [eggs_found]), 18, Color("fbbf24")))
 	column.add_child(Ui.spacer(Vector2(0, 10)))
-	column.add_child(Ui.button("Nochmal", Vector2(340, 54), UiTheme.ACCENT, func() -> void:
+	column.add_child(Ui.button("Again", Vector2(340, 54), UiTheme.ACCENT, func() -> void:
 		Router.go_to("dragonflight_run", {"level": level_n})
 	))
-	column.add_child(Ui.button("Zur Zucht", Vector2(340, 50), UiTheme.PANEL_LIGHT, func() -> void:
+	column.add_child(Ui.button("To the nursery", Vector2(340, 50), UiTheme.PANEL_LIGHT, func() -> void:
 		Router.go_to("dragonflight_hatchery")
 	))
 	column.add_child(Ui.button("Hangar", Vector2(340, 50), UiTheme.PANEL_LIGHT, func() -> void:

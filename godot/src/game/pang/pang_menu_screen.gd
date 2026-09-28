@@ -49,9 +49,9 @@ func _build_chrome() -> void:
 	content_layer().add_child(column)
 
 	column.add_child(Ui.title("PANG 3D", 44, UiTheme.ACCENT))
-	column.add_child(Ui.label("Spieß alle Kugeln auf, bevor die Zeit abläuft.", 17, UiTheme.TEXT_DIM))
+	column.add_child(Ui.label("Skewer every ball before time runs out.", 17, UiTheme.TEXT_DIM))
 	column.add_child(Ui.label(
-		Loc.f("Ab Level %d kündigt sich der Nachschub an; die Karte nennt die Seite.", [Pang.WAVE_FIRST_LEVEL]), 15, Color("f472b6")
+		Loc.f("From level %d on, reinforcements announce themselves; the card names the side.", [Pang.WAVE_FIRST_LEVEL]), 15, Color("f472b6")
 	))
 	_page_label = Ui.label("", 16, UiTheme.TEXT_DIM)
 	_page_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -74,9 +74,9 @@ func _build_chrome() -> void:
 	var row := Ui.hbox(8)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	column.add_child(row)
-	row.add_child(Ui.button("◀ Zurück", Vector2(130, 44), UiTheme.PANEL_LIGHT, func() -> void: _turn_page(-1)))
-	row.add_child(Ui.button("Weiter ▶", Vector2(130, 44), UiTheme.PANEL_LIGHT, func() -> void: _turn_page(1)))
-	row.add_child(Ui.button("⏵ Spielen", Vector2(200, 44), UiTheme.ACCENT, func() -> void: _start()))
+	row.add_child(Ui.button("◀ Back", Vector2(130, 44), UiTheme.PANEL_LIGHT, func() -> void: _turn_page(-1)))
+	row.add_child(Ui.button("Continue ▶", Vector2(130, 44), UiTheme.PANEL_LIGHT, func() -> void: _turn_page(1)))
+	row.add_child(Ui.button("⏵ Play", Vector2(200, 44), UiTheme.ACCENT, func() -> void: _start()))
 
 
 func _rebuild() -> void:
@@ -115,7 +115,9 @@ func _page_best(span: Vector2i) -> String:
 	var best := 0.0
 	for level in range(span.x, span.y + 1):
 		best = maxf(best, Pang.level_best_time(level))
-	return "%.1f s" % best if best > 0.0 else "—"
+	# See `hangar_screen.gd`: the condition belongs outside the format, or a
+	# `%.1f` ends up with a dash. `—` needs no translation.
+	return Loc.f("%.1f s", [best]) if best > 0.0 else "—"
 
 
 func _level_card(level: int) -> Control:
@@ -144,11 +146,11 @@ func _level_card(level: int) -> Control:
 	# Which flank a wave arrives over is half the battle in that level, so the
 	# card says it up front instead of letting the player find out on the floor.
 	if waves > 0:
-		var flanks := Ui.label("Nachschub: " + Pang.wave_flanks_label(level), 12, Color("f472b6"))
+		var flanks := Ui.label("Reinforcements: " + Pang.wave_flanks_label(level), 12, Color("f472b6"))
 		flanks.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		column.add_child(flanks)
 
-	var record := Ui.label(Loc.f("%.1f s", [best if best > 0.0 else "—"]), 18, Color("facc15") if best > 0.0 else UiTheme.TEXT_MUTED, true)
+	var record := Ui.label(Loc.f("%.1f s", [best]) if best > 0.0 else "—", 18, Color("facc15") if best > 0.0 else UiTheme.TEXT_MUTED, true)
 	record.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(record)
 
@@ -158,7 +160,7 @@ func _level_card(level: int) -> Control:
 	button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	button.pressed.connect(func() -> void:
 		if not Pang.is_unlocked(level):
-			show_toast(Loc.f("Level %d ist noch gesperrt.", [level]))
+			show_toast(Loc.f("Level %d is still locked.", [level]))
 			Sfx.hurt()
 			return
 		Sfx.select()

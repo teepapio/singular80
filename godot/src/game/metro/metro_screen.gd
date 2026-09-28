@@ -1,18 +1,11 @@
 class_name MetroScreen
 extends WorldScreen
-## Metropol 3D — build and run a metro network on a tilted 3D city block.
-##
-## Port of the 2D OluMetro game to the 3D world of Singular 80. All rules live
-## in `metro.gd`; this file only turns that state into meshes, routes touch
-## input and draws the HUD.
-##
-## Rendering notes:
-##  - every line is one `ArrayMesh` ribbon with vertex colours, rebuilt only
-##    when its station list changes
-##  - travel direction is a small `MultiMesh` of beads per line, scrolled along
-##    the arc length every frame (one draw call per line)
-##  - every waiting commuter in the city is a single `MultiMesh`
-##  - sun, ambient light and fog follow the in-game clock
+## Metropol 3D — build and run a metro network on a tilted 3D city block. Port
+## of the 2D OluMetro game. All rules live in `metro.gd`; this file only turns
+## that state into meshes, routes touch input and draws the HUD.
+## Batching is the whole budget: one `ArrayMesh` ribbon per line (rebuilt only
+## when its station list changes), one bead `MultiMesh` per line for direction,
+## one `MultiMesh` for every waiting commuter, sun and fog on the in-game clock.
 
 const GROUND_Y := 0.0
 const WATER_Y := -0.18
@@ -879,7 +872,7 @@ func _build_ui() -> void:
 	_money_label = _value(column, "Einnahmen", "0 $", Color("4ade80"))
 	_waiting_label = _value(column, "Wartende", "0", Color("fbbf24"))
 	_riding_label = _value(column, "In den Zügen", "0", Color("38bdf8"))
-	column.add_child(Ui.label("Zufriedenheit", 14, UiTheme.TEXT_DIM))
+	column.add_child(Ui.label("Satisfaction", 14, UiTheme.TEXT_DIM))
 	_happiness = Ui.bar(Color("4ade80"), 14.0)
 	_happiness.custom_minimum_size = Vector2(250, 14)
 	column.add_child(_happiness)
@@ -889,13 +882,13 @@ func _build_ui() -> void:
 	right.position = Vector2(-300, 70)
 	right.custom_minimum_size = Vector2(288, 0)
 	hud_root.add_child(right)
-	_day_label = Ui.label("MO  Tag 1", 22, UiTheme.TEXT, true)
+	_day_label = Ui.label("MO  Day 1", 22, UiTheme.TEXT, true)
 	_day_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	right.add_child(_day_label)
 	_clock_label = Ui.label("08:00", 30, UiTheme.ACCENT, true)
 	_clock_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	right.add_child(_clock_label)
-	_phase_label = Ui.label("Morgen", 16, UiTheme.TEXT_DIM)
+	_phase_label = Ui.label("Morning", 16, UiTheme.TEXT_DIM)
 	_phase_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	right.add_child(_phase_label)
 	# Two forecast lines: what the city is missing now, and what the next
@@ -926,7 +919,7 @@ func _build_ui() -> void:
 	_build_resource_chips()
 	_build_tool_row()
 
-	var hint := Ui.label("Station antippen und verketten  ·  ersten Bahnhof erneut antippen schließt einen Ring", 14, UiTheme.TEXT_DIM)
+	var hint := Ui.label("Tap stations to chain them  ·  tapping the first station again closes a loop", 14, UiTheme.TEXT_DIM)
 	hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	hint.position = Vector2(0, -58)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -987,10 +980,10 @@ func _build_tool_row() -> void:
 	row.position = Vector2(16, -112)
 	hud_root.add_child(row)
 	var entries: Array[Dictionary] = [
-		{"text": "▣ Bauen", "tool": Tool.BUILD, "accent": UiTheme.ACCENT},
-		{"text": "▤ Lok", "tool": Tool.TRAIN, "accent": UiTheme.SUCCESS},
-		{"text": "▥ Wagen", "tool": Tool.WAGON, "accent": UiTheme.SUCCESS},
-		{"text": "✂ Abbau", "tool": Tool.REMOVE, "accent": UiTheme.DANGER},
+		{"text": "▣ Build", "tool": Tool.BUILD, "accent": UiTheme.ACCENT},
+		{"text": "▤ Local", "tool": Tool.TRAIN, "accent": UiTheme.SUCCESS},
+		{"text": "▥ Car", "tool": Tool.WAGON, "accent": UiTheme.SUCCESS},
+		{"text": "✂ Harvest", "tool": Tool.REMOVE, "accent": UiTheme.DANGER},
 	]
 	_tool_buttons = []
 	for entry in entries:
@@ -1004,7 +997,7 @@ func _build_tool_row() -> void:
 	help_button.position = Vector2(490, -112)
 	hud_root.add_child(help_button)
 
-	_finish_button = Ui.button("Fertig ✓", Vector2(130, 52), UiTheme.WARNING, _finish_drawing)
+	_finish_button = Ui.button("Done ✓", Vector2(130, 52), UiTheme.WARNING, _finish_drawing)
 	_finish_button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
 	_finish_button.position = Vector2(-292, -112)
 	_finish_button.visible = false
@@ -1043,9 +1036,9 @@ func _build_inspector() -> void:
 	column.add_child(_inspect_body)
 	var row := Ui.hbox(8)
 	column.add_child(row)
-	_inspect_branch = Ui.button("Linie hierher verzweigen", Vector2(224, 44), UiTheme.SUCCESS, _branch_from_inspector)
+	_inspect_branch = Ui.button("Branch a line here", Vector2(224, 44), UiTheme.SUCCESS, _branch_from_inspector)
 	row.add_child(_inspect_branch)
-	row.add_child(Ui.button("Schließen", Vector2(120, 44), UiTheme.PANEL_LIGHT, func() -> void:
+	row.add_child(Ui.button("Close", Vector2(120, 44), UiTheme.PANEL_LIGHT, func() -> void:
 		_inspect_panel.visible = false
 		_inspect_station = -1
 	))
@@ -1118,7 +1111,7 @@ func _show_mode_select() -> void:
 	var column := Ui.vbox(8)
 	center.add_child(column)
 	column.add_child(Ui.title("▣ METROPOL", 46, UiTheme.ACCENT))
-	var intro := Ui.label("Baue ein U-Bahn-Netz, das eine wachsende Stadt am Leben hält.", 17, UiTheme.TEXT_DIM)
+	var intro := Ui.label("Build a subway network that keeps a growing city alive.", 17, UiTheme.TEXT_DIM)
 	intro.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(intro)
 	for mode in [Metro.Mode.NORMAL, Metro.Mode.ENDLESS, Metro.Mode.EXTREME]:
@@ -1142,7 +1135,7 @@ func _show_help() -> void:
 	var column := Ui.vbox(7)
 	column.custom_minimum_size = Vector2(600, 0)
 	panel.add_child(column)
-	column.add_child(Ui.title("So spielst du", 32, UiTheme.ACCENT))
+	column.add_child(Ui.title("How to play", 32, UiTheme.ACCENT))
 	var lines: Array[String] = [
 		"▪ Jeder Fahrgast will zu einer Station des gleichen Typs. Farbe und Symbol zeigen den Typ, der Buchstabe steht für den genauen Zielort.",
 		"▪ ▣ Bauen: Station antippen, dann die weiteren Stationen antippen. Den ersten Bahnhof erneut antippen schließt einen Ring. Auf leere Fläche tippen beendet die Linie.",
@@ -1166,7 +1159,7 @@ func _show_help() -> void:
 	var row := Ui.hbox(8)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	column.add_child(row)
-	row.add_child(Ui.button("Verstanden", Vector2(200, 48), UiTheme.ACCENT, func() -> void:
+	row.add_child(Ui.button("Got it", Vector2(200, 48), UiTheme.ACCENT, func() -> void:
 		_close_modal()
 	))
 	if _started:
@@ -1250,17 +1243,17 @@ func _show_game_over(payload: Dictionary) -> void:
 	root.add_child(center)
 	var column := Ui.vbox(7)
 	center.add_child(column)
-	column.add_child(Ui.title("Netz kollabiert", 42, UiTheme.DANGER))
+	column.add_child(Ui.title("The network collapsed", 42, UiTheme.DANGER))
 	var station_id := int(payload.get("station", -1))
 	if station_id >= 0 and station_id < metro.stations.size():
-		var sub := Ui.label(Loc.f("%s war zu lange überfüllt.", [Metro.type_name(int(metro.stations[station_id]["type"]))]), 17, UiTheme.TEXT_DIM)
+		var sub := Ui.label(Loc.f("%s was over capacity for too long.", [Metro.type_name(int(metro.stations[station_id]["type"]))]), 17, UiTheme.TEXT_DIM)
 		sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		column.add_child(sub)
-	var money_label := Ui.label(Loc.f("Einnahmen: %s $", [Ui.format_number(int(payload.get("money", 0)))]), 30, Color("4ade80"), true)
+	var money_label := Ui.label(Loc.f("Income: %s $", [Ui.format_number(int(payload.get("money", 0)))]), 30, Color("4ade80"), true)
 	money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(money_label)
 	if record:
-		var best := Ui.label("Neuer Bestwert!", 20, UiTheme.WARNING, true)
+		var best := Ui.label("New best!", 20, UiTheme.WARNING, true)
 		best.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		column.add_child(best)
 	column.add_child(_centered("Zugestellt %d   ·   Pünktlich %d   ·   Beste Serie %d" % [
@@ -1277,7 +1270,7 @@ func _show_game_over(payload: Dictionary) -> void:
 	var row := Ui.hbox(10)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	column.add_child(row)
-	row.add_child(Ui.button("Neues Netz", Vector2(200, 52), UiTheme.ACCENT, func() -> void: Router.go_to(screen_id)))
+	row.add_child(Ui.button("New network", Vector2(200, 52), UiTheme.ACCENT, func() -> void: Router.go_to(screen_id)))
 	row.add_child(Ui.button("Lobby", Vector2(160, 52), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))
 
 
@@ -1789,7 +1782,7 @@ func _say(text: String, color: Color = UiTheme.TEXT) -> void:
 		glyph = "\u2713"
 	elif color == UiTheme.WARNING:
 		glyph = "\u2605"
-	notify(Loc.f("%s  %s", [[glyph, text]]), 2.4)
+	notify(Loc.f("%s  %s", [glyph, text]), 2.4)
 
 
 # --- loop -------------------------------------------------------------------

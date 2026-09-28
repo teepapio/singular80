@@ -2,7 +2,7 @@
   {
     "id": "dash",
     "name": "Dash",
-    "description": "Leertaste: kurzer Dash mit Unverwundbarkeit (1,5s Abklingzeit).",
+    "description": "Space bar: a short dash with invulnerability (1.5s cooldown).",
     "enabled": true
   }
 ]

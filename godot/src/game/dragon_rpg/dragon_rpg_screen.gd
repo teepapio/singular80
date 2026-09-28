@@ -294,7 +294,7 @@ func _build_ui() -> void:
 	column.custom_minimum_size = Vector2(280, 0)
 	column.add_theme_constant_override("separation", 2)
 	hud_root.add_child(column)
-	column.add_child(Ui.label("☄  DRACHEN-RPG 3D", 22, UiTheme.TEXT, true))
+	column.add_child(Ui.label("☄  DRAGON RPG 3D", 22, UiTheme.TEXT, true))
 	_wave_label = _value(column, "Welle", "0")
 	_level_label = _value(column, "Level", "1")
 	_gold_label = _value(column, "Gold", "0", Color("fbbf24"))
@@ -350,7 +350,7 @@ func _build_ui() -> void:
 	_boss_bar.offset_top = 26
 	_boss_box.add_child(_boss_bar)
 
-	var hint := Ui.label("Stick bewegen · ⚔ Angriff (auch Auto-Ziel) · » Drachenflucht (kurze Unverwundbarkeit)", 15, UiTheme.TEXT_DIM)
+	var hint := Ui.label("Move the stick · ⚔ Attack (also auto-aim) · » Dragon escape (short invulnerability)", 15, UiTheme.TEXT_DIM)
 	hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	hint.position = Vector2(0, -130)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -851,8 +851,7 @@ func _end_run() -> void:
 	_over_layer.add_child(center)
 	var column := Ui.vbox(12)
 	center.add_child(column)
-	column.add_child(Ui.title("Gefallen", 46, Color("f87171")))
-	column.add_child(Ui.label(Loc.f("Welle %d · Level %d · Gold %s\nKills %d · Score %s", [[
-		wave, level, Ui.format_number(gold), kills, Ui.format_number(score)]]), 20, UiTheme.TEXT))
-	column.add_child(Ui.button("Nochmal", Vector2(340, 56), UiTheme.ACCENT, func() -> void: Router.go_to(screen_id)))
+	column.add_child(Ui.title("Felled", 46, Color("f87171")))
+	column.add_child(Ui.label(Loc.f("Wave %d · Level %d · Gold %s\nKills %d · Score %s", [wave, level, Ui.format_number(gold), kills, Ui.format_number(score)]), 20, UiTheme.TEXT))
+	column.add_child(Ui.button("Again", Vector2(340, 56), UiTheme.ACCENT, func() -> void: Router.go_to(screen_id)))
 	column.add_child(Ui.button("Lobby", Vector2(340, 56), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))

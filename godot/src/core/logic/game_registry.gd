@@ -19,7 +19,7 @@ const CATEGORIES: Array[Dictionary] = [
 		"icon": "◉",
 		"accent": Color(0.055, 0.647, 0.898),
 		"accent_hex": 0x0ea5e9,
-		"tagline": "Schnelle Reflexe, kurze Runs",
+		"tagline": "Fast reflexes, short runs",
 	},
 	{
 		"id": CATEGORY_ADVENTURE,
@@ -27,23 +27,23 @@ const CATEGORIES: Array[Dictionary] = [
 		"icon": "☄",
 		"accent": Color(0.937, 0.267, 0.267),
 		"accent_hex": 0xef4444,
-		"tagline": "Erkunden, sammeln, kämpfen",
+		"tagline": "Explore, collect, fight",
 	},
 	{
 		"id": CATEGORY_BOARD,
-		"name": "Brettspiele",
+		"name": "Board games",
 		"icon": "◼",
 		"accent": Color(0.851, 0.467, 0.024),
 		"accent_hex": 0xd97706,
-		"tagline": "Zug um Zug zum Sieg",
+		"tagline": "Move by move to victory",
 	},
 	{
 		"id": CATEGORY_CARDS,
-		"name": "Kartenspiele",
+		"name": "Card games",
 		"icon": "♠",
 		"accent": Color(0.133, 0.773, 0.369),
 		"accent_hex": 0x22c55e,
-		"tagline": "Blatt, Hand, Glück",
+		"tagline": "Cards, hands, luck",
 	},
 	{
 		"id": CATEGORY_PUZZLE,
@@ -51,7 +51,7 @@ const CATEGORIES: Array[Dictionary] = [
 		"icon": "▦",
 		"accent": Color(0.659, 0.333, 0.969),
 		"accent_hex": 0xa855f7,
-		"tagline": "Köpfchen gefragt",
+		"tagline": "Use your head",
 	},
 ]
 
@@ -59,7 +59,7 @@ const GAMES: Array[Dictionary] = [
 	{
 		"id": "arena",
 		"name": "Singular 80",
-		"description": "Arena-Survival: Überlebe Wellen, sammle XP und verbessere deine Waffe.",
+		"description": "Arena survival: survive the waves, collect XP and upgrade your weapon.",
 		"icon": "◉",
 		"screen": "arena",
 		"accent": Color(0.055, 0.647, 0.898),
@@ -70,7 +70,7 @@ const GAMES: Array[Dictionary] = [
 	{
 		"id": "tetris",
 		"name": "Tetris",
-		"description": "Der Klassiker: Stapel Tetrominos, räume Linien und überlebe das immer schnellere Fallen.",
+		"description": "The classic: stack tetrominoes, clear lines and survive the ever-faster drops.",
 		"icon": "▦",
 		"screen": "tetris",
 		"accent": Color(0.659, 0.333, 0.969),
@@ -81,7 +81,7 @@ const GAMES: Array[Dictionary] = [
 	{
 		"id": "poker",
 		"name": "Texas Hold'em",
-		"description": "Poker gegen drei Computer-Gegner: Setze, erhöhe, bluffe und gewinne den Pot am Tisch.",
+		"description": "Poker against three computer opponents: bet, raise, bluff and win the pot.",
 		"icon": "♠",
 		"screen": "poker",
 		"accent": Color(0.937, 0.267, 0.267),
@@ -92,7 +92,7 @@ const GAMES: Array[Dictionary] = [
 	{
 		"id": "freecell",
 		"name": "FreeCell",
-		"description": "Karten-Solitaire mit vier freien Zellen: Sortiere alle 52 Karten in die Fundamente.",
+		"description": "Card solitaire with four free cells: sort all 52 cards into the foundations.",
 		"icon": "♣",
 		"screen": "freecell",
 		"accent": Color(0.133, 0.773, 0.369),
@@ -102,8 +102,8 @@ const GAMES: Array[Dictionary] = [
 	},
 	{
 		"id": "dame",
-		"name": "Dame",
-		"description": "Der Brett-Klassiker: Ziehe diagonal, schlage die Steine der KI und mache deine Dame zur Königin.",
+		"name": "Checkers",
+		"description": "The board classic: move diagonally, capture the AI’s pieces and crown your king.",
 		"icon": "◼",
 		"screen": "dame",
 		"accent": Color(0.851, 0.467, 0.024),
@@ -114,7 +114,7 @@ const GAMES: Array[Dictionary] = [
 	{
 		"id": "crystal3d",
 		"name": "Crystal Jumper 3D",
-		"description": "Klettere den Turm, sammle Kristalle und verschmelze sie am Gipfel zu Juwelen.",
+		"description": "Climb the tower, collect crystals and merge them into jewels at the summit.",
 		"icon": "◆",
 		"screen": "crystal3d",
 		"accent": Color(0.024, 0.714, 0.831),
@@ -124,8 +124,8 @@ const GAMES: Array[Dictionary] = [
 	},
 	{
 		"id": "crystal3d-christmas",
-		"name": "Weihnachts-Jumper",
-		"description": "Crystal-Jumper-Weihnachtslevel: Sammle Glaskugeln im Schnee und erreiche den Gipfel.",
+		"name": "Christmas Jumper",
+		"description": "Crystal Jumper Christmas level: collect baubles in the snow and reach the summit.",
 		"icon": "✧",
 		"screen": "crystal3d_christmas",
 		"accent": Color(0.133, 0.773, 0.369),
@@ -135,8 +135,8 @@ const GAMES: Array[Dictionary] = [
 	},
 	{
 		"id": "crystal3d-halloween",
-		"name": "Halloween-Jumper",
-		"description": "Crystal-Jumper-Halloweenlevel: Sammle nachts Kürbisse und verschmelze sie zu Geistern.",
+		"name": "Halloween Jumper",
+		"description": "Crystal Jumper Halloween level: collect pumpkins at night and merge them into ghosts.",
 		"icon": "☠",
 		"screen": "crystal3d_halloween",
 		"accent": Color(0.973, 0.451, 0.086),
@@ -146,8 +146,8 @@ const GAMES: Array[Dictionary] = [
 	},
 	{
 		"id": "merge3d-christmas",
-		"name": "Weihnachts-Merge 3D",
-		"description": "3D-Merge-Brett im Weihnachtsstil: Kombiniere 3 oder 5 gleiche Items zu prächtigerem Schmuck.",
+		"name": "Christmas Merge 3D",
+		"description": "A 3D merge board in Christmas style: combine 3 or 5 matching items into finer decorations.",
 		"icon": "✦",
 		"screen": "merge3d_christmas",
 		"accent": Color(0.133, 0.773, 0.369),
@@ -157,8 +157,8 @@ const GAMES: Array[Dictionary] = [
 	},
 	{
 		"id": "merge3d-halloween",
-		"name": "Halloween-Merge 3D",
-		"description": "Dieselben 3er-/5er-Merges als Halloween-Edition — verschmelze Kürbisse zu Geisterkürbissen.",
+		"name": "Halloween Merge 3D",
+		"description": "The same 3- and 5-merges as a Halloween edition — merge pumpkins into ghost pumpkins.",
 		"icon": "☽",
 		"screen": "merge3d_halloween",
 		"accent": Color(0.973, 0.451, 0.086),
@@ -168,8 +168,8 @@ const GAMES: Array[Dictionary] = [
 	},
 	{
 		"id": "horserunner",
-		"name": "Pferde-Parcours 3D",
-		"description": "Reite mit dem Pferd über den Erdweg, springe über Baumstämme, Felsen und Zäune und weiche den Bäumen aus.",
+		"name": "Horse Course 3D",
+		"description": "Ride your horse along the dirt track, jump logs, rocks and fences and dodge the trees.",
 		"icon": "♞",
 		"screen": "horserunner",
 		"accent": Color(0.518, 0.8, 0.086),
@@ -179,8 +179,8 @@ const GAMES: Array[Dictionary] = [
 	},
 	{
 		"id": "dragonrpg",
-		"name": "Drachen-RPG 3D",
-		"description": "Action-RPG in der Drachenruine: Erlege Drachenwellen, sammle Gold und Beute und verbessere Waffe und Level.",
+		"name": "Dragon RPG 3D",
+		"description": "An action RPG in the dragon ruin: fight off waves of dragons, gather gold and loot, and upgrade your weapon and level.",
 		"icon": "☄",
 		"screen": "dragonrpg",
 		"accent": Color(0.937, 0.267, 0.267),
@@ -190,8 +190,8 @@ const GAMES: Array[Dictionary] = [
 	},
 	{
 		"id": "dragonflight",
-		"name": "Drachenflug",
-		"description": "Fliege mit deinem Drachen über 30 Level, züchte Nachkommen mit vererbtenTraits und sammle Drachengold.",
+		"name": "Dragon Flight",
+		"description": "Fly your dragon through 30 levels, breed offspring with inherited traits and collect dragon gold.",
 		"icon": "☄",
 		"screen": "dragonflight",
 		"accent": Color(0.055, 0.647, 0.898),
@@ -202,7 +202,7 @@ const GAMES: Array[Dictionary] = [
 	{
 		"id": "pang",
 		"name": "Pang 3D",
-		"description": "Klassiker im 3D-Diorama: Spieß alle Kugeln auf, bevor die Zeit abläuft — 30 Level und vier Boni.",
+		"description": "The classic in a 3D diorama: skewer every ball before time runs out — 30 levels and four bonuses.",
 		"icon": "⇈",
 		"screen": "pang_menu",
 		"accent": Color(0.961, 0.620, 0.043),
@@ -213,7 +213,7 @@ const GAMES: Array[Dictionary] = [
 	{
 		"id": "metro3d",
 		"name": "Metropol 3D",
-		"description": "Baue ein U-Bahn-Netz in einer 3D-Stadt: Linien ziehen, Züge setzen, Rush Hour überstehen.",
+		"description": "Build a subway network in a 3D city: draw lines, place trains, survive rush hour.",
 		"icon": "▣",
 		"screen": "metro3d",
 		"accent": Color(0.024, 0.714, 0.831),
@@ -224,7 +224,7 @@ const GAMES: Array[Dictionary] = [
 	{
 		"id": "2048",
 		"name": "2048",
-		"description": "Das Sucht-Puzzle: Verschiebe die Kacheln, verschmelze gleiche Zahlen und baue die 2048.",
+		"description": "The addictive puzzle: slide the tiles, merge matching numbers and build the 2048 tile.",
 		"icon": "▣",
 		"screen": "g2048",
 		"accent": Color(0.961, 0.62, 0.043),
@@ -235,7 +235,7 @@ const GAMES: Array[Dictionary] = [
 	{
 		"id": "candy3d",
 		"name": "Candy Crush 3D",
-		"description": "Match-3 in 6 Welten mit 240 Leveln: Bonbons tauschen, Ketten auslösen und Blöcke räumen.",
+		"description": "Match-3 across 6 worlds with 240 levels: swap candies, trigger chains and clear blocks.",
 		"icon": "✦",
 		"screen": "candy3d",
 		"accent": Color(0.957, 0.447, 0.714),
@@ -246,8 +246,8 @@ const GAMES: Array[Dictionary] = [
 	},
 	{
 		"id": "siedler",
-		"name": "Siedler 3D",
-		"description": "Aufbauspiel nach Die Siedler: Fahnen und Träger tragen deine Waren, Werkzeuge und Minen hungern.",
+		"name": "Settlers 3D",
+		"description": "A settlers-style building game: banners and carriers move your goods, tools and mines go hungry.",
 		"icon": "⌂",
 		"screen": "siedler",
 		"accent": Color(0.518, 0.8, 0.086),

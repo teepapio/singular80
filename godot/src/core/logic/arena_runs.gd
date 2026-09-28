@@ -321,7 +321,7 @@ static func repair_offer(stats: PlayerStats, slot: int) -> Dictionary:
 	return {
 		"id": "repair_%d" % index,
 		"name": str(REPAIR_NAME[index]),
-		"description": "+%d Leben" % amount,
+		"description": "+%d health" % amount,
 		"stat": "hp",
 		"amount": amount,
 		"maxStacks": 99,

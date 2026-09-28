@@ -35,8 +35,8 @@ const STYLE_SEATS: Array = [STYLE_TIGHT, STYLE_LOOSE, STYLE_BLUFF]
 ##   size_scale   Multiplikator auf die Einsatzhöhe
 const STYLES := {
 	STYLE_TIGHT: {
-		"label": "Stein",
-		"hint": "spielt eng",
+		"label": "Stone",
+		"hint": "plays tight",
 		"color": "93c5fd",
 		"fold_bias": 0.20,
 		"raise_scale": 0.55,
@@ -45,7 +45,7 @@ const STYLES := {
 	},
 	STYLE_LOOSE: {
 		"label": "Wild",
-		"hint": "ruft alles",
+		"hint": "summons everything",
 		"color": "86efac",
 		"fold_bias": -0.16,
 		"raise_scale": 1.25,
@@ -54,7 +54,7 @@ const STYLES := {
 	},
 	STYLE_BLUFF: {
 		"label": "Bluff",
-		"hint": "blufft gern",
+		"hint": "loves to bluff",
 		"color": "fca5a5",
 		"fold_bias": -0.02,
 		"raise_scale": 1.0,

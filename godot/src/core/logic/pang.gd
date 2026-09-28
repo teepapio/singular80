@@ -116,10 +116,10 @@ const DROP_CHANCE := 0.14
 ## `weight` drives the drop table. `double_harpoon` is additive, `freeze` is
 ## timed, the rest apply instantly.
 const BONUSES: Array[Dictionary] = [
-	{"id": "double_harpoon", "name": "Doppelhaken", "icon": "⇈", "asset": "pang/harpoon", "color": Color("facc15"), "weight": 40, "duration": 0.0, "description": "Zwei Haken auf einmal."},
-	{"id": "freeze", "name": "Eiswürfel", "icon": "❄", "asset": "pang/ice", "color": Color("67e8f9"), "weight": 20, "duration": 6.0, "description": "Hält alle Kugeln sechs Sekunden an."},
-	{"id": "extra_time", "name": "Zeitbonus", "icon": "∞", "asset": "pang/clock", "color": Color("34d399"), "weight": 20, "duration": 0.0, "description": "Schenkt dir Sekunden."},
-	{"id": "extra_life", "name": "Leben", "icon": "♥", "asset": "pang/heart", "color": Color("f472b6"), "weight": 20, "duration": 0.0, "description": "Ein Leben extra."},
+	{"id": "double_harpoon", "name": "Double Hook", "icon": "⇈", "asset": "pang/harpoon", "color": Color("facc15"), "weight": 40, "duration": 0.0, "description": "Two hooks at once."},
+	{"id": "freeze", "name": "Ice Cube", "icon": "❄", "asset": "pang/ice", "color": Color("67e8f9"), "weight": 20, "duration": 6.0, "description": "Halts all balls for six seconds."},
+	{"id": "extra_time", "name": "Time bonus", "icon": "∞", "asset": "pang/clock", "color": Color("34d399"), "weight": 20, "duration": 0.0, "description": "Saves you seconds."},
+	{"id": "extra_life", "name": "Life", "icon": "♥", "asset": "pang/heart", "color": Color("f472b6"), "weight": 20, "duration": 0.0, "description": "One extra life."},
 ]
 
 const FREEZE_DURATION := 6.0

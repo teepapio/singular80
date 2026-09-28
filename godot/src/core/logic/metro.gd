@@ -39,23 +39,23 @@ enum Service { OK, PARTIAL, BLOCKED }
 
 ## Display metadata per `Kind`, index-aligned with the enum above.
 const TYPES: Array[Dictionary] = [
-	{"name": "Wohnen", "glyph": "W", "color": Color("f59e0b"), "symbol": Symbol.ROUND},
-	{"name": "Büro", "glyph": "B", "color": Color("3b82f6"), "symbol": Symbol.SQUARE},
-	{"name": "Markt", "glyph": "M", "color": Color("10b981"), "symbol": Symbol.TRIANGLE},
-	{"name": "Klinik", "glyph": "K", "color": Color("ef4444"), "symbol": Symbol.CROSS},
-	{"name": "Schule", "glyph": "S", "color": Color("06b6d4"), "symbol": Symbol.STAR},
-	{"name": "Werk", "glyph": "I", "color": Color("78716c"), "symbol": Symbol.HEX},
-	{"name": "Theater", "glyph": "T", "color": Color("a855f7"), "symbol": Symbol.STAR},
-	{"name": "Sportplatz", "glyph": "P", "color": Color("22c55e"), "symbol": Symbol.ROUND},
+	{"name": "Housing", "glyph": "W", "color": Color("f59e0b"), "symbol": Symbol.ROUND},
+	{"name": "Office", "glyph": "B", "color": Color("3b82f6"), "symbol": Symbol.SQUARE},
+	{"name": "Market", "glyph": "M", "color": Color("10b981"), "symbol": Symbol.TRIANGLE},
+	{"name": "Clinic", "glyph": "K", "color": Color("ef4444"), "symbol": Symbol.CROSS},
+	{"name": "School", "glyph": "S", "color": Color("06b6d4"), "symbol": Symbol.STAR},
+	{"name": "Work", "glyph": "I", "color": Color("78716c"), "symbol": Symbol.HEX},
+	{"name": "Theatre", "glyph": "T", "color": Color("a855f7"), "symbol": Symbol.STAR},
+	{"name": "Sports Ground", "glyph": "P", "color": Color("22c55e"), "symbol": Symbol.ROUND},
 	{"name": "Hotel", "glyph": "H", "color": Color("e879f9"), "symbol": Symbol.SQUARE},
 	{"name": "Restaurant", "glyph": "R", "color": Color("fb923c"), "symbol": Symbol.TRIANGLE},
 	{"name": "Museum", "glyph": "U", "color": Color("c084fc"), "symbol": Symbol.CROSS},
-	{"name": "Kirche", "glyph": "C", "color": Color("fcd34d"), "symbol": Symbol.STAR},
+	{"name": "Church", "glyph": "C", "color": Color("fcd34d"), "symbol": Symbol.STAR},
 	{"name": "Park", "glyph": "A", "color": Color("4ade80"), "symbol": Symbol.HEX},
-	{"name": "Flughafen", "glyph": "F", "color": Color("38bdf8"), "symbol": Symbol.ROUND},
-	{"name": "Stadion", "glyph": "D", "color": Color("84cc16"), "symbol": Symbol.SQUARE},
-	{"name": "Bibliothek", "glyph": "L", "color": Color("94a3b8"), "symbol": Symbol.TRIANGLE},
-	{"name": "Bank", "glyph": "N", "color": Color("eab308"), "symbol": Symbol.CROSS},
+	{"name": "Airport", "glyph": "F", "color": Color("38bdf8"), "symbol": Symbol.ROUND},
+	{"name": "Stadium", "glyph": "D", "color": Color("84cc16"), "symbol": Symbol.SQUARE},
+	{"name": "Library", "glyph": "L", "color": Color("94a3b8"), "symbol": Symbol.TRIANGLE},
+	{"name": "Bench", "glyph": "N", "color": Color("eab308"), "symbol": Symbol.CROSS},
 ]
 
 const LINE_COLORS: Array[Color] = [
@@ -1921,7 +1921,7 @@ func _offer_cards() -> void:
 		if kind == "line" and not can_create_new_line():
 			kind = "wagon"
 		options.append(_card(kind))
-	modals.append({"type": "cards", "title": CARD_TITLE, "hint": "Wähle eine Karte", "options": options})
+	modals.append({"type": "cards", "title": CARD_TITLE, "hint": "Choose a card", "options": options})
 
 
 ## The weekly reward: one locomotive plus one extra card.
@@ -1932,8 +1932,8 @@ func _offer_upgrade() -> void:
 		kind = "wagon"
 	modals.append({
 		"type": "upgrade",
-		"title": "Wochenbonus",
-		"hint": "Ein Zug und ein Extra",
+		"title": "Weekly bonus",
+		"hint": "One move and one extra",
 		"options": [_card("train"), _card(kind)],
 	})
 

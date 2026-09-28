@@ -2,17 +2,14 @@ class_name SettingsDialog
 extends RefCounted
 ## Settings: language, sound, touch controls and the server address.
 ##
-## Every setting is reachable from here; `touch_controls` in particular was read
-## in several places and written in none.
-##
-## `Loc.set_code` takes effect at once for new captions, but not for the screen
-## behind the dialog. Rebuilding a running game would lose the round, so
-## `Router` rebuilds only when `rebuild_safe()` allows it and the dialog says so.
+## Every setting is operable from here, including `touch_controls`, which was
+## read in several places and written in none.
+## `Loc.set_code` applies to new captions only; `Router` rebuilds the screen
+## behind the dialog only when `rebuild_safe()` allows it, and the dialog says so.
 
 static var _layer: CanvasLayer = null
 static var _tree: SceneTree = null
-## After a language change the screen should be rebuilt — but only once the
-## dialog is gone. A dialog vanishing mid-fade is worse than one that waits.
+## Rebuilt only after the dialog is gone; one vanishing mid-fade is worse.
 static var _rebuild := false
 
 
@@ -78,8 +75,7 @@ static func _build(tree: SceneTree) -> void:
 	for entry in languages:
 		var code := str(entry["code"])
 		column.add_child(_language_button(code, code == Loc.code()))
-	# With no readable catalogue there is nothing to pick, and an empty list looks
-	# like a fault. `Loc` has not translated anything either in that case.
+	# No readable catalogue means nothing to pick; an empty list looks like a fault.
 	if languages.is_empty():
 		column.add_child(Ui.label(Loc.t("ui.no_languages"), 15, UiTheme.WARNING))
 
@@ -91,23 +87,27 @@ static func _build(tree: SceneTree) -> void:
 	column.add_child(note)
 
 	# --- sound -----------------------------------------------------------
-	var sound := Ui.button("", Vector2(0, 46), UiTheme.PANEL_LIGHT, func() -> void:
+	# The handler assigns to `sound`, so it is connected after the button exists:
+	# a GDScript lambda captures locals by value, and inside the `Ui.button`
+	# argument the local would still be null.
+	var sound := Ui.button("", Vector2(0, 46), UiTheme.PANEL_LIGHT)
+	sound.text = _sound_label()
+	sound.pressed.connect(func() -> void:
 		Sfx.select()
 		Game.toggle_muted()
 		sound.text = _sound_label()
 	)
-	sound.text = _sound_label()
 	column.add_child(sound)
 
 	# --- touch controls --------------------------------------------------
-	# Read by several screens and written nowhere: the setting existed but was
-	# unreachable. This switch makes it operable.
-	var touch := Ui.button("", Vector2(0, 46), UiTheme.PANEL_LIGHT, func() -> void:
+	# Read by many screens, written nowhere before this switch.
+	var touch := Ui.button("", Vector2(0, 46), UiTheme.PANEL_LIGHT)
+	touch.text = _touch_label()
+	touch.pressed.connect(func() -> void:
 		Sfx.select()
 		Game.set_touch_controls(not Game.touch_controls)
 		touch.text = _touch_label()
 	)
-	touch.text = _touch_label()
 	column.add_child(touch)
 
 	# --- server ----------------------------------------------------------
@@ -118,9 +118,7 @@ static func _build(tree: SceneTree) -> void:
 	column.add_child(server)
 
 	# --- waiting suggestions ---------------------------------------------
-	# The same number the lobby shows. One line here answers the question a player
-	# would otherwise look up in the source: has my idea arrived, or is it still
-	# sitting somewhere?
+	# The same count the lobby shows: has my idea arrived, or is it still waiting?
 	var pending := Api.pending_count()
 	if pending > 0:
 		column.add_child(Ui.label(Loc.t("ui.pending_reason", {
@@ -156,8 +154,7 @@ static func _choose(code: String) -> void:
 	if not Loc.set_code(code):
 		return
 	_rebuild = true
-	# Rebuild the dialog right away so the language buttons are in the new
-	# language — otherwise it reads "Deutsch" next to "✓ English".
+	# Rebuild right away, or the buttons read "Deutsch" next to "✓ English".
 	var tree := _tree
 	_release()
 	_build(tree)

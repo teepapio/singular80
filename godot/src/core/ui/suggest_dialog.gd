@@ -9,8 +9,7 @@ const MAX_LENGTH := 2000
 const QueueClass := preload("res://src/core/logic/suggestion_queue.gd")
 
 static var _layer: CanvasLayer = null
-## Stays on the autoload while the dialog is open and is released again in
-## `close()` — otherwise a later suggestion would write into a destroyed label.
+## Released in `close()`; otherwise a later suggestion writes into a freed label.
 static var _warning_hook: Callable = Callable()
 
 
@@ -92,8 +91,7 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 	hint.custom_minimum_size = Vector2(640, 0)
 	column.add_child(hint)
 
-	# What is still waiting for the network belongs visibly in the dialog: a
-	# player who has sent three ideas must not consider them lost.
+	# Sent ideas must not look lost, so the pending count is visible here.
 	var waiting := Ui.label("", 16, UiTheme.ACCENT)
 	waiting.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	waiting.custom_minimum_size = Vector2(640, 0)
@@ -113,8 +111,7 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 	name_edit.custom_minimum_size = Vector2(640, 46)
 	column.add_child(name_edit)
 
-	# Terms are a notice and block nothing: there is no consent checkbox. They
-	# are information, not a condition.
+	# Terms are a notice, not a condition: there is no consent checkbox.
 	var terms := Ui.label(Loc.t("ui.suggest_terms", {"url": AppLegal.terms_url()}), 14, UiTheme.TEXT_MUTED)
 	terms.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	terms.custom_minimum_size = Vector2(640, 0)
@@ -124,10 +121,9 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status.custom_minimum_size = Vector2(640, 48)
 	column.add_child(status)
-	# The queue names its reasons here — stored offline, or the oldest suggestion
-	# dropped by the cap. Without this channel that loss would be silent.
-	# `last_warning` pins the reason for the sender, who would otherwise
-	# overwrite it with his own text.
+	# The queue names the reason here (stored offline, or the oldest suggestion
+	# dropped by the cap). `last_warning` pins it for the sender, whose own status
+	# text would otherwise overwrite it.
 	var last_warning := {"text": ""}
 	_warning_hook = func(reason: String) -> void:
 		last_warning["text"] = reason
@@ -162,14 +158,12 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 		send.text = Loc.t("ui.suggest_sending")
 		last_warning["text"] = ""
 		var author := name_edit.text.strip_edges().substr(0, 60)
-		# "Anonym" is a value for the backend, not screen text: it shows up on the
-		# dashboard next to other suggestions, and translating it would mint the
-		# same name in two languages.
+		# "Anonym" is a backend value, not screen text: it shows next to other
+		# suggestions on the dashboard.
 		var view := await Api.submit_suggestion(text, author if author != "" else "Anonym", source)
 		if view.is_empty():
 			status.add_theme_color_override("font_color", UiTheme.WARNING)
-			# A concrete reason from the queue beats the general sentence:
-			# "oldest suggestion dropped" matters more than "stored".
+			# A concrete reason from the queue beats the generic "stored" sentence.
 			var reason := str(last_warning.get("text", ""))
 			status.text = reason if reason != "" else Loc.t("ui.suggest_queued")
 			send.text = Loc.t("ui.suggest_stored")

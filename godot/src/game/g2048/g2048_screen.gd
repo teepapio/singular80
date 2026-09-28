@@ -88,12 +88,12 @@ func _build_ui() -> void:
 	_highscore_label = _stat(layer, Vector2(1090, 168), "HIGHSCORE", "0")
 	_best_label = _stat(layer, Vector2(975, 268), "GRÖSSTE KACHEL", "2")
 	# The ghost tile is drawn by the board view; these are its labels.
-	var next_caption := Ui.label("NÄCHSTE KACHEL", 14, UiTheme.TEXT_DIM)
+	var next_caption := Ui.label("NEXT TILE", 14, UiTheme.TEXT_DIM)
 	next_caption.position = NEXT_CENTER + Vector2(-100, -80)
 	next_caption.size = Vector2(200, 22)
 	next_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(next_caption)
-	var next_note := Ui.label("zieht beim nächsten Zug mit und wird dann endgültig", 12, UiTheme.ACCENT)
+	var next_note := Ui.label("hatches with the next brood and is then final", 12, UiTheme.ACCENT)
 	next_note.position = Vector2(790, NEXT_CENTER.y + 46.0)
 	next_note.size = Vector2(360, 20)
 	next_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -108,7 +108,7 @@ func _build_ui() -> void:
 	layer.add_child(_next_view)
 
 	# Controls under the board, where the panel was wasting the width.
-	var controls := Ui.label("← ↑ → ↓  ·  W A S D  ·  Wischen   verschieben\nU / Z   rückgängig        R   neu starten        ESC   Pause", 13, Color("94a3b8"))
+	var controls := Ui.label("← ↑ → ↓  ·  W A S D  ·  Swipe   to move\nU / Z   undo        R   restart        ESC   pause", 13, Color("94a3b8"))
 	controls.position = Vector2(146, 658)
 	controls.size = Vector2(560, 46)
 	layer.add_child(controls)
@@ -233,13 +233,13 @@ func _on_win() -> void:
 	layer.add_child(center)
 	var column := Ui.vbox(14)
 	center.add_child(column)
-	column.add_child(Ui.title("2048 erreicht!", 44, Color("edc22e")))
-	column.add_child(Ui.label(Loc.f("Punkte: %s", [Ui.format_number(score)]), 24, UiTheme.TEXT))
-	column.add_child(Ui.button("Weiter spielen", Vector2(360, 56), UiTheme.ACCENT, func() -> void:
+	column.add_child(Ui.title("2048 reached!", 44, Color("edc22e")))
+	column.add_child(Ui.label(Loc.f("Points: %s", [Ui.format_number(score)]), 24, UiTheme.TEXT))
+	column.add_child(Ui.button("Keep playing", Vector2(360, 56), UiTheme.ACCENT, func() -> void:
 		keep_playing = true
 		close_modals()
 	))
-	column.add_child(Ui.button("Neu starten", Vector2(360, 56), UiTheme.PANEL_LIGHT, func() -> void: reset_game()))
+	column.add_child(Ui.button("Restart", Vector2(360, 56), UiTheme.PANEL_LIGHT, func() -> void: reset_game()))
 
 
 func _on_game_over() -> void:
@@ -254,9 +254,9 @@ func _on_game_over() -> void:
 	layer.add_child(center)
 	var column := Ui.vbox(14)
 	center.add_child(column)
-	column.add_child(Ui.title("Kein Zug mehr", 44, Color("f87171")))
-	column.add_child(Ui.label(Loc.f("Punkte: %s   ·   Beste Kachel: %d", [[Ui.format_number(score), best]]), 22, UiTheme.TEXT))
-	column.add_child(Ui.button("Neu starten", Vector2(360, 56), UiTheme.ACCENT, func() -> void: reset_game()))
+	column.add_child(Ui.title("No moves left", 44, Color("f87171")))
+	column.add_child(Ui.label(Loc.f("Points: %s   ·   Best tile: %d", [Ui.format_number(score), best]), 22, UiTheme.TEXT))
+	column.add_child(Ui.button("Restart", Vector2(360, 56), UiTheme.ACCENT, func() -> void: reset_game()))
 	column.add_child(Ui.button("Lobby", Vector2(360, 56), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))
 
 
@@ -271,8 +271,8 @@ func _toggle_pause() -> void:
 	var column := Ui.vbox(14)
 	center.add_child(column)
 	column.add_child(Ui.title("Pause", 46))
-	column.add_child(Ui.button("Fortsetzen", Vector2(360, 56), UiTheme.ACCENT, func() -> void: close_modals()))
-	column.add_child(Ui.button("Neu starten", Vector2(360, 56), UiTheme.PANEL_LIGHT, func() -> void: reset_game()))
+	column.add_child(Ui.button("Continue", Vector2(360, 56), UiTheme.ACCENT, func() -> void: close_modals()))
+	column.add_child(Ui.button("Restart", Vector2(360, 56), UiTheme.PANEL_LIGHT, func() -> void: reset_game()))
 	column.add_child(Ui.button("Lobby", Vector2(360, 56), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))
 
 

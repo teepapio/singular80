@@ -150,9 +150,7 @@ func hide_loading() -> void:
 
 
 ## Shows a transient message across the lower third of the screen.
-##
-## Named `notify` rather than `show_toast` so a 3D game that already has a toast
-## of its own does not shadow the base method.
+## Named `notify` so a 3D game with a toast of its own does not shadow it.
 var _notify_label: Label
 var _notify_time := 0.0
 
@@ -182,8 +180,7 @@ func _fade_notify(delta: float) -> void:
 	_notify_label.modulate.a = clampf(_notify_time * 2.5, 0.0, 1.0)
 
 
-## Camera that trails a target from a fixed offset — the pattern every 3D game
-## uses, with the height/distance in world units.
+## Camera that trails a target from a fixed offset; height/distance in world units.
 func follow_camera(target: Vector3, height: float, distance: float, lerp_speed: float = 6.0, delta: float = 0.016) -> void:
 	var goal := Vector3(target.x, target.y + height, target.z + distance)
 	camera.position = camera.position.lerp(goal, clampf(lerp_speed * delta, 0.0, 1.0))
@@ -192,16 +189,12 @@ func follow_camera(target: Vector3, height: float, distance: float, lerp_speed: 
 
 # --- touch ------------------------------------------------------------------
 
-## Adds a thumb stick anchored to a screen corner. Returns it so the game can
-## read `value` every frame.
+## Adds a thumb stick anchored to a screen corner; returns it for per-frame reads.
 ##
-## The corner inset goes through `offset_*` and never through `position`: in the
-## tree `position` is measured from the parent origin, so a negative offset
-## meant as "24 px above the bottom edge" lands below the *top* edge instead —
-## off screen, where the stick can neither be seen nor touched.
-##
-## `Control` re-clamps its size when an offset pair is momentarily inconsistent,
-## so the wanted size is read once up front and leading edges are written first.
+## Corner insets go through `offset_*`, never `position`: `position` is measured
+## from the parent origin, so "24 px above the bottom edge" lands off screen.
+## Size is read once up front because `Control` re-clamps an inconsistent offset
+## pair.
 func add_stick(corner: String = "bottom_left", label_text: String = "") -> VirtualStick:
 	var stick := VirtualStick.new()
 	stick.label_text = label_text
@@ -232,8 +225,8 @@ func add_action_button(text: String, radius: float = 62.0, action: StringName = 
 	node.add_theme_stylebox_override("hover", UiTheme.flat(Color(0.153, 0.212, 0.345, 0.85), UiTheme.ACCENT, int(radius * 0.5)))
 	node.add_theme_stylebox_override("pressed", UiTheme.flat(UiTheme.ACCENT.darkened(0.25), Color.WHITE, int(radius * 0.5)))
 	if not action.is_empty():
-		# Holding the on-screen button feeds the same InputMap action as the
-		# keyboard/gamepad, so game code only ever reads one source.
+		# Holding the button feeds the same InputMap action, so game code reads
+		# one source only.
 		node.button_down.connect(func() -> void: Input.action_press(action))
 		node.button_up.connect(func() -> void: Input.action_release(action))
 	if on_press.is_valid():
@@ -288,8 +281,7 @@ static func standard_material(color: Color, emission: float = 0.0) -> StandardMa
 ## Loads one of the bundled Blender meshes, scaled and tinted. Returns `null`
 ## when the import failed so callers can fall back to a primitive.
 static func mesh(key: String, color: Color = Color.WHITE, scale: float = 1.0, emission: float = 0.0) -> Node3D:
-	# A key that already carries a path (the gallery's LOD tiers) is used as is,
-	# so no caller has to know how the folders are laid out.
+	# A key that already is a `res://` path (the gallery's LOD tiers) is used as is.
 	var path := key if key.begins_with("res://") else "res://assets/meshes/%s.glb" % key
 	if not ResourceLoader.exists(path):
 		return null

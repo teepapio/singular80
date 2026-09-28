@@ -101,7 +101,7 @@ func _build_ui() -> void:
 	_capture_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(_capture_label)
 
-	var hint := Ui.label("Stein antippen, dann Zielfeld wählen  ·  Schlagzüge werden markiert  ·  ♛ wird zur Königin", 13, UiTheme.TEXT_DIM)
+	var hint := Ui.label("Tap a stone, then choose a target square  ·  captures are marked  ·  ♛ is crowned", 13, UiTheme.TEXT_DIM)
 	hint.position = Vector2(0, 666)
 	hint.size = Vector2(1280, 18)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

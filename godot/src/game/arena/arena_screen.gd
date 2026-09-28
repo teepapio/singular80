@@ -622,7 +622,7 @@ func _kill_enemy(enemy: Enemy) -> void:
 		_drop_gem(pos, extra_xp, Color("facc15"))
 	if bool(chain["milestone"]):
 		chain_milestone = 1.0
-		show_toast(Loc.f("Kette ×%d!", [mini(int(chain["chain"]), ArenaRuns.CHAIN_CAP)]), 1.1)
+		show_toast(Loc.f("Chain ×%d!", [mini(int(chain["chain"]), ArenaRuns.CHAIN_CAP)]), 1.1)
 	_drop_gem(pos, enemy.xp_value)
 	for mechanic in mechanics:
 		mechanic.on_enemy_killed(self, enemy)
@@ -753,7 +753,7 @@ func _spawn_boss(wave: int) -> void:
 		_boss_banner.text = "☠  %s erscheint  ☠" % boss_banner_name
 		_boss_banner.add_theme_color_override("font_color", Color("f87171"))
 		_boss_banner.modulate.a = 1.0
-	show_toast(Loc.f("%s ist aufgetaucht", [boss_banner_name]), 2.0)
+	show_toast(Loc.f("%s has surfaced", [boss_banner_name]), 2.0)
 	shake_camera(220.0, 0.005)
 
 
@@ -871,7 +871,7 @@ func _show_upgrade_choices() -> void:
 
 	var column := Ui.vbox(18)
 	center.add_child(column)
-	column.add_child(Ui.title(Loc.f("Level %d — Upgrade wählen", [stats.level]), 32))
+	column.add_child(Ui.title(Loc.f("Level %d — choose an upgrade", [stats.level]), 32))
 
 	# What the draft is worth, in one line, before a single card is read.
 	var headline := ArenaRuns.draft_headline(pending_choices, stats)
@@ -891,7 +891,7 @@ func _show_upgrade_choices() -> void:
 
 	# Both input paths say what they do: tap the card you want, or let the
 	# strongest one be taken.
-	var footer := Ui.label("Karte antippen = wählen   ·   Bestätigen = stärkstes Angebot", 14, UiTheme.TEXT_MUTED)
+	var footer := Ui.label("Tap a card to select   ·   Confirm = strongest offer", 14, UiTheme.TEXT_MUTED)
 	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(footer)
 
@@ -1054,11 +1054,11 @@ func _show_pause_menu() -> void:
 	center.add_child(column)
 	column.add_child(Ui.title("Pause", 44))
 
-	column.add_child(Ui.button("Fortsetzen", Vector2(420, 58), UiTheme.ACCENT, toggle_pause))
-	column.add_child(Ui.button("Vorschlag einreichen", Vector2(420, 54), UiTheme.PANEL_LIGHT, func() -> void:
+	column.add_child(Ui.button("Continue", Vector2(420, 58), UiTheme.ACCENT, toggle_pause))
+	column.add_child(Ui.button("Submit a suggestion", Vector2(420, 54), UiTheme.PANEL_LIGHT, func() -> void:
 		SuggestDialog.open(self)
 	))
-	column.add_child(Ui.button("Waffenauswahl", Vector2(420, 54), UiTheme.PANEL_LIGHT, func() -> void:
+	column.add_child(Ui.button("Weapon select", Vector2(420, 54), UiTheme.PANEL_LIGHT, func() -> void:
 		Router.go_to("main_menu")
 	))
 	column.add_child(Ui.button("Lobby", Vector2(420, 54), UiTheme.PANEL_LIGHT, func() -> void:
