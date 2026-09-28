@@ -100,10 +100,11 @@ gibt einen Auftrag und erwartet ein Ergebnis, keine Rückfrage. Bis die Aufgabe
 erledigt ist, wird weitergearbeitet — auch wenn zwischendurch eine Frage
 aufkommt.
 
-**Entscheidungen sind meine.** Wenn eine Wahl offen ist, entscheide ich sie,
-schreibe sie in den Bericht und arbeite weiter. Nachfragen gibt es nur, wenn
-eine Antwort **nicht ersetzbar** ist, das heißt wenn ein Fehler ein reales Risiko
-ist:
+**Entscheidungen sind meine.** Wenn eine Wahl offen ist, entscheide ich sie
+und arbeite weiter. Eine Entscheidung, die der Besitzer nicht bemerkt, ist
+falsch — deshalb steht sie als Stichpunkt im Bericht, sobald etwas schiefging
+oder unerwartet lief. Nachfragen gibt es nur, wenn eine Antwort **nicht
+ersetzbar** ist, das heißt wenn ein Fehler ein reales Risiko ist:
 
 - Ein Auftrag würde Daten löschen, überschreiben oder zurücksetzen, und es gibt
   keinen Hinweis darauf, dass genau das gemeint ist.
@@ -114,13 +115,13 @@ ist:
 Sonst nicht. „Soll ich?", „Möchtest du?" und „Ich könnte …" sind im Bericht
 **keine** Zulieferung. Typische Fälle, die ohne Rückfrage entschieden werden:
 
-- **Aufraeumen statt fragen:** `#6` und `#7` waren zwei fast gleiche Auftraege.
-  Richtig ist, die Doppelte zu verwerfen und es zu *sagen* — nicht, den
-  Besitzer zwischen zwei fast gleichen Vorschlaegen entscheiden zu lassen.
+- **Aufraeumen statt fragen:** zwei fast gleiche Auftraege werden zu einem
+  zusammengefasst und das als Stichpunkt genannt — nicht, den Besitzer zwischen
+  ihnen entscheiden zu lassen.
 - **Fehlendes Werkzeug:** Ist `adb` nicht da, wird der Grund genannt und der
   nächstbeste Weg versucht, statt die Arbeit abzubrechen.
-- **Unklare Formulierung:** Die naheliegendste Lesart wählen, im Bericht
-  benennen, damit sie auffällt, falls sie falsch war.
+- **Unklare Formulierung:** Die naheliegendste Lesart wählen. Nur wenn etwas
+  offen blieb oder unerwartet lief, kommt sie als Stichpunkt in den Bericht.
 - **Zweiter Weg vorhanden:** functionierenden Weg nehmen, anderen erwaehnen.
 
 **Nicht abgeben.** Der Auftrag endet nicht mit „ich habe vorbereitet", „der Rest
@@ -134,23 +135,37 @@ ueberlassen.
 
 ## Kurze Abschlussberichte
 
-**Der Bericht am Ende einer Aufgabe ist kurz.** Höchstens fünf Stichpunkte,
-und nur was eine Entscheidung ändert oder verlangt:
+**Der Bericht am Ende einer Aufgabe ist eine Liste von Stichpunkten.** Was
+implementiert wurde, ein Stichpunkt je Punkt. Mehr nicht.
 
-- Was geändert wurde — in einem Satz, nicht in einer Aufzählung von Dateien.
-- Welche **Entscheidungen** getroffen wurden und warum, damit eine andere
-  Lesart auffällt.
-- Was **nicht** fertig ist oder warum etwas nicht ging.
-- Ein Sicherheits- oder Datenverlustrisiko, wenn es eines gibt.
+- Nur was **fertig** ist.
+- Ein Satz je Stichpunkt. Kein Dateiname, kein Commit-Hash, kein Teststatus.
+- Nichts über Prüfungen, nichts über Entscheidungen, nichts über Begründungen.
 
-Kein "Ich habe X geprüft", kein "die Tests laufen durch", keine Wiederholung
-desselben Punkts in zwei Formulierungen. Wer eine Datei oder Zeile braucht,
-schaut in den Commit. Ein Bericht, den niemand liest, ist genauso wertlos
-wie ein Changelog, das keiner pflegt.
+**Zusätzliche Information nur, wenn etwas nicht sauber fertig wurde.** Dann
+und nur dann kommen ein bis drei weitere Stichpunkte dazu:
 
-Die Liste „Was der Besitzer tun muss" ist die einzige, die nicht weggelassen
-werden darf — und sie ist **kurz**: ein Befehl, ein Satz. Sie ist kein Weg, die
-eigene Arbeit weiterzugeben. Geht nichts übrig, steht sie nicht da.
+- Was offen geblieben ist und warum.
+- Ein Fehlversuch, ein Risiko, verlorene Daten.
+
+Ein Bericht, der nur Stichpunkte hat, ist der Normalfall und kein Mangel. Ein
+Satz „Die Tests laufen durch" ist überflüssig, weil der Besitzer nichts daran
+ändern kann; ein Satz „3 Tests schlagen fehl, Ursache ist X" ist es nicht.
+
+Beispiel für einen fertigen Auftrag:
+
+> - Telegram: `/task` nimmt freie Aufträge an und startet sie sofort
+> - Changelog: Zeile pro Auftrag, eigener Commit, wird gepusht
+> - Löschen: Knopf im Dashboard, verweigert bei laufendem Run
+
+Beispiel für denselben Auftrag mit einem offenen Punkt:
+
+> - Telegram: `/task` nimmt freie Aufträge an und startet sie sofort
+> - Changelog: Zeile pro Auftrag, eigener Commit, wird gepusht
+> - `npm run typecheck` schlägt fehl: die neue `locale.ts` fehlt noch in
+>   `tsconfig.json` — das ist die Aufgabe der Sitzung, die sie geschrieben hat
+> - Offen: der Android-Build ist nicht neu, der neue Dialog ist im Gerät noch
+>   nicht sichtbar
 
 ## Vor der ersten Änderung
 
