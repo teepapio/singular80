@@ -19,6 +19,14 @@ import type {
 } from '../src/shared/types';
 import type { Store } from './db';
 import { appendChangelog } from './changelog';
+import {
+  buildTerminalSession,
+  clearTerminalState,
+  findTerminal,
+  readExitFile,
+  readPidFile,
+  type TerminalSession,
+} from './terminal';
 import { auditScope, freeLane, scopeForSuggestion, scopesConflict } from './scopes';
 
 export interface RunnerCallbacks {
@@ -45,6 +53,16 @@ interface RunEntry {
   logOffset: number;
   /** Poll timer that watches an adopted run until its process exits. */
   timer: ReturnType<typeof setInterval> | null;
+  /**
+   * Set when the session runs in a terminal window. The emulator's own process
+   * exits as soon as the window opens, so the outcome arrives through
+   * `exitFile` instead of the close event.
+   */
+  terminal: TerminalSession | null;
+  /** Changelog text when a terminal run produced no JSON summary. */
+  summaryFallback: string | null;
+  /** Argv of the piped run, kept so a failed terminal can fall back to it. */
+  pipedArgs: string[] | null;
 }
 
 const MAX_MEMORY_EVENTS = 4000;
@@ -53,6 +71,9 @@ const MAX_SUMMARY = 600;
 
 /** How often an adopted (orphaned) run is checked for new log output and process exit. */
 const ORPHAN_POLL_MS = 3000;
+
+/** How long a terminal gets to show a real session before the run falls back. */
+const TERMINAL_VERIFY_MS = 4000;
 
 /** How often the supervisor enforces the hard timeout and the backoff wake-up. */
 const SUPERVISOR_MS = 2000;
@@ -272,6 +293,16 @@ export class Runner {
       dataDir: string;
       contentDir: string;
       callbacks: RunnerCallbacks;
+      /**
+       * Runs the session in a terminal window instead of the dashboard's log
+       * pane.
+       *
+       * **Opt-in, and it stays that way.** Making it the default was a mistake:
+       * the test suite builds a Runner around a fake `opencode` binary, and every
+       * one of those tests then opened a real window on the owner's desktop. The
+       * library does nothing unless the application asks for it.
+       */
+      terminalMode?: boolean;
     },
   ) {
     mkdirSync(this.logDir, { recursive: true });
@@ -370,6 +401,9 @@ export class Runner {
       pid: null,
       logOffset: 0,
       timer: null,
+      terminal: null,
+      summaryFallback: null,
+      pipedArgs: null,
     };
   }
 
@@ -975,13 +1009,131 @@ export class Runner {
     }, KILL_GRACE_MS).unref?.();
   }
 
+  /**
+   * Opens the session in a terminal emulator, or returns null to let the caller
+   * fall back to the piped run.
+   *
+   * The interactive `opencode` is used here rather than `opencode run`: `run`
+   * prints a JSON stream meant for a parser, which in a terminal window is
+   * unreadable. The trade-off is that no summary, cost or session id arrives —
+   * the changelog then uses the suggestion's own text, which is what a reader
+   * wants to see anyway.
+   */
+  private openTerminal(entry: RunEntry, bin: string, pipedArgs: string[]): TerminalSession | null {
+    entry.pipedArgs = pipedArgs;
+    // Only when explicitly asked for, and never when switched off by hand.
+    if (this.options.terminalMode !== true) return null;
+    if (process.env.S80_TERMINAL === '0') return null;
+    const found = findTerminal();
+    if (!found) return null;
+    const { record } = entry;
+    const stateDir = join(this.options.projectRoot, 'run', 'terminal');
+    mkdirSync(stateDir, { recursive: true });
+    const session = buildTerminalSession({
+      bin: found.bin,
+      args: found.args,
+      title: `Singular 80 — #${record.suggestionId}`,
+      cwd: this.options.projectRoot,
+      command: [bin, '--auto', '--prompt', record.prompt],
+      stateDir,
+      runId: record.id,
+    });
+    try {
+      const child = spawn(session.bin, session.args, {
+        cwd: this.options.projectRoot,
+        env: { ...process.env },
+        stdio: 'ignore',
+        detached: false,
+      });
+      child.on('error', (err) => {
+        this.finalize(entry, null, `Terminal nicht zu öffnen: ${err.message}`);
+      });
+      // The emulator exits right away; its exit code is meaningless. The real
+      // outcome is read from `exitFile` in `tick()`.
+      child.on('close', () => {});
+    } catch (err) {
+      this.finalize(entry, null, `Terminal nicht zu öffnen: ${(err as Error).message}`);
+      return null;
+    }
+    entry.terminal = session;
+    entry.child = null;
+    entry.summaryFallback = this.store.getSuggestion(record.suggestionId)?.text.slice(0, 200) ?? null;
+    // The session writes its own pid a moment later; register it as soon as it
+    // appears so a server restart can still adopt and stop the run.
+    this.watchTerminal(entry);
+    // Verification, because a terminal can be *present* and still unusable: the
+    // dev server runs detached from the desktop session, and without DISPLAY
+    // gnome-terminal exits with a message instead of a window. `spawn` succeeds
+    // either way, so the pid file is the only honest proof that a session is
+    // actually running. Without this check a run would sit "läuft" for ever with
+    // nothing behind it.
+    setTimeout(() => {
+      if (entry.record.status !== 'running') return;
+      if (readPidFile(session.pidFile) !== null) return;
+      this.fallbackFromTerminal(entry, 'Terminal hat die Sitzung nicht gestartet');
+    }, TERMINAL_VERIFY_MS).unref?.();
+    return session;
+  }
+
+  /**
+   * Gives up on the terminal and runs the session the old way. Used when the
+   * window did not appear; the run then behaves exactly as it did before this
+   * existed, minus the interactive part.
+   */
+  private fallbackFromTerminal(entry: RunEntry, reason: string): void {
+    const session = entry.terminal;
+    if (!session) return;
+    if (entry.timer) {
+      clearInterval(entry.timer);
+      entry.timer = null;
+    }
+    clearTerminalState(session);
+    entry.terminal = null;
+    entry.summaryFallback = null;
+    this.pushEvent(entry.record.id, { t: Date.now(), kind: 'info', text: `${reason} — Rückfall auf den Lauf im Dashboard.` });
+    this.startPiped(entry, findOpencodeBinary(), entry.pipedArgs ?? []);
+  }
+
+  /** Polls the pid and exit files of a terminal run until the session is done. */
+  private watchTerminal(entry: RunEntry): void {
+    if (entry.timer) clearInterval(entry.timer);
+    entry.timer = setInterval(() => this.checkTerminal(entry), ORPHAN_POLL_MS);
+  }
+
+  private checkTerminal(entry: RunEntry): void {
+    const session = entry.terminal;
+    if (!session || entry.record.status !== 'running') return;
+    const pid = readPidFile(session.pidFile);
+    if (pid !== null && entry.pid !== pid) {
+      entry.pid = pid;
+      this.rememberPid(entry.record.id, pid);
+    }
+    const code = readExitFile(session.exitFile);
+    if (code === null) return;
+    if (entry.timer) {
+      clearInterval(entry.timer);
+      entry.timer = null;
+    }
+    clearTerminalState(session);
+    if (entry.timedOut) return;
+    if (entry.cancelRequested) {
+      this.finalize(entry, code, 'Abgebrochen (Terminal)', 'cancelled');
+    } else {
+      this.finalize(entry, code);
+    }
+  }
+
+  /** The argv of a run whose output the runner parses. */
+  private pipedArgs(record: RunRecord): string[] {
+    const args = ['run', '--format', 'json', '--auto', '--title', `Vorschlag #${record.suggestionId}`];
+    if (this.store.getSettings().model.trim()) args.push('--model', this.store.getSettings().model.trim());
+    args.push(record.prompt);
+    return args;
+  }
+
   private async start(entry: RunEntry) {
     const { record } = entry;
-    const settings = this.store.getSettings();
     const bin = findOpencodeBinary();
-    const args = ['run', '--format', 'json', '--auto', '--title', `Vorschlag #${record.suggestionId}`];
-    if (settings.model.trim()) args.push('--model', settings.model.trim());
-    args.push(record.prompt);
 
     record.status = 'running';
     record.startedAt = Date.now();
@@ -1002,6 +1154,34 @@ export class Runner {
       },
     );
 
+    // A terminal window, if one can be opened: the session is then something the
+    // owner can watch *and* type into, which a log pane in the dashboard is not.
+    // `--auto` stays, so the agent does not stop on a permission question that
+    // nobody is there to answer.
+    const terminal = this.openTerminal(entry, bin, this.pipedArgs(record));
+    if (terminal) {
+      this.pushEvent(record.id, {
+        t: Date.now(),
+        kind: 'status',
+        text: `Lauf läuft in einem Terminalfenster: ${terminal.bin}`,
+      });
+      return;
+    }
+
+    this.startPiped(entry, bin, this.pipedArgs(record));
+  }
+
+  /**
+   * The original way: the session's output is piped and parsed, and the
+   * dashboard shows it. Still used when no terminal can be opened, and it is
+   * what the runner falls back to if a terminal fails to come up.
+   */
+  private startPiped(entry: RunEntry, bin: string, args: string[]): void {
+    const { record } = entry;
+    if (args.length === 0) {
+      this.finalize(entry, null, 'kein Auftrag übergeben');
+      return;
+    }
     let child: RunnerChild;
     try {
       child = spawn(bin, args, {
@@ -1137,7 +1317,7 @@ export class Runner {
     }
     const fallback =
       record.status === 'succeeded'
-        ? 'Erfolgreich abgeschlossen.'
+        ? entry.summaryFallback ?? 'Erfolgreich abgeschlossen.'
         : note ?? `Fehlgeschlagen${exitCode != null ? ` (Exit ${exitCode})` : ''}.`;
     record.resultSummary = shortSummary(entry.summary, fallback);
     record.scopeIssues = this.scopeIssuesOf(record, entry.events);

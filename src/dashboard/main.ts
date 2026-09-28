@@ -20,7 +20,6 @@ import {
   manifestHeadline,
   outcomeBadge,
   scopeLabel,
-  scopeWarning,
   type QueueSummary,
 } from './queueControls';
 import { describeRunActivity, formatDuration, lastEventTimestamp, needsRunCleanup } from './runActivity';
@@ -38,6 +37,13 @@ interface DashboardState {
   lastActivityAt: Map<string, number>;
   /** Whether the server still tracks a live process, per run id. */
   alive: Map<string, boolean>;
+  /**
+   * Suggestions the owner closed in the "done" tab. Client-side only: nothing is
+   * deleted and nothing is sent to the server, because "Schließen" means "out of
+   * my sight", not "erase this from the record". They come back on reload, which
+   * is the honest behaviour for a view filter.
+   */
+  dismissed: Set<number>;
   /** Pause state, policy and pending runs as the server reports them. */
   queue: QueueState | null;
   /** Scope layout the runner depends on (from scripts/scopes.mjs). */
@@ -105,6 +111,7 @@ const state: DashboardState = {
   category: null,
   search: '',
   expanded: new Set(),
+  dismissed: new Set(),
   connected: false,
   splitFor: null,
   backup: null,
@@ -266,6 +273,8 @@ function visibleSuggestions(): SuggestionView[] {
     case 'cluster':
       return list.sort((a, b) => b.clusterSize - a.clusterSize || b.score - a.score);
     case 'done':
+      // Only here: a closed entry must not vanish from the open tabs.
+      list = list.filter((s) => !state.dismissed.has(s.id));
       list = list.filter((s) => s.status === 'implemented' || s.status === 'failed' || s.status === 'rejected');
       return list.sort((a, b) => b.updatedAt - a.updatedAt);
     default:
@@ -308,11 +317,32 @@ function renderCategories(): void {
     .join('');
 }
 
+/**
+ * A settled suggestion: implemented, failed or rejected.
+ *
+ * The "done" tab exists to look back, and a card that offers to implement a
+ * finished task is a contradiction the owner has to think about. Everything
+ * about the *implementation* is removed there — the "Umsetzung:" summary, the
+ * run status, the commit, the scope — because the changelog and the commit
+ * already hold that, and the row only needs to say what the idea was and what
+ * became of it. What stays is the number, the status, the author, the age and
+ * the text.
+ *
+ * The three labels are the German words the owner asked to have removed:
+ * "Umsetzung" and its siblings.
+ */
+function isSettled(s: SuggestionView): boolean {
+  return s.status === 'implemented' || s.status === 'failed' || s.status === 'rejected';
+}
+
 function renderCard(s: SuggestionView, children: number[]): string {
   const expanded = state.expanded.has(s.id);
   const isClusterCanonical = s.canonicalId === null || s.canonicalId === s.id;
   const hasChildren = children.length > 0;
   const run = s.run;
+  // Only for the "done" tab, not for a task that merely failed: there the run
+  // is current information.
+  const settled = state.tab === 'done' && isSettled(s);
   const runBadge =
     run && (run.status === 'running' || run.status === 'queued')
       ? `<span class="badge status-implementing">Run ${run.status === 'queued' ? 'in Warteschlange' : 'läuft'}</span>`
@@ -338,12 +368,12 @@ function renderCard(s: SuggestionView, children: number[]): string {
         <span class="score" title="Prioritäts-Score (ohne KI berechnet)">Score ${s.score}</span>
       </div>
       <p class="card-text">${escapeHtml(s.text)}</p>
-      ${run?.resultSummary ? `<p class="card-summary"><span class="summary-label">🤖 Umsetzung:</span> ${escapeHtml(run.resultSummary)}</p>` : ''}
+      ${run?.resultSummary && !settled ? `<p class="card-summary"><span class="summary-label">🤖 Umsetzung:</span> ${escapeHtml(run.resultSummary)}</p>` : ''}
       <div class="card-meta">
         <span>👍 ${s.votes} Stimmen</span>
         ${s.discordMessageId ? '<span title="an Discord gesendet">📨 Discord</span>' : ''}
-        ${run && run.status !== 'running' ? `<span>🤖 ${run.status}${commit}</span>` : ''}
-        ${run?.scope ? `<span title="Scope aus scripts/scopes.mjs">📁 ${escapeHtml(scopeLabel(run, state.manifest))}</span>` : ''}
+        ${run && run.status !== 'running' && !settled ? `<span>🤖 ${run.status}${commit}</span>` : ''}
+        ${run?.scope && !settled ? `<span title="Scope aus scripts/scopes.mjs">📁 ${escapeHtml(scopeLabel(run, state.manifest))}</span>` : ''}
         ${!isClusterCanonical ? `<span>gehört zu Cluster #${s.canonicalId}</span>` : ''}
         ${hasChildren ? `<span>Aufgeteilt in ${children.length} Einzelaufträge: ${children.map((id) => `#${id}`).join(', ')}</span>` : ''}
       </div>
@@ -360,24 +390,29 @@ function renderCard(s: SuggestionView, children: number[]): string {
             : ''
         }
         ${
-          s.status !== 'implementing' && !hasChildren
+          // Never on a settled card: a task that is already done cannot be
+          // implemented, and offering it only invites the question.
+          !settled && s.status !== 'implementing' && !hasChildren
             ? `<button class="implement" data-action="implement" data-id="${s.id}">🤖 In OpenCode umsetzen</button>`
             : ''
         }
         ${
-          s.status !== 'implemented' && s.status !== 'implementing' && !hasChildren
+          !settled && s.status !== 'implemented' && s.status !== 'implementing' && !hasChildren
             ? `<button data-action="split" data-id="${s.id}">✂ Aufteilen</button>`
             : ''
         }
         <button data-action="details" data-id="${s.id}">${expanded ? '▴ Details' : '▾ Details'}</button>
         ${
-          // Löschen steht am Ende und immer da: Testeinträge und Doubletten
-          // sollen sich nicht erst durch die Historie ziehen müssen. Der Knopf
-          // fragt nach, und der Server verweigert das Löschen, solange ein
-          // Run läuft.
-          s.status === 'implementing' || s.run?.status === 'running'
-            ? ''
-            : `<button class="danger" data-action="delete" data-id="${s.id}">Löschen</button>`
+          // Two verbs for two different intentions. On open work the entry is a
+          // test run, a duplicate or a typo and should be gone. On a settled
+          // suggestion there is nothing to clean up: the owner wants it out of
+          // sight, not out of existence, and "Löschen" there reads as "erase this
+          // from the record".
+          settled
+            ? `<button class="danger" data-action="dismiss" data-id="${s.id}">✕ Schließen</button>`
+            : s.status === 'implementing' || s.run?.status === 'running'
+              ? ''
+              : `<button class="danger" data-action="delete" data-id="${s.id}">Löschen</button>`
         }
       </div>
       ${
@@ -448,11 +483,6 @@ function renderRunCard(run: RunRecord): string {
     connected: state.connected,
     alive: alive ?? undefined,
   });
-  const lines = eventsOf(run.id)
-    .slice(-400)
-    .map((event) => `<div class="line ${event.kind}">${escapeHtml(event.text)}</div>`)
-    .join('');
-  const warning = scopeWarning(state.audits.get(run.id) ?? null);
   const operator = suggestionAuthor(run.suggestionId) === 'Betreiber' ? ' · Auftrag' : '';
   return `
     <div class="run-card activity-${activity.level}" data-run-card="${run.id}">
@@ -460,17 +490,11 @@ function renderRunCard(run: RunRecord): string {
         <span>🤖 #${run.suggestionId}${operator} <span class="lane-tag" title="Diese Spur in der Warteschlange">Spur ${run.lane ?? '?'}</span></span>
         <span>${alive === false ? '⚠ Prozess weg' : '⚙ läuft'}</span>
       </div>
+      <div class="run-sub run-task" title="${escapeHtml(suggestionText(run.suggestionId))}">${escapeHtml(suggestionText(run.suggestionId))}</div>
       <div class="run-sub" data-run-budget="${run.id}">${escapeHtml(runBudgetLine(run))}</div>
-      <div class="run-sub">📁 ${escapeHtml(scopeLabel(run, state.manifest))}</div>
-      ${
-        warning
-          ? `<div class="run-warning" title="Der Run hat Dateien außerhalb seines Scopes angefasst">⚠ ${escapeHtml(warning)}</div>`
-          : ''
-      }
       <div class="run-activity ${activity.level}" data-run-activity="${run.id}" title="Zeit seit der letzten Ausgabe von OpenCode">
         ${escapeHtml(activity.label)}
       </div>
-      <div class="console" data-run-console="${run.id}">${lines}</div>
       <div class="card-actions">
         <button data-action="cancel-run" data-run="${run.id}">⏹ Abbrechen</button>
         ${
@@ -486,6 +510,16 @@ function renderRunCard(run: RunRecord): string {
 /** Author of a suggestion, for the badge that marks an operator order. */
 function suggestionAuthor(id: number): string {
   return state.suggestions.find((s) => s.id === id)?.author ?? '';
+}
+
+/** The suggestion's own words, in one line — what a run is going to work on. */
+function suggestionText(id: number): string {
+  const text = state.suggestions.find((s) => s.id === id)?.text ?? '';
+  if (!text.trim()) return '(Vorschlag nicht geladen)';
+  // Newlines become spaces: a suggestion pasted from several lines would
+  // otherwise break the row into a paragraph.
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > 140 ? `${flat.slice(0, 139)}…` : flat;
 }
 
 function renderRuns(): void {
@@ -527,14 +561,17 @@ function renderRuns(): void {
         const wait =
           run.notBefore && run.notBefore > Date.now() ? ` · startet in ${formatCountdown(run.notBefore - Date.now())}` : '';
         const waitReason = blocked.has(run.id) ? 'wartet auf eine belegte Spur (gleicher Scope)' : 'wartet';
+        // What is actually queued. The run id, the cost and the scope line said
+        // how the runner works, not what it is about to do, and the owner
+        // recognises a task by its text.
+        const text = suggestionText(run.suggestionId);
         return `
       <div class="run-card${blocked.has(run.id) ? ' blocked' : ''}">
         <div class="run-title">
           <span>#${run.suggestionId}${badge ? ` · ${escapeHtml(badge)}` : ''}</span>
           <span>${waitReason}</span>
         </div>
-        <div class="run-sub">${escapeHtml(run.id)}${escapeHtml(wait)}</div>
-        <div class="run-sub">📁 ${escapeHtml(scopeLabel(run, state.manifest))}</div>
+        <div class="run-sub queued-task" title="${escapeHtml(text)}">${escapeHtml(text)}${escapeHtml(wait)}</div>
         <div class="card-actions">
           <button data-action="cancel-run" data-run="${run.id}">⏹ Entfernen</button>
         </div>
@@ -544,10 +581,6 @@ function renderRuns(): void {
   }
 
   active.innerHTML = html;
-  for (const run of running) {
-    const consoleEl = document.querySelector(`[data-run-console="${run.id}"]`);
-    if (consoleEl) consoleEl.scrollTop = consoleEl.scrollHeight;
-  }
   updateRunActivity();
 
   $('#run-history').innerHTML = renderRunHistory();
@@ -601,23 +634,20 @@ function renderRunHistory(): string {
     .map((run) => {
       const badge = outcomeBadge(run);
       const attempt = attemptLabel(run);
-      const audit = state.audits.get(run.id) ?? parseStoredAudit(run);
-      const warning = scopeWarning(audit);
+      // Same reasoning as the queue: the text is what identifies the task. The
+      // commit stays reachable through the changelog, and the scope and cost
+      // lines are runner internals.
+      const text = suggestionText(run.suggestionId);
       return `
       <div class="run-card">
         <div class="run-title">
           <span>#${run.suggestionId}${attempt ? ` · ${escapeHtml(attempt)}` : ''}</span>
           <span>${badge ? `${badge.icon} ${escapeHtml(badge.label)}` : escapeHtml(run.status)}</span>
         </div>
-        <div class="run-sub">
-          ${escapeHtml(run.id)}${run.commitHash ? ` · <code>${escapeHtml(run.commitHash)}</code>` : ''}
-          ${run.cost != null ? ` · $${run.cost.toFixed(4)}` : ''}
-          ${run.finishedAt ? ` · ${timeAgo(run.finishedAt)}` : ''}
-        </div>
-        <div class="run-sub">📁 ${escapeHtml(scopeLabel(run, state.manifest))}${
-          run.retryOf ? ` · ↻ wiederholt ${escapeHtml(run.retryOf)}` : ''
-        }${run.lane != null ? ` · Spur ${run.lane}` : ''}</div>
-        ${warning ? `<div class="run-warning">⚠ ${escapeHtml(warning)}</div>` : ''}
+        <div class="run-sub run-task" title="${escapeHtml(text)}">${escapeHtml(text)}</div>
+        <div class="run-sub">${run.finishedAt ? timeAgo(run.finishedAt) : ''}${
+          run.retryOf ? ' · ↻ wiederholt' : ''
+        }</div>
         <div class="card-actions">
           ${
             run.status === 'failed' || run.status === 'cancelled'
@@ -668,33 +698,12 @@ function renderScopes(): void {
     .join('');
 }
 
-/** Reads the audit that the runner stored with the run. */
-function parseStoredAudit(run: RunRecord): ScopeAudit | null {
-  if (!run.scopeIssues) return null;
-  try {
-    const stored = JSON.parse(run.scopeIssues) as Partial<ScopeAudit>;
-    return {
-      runId: run.id,
-      scopes: run.scopes,
-      agent: null,
-      ok: (stored.violations?.length ?? 0) === 0,
-      violations: stored.violations ?? [],
-      shared: stored.shared ?? [],
-      unclaimed: stored.unclaimed ?? [],
-      notes: stored.notes ?? [],
-      checked: stored.checked ?? 0,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** One line with run id, runtime and the remaining hard-timeout budget. */
+/** Runtime and the remaining hard-timeout budget. The run id is not shown. */
 function runBudgetLine(run: RunRecord): string {
   const elapsed = run.startedAt ? `läuft seit ${formatDuration(Date.now() - run.startedAt)}` : 'startet gerade';
-  if (run.timeoutMs <= 0 || !run.startedAt) return `${run.id} · ${elapsed} · ohne Zeitlimit`;
+  if (run.timeoutMs <= 0 || !run.startedAt) return `${elapsed} · ohne Zeitlimit`;
   const left = Math.max(0, run.startedAt + run.timeoutMs - Date.now());
-  return `${run.id} · ${elapsed} · Restzeit ${formatCountdown(left)} von ${formatCountdown(run.timeoutMs)}`;
+  return `${elapsed} · Restzeit ${formatCountdown(left)} von ${formatCountdown(run.timeoutMs)}`;
 }
 
 /** Refreshes every lane's "last output" indicator without rebuilding the panel. */
@@ -989,9 +998,9 @@ async function loadSettings(): Promise<void> {
   ($('#setting-retries') as HTMLInputElement).value = String(settings.retryLimit);
   ($('#setting-backoff') as HTMLInputElement).value = String(settings.retryBackoffSeconds);
   ($('#setting-lanes') as HTMLInputElement).value = String(settings.maxParallelRuns);
-  // Der Zustand von Telegram wird **nicht** gemerkt: der Token steht in der
-  // `.env`, und die ändert sich außerhalb des Dashboards. Ein gemerkter Stand
-  // wäre nach einem Neustart eine Lüge.
+  // The Telegram state is deliberately **not** remembered: the token lives in
+  // `.env`, which changes outside the dashboard. A remembered state would be a
+  // lie after a restart.
   $('#telegram-state').textContent = settings.telegramConfigured
     ? 'eingerichtet — Vorschläge und Befehle laufen'
     : !settings.telegramTokenSet
@@ -1134,12 +1143,19 @@ async function act(action: string, id: number, runId?: string): Promise<void> {
         body: JSON.stringify({}),
       });
       toast(`Run für #${id} in die Warteschlange gestellt`, 'success');
+    } else if (action === 'dismiss') {
+      // No request, no confirmation: nothing is destroyed. The card leaves the
+      // "done" list and a reload brings it back.
+      state.dismissed.add(id);
+      state.expanded.delete(id);
+      renderList();
+      renderStats();
+      return;
     } else if (action === 'delete') {
-      // Zwei Rückfragen, weil der Vorgang nicht rückgängig wird: Der Eintrag
-      // ist danach weg, und mit ihm seine Läufe und Stimmen. `confirm` fragt
-      // einmal — ein Dialog mit der Nummer ist hier genug, ein zweiter Dialog
-      // wäre nur ein zweiter Weg, an dem jemand auf „Abbrechen" klickt und
-      // sich wundert, warum nichts passiert.
+      // One confirmation, because this cannot be undone: the entry is gone, and
+      // with it its runs and votes. A `confirm` carrying the number is enough; a
+      // second dialog would only be a second place to click "cancel" and then
+      // wonder why nothing happened.
       if (!confirm(`Vorschlag #${id} endgültig löschen?\n\nMit ihm verschwinden auch seine Läufe und Stimmen. Das lässt sich nicht rückgängig machen.`)) {
         return;
       }
@@ -1230,16 +1246,9 @@ function connectEvents(): void {
       markActivity(event.runId);
       if (buffer.length > 1500) buffer.splice(0, buffer.length - 1500);
       state.runEvents.set(event.runId, buffer);
-      const consoleEl = document.querySelector(`[data-run-console="${event.runId}"]`);
-      if (consoleEl) {
-        const line = document.createElement('div');
-        line.className = `line ${event.event.kind}`;
-        line.textContent = event.event.text;
-        consoleEl.appendChild(line);
-        consoleEl.scrollTop = consoleEl.scrollHeight;
-      } else {
-        renderRuns();
-      }
+      // The session runs in a terminal window now, so there is no log pane to
+      // append to. The activity indicator is the only thing that updates in
+      // place; everything else waits for the next full render.
       updateRunActivity();
     } else if (event.type === 'run:finished') {
       toast(`Run für #${event.run.suggestionId}: ${event.run.status}`, event.run.status === 'succeeded' ? 'success' : 'error');
@@ -1368,9 +1377,9 @@ function setupUi(): void {
     }
   });
   $('#test-telegram').addEventListener('click', async () => {
-    // Der Fehlertext des Servers wird durchgereicht, weil genau er die
-    // häufigsten Ursachen nennt: fehlender Token, fehlende Chat-Id oder der
-    // Bot, der noch keine Nachricht bekommen hat.
+    // The server's error text is passed through because it names the most
+    // common causes: missing token, missing chat id, or a bot that has not
+    // received a message yet.
     try {
       await api('/api/telegram/test', { method: 'POST', body: JSON.stringify({}) });
       toast('Testnachricht gesendet — prüfe deinen Telegram-Chat.', 'success');
@@ -1432,8 +1441,8 @@ async function main(): Promise<void> {
   void loadBackup();
   connectEvents();
   setInterval(() => {
-    // Auch bei stehendem Ladefehler weiter versuchen: der Server kann längst
-    // wieder da sein, während die Seite auf seinen nächsten Versuch wartet.
+    // Keep retrying after a load error: the server may be back long before the
+    // page gets around to its next attempt.
     if (!state.connected || state.loadError !== null) void refreshAll();
   }, 8000);
   // Keep the "last output" indicator ticking while a run is active.
