@@ -83,8 +83,8 @@ func _rebuild() -> void:
 	for child in _panel.get_children():
 		child.queue_free()
 	var span := _page_range()
-	_page_label.text = "Level %d–%d von %d  ·  Bestzeit %s" % [
-		span.x, span.y, Pang.TOTAL_LEVELS, _page_best(span)]
+	_page_label.text = Loc.f("Level %d–%d of %d  ·  Best time %s", [
+		span.x, span.y, Pang.TOTAL_LEVELS, _page_best(span)])
 	var grid := GridContainer.new()
 	grid.columns = 5
 	grid.add_theme_constant_override("h_separation", GAP)
@@ -93,7 +93,7 @@ func _rebuild() -> void:
 	_panel.add_child(grid)
 	for level in range(span.x, span.y + 1):
 		grid.add_child(_level_card(level))
-	_detail.text = "Freigeschaltet bis Level %d." % Pang.unlocked_level()
+	_detail.text = Loc.f("Unlocked up to level %d.", [Pang.unlocked_level()])
 
 
 func _pages() -> int:

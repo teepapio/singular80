@@ -97,6 +97,14 @@ export function buildTerminalSession(input: {
   const script = [
     `echo $$ > ${shellQuote(pidFile)}`,
     `cd ${shellQuote(input.cwd)} || exit 1`,
+    // Job control, and it is not optional. Without `set -m` the backgrounded
+    // session stays in the wrapper's own process group, and a full-screen
+    // interface in that group never finishes: measured, it ran until a 120 s
+    // test timeout killed it. With job control the session gets its own process
+    // group and becomes the terminal's foreground job — which is what the
+    // interface needs in order to draw and to read the keyboard — and the trap
+    // below can still reach it.
+    'set -m',
     'singular80_child=""',
     'trap \'[ -n "$singular80_child" ] && kill -TERM "$singular80_child" 2>/dev/null\' TERM INT',
     `${inner} &`,

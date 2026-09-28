@@ -792,16 +792,17 @@ func _update_hud() -> void:
 	var traits: Array = stats.get("traits", [])
 	_label_trait.text = ", ".join(_short(traits)) if not traits.is_empty() else "—"
 	var summary := DragonFlight.level_resist_summary(level_def)
-	_label_element.text = DragonFlight.element_name(dragon_element) if summary.is_empty() else "%s · Gegner %s" % [DragonFlight.element_name(dragon_element), summary]
+	_label_element.text = (DragonFlight.element_name(dragon_element) if summary.is_empty()
+		else Loc.f("%s · enemies %s", [DragonFlight.element_name(dragon_element), summary]))
 	var effects: Array[String] = []
 	if buff_shield > 0.0:
-		effects.append("Schild %.0fs" % buff_shield)
+		effects.append(Loc.f("Shield %.0fs", [buff_shield]))
 	if buff_rapid > 0.0:
-		effects.append("Feuersturm %.0fs" % buff_rapid)
+		effects.append(Loc.f("Firestorm %.0fs", [buff_rapid]))
 	if buff_magnet > 0.0:
-		effects.append("Magnet %.0fs" % buff_magnet)
+		effects.append(Loc.f("Magnet %.0fs", [buff_magnet]))
 	if combo > 1:
-		effects.append("Combo x%d" % combo)
+		effects.append(Loc.f("Combo x%d", [combo]))
 	_label_buff.text = " · ".join(effects) if not effects.is_empty() else "—"
 
 

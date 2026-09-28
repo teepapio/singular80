@@ -169,18 +169,20 @@ func _clear_selection() -> void:
 
 func _refresh() -> void:
 	_view.queue_redraw()
-	_player_label.text = "Du: %d Steine" % Checkers.count_pieces(board, Checkers.WHITE)
-	_ai_label.text = ("KI: %d Steine" % Checkers.count_pieces(board, Checkers.BLACK)) if not two_player else "Gegner: %d Steine" % Checkers.count_pieces(board, Checkers.BLACK)
-	_wins_label.text = "Du %d  :  %d KI" % [wins, 0] if not two_player else "Du %d  :  %d Gegner" % [wins, 0]
+	_player_label.text = Loc.f("You: %d pieces", [Checkers.count_pieces(board, Checkers.WHITE)])
+	_ai_label.text = (Loc.f("AI: %d pieces", [Checkers.count_pieces(board, Checkers.BLACK)]) if not two_player
+		else Loc.f("Opponent: %d pieces", [Checkers.count_pieces(board, Checkers.BLACK)]))
+	_wins_label.text = (Loc.f("You %d  :  %d AI", [wins, 0]) if not two_player
+		else Loc.f("You %d  :  %d Opponent", [wins, 0]))
 	_hint_button.disabled = game_over
 	if not _status.is_empty():
-		_message_label.text = _status
+		_message_label.text = Loc.resolve(_status)
 	elif game_over:
-		_message_label.text = "Spiel vorbei — Neu starten"
+		_message_label.text = Loc.f("Game over — restart", [])
 	elif two_player:
-		_message_label.text = "Du bist am Zug" if side == Checkers.WHITE else "Gegner ist am Zug"
+		_message_label.text = Loc.f("Your turn", []) if side == Checkers.WHITE else Loc.f("Opponent's turn", [])
 	else:
-		_message_label.text = "Du bist am Zug" if side == Checkers.WHITE else "KI denkt …"
+		_message_label.text = Loc.f("Your turn", []) if side == Checkers.WHITE else Loc.f("AI is thinking …", [])
 
 
 # --- Making captures visible -----------------------------------------------
@@ -205,7 +207,7 @@ func _update_capture_label() -> void:
 		_capture_label.text = ""
 		_capture_label.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
 		return
-	_capture_label.text = "Größter Schlag: %d Steine" % int((capture_marks[0] as Dictionary)["captures"])
+	_capture_label.text = Loc.f("Longest capture: %d pieces", [int((capture_marks[0] as Dictionary)["captures"])])
 	_capture_label.add_theme_color_override("font_color", Color("f87171"))
 
 
@@ -222,21 +224,21 @@ func show_hint() -> void:
 		return
 	_clear_hint()
 	if _hint_side() != side:
-		_status = "Die KI ist am Zug"
+		_status = Loc.f("The AI is to move", [])
 		Sfx.select()
 		_refresh()
 		return
 	var chain := Checkers.best_capture(board, side)
 	if chain.is_empty():
 		hint_moves = Checkers.movable_squares(board, side)
-		_status = "Kein Schlagzug — %d Steine dürfen ziehen" % hint_moves.size()
+		_status = Loc.f("No capture — %d pieces may move", [hint_moves.size()])
 	else:
 		var steps: Array = chain["steps"]
 		hint_steps = steps
 		selected = int((steps[0] as Array)[0])
 		legal_targets = [steps[steps.size() - 1]]
 		legal_turns = [chain]
-		_status = "Tipp: %d Steine, Zielfeld ist markiert" % int(chain["captures"])
+		_status = Loc.f("Tip: %d pieces, target square is marked", [int(chain["captures"])])
 	Sfx.select()
 	_refresh()
 

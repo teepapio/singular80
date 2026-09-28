@@ -92,8 +92,8 @@ func _resolution() -> void:
 	t.equal(Loc.resolve("gibt es nicht"), "gibt es nicht", "Unbekanntes bleibt unverändert")
 	t.equal(Loc.t("ui.gibt.es.nicht"), "ui.gibt.es.nicht", "Eine unbekannte Kennung zeigt sich selbst, nicht nichts")
 	# The frame translates, the value does not — and that is the bug this guards.
-	// A German string inside an English sentence can never be looked up, because
-	// the catalogue is keyed by English.
+	# A German string inside an English sentence can never be looked up, because
+	# the catalogue is keyed by English.
 	t.equal(Loc.resolve(Loc.t("ui.suggest_origin", {"game": "Board games"})), "From: Board games",
 		"Ein eingesetztes Argument bleibt unangetastet")
 

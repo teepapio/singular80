@@ -23,7 +23,7 @@ function session(overrides: Partial<Parameters<typeof buildTerminalSession>[0]> 
       args,
       title: 'Singular 80 — #7',
       cwd: '/home/edi/singular80',
-      command: ['opencode', '--auto', '--prompt', 'Der Slime soll springen'],
+      command: ['opencode', 'run', '--auto', 'Der Slime soll springen'],
       stateDir: dir,
       runId: 'run_x',
       ...overrides,

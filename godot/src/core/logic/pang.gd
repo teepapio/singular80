@@ -940,7 +940,7 @@ static func wave_eta(wave: Dictionary, live_balls: int, elapsed: float, warned: 
 static func wave_alert(wave: Dictionary, warned: float) -> String:
 	if wave.is_empty() or warned < 0.0:
 		return ""
-	return "Nachschub von %s — noch %.1f s" % [wave_side_label(wave), maxf(0.0, wave_warn_time(wave) - warned)]
+	return Loc.f("Reinforcements from %s — %.1f s left", [wave_side_label(wave), maxf(0.0, wave_warn_time(wave) - warned)])
 
 
 # --- scoring ----------------------------------------------------------------

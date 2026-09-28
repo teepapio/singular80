@@ -220,8 +220,9 @@ func _build_ui() -> void:
 ## `Ui.label` line by line — which put a *fragment* of a sentence in front of the
 ## extractor, and a fragment is not something a catalogue can hold. One key per
 ## row instead: the extractor sees a key, and the whole caption travels as one
-## string.
-const CONTROL_HELP: Array[String] = [
+## string. The `_LOC_KEYS` suffix is what the extractor looks for; a list of
+## identifiers under any other name is invisible to it.
+const CONTROL_HELP_LOC_KEYS: Array[String] = [
 	"tetris.control.move",
 	"tetris.control.soft_drop",
 	"tetris.control.rotate",
@@ -234,21 +235,20 @@ const CONTROL_HELP: Array[String] = [
 
 ## What the violet marks on the board mean, shown next to the control reference:
 ## the kick tables are only fair if the game says what they do.
-const SPIN_HELP: Array[String] = [
+const SPIN_HELP_LOC_KEYS: Array[String] = [
 	"tetris.spin.frame",
 	"tetris.spin.ghost",
 	"tetris.spin.kick",
 	"tetris.spin.turn",
-	"tetris.spin.always",
 ]
 
 ## Both reference blocks as the overlay wants them: one entry per label, spin
 ## explanation first.
 func _help_lines() -> Array:
 	var out: Array = []
-	for key in SPIN_HELP:
+	for key in SPIN_HELP_LOC_KEYS:
 		out.append(Loc.t(key))
-	for key in CONTROL_HELP:
+	for key in CONTROL_HELP_LOC_KEYS:
 		out.append(Loc.t(key))
 	return out
 
@@ -820,6 +820,9 @@ func _show_overlay(title: String, title_color: Color, buttons: Array, info: Arra
 		for line in info:
 			var text := Ui.label(str(line), 17, info_color)
 			text.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+			# A whole caption is longer than the line the German happened to break
+			# into, so the label wraps instead of running off the overlay.
+			text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			help.add_child(text)
 
 

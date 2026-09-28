@@ -212,6 +212,7 @@ const ARENA_LOC_KEYS: Array[String] = [
 	"arena.repair.0",
 	"arena.repair.1",
 	"arena.repair.2",
+	"arena.draft.badge",
 ]
 
 const AXIS_WEIGHT := {"angriff": 1.0, "zaehigkeit": 0.7, "ertrag": 0.6}

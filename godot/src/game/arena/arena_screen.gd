@@ -933,8 +933,10 @@ func _build_offer_card(index: int) -> Button:
 	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	card.add_child(name_label)
 
-	# What kind of card this is, and how often it has been taken already.
-	var meta := "STÄRKSTES  ·  " if is_best else ""
+	# What kind of card this is, and how often it has been taken already. The
+	# badge is a key rather than a string, so a language may word it as it likes
+	# and the sentence around it is not a finished caption nobody can translate.
+	var meta := Loc.t("arena.draft.badge") + "  ·  " if is_best else ""
 	meta += ArenaRuns.axis_label(upgrade).to_upper()
 	if int(upgrade.get("maxStacks", 99)) < 90:
 		meta += "  ·  %d/%d" % [stacks, int(upgrade["maxStacks"])]

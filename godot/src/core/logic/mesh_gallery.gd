@@ -186,7 +186,7 @@ static func draft(marks: Dictionary) -> String:
 	# triangle version of a bad shape is a different problem than a 400 triangle one.
 		var head := "%s — %s, Stufe %s (%s Dreiecke)" % [
 			AssetRegistry.display_name(key), key,
-			str(AssetRegistry.TIER_LABELS.get(tier, tier)), AssetRegistry.tri_text(key, tier),
+			AssetRegistry.tier_label(tier), AssetRegistry.tri_text(key, tier),
 		]
 		var note := str(entry.get("note", ""))
 		lines.append("– %s" % head if note == "" else "– %s\n  %s" % [head, note])

@@ -5,8 +5,8 @@ extends WorldScreen
 ## (`core/logic/pang.gd`); this file builds the stage, draws it and feeds input.
 ## Balls and harpoons share one Z plane with scenery in front and behind, so the
 ## side-on readability of the original survives while every prop is a real mesh.
-## Reinforcement waves from mid-campaign use the same pooled spawn as the
-## opening layout, so a wave costs no allocation and no new node.
+## Reinforcement waves use the same pooled spawn as the opening layout, so a wave
+## costs no allocation and no new node.
 
 ## The ball pool is sized from the rules, not guessed: see `Pang.ORB_SAFE_CAP`.
 const ORB_LIMIT := Pang.ORB_SAFE_CAP

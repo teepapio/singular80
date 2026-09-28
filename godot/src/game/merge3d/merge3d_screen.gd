@@ -218,7 +218,7 @@ func _build_ui() -> void:
 	_used_label = _hud_value(column, "Felder belegt", "0", UiTheme.TEXT)
 	_sel_label = _hud_value(column, "Auswahl", "—", UiTheme.TEXT_DIM)
 
-	_mode_label = Ui.button("3er-Merge", Vector2(190, 52), UiTheme.ACCENT, _toggle_mode)
+	_mode_label = Ui.button(_mode_caption(), Vector2(190, 52), UiTheme.ACCENT, _toggle_mode)
 	_mode_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	_mode_label.position = Vector2(24, -64)
 	hud_root.add_child(_mode_label)
@@ -261,8 +261,15 @@ func _build_ui() -> void:
 ## worse than no tip.
 func _instruction_text() -> String:
 	if required == Merge3D.MERGE_5:
-		return "Items antippen — 5 gleiche ergeben 2 Items der nächsten Stufe"
-	return "Items antippen und auswählen — 3 gleiche ergeben ein Item der nächsten Stufe"
+		return Loc.f("Tap items — 5 alike give 2 items of the next tier", [])
+	return Loc.f("Tap items and select — 3 alike give one item of the next tier", [])
+
+
+## The mode caption. Read from `required` and nowhere else — the button used to
+## be its own state, and comparing its translated text back to "3er-Merge" is
+## how the first translation would have switched the merge mode off silently.
+func _mode_caption() -> String:
+	return Loc.f("5-merge", []) if required == Merge3D.MERGE_3 else Loc.f("3-merge", [])
 
 
 func _hud_value(parent: VBoxContainer, caption: String, value: String, color: Color) -> Label:
@@ -279,7 +286,7 @@ func _hud_value(parent: VBoxContainer, caption: String, value: String, color: Co
 
 func _toggle_mode() -> void:
 	required = Merge3D.MERGE_5 if required == Merge3D.MERGE_3 else Merge3D.MERGE_3
-	_mode_label.text = "5er-Merge" if required == Merge3D.MERGE_3 else "3er-Merge"
+	_mode_label.text = _mode_caption()
 	_instruction_label.text = _instruction_text()
 	selected = PackedInt32Array()
 	_clear_hint()
@@ -299,7 +306,7 @@ func _show_hint(loud: bool = true) -> void:
 	var cells := _hint_cells()
 	_clear_hint()
 	if cells.is_empty():
-		_hint_label.text = "Gerade nichts zu mergen — es kommen laufend neue Items."
+		_hint_label.text = Loc.f("Nothing to merge right now — new items keep coming.", [])
 		_hint_label.add_theme_color_override("font_color", UiTheme.TEXT_MUTED)
 		if loud:
 			notify("No merge possible — wait a moment")
@@ -309,7 +316,7 @@ func _show_hint(loud: bool = true) -> void:
 	hint_cells = cells
 	hint_until = elapsed + HINT_LIFETIME
 	selected = cells
-	_hint_label.text = "Tipp: %s" % Merge3D.hint_text(theme, board, cells)
+	_hint_label.text = Loc.f("Tip: %s", [Merge3D.hint_text(theme, board, cells)])
 	_hint_label.add_theme_color_override("font_color", Merge3D.tier_color(theme, tier).lightened(0.4))
 	if loud:
 		notify(Loc.f("Hint: %s", [Merge3D.tier_name(theme, tier)]))
@@ -440,9 +447,10 @@ func _try_merge() -> void:
 		return
 	# A 3-merge attempt on a 5-selection still works when enough items match.
 	if Merge3D.merge_is_valid(board, selected, Merge3D.MERGE_3):
+		var was := required
 		required = Merge3D.MERGE_3
 		_try_merge()
-		required = Merge3D.MERGE_5 if _mode_label.text == "3er-Merge" else Merge3D.MERGE_3
+		required = was
 		return
 	selected = PackedInt32Array()
 	_refresh()
@@ -510,7 +518,7 @@ func _refresh() -> void:
 	if selected.is_empty():
 		_sel_label.text = "—"
 	else:
-		_sel_label.text = "%d× %s" % [selected.size(), Merge3D.tier_name(theme, board[selected[0]])]
+		_sel_label.text = Loc.f("%d× %s", [selected.size(), Merge3D.tier_name(theme, board[selected[0]])])
 
 
 ## The automatic tip only fires when it helps: an almost full board, no merge

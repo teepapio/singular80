@@ -9,8 +9,23 @@ extends RefCounted
 ## Suits are indices 0..3: spades, hearts, diamonds, clubs.
 
 const SUIT_SYMBOLS := ["♠", "♥", "♦", "♣"]
-const SUIT_NAMES := ["Pik", "Herz", "Karo", "Kreuz"]
+## The suit names are a display name, not a deck index, and they reach the player
+## inside a sentence — so they get keys, and the sentence around them stays a
+## template the catalogue can reorder.
+const SUIT_LOC_KEYS: Array[String] = [
+	"cards.suit.spades",
+	"cards.suit.hearts",
+	"cards.suit.diamonds",
+	"cards.suit.clubs",
+]
 const RANK_LABELS := ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+
+
+## The suit name in the player's language.
+static func suit_name(index: int) -> String:
+	if index < 0 or index >= SUIT_LOC_KEYS.size():
+		return ""
+	return Loc.t(SUIT_LOC_KEYS[index])
 
 const RED := Color(0.863, 0.149, 0.149)
 const BLACK_SUIT := Color(0.118, 0.161, 0.231)
@@ -215,14 +230,14 @@ static func freecell_hint_text(move: Dictionary) -> String:
 		what += " +%d" % (int(move["count"]) - 1)
 	var zone := str(to["zone"])
 	if zone == "foundation":
-		return "%s kommt sicher auf das %s-Fundament" % [what, SUIT_NAMES[int(to["index"])]]
+		return Loc.f("%s goes safely onto the %s foundation", [what, suit_name(int(to["index"]))])
 	if zone == "cell":
-		return "%s in die freie Zelle %d" % [what, int(to["index"]) + 1]
+		return Loc.f("%s into the free cell %d", [what, int(to["index"]) + 1])
 	if int(to.get("empty", false)):
 		if str(from["zone"]) == "cell":
-			return "%s gibt Zelle %d frei" % [what, int(from["index"]) + 1]
-		return "%s in den leeren Stapel %d" % [what, int(to["index"]) + 1]
-	return "%s passt auf %s in Spalte %d%s" % [what, str(move["onto"]), int(to["index"]) + 1, str(move.get("note", ""))]
+			return Loc.f("%s frees cell %d", [what, int(from["index"]) + 1])
+		return Loc.f("%s into the empty stack %d", [what, int(to["index"]) + 1])
+	return Loc.f("%s fits onto %s in column %d%s", [what, str(move["onto"]), int(to["index"]) + 1, str(move.get("note", ""))])
 
 
 ## Does the card fit on the other one (suit and rank must both match)?

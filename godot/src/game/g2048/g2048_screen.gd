@@ -2,11 +2,9 @@ class_name Game2048Screen
 extends Screen
 ## 2048 — sliding tile puzzle with a one-move preview, undo, keyboard, gamepad
 ## and swipe input. Port of `scenes/Game2048Scene.ts`.
-##
 ## The tile the next move spawns is already on the board as a dashed ghost, so
-## the player plans one step ahead instead of reacting to a spawn. It rides
-## along with the slide and becomes permanent with that move. Rules and ghost
-## live in `Twenty48`.
+## the player plans a step ahead instead of reacting to a spawn; it rides along
+## with the slide and becomes permanent with that move. Rules live in `Twenty48`.
 
 const TILE := 118.0
 const GAP := 14.0

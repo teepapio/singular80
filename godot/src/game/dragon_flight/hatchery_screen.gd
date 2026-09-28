@@ -406,17 +406,17 @@ func _place_eggs() -> void:
 func _refresh_panel() -> void:
 	var a := DragonFlight.dragon_by_uid(profile, parent_a)
 	var b := DragonFlight.dragon_by_uid(profile, parent_b)
-	_label_slots.text = "Elternteil A: %s\nElternteil B: %s" % [_dragon_label(a), _dragon_label(b)]
+	_label_slots.text = Loc.f("Parent A: %s\nParent B: %s", [_dragon_label(a), _dragon_label(b)])
 	var cost := 0
 	if not a.is_empty() and not b.is_empty() and parent_a != parent_b:
 		cost = DragonFlight.pairing_cost(a, b)
-		_label_info.text = "Kosten %d ◈" % cost
+		_label_info.text = Loc.f("Cost %d ◈", [cost])
 		_pair_button.disabled = int(profile.get("gold", 0)) < cost
-		_pair_button.text = "Paaren (%d ◈)" % cost
+		_pair_button.text = Loc.f("Pair (%d ◈)", [cost])
 	else:
-		_label_info.text = "Wähle zwei verschiedene Drachen auf den Sockeln."
+		_label_info.text = Loc.f("Pick two different dragons on the pedestals.", [])
 		_pair_button.disabled = true
-		_pair_button.text = "Paaren"
+		_pair_button.text = Loc.f("Pair", [])
 	for spot in pedestals:
 		var ring: MeshInstance3D = spot["ring"]
 		ring.visible = int(spot["uid"]) != 0 and (int(spot["uid"]) == parent_a or int(spot["uid"]) == parent_b)
@@ -436,25 +436,26 @@ func _refresh_goal() -> void:
 	var recessive: bool = bool(gene.get("recessive", false))
 	var carriers := DragonFlight.goal_carriers(profile, target_trait)
 	var needed := 2 if recessive else 1
-	var lines: Array[String] = ["Ziel: %s · %s · %d von %d Trägern" % [
-		str(gene.get("name", target_trait)), "rezessiv" if recessive else "dominant",
+	var lines: Array[String] = [Loc.f("Goal: %s · %s · %d of %d carriers", [
+		str(gene.get("name", target_trait)),
+		Loc.f("recessive", []) if recessive else Loc.f("dominant", []),
 		mini(carriers, needed), needed,
-	]]
+	])]
 	var best := DragonFlight.best_pair(profile, target_trait)
 	if best.is_empty():
-		lines.append("Zu wenige Drachen im Stall.")
+		lines.append(Loc.f("Too few dragons in the stable.", []))
 		_label_goal.text = "\n".join(lines)
 		_refresh_candidates()
 		return
 	var a: Dictionary = best["a"]
 	var b: Dictionary = best["b"]
-	lines.append("Beste Paarung: %s (%s) × %s (%s) = %d %%" % [
+	lines.append(Loc.f("Best pairing: %s (%s) × %s (%s) = %d %%", [
 		_dragon_label(a), DragonFlight.allele_pair(a.get("alleles", {}), target_trait),
 		_dragon_label(b), DragonFlight.allele_pair(b.get("alleles", {}), target_trait),
 		roundi(float(best["chance"]) * 100.0),
-	])
+	]))
 	if float(best["chance"]) <= 0.0:
-		lines.append("Kein Paar bringt es — ein zweiter Träger fehlt.")
+		lines.append(Loc.f("No pair gets there — a second carrier is missing.", []))
 	_label_goal.text = "\n".join(lines)
 	_refresh_candidates()
 
@@ -474,8 +475,9 @@ func _refresh_candidates() -> void:
 		var uid := int(entry["uid"])
 		var alleles: Dictionary = dragon.get("alleles", {})
 		var state := DragonFlight.gene_state(alleles, target_trait)
-		var mark := "zeigt" if state == DragonFlight.GENE_SHOWS else ("Träger" if DragonFlight.is_carrier(alleles, target_trait) else "—")
-		var caption := "%s · %s · %s" % [_dragon_label(dragon), DragonFlight.allele_pair(alleles, target_trait), mark]
+		var mark := (Loc.f("shows", []) if state == DragonFlight.GENE_SHOWS
+			else (Loc.f("carrier", []) if DragonFlight.is_carrier(alleles, target_trait) else "—"))
+		var caption := Loc.f("%s · %s · %s", [_dragon_label(dragon), DragonFlight.allele_pair(alleles, target_trait), mark])
 		if uid == parent_a:
 			caption = "A · " + caption
 		elif uid == parent_b:

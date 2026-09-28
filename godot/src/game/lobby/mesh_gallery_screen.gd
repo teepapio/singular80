@@ -406,7 +406,9 @@ func _rebuild_meshes() -> void:
 		if key == "":
 			sign.text = ""
 			continue
-		sign.text = AssetRegistry.display_name(key)
+		# A `Label3D` resolves nothing on its own, so the display name has to be
+		# translated where it is assigned.
+		sign.text = Loc.resolve(AssetRegistry.display_name(key))
 		sign.modulate = AssetRegistry.color_of(key)
 		# If this one mesh misses the chosen level, fall back to the finest that
 		# exists — otherwise a low-poly mesh stands under the label "Hoch".
@@ -495,14 +497,14 @@ func _refresh_panel() -> void:
 					tier = candidate
 					break
 	if _page_label != null:
-		_page_label.text = "Seite %d / %d" % [page_index + 1, maxi(1, page_count())]
+		_page_label.text = Loc.f("Page %d / %d", [page_index + 1, maxi(1, page_count())])
 	if _tier_label != null:
 		_tier_label.text = MeshGallery.tier_caption(tier)
 	if _group_label != null:
-		_group_label.text = "%d Meshes in dieser Sammlung" % AssetRegistry.keys_in_group(group_id).size()
+		_group_label.text = Loc.f("%d meshes in this collection", [AssetRegistry.keys_in_group(group_id).size()])
 	if _marks_label != null:
 		var count := MeshGallery.mark_count(_marks())
-		_marks_label.text = "Vorgemerkt: %d" % count
+		_marks_label.text = Loc.f("Marked: %d", [count])
 	for i in _tier_buttons.size():
 		var tier_id: String = AssetRegistry.TIERS[i]
 		var enabled := tier_id == tier
@@ -518,25 +520,25 @@ func _refresh_info() -> void:
 	var keys := visible_keys()
 	var key := MeshGallery.key_at(keys, active_pedestal)
 	if key == "":
-		_info_name.text = "Laufe zu einem Sockel, um ein Mesh zu betrachten"
-		_info_meta.text = "Die Sammlung zeigt %d Meshes · Detailstufe %s" % [
-			AssetRegistry.keys_in_group(group_id).size(), str(AssetRegistry.TIER_LABELS[tier]),
-		]
+		_info_name.text = Loc.f("Walk to a pedestal to look at a mesh", [])
+		_info_meta.text = Loc.f("The collection shows %d meshes · Detail level %s", [
+			AssetRegistry.keys_in_group(group_id).size(), AssetRegistry.tier_label(tier),
+		])
 		_info_note.text = ""
 		_mark_button.disabled = true
 		return
 	_mark_button.disabled = false
 	_info_name.text = "%s  %s" % [AssetRegistry.group_of(key).substr(0, 1).to_upper(), AssetRegistry.display_name(key)]
 	# Label and triangle count must match the level that actually stands there,
-	# or a slim build claims "1.000 Dreiecke" over a 200-triangle mesh.
+	# or a slim build claims "1.000 triangles" over a 200-triangle mesh.
 	var shown := AssetRegistry.best_available(key, tier)
-	var shown_label := str(AssetRegistry.TIER_LABELS[shown])
+	var shown_label := AssetRegistry.tier_label(shown)
 	if shown != tier:
-		shown_label += " (statt %s)" % str(AssetRegistry.TIER_LABELS[tier])
-	_info_meta.text = "%s   ·   %s   ·   %s Dreiecke   ·   %s" % [
+		shown_label = Loc.f("%s (instead of %s)", [shown_label, AssetRegistry.tier_label(tier)])
+	_info_meta.text = Loc.f("%s   ·   %s   ·   %s triangles   ·   %s", [
 		key, shown_label, AssetRegistry.tri_text(key, shown),
-		"Vorgemerkt" if MeshGallery.is_marked(_marks(), key) else "nicht vorgemerkt",
-	]
+		Loc.f("Marked", []) if MeshGallery.is_marked(_marks(), key) else Loc.f("not marked", []),
+	])
 	var note := MeshGallery.mark_note(_marks(), key)
-	_info_note.text = ("Notiz: %s" % note) if note != "" else "Keine Notiz — mit „Vormerken“ auf die Liste"
-	_mark_button.text = "Vormerken ✓" if MeshGallery.is_marked(_marks(), key) else "Vormerken"
+	_info_note.text = Loc.f("Note: %s", [note]) if note != "" else Loc.f("No note — use “Mark” to add it to the list", [])
+	_mark_button.text = Loc.f("Mark ✓", []) if MeshGallery.is_marked(_marks(), key) else Loc.f("Mark", [])

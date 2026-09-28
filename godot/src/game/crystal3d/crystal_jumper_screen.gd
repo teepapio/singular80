@@ -720,8 +720,8 @@ func _refresh_bag() -> void:
 	var parts: Array = []
 	for i in counts.size():
 		if int(counts[i]) > 0:
-			parts.append("◆ %s ×%d" % [CrystalTower.crystal_tier_name(theme, i + 1), int(counts[i])])
-	_bag_label.text = "\n".join(parts) if not parts.is_empty() else "Inventar leer"
+			parts.append(Loc.f("◆ %s ×%d", [CrystalTower.crystal_tier_name(theme, i + 1), int(counts[i])]))
+	_bag_label.text = "\n".join(parts) if not parts.is_empty() else Loc.f("Inventory empty", [])
 
 
 ## Lays the 3D inventory grid out in tier rows above the summit altar.
@@ -869,7 +869,14 @@ func _show_summit_panel() -> void:
 	column.add_child(Ui.title(Loc.f("%s summit reached!", [theme["icon"]]), 32, theme["accent"]))
 	column.add_child(Ui.label(Loc.f("%s · Level %d · Time: %s · Goal: %s", [theme["title"], int(config["level"]), CrystalTower.format_time(summit_time), CrystalTower.format_time(float(config["targetMs"])),]), 16, UiTheme.TEXT_DIM))
 	if summit_within_target:
-		column.add_child(Ui.label(Loc.f("Goal reached! %s", [("Level %d ist freigeschaltet." % (int(config["level"]) + 1) if int(config["level"]) < CrystalTower.MAX_LEVEL else "Du bist auf der höchsten Stufe!")]), 16, Color("facc15")))
+		# The two sentences are keys, not a German argument dropped into an
+		# English frame: an inline `if/else` inside `Loc.f` locks one language
+		# into the middle of another, and the level number inside it is a second
+		# substitution nobody can reorder.
+		var reached := (Loc.f("Level %d unlocked.", [int(config["level"]) + 1])
+			if int(config["level"]) < CrystalTower.MAX_LEVEL
+			else Loc.t("crystal.top_level"))
+		column.add_child(Ui.label(Loc.f("Goal reached! %s", [reached]), 16, Color("facc15")))
 	else:
 		column.add_child(Ui.label(Loc.f("Missed the goal (%s). Try again!", [CrystalTower.format_time(float(config["targetMs"]))]), 16, UiTheme.WARNING))
 

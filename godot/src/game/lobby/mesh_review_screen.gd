@@ -132,7 +132,7 @@ func _row(index: int, key: String) -> Control:
 	var title := Ui.label(AssetRegistry.display_name(key), 18, AssetRegistry.color_of(key), true)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(title)
-	head.add_child(Ui.label(str(AssetRegistry.TIER_LABELS.get(str(entry.get("tier", "low")), "low")), 13, UiTheme.TEXT_DIM))
+	head.add_child(Ui.label(AssetRegistry.tier_label(str(entry.get("tier", "low"))), 13, UiTheme.TEXT_DIM))
 	head.add_child(Ui.button("✕", Vector2(36, 30), UiTheme.PANEL_LIGHT, func() -> void:
 		MeshGallery.set_marks(MeshGallery.unmark(_marks(), key))
 		Sfx.select()

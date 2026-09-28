@@ -153,7 +153,7 @@ func _build_level_scroll() -> Control:
 # --- refresh ----------------------------------------------------------------
 
 func _refresh() -> void:
-	_gold_label.text = "◈ %s Gold   ·   %d Eier" % [Ui.format_number(int(profile.get("gold", 0))), int(profile.get("eggs", 0))]
+	_gold_label.text = Loc.f("◈ %s gold   ·   %d eggs", [Ui.format_number(int(profile.get("gold", 0))), int(profile.get("eggs", 0))])
 	_rebuild_dragons()
 	_rebuild_upgrades()
 	_rebuild_levels()
@@ -208,7 +208,7 @@ func _refresh_stats() -> void:
 		return
 	var breed := DragonFlight.breed_by_id(str(dragon["breed"]))
 	var stats := DragonFlight.resolve_stats(dragon, profile.get("upgrades", {}))
-	_title.text = "☄  DRACHENFLUG  ·  %s" % str(breed["name"])
+	_title.text = Loc.f("☄  DRAGON FLIGHT  ·  %s", [str(breed["name"])])
 	_stats.add_child(_wrap(str(breed["desc"]), 14, UiTheme.TEXT_MUTED))
 	_stat_row("Lebensenergie", "%d" % roundi(float(stats["max_hp"])), Color("22c55e"))
 	_stat_row("Tempo", "%.0f" % float(stats["speed"]), Color("38bdf8"))
@@ -341,8 +341,9 @@ func _refresh_detail() -> void:
 	var level_def := DragonFlight.level(selected_level)
 	var biome := DragonFlight.biome_by_id(str(level_def["biome"]))
 	var boss := str(level_def.get("boss", ""))
-	var boss_name := "Boss: %s" % str(DragonFlight.enemy_by_id(boss)["name"]) if not boss.is_empty() else "ohne Boss"
-	_detail.text = "Level %d · %s · %s m · %d Gegner gleichzeitig · %s" % [
+	var boss_name := (Loc.f("Boss: %s", [str(DragonFlight.enemy_by_id(boss)["name"])]) if not boss.is_empty()
+		else Loc.f("no boss", []))
+	_detail.text = Loc.f("Level %d · %s · %s m · %d enemies at once · %s", [
 		selected_level,
 		str(biome["name"]),
 		Ui.format_number(int(level_def["length"])) + " m",

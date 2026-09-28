@@ -2,10 +2,11 @@ class_name Loc
 extends RefCounted
 ## Language, translation lookup, locale-aware number formatting.
 ## Two key kinds, in order: `keys` (ids like `ui.back_to_lobby`) and `text` (the
-## German source string as its own key, which is what `Ui.label` passes to
-## `resolve()` — so existing labels translate without rewriting 650 call sites).
-## Invariant: `resolve()` is idempotent, because `_values` holds every string a
-## catalogue emits. A missing translation falls back active -> `de` -> the key.
+## source string as its own key, which is what `Ui.label` passes to `resolve()`
+## — so existing labels translate without rewriting 650 call sites).
+## Invariant: `resolve()` is idempotent, because `_values` and `_results` hold
+## every string a catalogue emits. A missing translation falls back
+## active -> source -> the key.
 ## Separators come from the catalogue (`1.234` de, `1,234` en). Persistence goes
 ## through `Game.set_language`, not a `ConfigFile` here.
 
@@ -92,9 +93,9 @@ static func boot() -> void:
 	elif _catalogues.has(SOURCE):
 		_apply(SOURCE)
 	else:
-		# No readable catalogue: the key *is* the German source text, so behaviour
-		# is exactly what it was before multi-language. The engine still has to
-		# hear it: `TranslationServer.set_locale` was skipped here, so `tr()` and
+		# No readable catalogue: the key *is* the source text, so behaviour is
+		# exactly what it was before multi-language. The engine still has to hear
+		# it: `TranslationServer.set_locale` was missing here, so `tr()` and
 		# `Control`'s own re-translation kept serving the project default while
 		# the rest of the game ran in the source.
 		_code = SOURCE
@@ -211,6 +212,9 @@ static func _placeholders(text: String) -> PackedStringArray:
 ## guard report a German sentence and its English translation as incompatible
 ## over nothing but the case of one letter: `F` is not a conversion character,
 ## `f` is. The trade is one format style the game does not use.
+##
+## Flags and conversions are the full set Godot's own formatter understands, so
+## a template this guard cannot see is a template it cannot check.
 static func _specifier_letters(text: String) -> PackedStringArray:
 	var out := PackedStringArray()
 	var i := 0
@@ -537,8 +541,8 @@ static func tn(key: String, count: int, args: Dictionary = {}) -> String:
 	return _interpolate(_raw(key, float(count)), filled)
 
 
-## Translates a German source text. Used by `Ui` and the base classes; game code
-## calls `t`.
+## Translates a source text. Used by `Ui` and the base classes; game code calls
+## `t`.
 static func resolve(value: String) -> String:
 	if value == "":
 		return ""
@@ -589,8 +593,8 @@ static func _raw(key: String, count: float = 0.0) -> String:
 		return _pick(_keys[key], count)
 	if _text.has(key):
 		return _pick(_text[key], count)
-	# Fall back to the source language: a half-translated language shows German
-	# where it has nothing yet, not the key.
+	# Fall back to the source language: a half-translated language shows the
+	# source where it has nothing yet, not the key.
 	var source: Dictionary = _catalogues.get(SOURCE, {})
 	var source_keys: Dictionary = source.get("keys", {})
 	var source_text: Dictionary = source.get("text", {})
@@ -723,10 +727,10 @@ static func coverage(code: String) -> float:
 	return float(done) / float(total) if total > 0 else 1.0
 
 
-## Keys still German in `code`. For tests, and for the language picker, which may
-## say how far a language has got. A plural that is only half translated is named
-## by the form that is missing — `ui.queue_waiting/other` — the same spelling
-## `_add_message` gives it.
+## Keys still untranslated in `code`. For tests, and for the language picker,
+## which may say how far a language has got. A plural that is only half
+## translated is named by the form that is missing —
+## `ui.queue_waiting/other` — the same spelling `_add_message` gives it.
 static func missing(code: String) -> PackedStringArray:
 	_ensure()
 	var out := PackedStringArray()

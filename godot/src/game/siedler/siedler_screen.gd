@@ -1,46 +1,28 @@
 class_name SiedlerScreen
 extends WorldScreen
-## Siedler 3D — Aufbauspiel nach *Die Siedler* (Blue Byte, Amiga 1993).
-##
-## Alle Regeln stehen in `Siedler` (`core/logic/siedler.gd`); diese Datei
-## zeichnet sie nur. Sichtbar gemacht wird genau die Erfindung des Originals:
-## jede türkise Fahne ist ein Verkehrsknoten, jeder farbige Punkt auf einer
-## Straße ist ein Träger mit genau einer Last, und an jeder Fahne wird
-## umgeladen. Wer mehr Fahnen auf eine Straße setzt, erhöht den Durchsatz — und
-## sieht es sofort.
-##
-## Bewusst besser als 1993 (das Original kritisierte man vor allem für seine
-## steile Lernkurve und den unsichtbaren Zustand): jedes Gebäude sagt, **warum**
-## es stillsteht, eine Ware ohne Abnehmer wird gemeldet statt still zu
-## verstopfen, und jede Straße zeigt ihren Durchsatz. Dazu die eine Zahl, an der
-## Siedler-Veteranen als Erstes den Speicherplatz der Burg vermissen: das Lager
-## ist endlich, ein Lagerhaus erweitert ihn wirklich, und ist die Kammer voll,
-## steht die Zahl im Kopf — samt der Ware, die den Platz frisst.
-##
-## Darstellung:
-##  - das Gelände ist **ein** `ArrayMesh` mit Vertexfarben, kein Mesh je Feld
-##  - alle Träger stecken in **einem** `MultiMesh` (eine Zeichenoperation)
-##  - Lagerstätten und Territorium liegen in `MultiMesh` pro Rohstoff
-##  - Gebäude, Fahnen und Siedler werden aus Pools wiederverwendet
-##  - `_update_world` allokiert nichts
+## Siedler 3D — a settlement builder after *Die Siedler* (Blue Byte, Amiga 1993).
+## Rules live in `Siedler` (`core/logic/siedler.gd`); this file only draws them.
+## The 1993 original hid *why* a building stalled — here every one says so.
+## One `ArrayMesh` for the terrain, one `MultiMesh` for all carriers, no allocations
+## in `_update_world`; buildings, flags and serfs come from pools.
 
 const GROUND_Y := 0.0
 const ROAD_Y := 0.09
 const TILE := 1.0
-## So viele Träger werden höchstens gezeichnet.
+## At most this many carriers are drawn.
 const MAX_CARRIERS := 420
-## So viele Siedler werden gezeichnet.
+## This many serfs are drawn.
 const MAX_SERFS := 48
-## Wie hoch eine Beschriftung über einem Gebäude schwebt.
+## How far a building label floats above its building.
 const LABEL_HEIGHT := 2.1
 
 enum Tool { SELECT, ROAD, FLAG }
 
 var siedler := Siedler.new()
 var tool: int = Tool.SELECT
-## Das armierte Gebäude aus dem Bau-Bogen, "" wenn keins.
+## The armed building from the build arc, "" if none.
 var armed_kind: String = ""
-## Startfeld einer Straßenplanung, -1 wenn keine läuft.
+## Start cell of a road planning, -1 if none is running.
 var road_from: int = -1
 var selected_building: int = -1
 var hover_cell: int = -1
@@ -69,25 +51,24 @@ var _inspector: PanelContainer
 var _inspector_body: VBoxContainer
 var _tool_buttons: Dictionary = {}
 var _modal_layer: Control
-## Die Ratgeber-Karte unten in der Mitte: der eine Grund, aus dem die Siedlung
-## gerade steht, mit dem Knopf, der ihn behebt.
+## The advisor card at the bottom centre: the one reason the settlement is stuck
+## right now, plus the button that fixes it.
 var _advisor: PanelContainer
 var _advisor_body: VBoxContainer
-## Schlüssel des zuletzt gebauten Ratgebers, damit die Karte nicht fünfmal pro
-## Sekunde neu aufgebaut wird.
+## Key of the last built advisor, so the card is not rebuilt five times a second.
 var _advisor_key := ""
-## Der Rat, der gerade auf der Karte steht.
+## The advice currently shown on the card.
 var _advisor_top: Dictionary = {}
-## Feld, auf das der Ratgeber gerade zeigt, -1 wenn keins.
+## Cell the advisor currently points at, -1 if none.
 var _advisor_cell := -1
-## Die Karte „Handelswege": der Bericht, welche Straße welche Ware trägt. Sie
-## ist ein Dialog und kein Dauerpanel, denn sie ändert sich mit jeder Sekunde
-## und eine springende Liste liest niemand.
+## The "Handelswege" card: which road carries which good. A dialog and not a
+## permanent panel, because it changes every second and nobody reads a list
+## that keeps jumping.
 var _routes_body: VBoxContainer = null
-## Was der letzte Optimierer-Durchgang getan hat, Zeile für Zeile.
+## What the last optimizer pass did, line by line.
 var _routes_notes: Array[String] = []
-## So viele Strecken zeigt die Karte. Alles darüber würde die Liste aus dem
-## Bild schieben, und die längsten Strecken stehen ohnehin oben.
+## How many routes the card shows. More would push the list out of view, and the
+## longest routes are on top anyway.
 const ROUTE_ROWS := 6
 
 # --- rebuild flags ----------------------------------------------------------
@@ -95,7 +76,7 @@ var _roads_dirty := true
 var _terrain_dirty := true
 var _slow_timer := 0.0
 var _hud_timer := 0.0
-## Laufzeit des Bildschirms, damit das Quadrat des Ratgebers pulsieren kann.
+## Screen runtime, so the advisor's square can pulse.
 var _clock := 0.0
 var _notice_shown := ""
 var _end_shown := false
@@ -264,9 +245,9 @@ func _build_panels() -> void:
 	help_row.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
 	help_row.position = Vector2(-248, -58)
 	hud_root.add_child(help_row)
-	# Die Handelswege gehören neben die Hilfe, nicht in die Werkzeugleiste:
-	# dort stehen schon drei Werkzeuge und der Bogen, und ein fünfter Knopf
-	# würde auf dem Telefon die halbe Breite fressen.
+	# The routes button belongs next to the help, not in the tool bar: three
+	# tools and the build arc are already there, and a fifth button would eat
+	# half the width on a phone.
 	help_row.add_child(Ui.button("⇄ Routes", Vector2(96, 48), UiTheme.PANEL_LIGHT, func() -> void:
 		_open_routes_sheet()
 	))
@@ -277,10 +258,10 @@ func _build_panels() -> void:
 		selected_building = -1
 	))
 
-	# Die Ratgeber-Karte. Sie liegt unten in der Mitte, wo nichts liegt, und
-	# nennt *einen* Grund — die ganze Liste holt der Spieler über den Knopf.
-	# Feste Anker statt `set_anchors_and_offsets_preset`: die Karte soll
-	# zentriert bleiben, wenn der Schweregrad sie wachsen lässt.
+	# The advisor card sits bottom centre, where nothing else is, and names *one*
+	# reason; the button opens the full list.
+	# Fixed anchors instead of `set_anchors_and_offsets_preset`: the card has to
+	# stay centred when the difficulty setting makes it grow.
 	_advisor = Ui.panel(Color(0.031, 0.047, 0.086, 0.9), UiTheme.BORDER, 12)
 	_advisor.anchor_left = 0.5
 	_advisor.anchor_right = 0.5
@@ -554,7 +535,7 @@ func _on_tap(cell: int) -> void:
 		else:
 			notify(siedler.notice)
 		return
-	# Ohne Werkzeug: auswählen.
+	# No tool armed: select.
 	selected_building = int(siedler.cells[cell]["building"])
 	Sfx.select()
 
@@ -603,9 +584,8 @@ func _set_speed(index: int) -> void:
 
 
 func _update_ghost() -> void:
-	# Der Ratgeber kann auf ein Feld zeigen, auf dem nichts gebaut werden soll —
-	# eine Fahne, die gestaut ist. Dann pulsiert dort ein Quadrat, damit der
-	# Spieler nicht raten muss, wohin er tippen soll.
+	# The advisor can point at a cell that cannot be built on (a stalled flag).
+	# A pulsing square there shows the player where to tap.
 	if armed_kind == "" and tool == Tool.FLAG and _advisor_cell >= 0:
 		_ghost.position = siedler.cell_position(_advisor_cell, 0.06)
 		_ghost.visible = true
@@ -640,7 +620,7 @@ func _update_preview() -> void:
 	_preview.visible = true
 	_preview.position = (a + b) * 0.5
 	_preview.scale = Vector3(maxf(a.distance_to(b), 0.2), 1.0, 1.0)
-	# Der Balken liegt entlang der Verbindungsachse.
+	# The bar lies along the connecting axis.
 	_preview.rotation.y = atan2(b.x - a.x, b.z - a.z)
 
 
@@ -665,15 +645,15 @@ func _update_world(delta: float) -> void:
 	_sync_carriers()
 	_animate_machines()
 
-	# Lagerstätten und Territorium nur alle halbe Sekunde: sie ändern sich
-	# selten, und das spart das Neuschreiben tausender Instanzmatrizen.
+	# Warehouses and territory only every half second: they change rarely, and
+	# this saves rewriting thousands of instance matrices.
 	_slow_timer += delta
 	if _slow_timer > 0.5:
 		_slow_timer = 0.0
 		_rebuild_props()
 		_rebuild_territory()
 
-	# Das blinkende Quadrat des Ratgebers pulsiert auch ohne Zeigerbewegung.
+	# The advisor's blinking square pulses even without pointer movement.
 	if armed_kind == "" and tool == Tool.FLAG and _advisor_cell >= 0:
 		_clock += delta
 		_update_ghost()
@@ -710,8 +690,8 @@ func _build_terrain() -> void:
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var size := siedler.map_size
 	var half := float(size) * 0.5
-	# Höhen je Gitterpunkt: Mittel der bis zu vier angrenzenden Felder, damit
-	# benachbarte Quads keine Risse bekommen.
+	# Height per grid point: the mean of the up to four adjacent cells, so
+	# neighbouring quads do not tear.
 	var heights: PackedFloat32Array = PackedFloat32Array()
 	heights.resize(size * size)
 	for j in size:
@@ -778,7 +758,7 @@ func _quad(
 # --- roads ------------------------------------------------------------------
 
 ## One `ArrayMesh` of road quads, rebuilt only when the network changes. A busy
-## road is heller — das ist die Durchsatzanzeige in der Welt.
+## road is lighter — that is the throughput readout in the world itself.
 func _build_roads() -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -849,7 +829,7 @@ func _rebuild_props() -> void:
 
 
 ## A translucent quad over every plot the player owns, so "wo darf ich noch
-## bauen?" sich mit einem Blick beantwortet.
+## bauen?" is answered at a glance.
 func _rebuild_territory() -> void:
 	var slot := 0
 	for i in siedler.cells.size():
@@ -924,7 +904,7 @@ func _sync_buildings() -> void:
 			_world_root.add_child(node)
 			_building_nodes[id] = node
 		node.position = siedler.cell_position(int(building["cell"]))
-		# Nur fertige Gebäude bekommen ein Schild; eine Bauhalle nicht.
+		# Only finished buildings get a sign; a construction site does not.
 		var spec := Siedler.spec_of(str(building["kind"]))
 		if str(building["state"]) == "done" and not _building_labels.has(id):
 			var label := Label3D.new()
@@ -1017,7 +997,7 @@ func _animate_machines() -> void:
 # --- carriers ---------------------------------------------------------------
 
 ## One `MultiMesh` holds every carrier, tinted by the good it carries. An empty
-## carrier is grau, so die Umladung ist auf einen Blick lesbar.
+## carrier is grey, so the transshipment is readable at a glance.
 func _sync_carriers() -> void:
 	var multimesh := _carriers.multimesh
 	var slot := 0
@@ -1035,7 +1015,7 @@ func _sync_carriers() -> void:
 			if good == "":
 				multimesh.set_instance_color(slot, Color("64748b"))
 			else:
-				# `class_name` ist ein reserviertes Wort, darum heißt es hier family.
+				# `class_name` is a reserved word, hence `family` here.
 				var family := str(Siedler.GOOD_CLASS.get(good, "wood"))
 				multimesh.set_instance_color(slot, Siedler.CLASS_COLORS.get(family, Color.WHITE))
 			slot += 1
@@ -1056,11 +1036,10 @@ func _update_stats() -> void:
 		],
 		"Werkzeuge %d" % _tool_count(),
 	]
-	# Die Lagerzeile steht über der Nahrung, weil sie dieselbe Frage beantwortet:
-	# Wie viel ist da, und wie viel geht noch hinein? Ohne sie sieht der Spieler
-	# eine prall gefüllte Burg erst dann, wenn nichts mehr hineinpasst. Die Zahl
-	# der abgewiesenen Lieferungen steht hier und nicht auf der Ratgeber-Karte,
-	# denn sie zählt im Sekundentakt weiter.
+	# The storage line sits above the food, because it answers the same question:
+	# how much is there, and how much still fits? Without it the player only sees
+	# a full castle once nothing fits any more. The refused-delivery count lives
+	# here and not on the advisor card, because it keeps counting every second.
 	if bool(store["full"]):
 		lines.append("Lager voll: %d von %d Plätzen · %d Lieferungen abgewiesen" % [
 			int(store["used"]), int(store["capacity"]), int(store["refused_total"]),
@@ -1084,10 +1063,9 @@ func _update_stats() -> void:
 	_stats_label.text = "\n".join(lines)
 
 
-## Der Ratgeber. Das ist die Karte, die einem neuen Spieler die teuerste
-## Lektion des Originals erspart: nicht *irgendein* Gebäude steht still,
-## sondern *dieses* hier, und es braucht *diese* Ware — mit dem Knopf, der
-## genau das tut. Die Logik dahinter liegt in `Siedler.bottlenecks()`.
+## The advisor: the card that spares a new player the original's most expensive
+## lesson. Not *some* building is idle, but *this* one, and it needs *this* good —
+## with the button that does exactly that. The logic is in `Siedler.bottlenecks()`.
 func _update_advisor() -> void:
 	var list := siedler.bottlenecks()
 	if list.is_empty():
@@ -1099,9 +1077,8 @@ func _update_advisor() -> void:
 	var top: Dictionary = list[0]
 	_advisor_cell = int(top["cell"])
 	_advisor_top = top
-	# Die Karte wird nur neu gebaut, wenn der Rat sich selbst ändert. Sonst
-	# zappelt sie fünfmal pro Sekunde, und niemand liest einen Text, der
-	# zappelt.
+	# The card is rebuilt only when the advice itself changes; otherwise it
+	# flickers five times a second, and nobody reads flickering text.
 	var key := "%s:%s:%d" % [str(top["code"]), str(top["good"]), int(top["count"])]
 	if key == _advisor_key and _advisor.visible:
 		return
@@ -1113,8 +1090,8 @@ func _update_advisor() -> void:
 	var color := _severity_color(int(top["severity"]))
 	_advisor_body.add_child(Ui.label(str(top["title"]), 17, color, true))
 	var detail := Ui.label(str(top["detail"]), 13, UiTheme.TEXT_DIM)
-	# Die Kartenhöhe wächst mit dem Text; ohne Umbruch liefe der Satz über den
-	# Rand hinaus.
+	# The card grows with the text; without wrapping the sentence would run past
+	# the edge.
 	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_advisor_body.add_child(detail)
 
@@ -1144,7 +1121,7 @@ func _severity_color(severity: int) -> Color:
 	return UiTheme.SUCCESS
 
 
-## Die Beschriftung des Knopfs, der den obersten Rat behebt.
+## The label of the button that fixes the top advice.
 func _fix_label(fix: String) -> String:
 	if fix.begins_with("build:"):
 		var kind := fix.substr(6)
@@ -1162,8 +1139,8 @@ func _fix_label(fix: String) -> String:
 	return ""
 
 
-## Führt den Griff aus, den der Ratgeber vorschlägt. Jeder Vorschlag ist eine
-## Ein-Knopf-Griff, damit der Spieler nicht erst im Bau-Bogen suchen muss.
+## Runs the move the advisor proposed. Every proposal is a one-button move, so
+## the player does not have to search the build arc first.
 func _run_fix(fix: String, target: int) -> void:
 	Sfx.select()
 	if fix.begins_with("build:"):
@@ -1201,16 +1178,16 @@ func _run_fix(fix: String, target: int) -> void:
 		selected_building = target
 
 
-## Kann die Burg dieses Gebäude noch bezahlen? Sonst würde der Knopf ins Leere
-## zeigen und der Spieler wundert sich über eine rote Karte.
+## Can the castle still pay for this building? Otherwise the button would lead
+## nowhere and the player would be surprised by a red card.
 func _can_pay(kind: String) -> bool:
 	var cost: Dictionary = Siedler.spec_of(kind)["cost"]
 	return int(siedler.store.get("planks", 0)) >= int(cost["planks"]) \
 		and int(siedler.store.get("stone", 0)) >= int(cost["stone"])
 
 
-## Die vollständige Liste — der Spieler soll sehen, dass es nicht *einen*
-## Engpass gibt, sondern eine Rangfolge, und selbst entscheiden dürfen.
+## The full list — the player should see that there is not *one* bottleneck but
+## a ranking, and be allowed to decide for themselves.
 func _show_all_advice() -> void:
 	Sfx.select()
 	var root := _modal_root()
@@ -1251,9 +1228,9 @@ func _show_all_advice() -> void:
 
 # --- Handelswege -------------------------------------------------------------
 
-## Die Karte „Handelswege". Sie beantwortet die Frage, die der Vorschlag stellt:
-## *welche* Straße trägt *welche* Ware. Der Ratgeber sagt, welches Gebäude
-## hungert; diese Karte sagt, warum die Lieferung trotzdem zu langsam ist.
+## The "Handelswege" card answers the question the proposal poses: *which* road
+## carries *which* good. The advisor says which building is hungry; this card
+## says why the delivery is still too slow.
 func _open_routes_sheet() -> void:
 	Sfx.select()
 	_routes_notes = []
@@ -1293,8 +1270,8 @@ func _open_routes_sheet() -> void:
 	))
 
 
-## Baut den Karteninhalt neu auf. Nach einem Optimierer-Durchgang ändert sich
-## die Zahl der Strecken, also kann man die Zeilen nicht wiederverwenden.
+## Rebuilds the card content. After an optimizer pass the number of routes
+## changes, so the rows cannot be reused.
 func _rebuild_routes_sheet() -> void:
 	if _routes_body == null or not is_instance_valid(_routes_body):
 		return
@@ -1326,10 +1303,9 @@ func _note_label(text: String, color: Color) -> Label:
 	return label
 
 
-## Eine Strecke in der Karte: was sie trägt, wie viele Träger sie hat, und der
-## eine Satz, was daran zu tun ist. Dazu dieselben zwei Griffe, die der
-## Optimierer nimmt — damit der Spieler dem Vorschlag widersprechen kann,
-## statt ihn nur hinnehmen zu müssen.
+## One route in the card: what it carries, how many carriers, and the one sentence
+## about what to do. Plus the same two moves the optimizer takes, so the player
+## can disagree with the proposal instead of having to accept it.
 func _route_row(entry: Dictionary) -> Control:
 	var box := Ui.vbox(2)
 	var head := Ui.hbox(8)
@@ -1341,9 +1317,9 @@ func _route_row(entry: Dictionary) -> Control:
 		Siedler.CLASS_COLORS.get(family, UiTheme.TEXT), true
 	))
 	if str(entry["kind"]) == "link":
-		# Der Stummel zwischen Haus und Fahne trägt die halbe Lieferung einer
-		# jungen Siedlung. Er steht im Bericht, aber er ist kein Handelsweg, und
-		# das soll der Spieler beim Lesen der Zeile sofort sehen.
+		# The stub between house and flag carries half the delivery of a young
+		# settlement. It is in the report, but it is not a trade route, and the
+		# player should see that at once when reading the row.
 		head.add_child(Ui.label("Neighbour", 12, UiTheme.TEXT_MUTED))
 	head.add_child(Ui.label(
 		Loc.f("%d of %d", [int(entry["top_count"]), int(entry["total"])]), 12, UiTheme.TEXT_MUTED
@@ -1393,13 +1369,13 @@ func _split_road(cell: int) -> void:
 		Sfx.select()
 	else:
 		notify(siedler.notice)
-	# Eine Fahne teilt eine Straße in zwei, und die Kanten-Ids verschieben sich
-	# dabei. Die Karte liest deshalb nach jedem Griff neu.
+	# A flag splits a road in two and the edge ids shift, so the card re-reads
+	# after every move.
 	_rebuild_routes_sheet()
 
 
-## Der eine Griff aus dem Vorschlag. Er kommt aus der Logik und meldet sich
-## selbst per `notice`; die Karte zeigt zusätzlich, was er getan hat.
+## The single move from the proposal. It comes from the logic and reports
+## itself via `notice`; the card additionally shows what it did.
 func _run_optimizer() -> void:
 	_routes_notes = siedler.optimize_trade_routes()
 	_roads_dirty = true
@@ -1415,8 +1391,8 @@ func _tool_count() -> int:
 	return total
 
 
-## Der Inspektor beantwortet die Frage, die das Original am meisten quälte:
-## warum steht dieses Gebäude still?
+## The inspector answers the question that bothered the original most:
+## why is this building idle?
 func _update_inspector() -> void:
 	if selected_building < 0 or selected_building >= siedler.buildings.size():
 		_inspector.visible = false
@@ -1437,9 +1413,8 @@ func _update_inspector() -> void:
 	if not rival:
 		status_color = UiTheme.SUCCESS if str(building["status"]) == "ok" else UiTheme.WARNING
 	_inspector_body.add_child(_row("Zustand", status_text, status_color))
-	# Die Burg *ist* die Vorratskammer. Deshalb steht hier der Lagerplatz, und
-	# nicht irgendein Warenbestand: eine volle Kammer nimmt keine Lieferung mehr
-	# an, und das sieht man sonst erst an der Stau-Zeile.
+	# The castle *is* the warehouse: it shows the storage slots. A full store
+	# refuses deliveries, which is otherwise only visible in the queue row.
 	if not rival and str(building["kind"]) == "castle":
 		var store := siedler.store_report()
 		_inspector_body.add_child(_row(

@@ -23,7 +23,10 @@ const THEMES := {
 		"id": THEME_CHRISTMAS,
 		"title": "Christmas Merge 3D",
 		"icon": "✦",
-		"tierNames": ["Tannenzapfen", "Zuckerstange", "Glaskugel", "Lebkuchenstern", "Christstern"],
+		"tierNames": [
+			"merge.tier.christmas.0", "merge.tier.christmas.1", "merge.tier.christmas.2",
+			"merge.tier.christmas.3", "merge.tier.christmas.4",
+		],
 		"tierColors": [Color("b45309"), Color("ef4444"), Color("7dd3fc"), Color("d97706"), Color("facc15")],
 		"tierAssets": ["xmas_pinecone", "xmas_candy_cane", "xmas_bauble", "xmas_gingerbread_star", "xmas_star"],
 		"background": Color("0a1220"),
@@ -39,7 +42,10 @@ const THEMES := {
 		"id": THEME_HALLOWEEN,
 		"title": "Halloween Merge 3D",
 		"icon": "☽",
-		"tierNames": ["Kürbiskern", "Süßigkeit", "Mini-Kürbis", "Kürbis", "Geisterkürbis"],
+		"tierNames": [
+			"merge.tier.halloween.0", "merge.tier.halloween.1", "merge.tier.halloween.2",
+			"merge.tier.halloween.3", "merge.tier.halloween.4",
+		],
 		"tierColors": [Color("fef3c7"), Color("f472b6"), Color("fb923c"), Color("ea580c"), Color("a7f3d0")],
 		"tierAssets": ["halloween_seed", "halloween_candy", "halloween_mini_pumpkin", "halloween_pumpkin", "halloween_ghost_pumpkin"],
 		"background": Color("0b0616"),
@@ -58,11 +64,28 @@ static func theme_by_id(id: String) -> Dictionary:
 	return THEMES[THEME_HALLOWEEN if id == THEME_HALLOWEEN else THEME_CHRISTMAS]
 
 
+## The tier names are display text, not asset keys, and they sit under a dict
+## key the extractor does not look at — so they are identifiers here and the
+## array below is what makes them discoverable.
+const MERGE_LOC_KEYS: Array[String] = [
+	"merge.tier.christmas.0",
+	"merge.tier.christmas.1",
+	"merge.tier.christmas.2",
+	"merge.tier.christmas.3",
+	"merge.tier.christmas.4",
+	"merge.tier.halloween.0",
+	"merge.tier.halloween.1",
+	"merge.tier.halloween.2",
+	"merge.tier.halloween.3",
+	"merge.tier.halloween.4",
+]
+
+
 static func tier_name(theme: Dictionary, tier: int) -> String:
 	if tier <= 0:
 		return "—"
 	var index: int = clampi(tier, 1, MAX_MERGE_TIER) - 1
-	return str((theme["tierNames"] as Array)[index])
+	return Loc.t(str((theme["tierNames"] as Array)[index]))
 
 
 static func tier_color(theme: Dictionary, tier: int) -> Color:
@@ -217,7 +240,7 @@ static func is_pressing(board: PackedInt32Array, limit: int = PRESSURE_CELLS) ->
 	return board.size() - used_cells(board) <= limit
 
 
-## One line for the tip, e.g. "3× Tannenzapfen → 1× Zuckerstange · +3". Empty when
+## One line for the tip, e.g. "3× Pinecone → 1× Candy cane · +3". Empty when
 ## there is nothing to point at.
 static func hint_text(theme: Dictionary, board: PackedInt32Array, cells: PackedInt32Array) -> String:
 	if cells.is_empty() or cells[0] < 0 or cells[0] >= board.size():
@@ -226,13 +249,13 @@ static func hint_text(theme: Dictionary, board: PackedInt32Array, cells: PackedI
 	if tier == EMPTY_CELL or tier >= MAX_MERGE_TIER:
 		return ""
 	var created: int = 2 if cells.size() >= MERGE_5 else 1
-	return "%d× %s → %d× %s  +%d" % [
+	return Loc.f("%d× %s → %d× %s  +%d", [
 		cells.size(),
 		tier_name(theme, tier),
 		created,
 		tier_name(theme, tier + 1),
 		merge_score(tier, cells.size()),
-	]
+	])
 
 
 ## Whether any tier on the board still has enough items for a 3-merge.

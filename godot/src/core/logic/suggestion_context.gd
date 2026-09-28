@@ -5,46 +5,72 @@ extends RefCounted
 ## front of the submitted text so the dashboard can group ideas by origin.
 
 ## Screens that are not playable games still deserve a label.
-const SCREEN_LABELS := {
-	"lobby": "Lobby",
-	"lobby_list": "Spieleliste",
-	"main_menu": "Hauptmenü",
-	"game_over": "Spielende",
-	"mesh_gallery": "Mesh-Galerie",
-	"mesh_review": "Mesh-Improvements",
+##
+## The label lands in the `{game}` argument of `ui.suggest_origin`. The frame
+## around it is translated; these values are the one place a German word would
+## survive that, so they get keys and a lookup of their own.
+const SCREEN_LOC_KEY := {
+	"lobby": "ui.origin.lobby",
+	"lobby_list": "ui.origin.lobby_list",
+	"main_menu": "ui.origin.main_menu",
+	"game_over": "ui.origin.game_over",
+	"mesh_gallery": "ui.origin.mesh_gallery",
+	"mesh_review": "ui.origin.mesh_review",
 }
+
+## Every key above, in the array form the extractor recognises. They are only
+## ever looked up in a dictionary, and a key that is never written down
+## anywhere is a key nobody can find when it goes missing.
+const SCREEN_LOC_KEYS: Array[String] = [
+	"ui.origin.lobby",
+	"ui.origin.lobby_list",
+	"ui.origin.main_menu",
+	"ui.origin.game_over",
+	"ui.origin.mesh_gallery",
+	"ui.origin.mesh_review",
+	"ui.origin.unknown",
+]
 
 ## Never let a very long label eat the 2000 characters the server accepts.
 const MAX_PREFIX := 48
 
-const UNKNOWN := "Spiel"
+const UNKNOWN_LOC_KEY := "ui.origin.unknown"
+
+## The fallback label. A key rather than a string, so the dashboard sees the
+## word in the player's language too.
+static func unknown() -> String:
+	return Loc.t(UNKNOWN_LOC_KEY)
 
 
-## The German label for a screen id, from the game registry when the screen
-## belongs to a game.
+## The label for a screen id, from the game registry when the screen belongs to
+## a game. Registry names and free text are already in the catalogue, so they go
+## through `Loc.resolve`; the six screens above have no registry entry and get a
+## key.
 static func for_screen(screen_id: String) -> String:
 	if screen_id == "":
-		return UNKNOWN
+		return unknown()
 	for game in GameRegistry.GAMES:
 		if str(game.get("screen", "")) == screen_id:
-			return str(game.get("name", screen_id))
-	var label: Variant = SCREEN_LABELS.get(screen_id)
-	return str(label) if label != null else screen_id
+			return Loc.resolve(str(game.get("name", screen_id)))
+	var key := str(SCREEN_LOC_KEY.get(screen_id, ""))
+	if key != "":
+		return Loc.t(key)
+	return screen_id
 
 
 ## The label for a context that may be a screen id or free text. Free text is
 ## passed through unchanged (trimmed and shortened), which is what the mesh
-## gallery uses for "Mesh-Galerie · Drachen".
+## gallery uses for "Mesh gallery · dragons".
 static func resolve(context: String) -> String:
 	var text := context.strip_edges()
 	if text == "":
-		return UNKNOWN
+		return unknown()
 	for game in GameRegistry.GAMES:
 		if text == str(game.get("id", "")) or text == str(game.get("screen", "")):
-			return str(game.get("name", text))
-	var label: Variant = SCREEN_LABELS.get(text)
-	if label != null:
-		return str(label)
+			return Loc.resolve(str(game.get("name", text)))
+	var key := str(SCREEN_LOC_KEY.get(text, ""))
+	if key != "":
+		return Loc.t(key)
 	if text.length() > MAX_PREFIX:
 		return text.substr(0, MAX_PREFIX)
 	return text
@@ -56,7 +82,7 @@ static func resolve(context: String) -> String:
 static func compose(context: String, text: String) -> String:
 	var body := text.strip_edges()
 	var label := resolve(context)
-	if label == "" or label == UNKNOWN:
+	if label == "" or label == unknown():
 		return body
 	var prefix := "%s: " % label
 	if body.begins_with(prefix) or body.begins_with("%s — " % label) or body.begins_with("%s —" % label):

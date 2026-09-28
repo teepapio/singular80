@@ -1010,14 +1010,44 @@ export class Runner {
   }
 
   /**
+   * The argv for the chosen terminal mode. `S80_TERMINAL=tui` or `run`, default
+   * `tui`.
+   */
+  private terminalArgs(bin: string, record: RunRecord): string[] {
+    const mode = (process.env.S80_TERMINAL ?? 'tui').toLowerCase();
+    // `--standalone` is not optional and not a detail. Without it `opencode`
+    // connects to the **background service** — the one the owner's own opencode
+    // window is attached to. The run then does not stay in the terminal we opened
+    // for it: it appears there as another session, half-written prompts land in a
+    // window someone is working in, and two terminals show two halves of one job.
+    // A private server per run is the only way to keep them apart.
+    if (mode === 'run') {
+      return [bin, 'run', '--standalone', '--auto', '--title', `Vorschlag #${record.suggestionId}`, record.prompt];
+    }
+    return [bin, '--standalone', '--auto', '--prompt', record.prompt];
+  }
+
+  /**
    * Opens the session in a terminal emulator, or returns null to let the caller
    * fall back to the piped run.
    *
-   * The interactive `opencode` is used here rather than `opencode run`: `run`
-   * prints a JSON stream meant for a parser, which in a terminal window is
-   * unreadable. The trade-off is that no summary, cost or session id arrives —
-   * the changelog then uses the suggestion's own text, which is what a reader
-   * wants to see anyway.
+   * Two modes, because the two `opencode` commands are not interchangeable:
+   *
+   *  - `tui` (the default, what the owner asked for): bare `opencode --auto
+   *    --prompt`. A real OpenCode window that shows the work as it happens and
+   *    can be typed into.
+   *  - `run`: `opencode run` with its normal output — a short, readable log
+   *    instead of a full-screen interface.
+   *
+   * The TUI is the better window and the worse automation. When the agent has
+   * finished, it does not exit: it sits at a prompt waiting for the next
+   * instruction. So a run in the TUI ends when the window is closed, not when
+   * the work is done, and the owner has to close it. `S80_TERMINAL=run` trades
+   * the interface for a session that ends by itself, which is the right choice
+   * for a long queue nobody is watching.
+   *
+   * Without the JSON stream there is no summary, cost or session id either, so
+   * the changelog uses the suggestion's own text.
    */
   private openTerminal(entry: RunEntry, bin: string, pipedArgs: string[]): TerminalSession | null {
     entry.pipedArgs = pipedArgs;
@@ -1034,7 +1064,7 @@ export class Runner {
       args: found.args,
       title: `Singular 80 — #${record.suggestionId}`,
       cwd: this.options.projectRoot,
-      command: [bin, '--auto', '--prompt', record.prompt],
+      command: this.terminalArgs(bin, record),
       stateDir,
       runId: record.id,
     });
@@ -1109,17 +1139,42 @@ export class Runner {
       this.rememberPid(entry.record.id, pid);
     }
     const code = readExitFile(session.exitFile);
-    if (code === null) return;
+    if (code === null) {
+      // No exit code, but the session is gone: the window was closed. In TUI mode
+      // that is the normal end — the agent finished and left the interface open,
+      // and closing the window is how the owner says so.
+      //
+      // Without this the run stays "läuft" for the full hard timeout, and the
+      // queue waits behind a job nobody is doing any more. It is also the one
+      // place where success cannot be claimed: the result was never reported, so
+      // the run is recorded as cancelled and the suggestion returns to the queue
+      // where the owner can look at the window's output and decide.
+      if (entry.pid !== null && !isProcessAlive(entry.pid)) {
+        this.finishTerminalRun(entry, 'Im Terminal beendet, ohne Ergebnis zu melden.', 'cancelled');
+      }
+      return;
+    }
+    this.finishTerminalRun(entry, undefined, undefined, code);
+  }
+
+  /** Closes a terminal run down: stop the poll, clear the files, record the outcome. */
+  private finishTerminalRun(
+    entry: RunEntry,
+    note?: string,
+    forced?: 'cancelled',
+    code?: number,
+  ): void {
+    const session = entry.terminal;
     if (entry.timer) {
       clearInterval(entry.timer);
       entry.timer = null;
     }
-    clearTerminalState(session);
+    if (session) clearTerminalState(session);
     if (entry.timedOut) return;
-    if (entry.cancelRequested) {
-      this.finalize(entry, code, 'Abgebrochen (Terminal)', 'cancelled');
+    if (entry.cancelRequested || forced === 'cancelled') {
+      this.finalize(entry, code ?? null, note ?? 'Abgebrochen (Terminal)', 'cancelled');
     } else {
-      this.finalize(entry, code);
+      this.finalize(entry, code ?? null, note);
     }
   }
 

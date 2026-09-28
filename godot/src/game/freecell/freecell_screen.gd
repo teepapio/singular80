@@ -20,7 +20,7 @@ const MIN_DY := 10.0
 const HINT_COST := 25
 ## Seconds the hint stays lit.
 const HINT_LIFE := 5.0
-const CONTROLS := "Karten antippen und dann ein Ziel wählen  ·  A = sichere Karten ablegen  ·  U = zurück  ·  R = neu  ·  F1 = Tipp"
+const CONTROLS := "Tap cards and then pick a target  ·  A = bank a card safely  ·  U = undo  ·  R = new  ·  F1 = tip"
 
 var free_cells: Array = [null, null, null, null]
 var foundations: Array = [[], [], [], []]
@@ -492,20 +492,20 @@ func _refresh() -> void:
 	_redraw_view()
 	if _moves_label == null:
 		return
-	_moves_label.text = "Züge: %d" % moves
-	_score_label.text = "Punkte: %d" % score
-	_highscore_label.text = "Bestwert: %d" % highscore
+	_moves_label.text = Loc.f("Moves: %d", [moves])
+	_score_label.text = Loc.f("Points: %d", [score])
+	_highscore_label.text = Loc.f("Best: %d", [highscore])
 	if _help_label == null:
 		return
 	if hint_move.is_empty():
 		_help_label.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
 		if hint_life > 0.0:
-			_help_label.text = "Kein sinnvoller Zug mehr  ·  R mischt neu"
+			_help_label.text = Loc.f("No useful move left  ·  R reshuffles", [])
 		else:
 			_help_label.text = CONTROLS
 		return
 	_help_label.add_theme_color_override("font_color", UiTheme.ACCENT)
-	_help_label.text = "Tipp: %s  ·  −%d Punkte" % [Cards.freecell_hint_text(hint_move), HINT_COST]
+	_help_label.text = Loc.f("Tip: %s  ·  −%d points", [Cards.freecell_hint_text(hint_move), HINT_COST])
 
 
 func _redraw_view() -> void:

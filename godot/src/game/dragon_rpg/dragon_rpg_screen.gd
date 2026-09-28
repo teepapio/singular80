@@ -827,7 +827,8 @@ func _update_hud() -> void:
 	# manual, so it gets its own bar next to HP and XP.
 	var charge := dash.charge()
 	Ui.set_bar(_dash_bar, charge, Color("7dd3fc") if charge >= 1.0 else Color("334155"))
-	_dash_text.text = "» Drachenflucht bereit" if charge >= 1.0 else "» Drachenflucht %.1fs" % dash.cooldown_left
+	_dash_text.text = (Loc.f("» Dragon escape ready", []) if charge >= 1.0
+		else Loc.f("» Dragon escape %.1fs", [dash.cooldown_left]))
 	_dash_button.modulate.a = 1.0 if charge >= 1.0 else 0.45
 	if not boss.is_empty():
 		var dragon: Dictionary = boss["dragon"]
