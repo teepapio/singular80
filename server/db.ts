@@ -459,6 +459,40 @@ export class Store {
     return this.getSuggestion(id);
   }
 
+  /**
+   * Löscht einen Vorschlag samt seiner Spuren: Stimmen und Läufe gehören zu
+   * ihm, ohne sie blieben Zeilen zurück, deren Vorschlag es nicht mehr gibt.
+   *
+   * Zwei Dinge werden **nicht** mitgelöscht, weil sie eigene Arbeit sind:
+   * Kinder aus einer Aufteilung (`parent_id`) und die übrigen Mitglieder eines
+   * Clusters. Die Kinder werden auf `NULL` gehängt und der Cluster bekommt ein
+   * neues Leitsuggestion — sonst zeigte das Dashboard nach dem Löschen
+   * Einträge, deren Nummer niemandem mehr gezeigt wurde.
+   *
+   * Gibt `false` zurück, wenn es den Vorschlag nicht gibt, damit die Route
+   * 404 und nicht 500 antwortet.
+   */
+  deleteSuggestion(id: number): boolean {
+    const target = this.getSuggestion(id);
+    if (!target) return false;
+    const canonical = target.canonicalId ?? id;
+    this.db.prepare('DELETE FROM votes WHERE suggestion_id = ?').run(id);
+    this.db.prepare('DELETE FROM runs WHERE suggestion_id = ?').run(id);
+    this.db.prepare('UPDATE suggestions SET parent_id = NULL WHERE parent_id = ?').run(id);
+    const siblings = this.db
+      .prepare('SELECT id FROM suggestions WHERE (canonical_id = ? OR id = ?) AND id != ? ORDER BY id')
+      .all(canonical, canonical, id) as { id: number }[];
+    if (siblings.length) {
+      const heir = siblings[0].id;
+      this.db.prepare('UPDATE suggestions SET canonical_id = ? WHERE id = ?').run(heir, heir);
+      this.db
+        .prepare('UPDATE suggestions SET canonical_id = ? WHERE canonical_id = ?')
+        .run(heir, canonical);
+    }
+    this.db.prepare('DELETE FROM suggestions WHERE id = ?').run(id);
+    return true;
+  }
+
   setSuggestionDiscordMessage(id: number, messageId: string | null) {
     this.db
       .prepare('UPDATE suggestions SET discord_message_id = ?, updated_at = ? WHERE id = ?')

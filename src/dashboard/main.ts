@@ -370,6 +370,15 @@ function renderCard(s: SuggestionView, children: number[]): string {
             : ''
         }
         <button data-action="details" data-id="${s.id}">${expanded ? '▴ Details' : '▾ Details'}</button>
+        ${
+          // Löschen steht am Ende und immer da: Testeinträge und Doubletten
+          // sollen sich nicht erst durch die Historie ziehen müssen. Der Knopf
+          // fragt nach, und der Server verweigert das Löschen, solange ein
+          // Run läuft.
+          s.status === 'implementing' || s.run?.status === 'running'
+            ? ''
+            : `<button class="danger" data-action="delete" data-id="${s.id}">Löschen</button>`
+        }
       </div>
       ${
         expanded
@@ -964,6 +973,9 @@ async function loadSettings(): Promise<void> {
     maxParallelRuns: number;
     webhookConfigured: boolean;
     envWebhook: boolean;
+    telegramConfigured: boolean;
+    telegramTokenSet: boolean;
+    telegramChatSet: boolean;
   }>('/api/settings');
   ($('#setting-webhook') as HTMLInputElement).value = settings.envWebhook ? '' : '';
   ($('#setting-webhook') as HTMLInputElement).placeholder = settings.webhookConfigured
@@ -977,6 +989,14 @@ async function loadSettings(): Promise<void> {
   ($('#setting-retries') as HTMLInputElement).value = String(settings.retryLimit);
   ($('#setting-backoff') as HTMLInputElement).value = String(settings.retryBackoffSeconds);
   ($('#setting-lanes') as HTMLInputElement).value = String(settings.maxParallelRuns);
+  // Der Zustand von Telegram wird **nicht** gemerkt: der Token steht in der
+  // `.env`, und die ändert sich außerhalb des Dashboards. Ein gemerkter Stand
+  // wäre nach einem Neustart eine Lüge.
+  $('#telegram-state').textContent = settings.telegramConfigured
+    ? 'eingerichtet — Vorschläge und Befehle laufen'
+    : !settings.telegramTokenSet
+      ? 'kein TELEGRAM_BOT_TOKEN in der .env'
+      : 'keine TELEGRAM_CHAT_ID in der .env';
   $('#webhook-state').textContent = settings.webhookConfigured
     ? settings.envWebhook
       ? 'Webhook kommt aus .env'
@@ -1114,6 +1134,17 @@ async function act(action: string, id: number, runId?: string): Promise<void> {
         body: JSON.stringify({}),
       });
       toast(`Run für #${id} in die Warteschlange gestellt`, 'success');
+    } else if (action === 'delete') {
+      // Zwei Rückfragen, weil der Vorgang nicht rückgängig wird: Der Eintrag
+      // ist danach weg, und mit ihm seine Läufe und Stimmen. `confirm` fragt
+      // einmal — ein Dialog mit der Nummer ist hier genug, ein zweiter Dialog
+      // wäre nur ein zweiter Weg, an dem jemand auf „Abbrechen" klickt und
+      // sich wundert, warum nichts passiert.
+      if (!confirm(`Vorschlag #${id} endgültig löschen?\n\nMit ihm verschwinden auch seine Läufe und Stimmen. Das lässt sich nicht rückgängig machen.`)) {
+        return;
+      }
+      await api(`/api/suggestions/${id}`, { method: 'DELETE' });
+      toast(`#${id} gelöscht`);
     } else if (action === 'cancel-run' && runId) {
       await api(`/api/runs/${runId}/cancel`, { method: 'POST', body: JSON.stringify({}) });
       toast('Run abgebrochen');
@@ -1332,6 +1363,17 @@ function setupUi(): void {
     try {
       await api('/api/discord/test', { method: 'POST', body: JSON.stringify(webhook ? { webhook } : {}) });
       toast('Testnachricht gesendet — prüfe deinen Discord-Kanal.', 'success');
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    }
+  });
+  $('#test-telegram').addEventListener('click', async () => {
+    // Der Fehlertext des Servers wird durchgereicht, weil genau er die
+    // häufigsten Ursachen nennt: fehlender Token, fehlende Chat-Id oder der
+    // Bot, der noch keine Nachricht bekommen hat.
+    try {
+      await api('/api/telegram/test', { method: 'POST', body: JSON.stringify({}) });
+      toast('Testnachricht gesendet — prüfe deinen Telegram-Chat.', 'success');
     } catch (err) {
       toast((err as Error).message, 'error');
     }

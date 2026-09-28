@@ -40,6 +40,8 @@ const VIEW = {
 } as unknown as SuggestionView;
 
 const URL_TEXT = 'https://singular80.example/dashboard';
+/** `sendTest` schickt, das ist hier nur sein Text — ohne Netz. */
+const sendTestText = 'Singular 80: Telegram ist verbunden.';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -65,11 +67,28 @@ describe('Telegram-Text', () => {
     expect(text).toContain('5 &lt; 6');
   });
 
-  it('nennt Nummer, Kategorie und Sprungmarke', () => {
+  it('schickt nur Nummer und Text — nichts, was auf dem Telefon stört', () => {
     const text = buildSuggestionText(VIEW, URL_TEXT);
-    expect(text).toContain('#7');
-    expect(text).toContain('Content');
-    expect(text).toContain(`${URL_TEXT}#suggestion-7`);
+    expect(text).toBe('#7\nEin Slime, der in zwei kleinere zerfällt');
+  });
+
+  it('lässt Kategorie, Punkte, Autor, Zeit und Adresse weg', () => {
+    // Absicht, nicht Versehen: der Besitzer liest das im Telegram auf dem
+    // Telefon. Jede Zusatzzeile ist eine, die er überlesen muss, und die
+    // Adresse des Dashboards ist von dort ohnehin nicht erreichbar.
+    const text = buildSuggestionText(VIEW, 'https://localhost:5173/dashboard.html');
+    expect(text).not.toContain('Content');
+    expect(text).not.toContain('localhost');
+    expect(text).not.toContain('Anonym');
+  });
+
+  it('schickt in keiner Nachricht ein Emoji', () => {
+    // `Emoji|Regional_Indicator` deckt die Symbole ab, die Telegram als Emoji
+    // rendert. Der Wunsch war ausdrücklich: keine.
+    const emoji = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{20E3}\u{2705}\u{274C}\u{2B50}\u{1F44D}\u{1F44E}]/u;
+    expect(emoji.test(buildSuggestionText(VIEW, URL_TEXT))).toBe(false);
+    expect(emoji.test(HELP_TEXT)).toBe(false);
+    expect(emoji.test(sendTestText)).toBe(false);
   });
 
   it('bleibt unter der Telegram-Grenze von 4096 Zeichen', () => {
@@ -278,6 +297,37 @@ describe('Der Bot führt Befehle aus', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body.text).toContain('/list');
     expect(body.text).toContain('/status');
+  });
+});
+
+describe('Das Ergebnis eines Laufs', () => {
+  it('meldet Nummer, Ausgang und Commit — sonst nichts', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+    await notifyRunResult(
+      { id: 7, text: 'Idee' } as never,
+      { id: 'run_1', status: 'succeeded', cost: 0.5, commitHash: 'abc1234' } as never,
+      URL_TEXT,
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.text).toBe('#7 umgesetzt abc1234');
+    expect(body.text).not.toContain('0.5000');
+  });
+
+  it('nennt beim Fehlschlag den Status des Laufs', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+    await notifyRunResult(
+      { id: 7, text: 'Idee' } as never,
+      { id: 'run_2', status: 'failed' } as never,
+      URL_TEXT,
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.text).toBe('#7 fehlgeschlagen (failed)');
   });
 });
 

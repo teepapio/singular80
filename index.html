@@ -135,8 +135,18 @@
           Commit für denselben Vorschlag.<br />
           Zwei Spuren teilen sich nur den Baum, wenn ihre Scopes sich nicht überschneiden: ein Run wartet
           auf eine freie Spur, statt einem belegten Scope zu schreiben.</small>
+        <label class="row">
+          Telegram
+          <small class="run-sub" id="telegram-state">Status unbekannt</small>
+        </label>
+        <small class="run-sub">Telegram wird nur aus der Umgebung gelesen
+          (<code>TELEGRAM_BOT_TOKEN</code>, <code>TELEGRAM_CHAT_ID</code> in der
+          <code>.env</code>). Der Token kommt bewusst nicht in dieses Formular:
+          er ist der Schlüssel zum ganzen Bot, und das Dashboard darf ihn nicht
+          kennen. Nach einem Ändern der Datei den Server neu starten.</small>
         <div class="settings-actions">
           <button type="button" id="test-webhook" class="ghost">Testnachricht senden</button>
+          <button type="button" id="test-telegram" class="ghost">Telegram testen</button>
           <button type="button" id="save-settings" class="primary">Speichern</button>
           <button type="button" id="close-settings" class="ghost">Schließen</button>
         </div>

@@ -1,8 +1,15 @@
 import type { RunRecord, Suggestion, SuggestionView } from '../src/shared/types';
-import { CATEGORY_LABELS } from './discord';
 
 /**
  * Telegram-Zustellung für Vorschläge und Runner-Ergebnisse.
+ *
+ * **Was in einer Nachricht steht, ist eine Absicht, keine Zierde.** Der
+ * Besitzer liest den Chat auf dem Telefon, und eine Nachricht aus Nummer und
+ * Vorschlagstext ist in einer Sekunde gelesen. Alles, was früher noch mitkam —
+ * Emojis, Kategorie, Punkte, Autor, Zeitstempel, Adresse des Dashboards — war
+ * Rauschen. Die Adresse ganz besonders: `DASHBOARD_URL` zeigt auf
+ * `localhost:5173`, und vom Telefon aus ist localhost das Telefon. Der Link
+ * konnte dort nie funktionieren.
  *
  * Warum Telegram und nicht Discord: der Bot braucht keinen Kanal und kein
  * Webhook-Setup im Server, und die Konfiguration steht vollständig in der
@@ -24,15 +31,6 @@ const API = 'https://api.telegram.org';
 
 /** Telegram nimmt 4096 Zeichen pro Nachricht; darüber antwortet es mit 400. */
 const MAX_MESSAGE = 4096;
-
-const STATUS_LABELS: Record<string, string> = {
-  new: '🆕 Neu',
-  approved: '👍 Genehmigt',
-  rejected: '❌ Abgelehnt',
-  implementing: '🔧 In Umsetzung',
-  implemented: '✅ Umgesetzt',
-  failed: '⚠️ Fehlgeschlagen',
-};
 
 function token(): string {
   return (process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
@@ -111,25 +109,15 @@ function explain(status: number, raw: string): string {
   return `Telegram ${status}: ${detail}`;
 }
 
-/** Der Text einer neuen Einreichung, mit denselben Angaben wie der Discord-Embed. */
-export function buildSuggestionText(suggestion: SuggestionView, dashboardUrl: string): string {
-  const lines = [
-    `🎮 <b>Vorschlag #${suggestion.id}</b> — ${STATUS_LABELS[suggestion.status] ?? suggestion.status}`,
-    '',
-    escapeHtml(suggestion.text),
-    '',
-    `🏷 ${CATEGORY_LABELS[suggestion.category] ?? suggestion.category} · ⭐ ${suggestion.score} · 👍 ${suggestion.votes}`,
-  ];
-  if (suggestion.clusterSize > 1) {
-    lines.push(`🔗 ${suggestion.clusterSize} ähnliche im Cluster #${suggestion.canonicalId ?? suggestion.id}`);
-  }
-  lines.push(
-    `👤 ${escapeHtml(suggestion.author)} · 📱 ${suggestion.source} · 🕐 ${new Date(
-      suggestion.createdAt,
-    ).toLocaleString('de-DE')}`,
-  );
-  lines.push(`${dashboardUrl}#suggestion-${suggestion.id}`);
-  return clip(lines.join('\n'));
+/** Der Text einer neuen Einreichung: nur Nummer und Vorschlag.
+ *
+ * Bewusst ohne Emojis, Kategorie, Punkte, Autor und Zeit. Der Besitzer liest
+ * das auf dem Telefon; jede Zeile, die er nicht braucht, ist eine, die er
+ * überlesen muss. Ein Zeitstempel steht ohnehin über jeder Telegram-Nachricht,
+ * und die Adresse des Dashboards ist vom Telefon aus nicht erreichbar.
+ */
+export function buildSuggestionText(suggestion: SuggestionView, _dashboardUrl: string): string {
+  return clip(`#${suggestion.id}\n${escapeHtml(suggestion.text)}`);
 }
 
 export async function notifyNewSuggestion(
@@ -150,36 +138,20 @@ export async function notifyNewSuggestion(
 export async function notifyRunResult(
   suggestion: Suggestion,
   run: RunRecord,
-  dashboardUrl: string,
+  _dashboardUrl: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const ok = run.status === 'succeeded';
-  const head = ok
-    ? `✅ <b>Vorschlag #${suggestion.id} wurde umgesetzt</b>${run.commitHash ? ` (<code>${escapeHtml(run.commitHash)}</code>)` : ''}`
-    : `⚠️ <b>Umsetzung von Vorschlag #${suggestion.id} fehlgeschlagen</b> (${escapeHtml(run.status)})`;
-  const lines = [
-    head,
-    '',
-    escapeHtml(suggestion.text.slice(0, 800)),
-    '',
-    `Run <code>${escapeHtml(run.id)}</code> · 💰 ${
-      run.cost != null ? `$${run.cost.toFixed(4)}` : '—'
-    }`,
-    `${dashboardUrl}#suggestion-${suggestion.id}`,
-  ];
-  if (run.resultSummary) {
-    lines.splice(2, 0, `<i>${escapeHtml(run.resultSummary.slice(0, 400))}</i>`, '');
-  }
-  return sendMessage(clip(lines.join('\n')));
+  // Nur Nummer, Ausgang und Commit. Der Commit ist die eine Angabe, die der
+  // Besitzer nach einem Lauf wirklich braucht: daran hängt das Nachsehen, was
+  // der Agent gemacht hat.
+  const line = run.status === 'succeeded' ? 'umgesetzt' : `fehlgeschlagen (${escapeHtml(run.status)})`;
+  return sendMessage(
+    `#${suggestion.id} ${line}${run.commitHash ? ` ${run.commitHash}` : ''}`,
+  );
 }
 
 /** Der Knopf „Test senden" im Dashboard — dieselbe Prüfung wie im echten Betrieb. */
-export async function sendTest(dashboardUrl: string): Promise<{ ok: boolean; error?: string }> {
-  return sendMessage(
-    [
-      '✅ <b>Singular 80</b> — Telegram ist verbunden.',
-      `Neue Vorschläge aus dem Spiel landen hier. ${dashboardUrl}`,
-    ].join('\n\n'),
-  );
+export async function sendTest(_dashboardUrl: string): Promise<{ ok: boolean; error?: string }> {
+  return sendMessage('Singular 80: Telegram ist verbunden.');
 }
 
 // --- Befehle aus dem Chat ----------------------------------------------------
@@ -206,14 +178,14 @@ export interface Command {
 }
 
 export const HELP_TEXT = [
-  '<b>Singular 80</b> — du steuerst das Dashboard aus diesem Chat.',
+  'Singular 80 — du steuerst das Dashboard aus diesem Chat.',
   '',
-  '<code>/list</code> — offene Vorschläge',
-  '<code>/status 12</code> — ein Vorschlag mit seinen Läufen',
-  '<code>/run 12</code> — OpenCode-Lauf zu Vorschlag 12 starten',
-  '<code>/approve 12</code> · <code>/reject 12</code> — Status setzen',
-  '<code>/queue</code> — Warteschlange und Spuren',
-  '<code>/help</code> — diese Liste',
+  '/list — offene Vorschläge',
+  '/status 12 — ein Vorschlag mit seinen Läufen',
+  '/run 12 — OpenCode-Lauf zu Vorschlag 12 starten',
+  '/approve 12, /reject 12 — Status setzen',
+  '/queue — Warteschlange und Spuren',
+  '/help — diese Liste',
 ].join('\n');
 
 /**

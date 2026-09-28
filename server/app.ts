@@ -250,6 +250,33 @@ export function createApp(options: AppOptions): FastifyInstance {
   });
 
   /**
+   * Löschen — für Testeinträge, Doubletten und Spuk-Eingaben aus dem Spiel.
+   *
+   * Der Weg über `rejected` genügt dafür nicht: ein abgelehnter Vorschlag
+   * bleibt in der Historie und in `backup/dashboard.json` stehen. Wer ihn
+   * wirklich weg haben will, muss ihn löschen können.
+   *
+   * **Während ein Run läuft, geht es nicht.** Der Runner hält den Vorschlag im
+   * Speicher und schreibt das Ergebnis später zurück; ein Löschen in diesem
+   * Moment hinterlässt einen Lauf, der auf einen Vorschlag zeigt, den es nicht
+   * mehr gibt. 409 statt eines stillen Datenverlusts.
+   */
+  app.delete('/api/suggestions/:id', async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    const suggestion = store.getSuggestion(id);
+    if (!suggestion) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
+    if (runner?.isBusyForSuggestion(suggestion)) {
+      return reply.code(409).send({ error: `Für #${id} läuft gerade ein Run — Abbrechen oder warten.` });
+    }
+    if (!store.deleteSuggestion(id)) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
+    // Kein `emit`: ein neuer Ereignistyp müsste in `src/shared/types.ts`
+    // stehen, und das ist laut AGENTS.md nicht zu ändern. Die Oberfläche lädt
+    // ihre Liste nach dem Löschen neu — das ist hier ohnehin der Fall, weil sie
+    // den Eintrag lokal entfernen muss.
+    return { ok: true, id };
+  });
+
+  /**
    * Startet einen Lauf für einen bestehenden Vorschlag.
    *
    * Das ist die **eine** Stelle, die das tut. Der HTTP-Knopf und der
@@ -294,9 +321,7 @@ export function createApp(options: AppOptions): FastifyInstance {
       void discord.updateSuggestionMessage(view, webhook, dashboardUrl);
     }
     if (telegram.isConfigured()) {
-      const sent = telegram.sendMessage(
-        `${status === 'approved' ? '👍' : status === 'rejected' ? '❌' : 'ℹ️'} #${id} ist jetzt <b>${status}</b>\n${dashboardUrl}#suggestion-${id}`,
-      );
+      const sent = telegram.sendMessage(`#${id} ist jetzt ${status}.`);
       void sent.then((r) => {
         if (!r.ok) console.warn('[telegram] Statuswechsel nicht zugestellt:', r.error);
       });
@@ -641,11 +666,19 @@ export function createApp(options: AppOptions): FastifyInstance {
 
   app.get('/api/settings', async () => {
     const settings = store.getSettings();
+    const token = (process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
+    const chat = (process.env.TELEGRAM_CHAT_ID ?? '').trim();
     return {
       ...settings,
       discordWebhook: maskWebhook(settings.discordWebhook || process.env.DISCORD_WEBHOOK_URL || ''),
       webhookConfigured: Boolean(settings.discordWebhook || process.env.DISCORD_WEBHOOK_URL),
       envWebhook: Boolean(process.env.DISCORD_WEBHOOK_URL && !settings.discordWebhook),
+      // Nur ja/nein und der Grund, warum nicht. Der Token selbst kommt nicht
+      // über die Leitung: `/api/settings` ist genau die Antwort, die ein
+      // Bildschirm zum Anzeigen braucht, und mehr nicht.
+      telegramConfigured: Boolean(token && chat),
+      telegramTokenSet: Boolean(token),
+      telegramChatSet: Boolean(chat),
     };
   });
 

@@ -114,63 +114,53 @@ export class TelegramBot {
           .listSuggestions()
           .filter((s) => s.status === 'new' || s.status === 'approved')
           .slice(0, 15);
-        if (!open.length) return '📭 Keine offenen Vorschläge.';
-        const lines = open.map((s) => {
-          const mark = s.status === 'approved' ? '👍' : '🆕';
-          return `${mark} <b>#${s.id}</b> ${telegram.escapeHtml(s.text.slice(0, 70))}`;
-        });
-        return [`<b>Offene Vorschläge</b>`, '', ...lines, '', `<code>/run 12</code> startet einen Lauf.`].join('\n');
+        if (!open.length) return 'Keine offenen Vorschläge.';
+        const lines = open.map((s) => `#${s.id} ${telegram.escapeHtml(s.text.slice(0, 70))}`);
+        return ['Offene Vorschläge', '', ...lines, '', '/run 12 startet einen Lauf.'].join('\n');
       }
       case 'status': {
         const id = telegram.suggestionIdArg(command.args);
-        if (!id) return 'Welcher Vorschlag? <code>/status 12</code>';
+        if (!id) return 'Welcher Vorschlag? /status 12';
         const view = viewOf(id);
-        if (!view) return `❌ Vorschlag #${id} gibt es nicht.`;
+        if (!view) return `Vorschlag #${id} gibt es nicht.`;
         const runs = (runner?.listSuggestionRuns(id) ?? store.listRuns(200).filter((r) => r.suggestionId === id)).slice(0, 3);
-        const lines = [
-          `<b>#${view.id}</b> — ${telegram.escapeHtml(view.status)}`,
-          '',
-          telegram.escapeHtml(view.text.slice(0, 900)),
-          '',
-          `👤 ${telegram.escapeHtml(view.author)} · ⭐ ${view.score} · 👍 ${view.votes}`,
-        ];
+        const lines = [`#${view.id} ${view.status}`, '', telegram.escapeHtml(view.text.slice(0, 900))];
         for (const run of runs) {
-          lines.push(`→ ${telegram.escapeHtml(run.status)}${run.commitHash ? ` <code>${telegram.escapeHtml(run.commitHash)}</code>` : ''}`);
+          lines.push(`${run.status}${run.commitHash ? ` ${run.commitHash}` : ''}`);
         }
-        lines.push(`${dashboardUrl}#suggestion-${view.id}`);
         return lines.join('\n');
       }
       case 'run': {
         const id = telegram.suggestionIdArg(command.args);
-        if (!id) return 'Welcher Vorschlag? <code>/run 12</code>';
-        if (!runner) return '⚠️ Der Runner ist abgeschaltet.';
-        if (runner.isPaused()) return '⏸️ Die Warteschlange ist pausiert. Läuft nach dem Fortsetzen.';
+        if (!id) return 'Welcher Vorschlag? /run 12';
+        if (!runner) return 'Der Runner ist abgeschaltet.';
+        if (runner.isPaused()) return 'Die Warteschlange ist pausiert. Läuft nach dem Fortsetzen.';
         const result = this.deps.startRun(id);
-        if (!result.ok) return `❌ ${telegram.escapeHtml(result.error ?? 'unbekannter Fehler')}`;
-        return `🚀 <b>Run für #${id} gestartet</b>\n<code>${telegram.escapeHtml(result.runId ?? '')}</code>`;
+        if (!result.ok) return telegram.escapeHtml(result.error ?? 'unbekannter Fehler');
+        return `Run für #${id} gestartet: ${telegram.escapeHtml(result.runId ?? '')}`;
       }
       case 'approve':
       case 'reject': {
         const id = telegram.suggestionIdArg(command.args);
-        if (!id) return `Welcher Vorschlag? <code>/${command.name} 12</code>`;
+        if (!id) return `Welcher Vorschlag? /${command.name} 12`;
         const status: SuggestionStatus = command.name === 'approve' ? 'approved' : 'rejected';
         const result = this.deps.setStatus(id, status);
-        if (!result.ok) return `❌ ${telegram.escapeHtml(result.error ?? 'unbekannter Fehler')}`;
-        return `${status === 'approved' ? '👍' : '❌'} #${id} ist jetzt <b>${status}</b>.`;
+        if (!result.ok) return telegram.escapeHtml(result.error ?? 'unbekannter Fehler');
+        return `#${id} ist jetzt ${status}.`;
       }
       case 'queue': {
-        if (!runner) return '⚠️ Der Runner ist abgeschaltet.';
+        if (!runner) return 'Der Runner ist abgeschaltet.';
         const state = runner.queueState();
-        const lines = [`<b>Warteschlange</b>`, `Spuren: ${state.activeRuns.length}/${runner.capacity()}`];
-        if (runner.isPaused()) lines.push('⏸️ pausiert');
+        const lines = ['Warteschlange', `Spuren: ${state.activeRuns.length}/${runner.capacity()}`];
+        if (runner.isPaused()) lines.push('pausiert');
         for (const run of state.queue.slice(0, 10)) {
-          lines.push(`→ #${run.suggestionId} ${telegram.escapeHtml(run.status)}`);
+          lines.push(`#${run.suggestionId} ${run.status}`);
         }
         if (!state.queue.length) lines.push('(leer)');
         return lines.join('\n');
       }
       default:
-        return `Unbekannt: <code>/${telegram.escapeHtml(command.name)}</code>\n\n${telegram.HELP_TEXT}`;
+        return `Unbekannt: /${telegram.escapeHtml(command.name)}\n\n${telegram.HELP_TEXT}`;
     }
   }
 }

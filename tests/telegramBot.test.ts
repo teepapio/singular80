@@ -92,6 +92,75 @@ describe('Bot und Dashboard teilen sich die Wahrheit', () => {
     }
   });
 
+  it('löscht einen Vorschlag samt seiner Spuren', async () => {
+    // Testeinträge aus dem Spiel und Doubletten sollen wirklich wegkönnen, nicht
+    // nur auf `rejected` gesetzt werden — der Eintrag bliebe sonst in der
+    // Historie und in `backup/dashboard.json` stehen.
+    const { dir, store, app } = harness();
+    try {
+      const id = store.listSuggestions()[0].id;
+      const res = await app.inject({ method: 'DELETE', url: `/api/suggestions/${id}` });
+      expect(res.statusCode).toBe(200);
+      expect(store.getSuggestion(id)).toBeNull();
+    } finally {
+      await app.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('antwortet beim Löschen eines unbekannten Vorschlags mit 404', async () => {
+    const { dir, app } = harness();
+    try {
+      const res = await app.inject({ method: 'DELETE', url: '/api/suggestions/4242' });
+      expect(res.statusCode).toBe(404);
+    } finally {
+      await app.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('lässt einen Vorschlag, zu dem ein Kind gehört, mit dem Kind weiterleben', async () => {
+    // Kinder aus einer Aufteilung sind eigene Arbeit und dürfen nicht mit dem
+    // Elternteil verschwinden.
+    const { dir, store, app } = harness();
+    try {
+      const parent = store.listSuggestions()[0];
+      const child = store.createSuggestion({
+        text: 'Teilaufgabe',
+        author: 'Anonym',
+        source: 'game',
+        category: 'mechanics',
+        canonicalId: null,
+        status: 'new',
+        parentId: parent.id,
+      });
+      const res = await app.inject({ method: 'DELETE', url: `/api/suggestions/${parent.id}` });
+      expect(res.statusCode).toBe(200);
+      const kept = store.getSuggestion(child.id);
+      expect(kept).not.toBeNull();
+      expect(kept?.parentId).toBeNull();
+    } finally {
+      await app.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('meldet Telegram nur als eingerichtet oder nicht — nie mit Token', async () => {
+    // `/api/settings` geht an jedes offene Fenster. Der Token darf dort nicht
+    // auftauchen, sonst läse jeder im Netz den Schlüssel zum Bot mit.
+    process.env.TELEGRAM_BOT_TOKEN = 'streng-geheim';
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const { dir, app } = harness();
+    try {
+      const settings = await app.inject({ method: 'GET', url: '/api/settings' });
+      expect(settings.json().telegramConfigured).toBe(true);
+      expect(settings.body).not.toContain('streng-geheim');
+    } finally {
+      await app.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('lässt einen Statuswechsel aus dem Chat im Dashboard ankommen', async () => {
     // Das ist die geforderte Synchronisierung: was der Typ im Chat tippt,
     // steht danach im Dashboard — und umgekehrt, weil beide `setStatus`

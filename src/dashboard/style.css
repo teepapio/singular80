@@ -460,6 +460,20 @@ textarea {
   color: #fca5a5;
 }
 
+/* Löschen ist der eine Knopf, der endgültig ist. Die Farbe ist Absicht, damit
+   er nicht zwischen „Ablehnen" und „Genehmigen" landet: Ablehnen lässt den
+   Eintrag in der Historie, Löschen nimmt ihn weg. */
+.card-actions button.danger {
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+  opacity: 0.75;
+}
+
+.card-actions button.danger:hover {
+  opacity: 1;
+  border-color: rgba(239, 68, 68, 0.8);
+}
+
 .card-actions button.implement {
   background: #0c4a6e;
   border-color: var(--accent);
