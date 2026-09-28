@@ -21,3 +21,4 @@ session. Written by the runner on success, or by
 - **#7** Slime noch langsamer: speed 38 auf 32 — `b2110c6`
 - **edi:** Changelog-Zeile für Aufträge aus Telegram ergänzt, die nach einem Server-Neustart sonst verloren gingen
 - **#14** Ja. — `7191201`
+- **edi:** Agenten arbeiten auf getrennten Worktrees statt im gemeinsamen Ordner; ein Merge-Gate prüft, merged… <!-- session:600c9e410f7a -->
