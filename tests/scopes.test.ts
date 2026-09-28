@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 import { auditScope, extractTouchedFiles, loadManifest, scopeForSuggestion, scopeManifest } from '../server/scopes';
 import type { RunEvent, Suggestion } from '../src/shared/types';
 
@@ -211,5 +213,87 @@ describe('auditScope', () => {
       events: [tool('edit · completed — godot/src/game/tetris/tetris_screen.gd')],
     });
     expect(audit.checked).toBe(1);
+  });
+});
+
+/**
+ * Runs the manifest CLI and hands back what it printed.
+ *
+ * The command is tested through its output rather than through `scopesForFiles`
+ * directly, because the output *is* the contract: the whole point of the command
+ * is that an agent reads a ready-to-paste `npm run test:game` line instead of
+ * working out the suite mapping from memory. Spawning it also keeps a second copy
+ * of the manifest's types out of the tree — the manifest has no `.d.mts` and
+ * `server/scopes.ts` reads it through `createRequire` for the same reason.
+ */
+function scopeFor(...files: string[]): { out: string; err: string; code: number } {
+  const run = spawnSync('node', ['scripts/scopes.mjs', 'scope-for', ...files], {
+    cwd: join(import.meta.dirname, '..'),
+    encoding: 'utf8',
+  });
+  return { out: run.stdout ?? '', err: run.stderr ?? '', code: run.status ?? -1 };
+}
+
+describe('scope-for', () => {
+  it('nennt den Scope einer geänderten Spieldatei und den Testbefehl dazu', () => {
+    const { out, code } = scopeFor('godot/src/game/tetris/tetris_screen.gd');
+    expect(code).toBe(0);
+    expect(out).toContain('tetris');
+    expect(out).toContain('npm run test:game -- --scope tetris');
+    // The count is what makes the line worth trusting: it says what will run.
+    expect(out).toMatch(/→ \d+ Suite\(n\), \d+ Screen\(s\)/);
+  });
+
+  /**
+   * A shared file is not a scope.
+   *
+   * `game_registry.gd` is listed in the `shared` half of nearly every game scope,
+   * so reporting it as "touched tetris, touched pang, touched siedler" would be
+   * technically true and practically useless — the file is covered by the
+   * `Screens` sweep, which only the full run has. The command has to say that
+   * instead of printing a scope list that tests nothing.
+   */
+  it('hält eine geteilte Datei zurück und benennt den vollen Lauf als das Gate', () => {
+    const { out, code } = scopeFor('godot/src/core/logic/game_registry.gd');
+    expect(code).toBe(0);
+    expect(out).toContain('Geteilte Dateien');
+    expect(out).toContain('game_registry.gd');
+    expect(out).not.toContain('npm run test:game -- --scope');
+  });
+
+  it('meldet eine Datei ohne Besitzer und beendet mit 1', () => {
+    const { out, code } = scopeFor('notes/gedanken.md');
+    expect(code).toBe(1);
+    expect(out).toContain('Kein Scope beansprucht');
+    expect(out).toContain('notes/gedanken.md');
+  });
+
+  /**
+   * A variant scope owns byte-identical globs to its base.
+   *
+   * Printing `crystal3d,crystal3d-christmas,crystal3d-halloween` would be three
+   * scopes for one directory, and it is the same identity `scopesConflict` relies
+   * on to keep three agents out of one game — the report must not undo it.
+   */
+  it('meldet eine Variante als ihren Basis-Scope, nicht als drei Spiele', () => {
+    const { out } = scopeFor('godot/src/game/crystal3d/crystal_screen.gd');
+    expect(out).toContain('npm run test:game -- --scope crystal3d');
+    expect(out).not.toContain('crystal3d-christmas');
+    expect(out).not.toContain('crystal3d-halloween');
+  });
+
+  /**
+   * A scope without suites is normal, not a broken manifest.
+   *
+   * `tooling`, `tests` and `dashboard` have no `t.suite` of their own, and
+   * `scopes.mjs list` is where a manifest problem belongs. Calling it an error
+   * here would send an agent looking for a missing suite that was never supposed
+   * to exist.
+   */
+  it('nennt einen Scope ohne Suite, statt das Manifest zum Fehler zu erklären', () => {
+    const { out, err, code } = scopeFor('scripts/locale.mjs');
+    expect(code).toBe(0);
+    expect(out).toContain('Ohne Suite im Manifest');
+    expect(err).toBe('');
   });
 });

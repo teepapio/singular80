@@ -305,3 +305,29 @@ describe('Vorlagen-Lint', () => {
     expect(formatMismatches('Loc.f("""\nBest: %s\n""", [a, b])\n', 'probe.gd')).toEqual([]);
   });
 });
+
+/**
+ * The wall clock of the extractor, as a regression guard.
+ *
+ * `contextOf` is called once per string literal with the whole file up to that
+ * literal, so an end-anchored pattern that sees the entire prefix turns the check
+ * into quadratic backtracking: measured at 19.6 s on this tree, more than half of
+ * `npm test`, all of it inside five regexes. `contextTail` and `nameBefore` cut
+ * the prefix first and the same run takes 0.47 s.
+ *
+ * A budget rather than a golden output on purpose. A digest of `collect()` would
+ * break every time a player-visible string is added, which is most days, and the
+ * thing worth protecting here is the *shape* of the work, not the exact set of
+ * captions. 5 s is roughly ten times the measurement and well under the 19.6 s
+ * the walk used to take, so it fails on the regression and not on a slow
+ * afternoon.
+ */
+describe('Laufzeit des Extraktors', () => {
+  it('sammelt das ganze Projekt in Sekunden, nicht in einer halben Minute', () => {
+    const start = performance.now();
+    const found = collect();
+    const ms = performance.now() - start;
+    expect(found.text.size).toBeGreaterThan(100);
+    expect(ms, `collect() brauchte ${ms.toFixed(0)} ms — Kontext-Schnitt fehlt wieder?`).toBeLessThan(5000);
+  });
+});

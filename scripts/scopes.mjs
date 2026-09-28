@@ -9,6 +9,8 @@
  *   node scripts/scopes.mjs check tetris            # staged files vs scope
  *   node scripts/scopes.mjs check tetris,pang --staged
  *   node scripts/scopes.mjs explain godot/src/core/logic/asset_registry.gd
+ *   node scripts/scopes.mjs scope-for               # changed files -> which suites
+ *   node scripts/scopes.mjs scope-for a.gd b.gd
  *
  * `own` is private to the scope, `shared` is a file every agent touches.
  */
@@ -775,6 +777,67 @@ export function check(names, files) {
   return out;
 }
 
+/**
+ * Which scopes a set of files makes worth testing, and which files belong to
+ * nobody's test scope at all.
+ *
+ * `check` answers "may this scope commit these files", and it is told which
+ * scopes to judge against. This answers the question an agent actually has
+ * afterwards — "I changed these, which suites do I run?" — and the manifest had
+ * no answer to it, only `testArgs` and the memory of whoever wrote the change.
+ * Without it the reflex was the full run: 39 s on this tree to learn what six
+ * Tetris suites say in 6.
+ *
+ * Only `own` yields a scope. A merely `shared` file belongs to no suite in
+ * particular — `game_registry.gd` is covered by the `Screens` sweep, which only
+ * the full run has — so it is reported as shared and the full run stays the gate.
+ * A variant scope owns byte-identical globs to its base, so the base answers for
+ * both and `--scope crystal3d,crystal3d-christmas` is never printed.
+ */
+export function scopesForFiles(files, scopes = buildScopes()) {
+  const own = new Map();
+  const shared = [];
+  const unowned = [];
+  for (const file of files) {
+    const owners = [];
+    let isShared = false;
+    for (const [name, scope] of scopes) {
+      if (scope.aliasOf) continue;
+      const kind = matchScope(file, scope);
+      if (kind === 'own') owners.push(name);
+      else if (kind === 'shared') isShared = true;
+    }
+    if (!owners.length) {
+      (isShared ? shared : unowned).push(file);
+      continue;
+    }
+    for (const name of owners) {
+      const list = own.get(name);
+      if (list) list.push(file);
+      else own.set(name, [file]);
+    }
+  }
+  return { own, shared, unowned };
+}
+
+/**
+ * The `npm run test:game` line for a set of scopes, plus what it will run.
+ *
+ * `null` when the scopes map to no suite and no screen at all — the same
+ * condition `test-game.mjs` refuses to start on, reported here so the agent finds
+ * out from a name it recognises rather than from exit code 2.
+ */
+export function testCommand(names, scopes = buildScopes()) {
+  if (!names.length) return null;
+  const { suites, screens } = testArgs(names, scopes);
+  if (!suites.length && !screens.length) return null;
+  return {
+    command: `npm run test:game -- --scope ${names.join(',')}`,
+    suites: suites.length,
+    screens: screens.length,
+  };
+}
+
 // CLI. Only when this file is the entry point — `test-game.mjs` imports the
 // manifest above and must not trigger the argument parsing here.
 const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -819,8 +882,45 @@ if (cmd === 'list' || !cmd) {
     process.exit(1);
   }
   console.log(`\n✓ ${res.checked.join(', ')}: ${files.length} Datei(en) im erlaubten Bereich.`);
+} else if (cmd === 'scope-for') {
+  const explicit = argv.slice(1).filter((a) => !a.startsWith('--'));
+  const staged = argv.includes('--staged');
+  const source = explicit.length ? 'angegeben' : staged ? 'im Index' : 'geändert';
+  const files = explicit.length ? explicit : staged ? gitStaged() : gitChanged();
+  if (!files.length) { console.log(`Keine Dateien ${source} — nichts zu prüfen.`); process.exit(0); }
+  const { own, shared, unowned } = scopesForFiles(files, scopes);
+  const names = [...own.keys()];
+  console.log(`${files.length} Datei(en) ${source}\n`);
+  const pad = Math.max(...names.map((n) => n.length), 0);
+  for (const name of names) {
+    console.log(`${name.padEnd(pad)}  ${scopes.get(name).label}`);
+    for (const file of own.get(name)) console.log(`${' '.repeat(pad)}    ${file}`);
+  }
+  if (shared.length) {
+    console.log('\nGeteilte Dateien — kein eigener Testumfang, der volle Lauf ist das Gate:');
+    for (const file of shared) console.log(`  ~ ${file}`);
+  }
+  if (unowned.length) {
+    console.log('\nKein Scope beansprucht diese Dateien — sie gehören niemandem, `git add -A` nimmt sie mit:');
+    for (const file of unowned) console.log(`  ✗ ${file}`);
+  }
+  const plan = testCommand(names, scopes);
+  if (plan) {
+    console.log(`\n  ${plan.command}`);
+    console.log(`  → ${plan.suites} Suite(n), ${plan.screens} Screen(s)`);
+  }
+  // A scope without suites is normal — `tooling` and `tests` have none, and
+  // `scopes.mjs list` is where a *manifest* problem is reported. This command
+  // only says which suites the change reaches, so it names the gap and stops.
+  const withoutTests = names.filter((n) => !testCommand([n], scopes));
+  if (withoutTests.length) {
+    console.log(`\nOhne Suite im Manifest, nur der volle Lauf deckt sie ab: ${withoutTests.join(', ')}`);
+  } else if (!plan) {
+    console.log('\nKein eigener Testumfang — nur der volle Lauf sagt etwas.');
+  }
+  process.exit(unowned.length ? 1 : 0);
 } else {
-  console.error(`Unbekanntes Kommando '${cmd}'. Erlaubt: list | check | explain`);
+  console.error(`Unbekanntes Kommando '${cmd}'. Erlaubt: list | check | explain | scope-for`);
   process.exit(2);
 }
 }
