@@ -2,21 +2,15 @@
 /**
  * Language catalogues: extraction, merging and the drift check.
  *
- * The game carries two kinds of key, and both live in the same file:
+ * The game carries two kinds of key in one file. `keys` are hand-written
+ * identifiers (`ui.back_to_lobby`) used as `Loc.t("ui.…")`. `text` are the
+ * German source strings themselves, so every existing caption gets a
+ * translation without rewriting 650 call sites; a missing translation shows
+ * the German original, never a key and never an empty line.
  *
- *  - `keys` are **hand-written identifiers** (`ui.back_to_lobby`). They survive
- *    a reworded German sentence and they allow one translation per context. In
- *    the code they appear as `Loc.t("ui.…")` and are *discovered* here, not
- *    guessed.
- *  - `text` are **the German source strings themselves** as keys, e.g.
- *    `"◀ Lobby"`. That gives every existing caption a translation without
- *    rewriting 650 call sites. A missing translation shows the German original —
- *    never a key, never an empty line.
- *
- * The `text` half of `de.json` is therefore **generated**: a run of this script
- * is the source of truth, and a new German sentence shows up on its own.
- * `en.json` and `fr.json` are hand-written; `sync` adds new keys to them without
- * touching translations that already exist.
+ * The `text` half of `de.json` is therefore generated and a run of this script
+ * is the source of truth. `en.json` and `fr.json` are hand-written; `sync` tops
+ * them up without touching existing translations.
  *
  *   node scripts/locale.mjs list      catalogues and their coverage
  *   node scripts/locale.mjs sync      write de.json, top up the others, mirror
@@ -50,8 +44,8 @@ const SOURCES = [
   { call: 'Loc.t', first: true, kind: 'key' },
   { call: 'Loc.tn', first: true, kind: 'key' },
   // `Loc.f` carries a German template with `%` placeholders, not an identifier.
-  // Someone who passes `ui.something` meant `Loc.t`; `check` says so out loud
-  // instead of hiding the identifier in the `text` half.
+  // Someone passing `ui.something` meant `Loc.t`, so `check` says so out loud
+  // instead of filing the identifier under `text`.
   { call: 'Loc.f', first: true, kind: 'text' },
   { call: 'Ui.label', first: true, kind: 'text' },
   { call: 'Ui.title', first: true, kind: 'text' },
@@ -75,9 +69,8 @@ const ASSIGNMENTS = [
 ];
 
 /**
- * Dictionary keys in the data modules. Building names, world names, weapon and
- * upgrade descriptions live here — the text most visible in the game and least
- * of it at a call site.
+ * Dictionary keys in the data modules: the text most visible in the game and
+ * least of it at a call site.
  */
 const DICT_KEYS = new Set([
   'name', 'names', 'description', 'desc', 'tagline', 'title', 'label', 'hint', 'reason',
@@ -92,11 +85,9 @@ const SKIP_DIRS = new Set(['tests', '.godot', 'android', 'build', 'node_modules'
  * translation keys and no sentences.
  *
  * `AppLegal.REASON_LOC_KEYS` is such a list: six strings that run through
- * `Loc.t` elsewhere. Without this rule the generator would not know they are
- * translatable, and `check` could neither report them missing nor verify them.
- * The suffix is deliberately that long: `asset_registry.gd` has a dozen
- * `const …_KEYS` lists full of asset names, and a short name would have reported
- * `crystal`, `tree` and `pumpkin` as translatable identifiers.
+ * `Loc.t` elsewhere. The suffix is deliberately that long — `asset_registry.gd`
+ * has a dozen `const …_KEYS` lists full of asset names, and a short name would
+ * have reported `crystal`, `tree` and `pumpkin` as translatable identifiers.
  */
 const KEY_ARRAY = /const\s+\w*_LOC_KEYS\s*(?::\s*Array\[String\]\s*)?=\s*\[[^\]]*$/;
 
@@ -118,11 +109,9 @@ function sourceFiles(dir = join(godotRoot, 'src'), out = []) {
 /**
  * Splits GDScript roughly into literals and the text in front of them.
  *
- * A real parser would be overkill here, but comments have to go: the `##`
+ * A real parser would be overkill, but comments have to go: the `##`
  * documentation is almost entirely German sentences and would flood the
- * catalogue with thousands of entries nobody ever sees. So this walks character
- * by character and keeps the context of each literal — the text *before* it —
- * which is what decides whether the value is visible.
+ * catalogue with thousands of entries nobody ever sees.
  */
 function scan(text) {
   const found = [];
@@ -210,16 +199,14 @@ const ANY_LETTER = /[A-Za-zÄÖÜäöüßÀÉÈÊàéèêÁÍÓÚáíóúÑñÇ�
  *
  * There are longer lists of reasons to drop a literal than to keep one: ids,
  * paths, colours, asset keys and format strings look exactly like a sentence in
- * the source. An over-eager filter takes away a translator's chance to do damage;
- * a lax one files ids in the catalogue, where translating them produces nonsense
- * that is visible in the game.
+ * the source. A lax filter files ids in the catalogue, and translating them
+ * produces nonsense that is visible in the game.
  */
 export function isDisplayText(value, kind) {
   if (!value || value.length > 400) return false;
   if (ICON.test(value)) return false;                       // a symbol, not text
   // An identifier *is* the key by definition — it looks like an id in the
-  // source, which is exactly why the id filter must not swallow it before the
-  // real check has seen it.
+  // source, so this check must run before the id filter below.
   if (kind === 'key') return /^[a-z][\w]*(\.[\w]+)+$/.test(value) || /^[a-z][\w]*$/.test(value);
   if (/^[-+]?[\d.,]+$/.test(value)) return false;             // a number
   if (/^(res|user):\/\//.test(value)) return false;          // a path
@@ -230,9 +217,8 @@ export function isDisplayText(value, kind) {
   // Only format characters: "%s · %s" is a pattern, not a sentence.
   const stripped = value.replace(/%[-+ #0-9.]*[sdfx%]/g, '').replace(/[{}]/g, '').trim();
   if (stripped === '') return false;
-  // A single word without a vowel and without an umlaut is usually a proper noun
-  // ("Tetris", "2048", "Railgun") — nobody translates those, and a wrong
-  // translation of one is visible.
+  // A word with neither a space nor a vowel is usually a proper noun ("Tetris",
+  // "2048", "Railgun") — nobody translates those, and a wrong one is visible.
   const isWord = /\s/.test(value) || ACCENTED.test(value);
   return isWord || /^[A-ZÄÖÜÀÁÂÃÅÆÇÉÈÊËÍÎÏÑÓÔÕØŒŠÙÛÝ]/.test(value);
 }
@@ -279,14 +265,19 @@ export function collect() {
       else if (KEY_ARRAY.test(before.slice(-400))) kind = 'key';
       if (!kind) continue;
       if (!isDisplayText(value, kind)) continue;
-      if (kind === 'key') keys.set(value, (keys.get(value) ?? '') + rel);
+      // The catalogue maps each entry to *itself*: the German sentence is both
+      // the key and, in `de.json`, the value. Mapping to the file it was found
+      // in produced catalogues whose values were paths, and the game then showed
+      // `src/game/siedler/siedler_screen.gd` instead of a sentence. The key is
+      // the search term; `grep` finds the call site.
+      if (kind === 'key') keys.set(value, value);
       else {
-        text.set(value, (text.get(value) ?? '') + rel);
+        text.set(value, value);
         if (ctx.call === 'Loc.f' && /^[a-z][\w]*(\.[\w]+)+$/.test(value)) locF.push({ value, rel });
       }
     }
   }
-  for (const value of contentText()) text.set(value, 'content/*.json');
+  for (const value of contentText()) text.set(value, value);
   return { keys, text, locF };
 }
 
@@ -308,14 +299,32 @@ function readCatalogue(code) {
   };
 }
 
+/**
+ * A file name is a language catalogue when it looks like a language code.
+ *
+ * `locale/` also holds `exclude.json` and `identical.json`, which are tools for
+ * this script and not translations. Deciding by name means `Loc` can read
+ * `res://assets/locale` without ever meeting a tool file and calling it a
+ * language, and the mirror below copies exactly the catalogues.
+ */
+const CATALOGUE_FILE = /^[a-z]{2}(-[A-Za-z0-9]+)*\.json$/;
+
 export function readAll() {
   const out = new Map();
   if (!existsSync(sourceDir)) return out;
   for (const name of readdirSync(sourceDir).sort()) {
-    if (!name.endsWith('.json') || name === 'exclude.json') continue;
+    if (!CATALOGUE_FILE.test(name)) continue;
     out.set(name.replace(/\.json$/, ''), readCatalogue(name.replace(/\.json$/, '')));
   }
   return out;
+}
+
+
+function readIdentical() {
+  const file = join(sourceDir, 'identical.json');
+  if (!existsSync(file)) return new Set();
+  const parsed = JSON.parse(readFileSync(file, 'utf8'));
+  return new Set([...(parsed.keys ?? []), ...(parsed.text ?? [])]);
 }
 
 function readExcludes() {
@@ -342,20 +351,35 @@ function serialise(catalogue) {
 }
 
 /** How much is translated, split into hand-written and generated. */
-export function coverage(catalogue, source) {
+export function coverage(catalogue, source, identical = new Set()) {
   const count = (wanted, have) => {
     const keys = Object.keys(wanted);
-    if (!keys.length) return { done: 0, total: 0 };
-    // A translation is one that differs from the German source; an entry that
-    // was filled in but left unchanged does not count as finished.
-    const done = keys.filter((k) => typeof have[k] === 'string' && have[k] !== wanted[k]).length;
-    return { done, total: keys.length };
+    // Entries `locale/identical.json` marks as equal in every language on
+    // purpose — brand names, symbol patterns, loanwords — leave the denominator.
+    // Calling "Tetris" untranslated would turn the number into a complaint about
+    // the one thing that is right. The count stays in the report, so the
+    // exclusion cannot be used to hide real gaps.
+    const open = keys.filter((k) => !identical.has(k));
+    // A translation is one that differs from the German source; an entry filled
+    // in but left unchanged does not count as finished. The comparison goes
+    // through JSON so a plural entry — an object of forms, not a string — counts
+    // like any other; a `typeof === 'string'` test would silently exclude every
+    // plural in the game and report them as open forever.
+    const done = open.filter((k) => have[k] !== undefined
+      && JSON.stringify(have[k]) !== JSON.stringify(wanted[k])).length;
+    return { done, total: open.length, same: keys.length - open.length, open: open.length - done };
   };
   const k = count(source.keys, catalogue.keys);
   const t = count(source.text, catalogue.text);
   const total = k.total + t.total;
   return {
-    keys: k, text: t, total, done: k.done + t.done, percent: total ? (k.done + t.done) / total : 1,
+    keys: k,
+    text: t,
+    total,
+    done: k.done + t.done,
+    same: k.same + t.same,
+    open: k.open + t.open,
+    percent: total ? (k.done + t.done) / total : 1,
   };
 }
 
@@ -372,8 +396,8 @@ function sync() {
   const source = all.get(SOURCE);
 
   // `keys` stay hand-written: an identifier discovered in the code without a
-  // German text is a gap, and the compiler should say so rather than a silent
-  // fallback to the key itself.
+  // German text is a gap, and the check should say so rather than fall back to
+  // the key itself.
   for (const key of found.keys.keys()) {
     if (!(key in source.keys)) {
       console.warn(`[locale] ${key} wird im Code benutzt, fehlt aber in ${SOURCE}.json (keys)`);
@@ -420,7 +444,7 @@ function sync() {
 
   if (!existsSync(mirrorDir)) mkdirSync(mirrorDir, { recursive: true });
   for (const name of readdirSync(sourceDir)) {
-    if (!name.endsWith('.json') || name === 'exclude.json') continue;
+    if (!CATALOGUE_FILE.test(name)) continue;
     copyFileSync(join(sourceDir, name), join(mirrorDir, name));
   }
   console.log(`[locale] ${SOURCE}.json: ${Object.keys(source.text).length} Quellstrings, `
@@ -440,9 +464,10 @@ function list() {
       console.log(`${code}  Quelle   ${Object.keys(source.text).length + Object.keys(source.keys).length} Einträge`);
       continue;
     }
-    const c = coverage(catalogue, source);
-    console.log(`${code}  ${catalogue.native.padEnd(12)} ${(c.percent * 100).toFixed(1).padStart(5)} %  `
-      + `(${c.done}/${c.total})  keys ${c.keys.done}/${c.keys.total}  text ${c.text.done}/${c.text.total}`);
+    const c = coverage(catalogue, source, readIdentical());
+    console.log(`${code}  ${catalogue.native.padEnd(10)} ${(c.percent * 100).toFixed(1).padStart(5)} %  `
+      + `${String(c.done).padStart(4)}/${c.total} übersetzt  ·  ${c.same} gleich  ·  ${c.open} offen`
+      + `  (keys ${c.keys.done}/${c.keys.total}, text ${c.text.done}/${c.text.total})`);
   }
   return 0;
 }
@@ -506,7 +531,27 @@ function check() {
       problems.push(`godot/assets/locale/${name} weicht von locale/${name} ab — "npm run locale:sync"`);
     }
   }
-  // 5. An identifier passed to `Loc.f` is nearly always a slip for `Loc.t`:
+  // 5. `identical.json` may only name entries that really are equal, and every
+  //    entry that is equal has to be named. The first direction stops somebody
+  //    translating "Tetris"; the second stops the list from becoming a hiding
+  //    place for a sentence nobody got round to.
+  const identical = readIdentical();
+  for (const [code, catalogue] of all) {
+    if (code === SOURCE) continue;
+    for (const section of ['keys', 'text']) {
+      for (const [key, value] of Object.entries(catalogue[section] ?? {})) {
+        if (JSON.stringify(value) === JSON.stringify(source[section][key]) && !identical.has(key)) {
+          problems.push(`${code}.json: "${key}" ist noch unübersetzt — übersetzen oder in identical.json eintragen`);
+        }
+      }
+    }
+  }
+  for (const key of identical) {
+    if (!(key in source.keys) && !(key in source.text)) {
+      problems.push(`identical.json nennt '${key}', das es in ${SOURCE}.json nicht gibt`);
+    }
+  }
+  // 6. An identifier passed to `Loc.f` is nearly always a slip for `Loc.t`:
   //    `Loc.f` formats with `%`, an identifier has no placeholders.
   for (const { value, rel } of found.locF) {
     problems.push(`Loc.f("${value}") in ${rel} sieht nach einer Kennung aus — dafür ist Loc.t zuständig`);

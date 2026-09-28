@@ -1,41 +1,40 @@
 class_name SuggestionQueue
 extends RefCounted
-## Queue for player suggestions — rules, format, storage.
+## Queue for player suggestions — rules, format, storage. Network-free and
+## renderer-free, so everything tests without a server.
+## The list itself is a plain `Array[Dictionary]` held by `Api`; what lives here
+## are the decisions around it:
 ##
-## Network-free and renderer-free, so everything tests without a server.
-## The list itself is a plain `Array[Dictionary]` held by `Api`; what
-## lives here are the decisions around it:
-##
-## 1. Every entry gets a `clientKey` on insert and keeps it across
-##    retries. The server dedupes on it — the client never compares
-##    texts: two identical ideas from one player are allowed.
-## 2. The list lives in `user://` and is written on **every** change
-##    before a send counts as success. If the process dies mid-send,
-##    that costs a retry, not the idea.
+## 1. Every entry gets a `clientKey` on insert and keeps it across retries. The
+##    server dedupes on it — the client never compares texts: two identical ideas
+##    from one player are allowed.
+## 2. The list lives in `user://` and is written on **every** change before a send
+##    counts as success. If the process dies mid-send, that costs a retry, not the
+##    idea.
 ##
 ## Everything here is deliberately `static`: the queue is data.
 
-## Storage path. Survives app kill, reboot and crash via `user://` —
-## unlike a list in RAM.
+## Storage path. Survives app kill, reboot and crash via `user://` — unlike a
+## list in RAM.
 const PATH := "user://suggestions.json"
 
 ## File format version. A foreign version is discarded, not guessed at.
 const VERSION := 1
 
-## Upper limit. An unbounded file in `user://` is worse than a visible
-## gap: the **oldest** entry yields.
+## Upper limit. An unbounded file in `user://` is worse than a visible gap: the
+## **oldest** entry yields.
 const MAX_ITEMS := 50
 
-## The server accepts 2000 characters; longer entries would only be
-## rejected at flush time.
+## The server accepts 2000 characters; longer entries would only be rejected at
+## flush time.
 const MAX_TEXT := 2000
 
 ## Length of the `clientKey` per the server contract.
 const CLIENT_KEY_MAX := 64
 
-## Wait after a failed delivery attempt, in seconds. Attempt 1 does not
-## wait, then 15 → 24 → 38 → 61 → 98 → 157 → 251 → 300. Without a
-## cap, a night without network would mean endless retries.
+## Wait after a failed delivery attempt, in seconds. Attempt 1 does not wait, then
+## 15 → 24 → 38 → 61 → 98 → 157 → 251 → 300. Without a cap, a night without network
+## would mean endless retries.
 const BACKOFF_BASE := 15.0
 const BACKOFF_FACTOR := 1.6
 const BACKOFF_MAX := 300.0
@@ -43,8 +42,8 @@ const BACKOFF_MAX := 300.0
 
 # --- Insert -----------------------------------------------------------------
 
-## The entry as it sits in the queue. `clientKey` and `queuedAt` are
-## born here and never change after.
+## The entry as it sits in the queue. `clientKey` and `queuedAt` are born here and
+## never change after.
 static func make_item(text: String, author: String, source: String = "game") -> Dictionary:
 	return {
 		"clientKey": new_client_key(),
@@ -55,13 +54,13 @@ static func make_item(text: String, author: String, source: String = "game") -> 
 	}
 
 
-## Appends an entry. Returns the **oldest dropped** entry if the limit
-## was hit — empty means nothing was lost.
+## Appends an entry. Returns the **oldest dropped** entry if the limit was hit —
+## empty means nothing was lost.
 static func push(items: Array, item: Dictionary, limit: int = MAX_ITEMS) -> Dictionary:
 	var stored := sanitise(item)
 	if find(items, str(stored.get("clientKey", ""))) != {}:
-		# Duplicate keys would merge server-side into one suggestion,
-		# the second vanishing without a trace.
+	# Duplicate keys would merge server-side into one suggestion, the second
+	# vanishing without a trace.
 		stored["clientKey"] = new_client_key()
 	items.append(stored)
 	var dropped := {}
@@ -73,8 +72,8 @@ static func push(items: Array, item: Dictionary, limit: int = MAX_ITEMS) -> Dict
 	return dropped
 
 
-## Removes an entry. Only after the server confirms a send does it
-## disappear — and the caller writes that to disk immediately.
+## Removes an entry. Only after the server confirms a send does it disappear — and
+## the caller writes that to disk immediately.
 static func remove(items: Array, client_key: String) -> bool:
 	for i in items.size():
 		var entry: Variant = items[i]
@@ -96,8 +95,8 @@ static func find(items: Array, client_key: String) -> Dictionary:
 	return {}
 
 
-## How many distinct `clientKey` values the list carries. Two rows with
-## the same key would be a silent loss on the server side.
+## How many distinct `clientKey` values the list carries. Two rows with the same
+## key would be a silent loss on the server side.
 static func distinct_keys(items: Array) -> int:
 	var seen := {}
 	for entry in items:
@@ -108,8 +107,8 @@ static func distinct_keys(items: Array) -> int:
 
 # --- Storage ----------------------------------------------------------------
 
-## Reads the queue from disk and repairs it on the way. A missing file
-## is not an error: the player has saved nothing yet.
+## Reads the queue from disk and repairs it on the way. A missing file is not an
+## error: the player has saved nothing yet.
 static func restore(path: String = PATH, limit: int = MAX_ITEMS) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	if not FileAccess.file_exists(path):
@@ -119,16 +118,14 @@ static func restore(path: String = PATH, limit: int = MAX_ITEMS) -> Array[Dictio
 	if out.size() > cap:
 		# Overflow from a time with a higher limit: the newest wins.
 		out = out.slice(out.size() - cap)
-	# Write back immediately: `decode()` has filled in missing keys and
-	# dropped duplicates; the on-disk state is now the truth a crash can
-	# no longer corrupt.
+	# Write back immediately: `decode()` has filled in missing keys and dropped
+	# duplicates; the on-disk state is now the truth a crash can no longer corrupt.
 	persist(path, out)
 	return out
 
 
-## Writes the queue atomically: temp file first, then rename. If the
-## process dies in between, the old list survives instead of a
-## half-written file.
+## Writes the queue atomically: temp file first, then rename. If the process dies in
+## between, the old list survives instead of a half-written file.
 static func persist(path: String, items: Array) -> bool:
 	var text := encode(items)
 	var file := FileAccess.open(path + ".tmp", FileAccess.WRITE)
@@ -164,10 +161,9 @@ static func encode(items: Array) -> String:
 	return JSON.stringify({"version": VERSION, "items": out}, "  ")
 
 
-## Reads the JSON format and repairs what is off: missing or over-long
-## `clientKey` values are replaced, duplicates get a new one, entries
-## without text are dropped. A broken file yields an empty list, not a
-## crash.
+## Reads the JSON format and repairs what is off: missing or over-long `clientKey`
+## values are replaced, duplicates get a new one, entries without text are
+## dropped. A broken file yields an empty list, not a crash.
 static func decode(text: String) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var parsed: Variant = JSON.parse_string(text)
@@ -185,16 +181,16 @@ static func decode(text: String) -> Array[Dictionary]:
 		if item.is_empty() or str(item.get("text", "")) == "":
 			continue
 		if seen.has(item.get("clientKey", "")):
-			# Two entries with the same key would merge server-side —
-			# the second would be silently lost.
+			# Two entries with the same key would merge server-side — the second would
+			# be silently lost.
 			item["clientKey"] = new_client_key()
 		seen[item.get("clientKey", "")] = true
 		out.append(item)
 	return out
 
 
-## Brings an entry down to the fields the server knows. Everything else
-## is discarded: the queue is not an archive.
+## Brings an entry down to the fields the server knows. Everything else is
+## discarded: the queue is not an archive.
 static func sanitise(entry: Variant) -> Dictionary:
 	var out := {}
 	if not (entry is Dictionary):
@@ -216,8 +212,8 @@ static func sanitise(entry: Variant) -> Dictionary:
 	return out
 
 
-## The POST body for one entry. `clientKey` sits on top and stays the
-## same across all retries — the server dedupes on exactly that.
+## The POST body for one entry. `clientKey` sits on top and stays the same across
+## all retries — the server dedupes on exactly that.
 static func request_body(item: Dictionary) -> Dictionary:
 	var clean := sanitise(item)
 	return {
@@ -230,8 +226,8 @@ static func request_body(item: Dictionary) -> Dictionary:
 
 # --- Decisions --------------------------------------------------------------
 
-## Wait time before the next attempt. Attempt 0 does not wait — after a
-## state change (new idea, app back in foreground) it should go at once.
+## Wait time before the next attempt. Attempt 0 does not wait — after a state change
+## (new idea, app back in foreground) it should go at once.
 static func backoff_seconds(attempt: int) -> float:
 	if attempt <= 0:
 		return 0.0
@@ -243,8 +239,8 @@ static func backoff_seconds(attempt: int) -> float:
 	return minf(wait, BACKOFF_MAX)
 
 
-## The text a screen can show for the pending count. Empty without a
-## queue, so the display hides itself instead of claiming "0 waiting".
+## The text a screen can show for the pending count. Empty without a queue, so the
+## display hides itself instead of claiming "0 waiting".
 static func pending_hint(count: int) -> String:
 	if count <= 0:
 		return ""
@@ -254,23 +250,23 @@ static func pending_hint(count: int) -> String:
 	return Loc.tn("ui.queue_waiting", count)
 
 
-## The reason shown when the list was too full. A dropped suggestion
-## needs a visible reason, otherwise the player only notices when the
-## list is empty again.
+## The reason shown when the list was too full. A dropped suggestion needs a
+## visible reason, otherwise the player only notices when the list is empty again.
 static func cap_warning(dropped_item: Dictionary, limit: int) -> String:
 	var text := str(dropped_item.get("text", "")).strip_edges()
 	if text.length() > 40:
 		text = text.substr(0, 40) + " …"
-	# `Loc.f` translates the template and substitutes afterwards. The other way
-	# round — format first, translate second — would mean writing a finished
-	# sentence with a player's own text already inside it into the catalogue.
-	return Loc.f("ui.queue_full", [limit, text])
+	# `Loc.t` with named placeholders, not `Loc.f` with `%`: the player's own text
+	# goes in after the sentence has been translated, so a language that puts the
+	# dropped suggestion first still reads correctly. The other way round — format
+	# first, translate second — would mean storing a finished sentence with a
+	# player's words already inside it.
+	return Loc.t("ui.queue_full", {"limit": str(limit), "text": text})
 
 
-## A random, stable key: generated once, then identical for every
-## attempt of this suggestion. Short enough for the server's
-## 64-character limit, unique enough for two ideas in the same
-## millisecond.
+## A random, stable key: generated once, then identical for every attempt of this
+## suggestion. Short enough for the server's 64-character limit, unique enough for
+## two ideas in the same millisecond.
 static func new_client_key() -> String:
 	return "s80_%08x%06x" % [
 		randi() & 0xFFFFFFFF,
