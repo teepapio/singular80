@@ -1,13 +1,10 @@
 /**
  * One command that answers "can we upload yet?".
  *
- * It chains the checks that matter, each of which has bitten a real Play
- * rejection at some point:
- *   1. config/app.json  — no TODO placeholders left, https URLs, sane version
- *   2. listing/*.md     — character limits and Play's forbidden marketing words
- *   3. legal/*.md       — the four documents Play requires, without placeholders
- *   4. assets/          — icon, feature graphic, screenshots, dimensions
- *   5. the AAB          — structure, targetSdk, package, signature (verify-aab)
+ * It chains the checks Play enforces in turn: config/app.json placeholders and
+ * https URLs, the store listing's character limits and forbidden marketing
+ * words, the four required legal documents, the graphics and their dimensions,
+ * and finally the AAB itself (targetSdk, package, signature).
  *
  * Exit code 0 means "uploadable", anything else lists what is missing.
  */
@@ -66,7 +63,7 @@ step('2 Store-Texte');
  * `## Field` heading followed by plain text until the next heading.
  *
  * The end-of-input lookahead is `(?![\s\S])` rather than `$`: with the `m` flag
- * `$` also matches at every line end, which truncated each field after one line.
+ * `$` also matches at every line end, which truncates each field after one line.
  */
 function parseListing(file) {
   const text = readFileSync(file, 'utf8');

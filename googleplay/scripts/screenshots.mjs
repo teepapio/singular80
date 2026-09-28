@@ -1,22 +1,17 @@
 /**
  * Renders real screenshots of the game's own screens for the Play store
- * listing. Play wants actual gameplay, not mock-ups — so the images come out
- * of the running Godot project, headless, at the project's native 1280×720
- * (16:9 landscape, which is what Play recommends for games).
+ * listing. Play wants actual gameplay, not mock-ups — so the images come out of
+ * the running Godot project at the project's native 1280×720 (16:9 landscape,
+ * which is what Play recommends for games).
  *
- *   npm run screenshots                 → the default set below
+ *   npm run screenshots                  → the default set below
  *   npm run screenshots -- lobby,tetris
- *   npm run screenshots -- --frames 12  → longer settle time per screen
+ *   npm run screenshots -- --frames 12   → longer settle time per screen
+ *   npm run screenshots -- --import DIR  → normalise PNG/JPG from DIR instead
  *
  * The harness lives in this folder and is copied into godot/ with a `_` prefix,
- * which export_presets.cfg already excludes from every build.
- *
- * Two modes:
- *   npm run screenshots                     render the game's own screens (needs
- *                                           a display; --headless has no renderer)
- *   npm run screenshots -- --import DIR     take PNG/JPG from DIR, normalise them
- *                                           to 1280×720 16:9 and validate them
- *                                           against Play's rules
+ * which export_presets.cfg already excludes from every build. Rendering the
+ * game's own screens needs a display: `--headless` has no renderer.
  */
 import { copyFileSync, existsSync, readdirSync, statSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, extname, basename } from 'node:path';
@@ -131,8 +126,8 @@ info('Erlaubt: 16:9 quer (1280×720 passt), max. 8 Stück, min. 2, JPEG oder 24-
 done(`${produced.length} Screenshots in ${SHOT_DIR}`);
 
 /**
- * Normalises externally taken screenshots to what Play expects:
- * 16:9 landscape, 1280×720, PNG without alpha, letterboxed rather than cropped
+ * Normalises externally taken screenshots to what Play expects: 16:9
+ * landscape, 1280×720, PNG without alpha, letterboxed rather than cropped
  * (cropping would cut off HUD elements, which Play's own review dislikes).
  */
 function importShots(dir) {

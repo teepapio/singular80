@@ -9,18 +9,16 @@
  *
  *   backup/dashboard.json   ← written by "Backup ins Repo schreiben"
  *
- * Two properties make that file worth having:
+ * Two properties make that file worth having: it is **readable without the
+ * server** (a lost database, a fresh clone or a second machine can read the whole
+ * history — texts, decisions, votes, every run with its commit — via `git show`)
+ * and it is **diffable** (sorted ids and a stable field order make a change one
+ * line, not a rebuilt binary).
  *
- *  - **It is readable without the server.** A lost database, a fresh clone or a
- *    second machine can read the whole history — texts, decisions, votes and
- *    every run with its commit — with `git show`.
- *  - **It is diffable.** Sorted ids and a stable field order mean a change is
- *    one line, not a rebuilt binary.
- *
- * Reading it back is a merge, not a restore: the file never overwrites newer
- * local facts, and a run that was still in flight on the other machine arrives
- * as `cancelled` rather than as a lie. The rules are in `mergeSnapshot` and each
- * one of them exists because the opposite would destroy something.
+ * Reading it back is a merge, not a restore: the file never overwrites newer local
+ * facts, and a run still in flight on the other machine arrives as `cancelled`
+ * rather than as a lie. The rules are in `mergeSnapshot`, and each exists because
+ * the opposite would destroy something.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
@@ -42,11 +40,11 @@ export const BACKUP_RELATIVE_PATH = join('backup', 'dashboard.json');
  * A run as it goes into the repository: same facts, but `prompt` is left out and
  * `logPath` is relative.
  *
- * The prompt is the one field that would blow the file up — every run stores a
- * few kilobytes of the same instructions — and it is *derived*: suggestion text,
+ * The prompt is the one field that would blow the file up — every run stores
+ * kilobytes of the same instructions — and it is *derived* from suggestion text,
  * cluster, settings, scope and attempt. Rebuilding it on import keeps the file
- * small and, better, keeps a hand-tuned prompt in the database authoritative
- * instead of letting a two-week-old copy win.
+ * small and keeps a hand-tuned prompt in the database authoritative instead of
+ * letting a two-week-old copy win.
  */
 export type PortableRun = Omit<RunRecord, 'prompt' | 'logPath'> & { logPath: string };
 
@@ -289,17 +287,16 @@ function sameSuggestion(a: Suggestion, b: Suggestion): boolean {
 /**
  * Applies a snapshot to the database. Never destructive:
  *
- *  - a suggestion only in the file is inserted with its id; a suggestion in both
- *    keeps whichever version has the newer `updatedAt` (ties go to the local one,
- *    because the local row may have just been changed by a vote this very
- *    request did not see);
- *  - a run only in the file is inserted; a run in both is only touched when the
+ *  - a suggestion only in the file is inserted with its id; one in both keeps
+ *    whichever version has the newer `updatedAt` (ties go to the local row, which
+ *    may have just been changed by a vote this request did not see);
+ *  - a run only in the file is inserted; one in both is touched only when the
  *    file has an *outcome* and the local row does not. That repairs a machine
- *    which lost "succeeded" and is a no-op for a run that is live here, because
- *    a live run has no outcome yet;
+ *    which lost "succeeded" and is a no-op for a run live here, since a live run
+ *    has no outcome yet;
  *  - a run the file still lists as `running`/`queued` arrives as `cancelled`. It
- *    was in flight on another machine, it cannot be resumed from a JSON file, and
- *    leaving it "running" would show the operator a session that does not exist.
+ *    was in flight on another machine, a JSON file cannot resume it, and leaving
+ *    it "running" would show the operator a session that does not exist.
  */
 export function mergeSnapshot(
   store: Store,

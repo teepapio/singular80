@@ -1,16 +1,12 @@
 class_name TestCrystal3d
 extends RefCounted
-## Rule and screen tests for "Crystal Jumper 3D" and its two themed editions.
+## Rule and screen tests for "Crystal Jumper 3D". The tower itself is covered by
+## the "Crystal Tower" suite in `test_logic.gd`; this file owns the *Flusskette*,
+## the chain of quick pickups that pays more the faster the player climbs.
 ##
-## The tower itself is covered by the "Crystal Tower" suite in `test_logic.gd`.
-## This file owns what the crystal3d scope added afterwards: the Flusskette, the
-## chain of quick pickups that pays more the faster the player climbs.
-##
-## The screen suite loads `crystal_jumper_screen.gd` **by path** rather than as
-## `CrystalJumperScreen`: a static reference would pull the screen into the
-## compile chain of `run_tests.gd`, which runs before the engine registers the
-## autoloads, and every autoload inside the screen would fail to resolve
-## (`test_screens.gd` and `test_metro_screens.gd` avoid the same trap the same way).
+## The screen is loaded **by path** rather than as `CrystalJumperScreen`: a static
+## reference pulls it into the compile chain of `run_tests.gd`, which runs before
+## the engine registers the autoloads.
 
 var t: TestKit
 ## Autoloads are not registered in `--script` mode, so they are fetched by path.
@@ -91,7 +87,7 @@ func _flow_chain() -> void:
 	t.suite_done()
 
 
-# --- Punkte -----------------------------------------------------------------
+# --- flow scoring ------------------------------------------------------------
 
 func _flow_scoring() -> void:
 	t.suite("Crystal Tower — Flusspunkte")
@@ -149,9 +145,9 @@ func _screen_flow(tree: SceneTree) -> void:
 		"Ketten- und Punkteanzeige sind gebaut")
 	t.equal(screen._label_pool.size(), 8, "Acht schwebende Texte liegen bereit")
 
-	# Der Startpunkt sammelt beim Einstieg einen Kristall ein, und die Engine
-	# tickt weiter, während die Suite wartet. Für die Kettenprüfungen wird der
-	# Lauf deshalb auf null gesetzt, sonst hingen die Erwartungen am Zeitpunkt.
+	# The spawn point already collects a crystal on entry, and the engine keeps
+	# ticking while the suite waits, so the run is zeroed first — otherwise every
+	# expectation would hang on the moment it happened to be checked.
 	_reset_run(screen)
 	screen._update_flow(0.016)
 	t.equal(screen.flow_chain, 0, "Zu Beginn läuft keine Kette")

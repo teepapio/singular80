@@ -1,20 +1,16 @@
 /**
- * Brings the local toolchain to the state Google Play requires as of
- * 2026-08-31: apps must target Android 16 / API level 36.
+ * Brings the local toolchain to the state Google Play requires as of 2026-08-31:
+ * apps must target Android 16 / API level 36.
  *
- * Two independent things can deliver API 36, and this script picks whichever
- * is available:
+ * Two independent things can deliver API 36, and this script uses whichever is
+ * available: `sdkmanager "platforms;android-36"` plus the compileSdk/targetSdk/
+ * buildTools patch of godot/android/build/config.gradle (the path that works
+ * with today's Godot), or a Godot release whose template already targets 36
+ * (4.7+), in which case the patch is a no-op.
  *
- *   1. `sdkmanager "platforms;android-36"` installs the platform, and
- *      `patchAndroidTemplate()` raises compileSdk/targetSdk/buildTools in
- *      godot/android/build/config.gradle to match. This is the path that works
- *      with the Godot version that is installed today.
- *   2. Upgrading Godot to a release whose template already targets 36 (4.7+).
- *      `check-env.mjs` reports which one applies; the patch is a no-op then.
- *
- * `npm run godot:android-template` rewrites godot/android/build from the
- * engine's zip, so the patch has to be applied *after* every install. The
- * `build` script therefore calls this file again before exporting.
+ * `npm run godot:android-template` rewrites godot/android/build from the engine's
+ * zip, so the patch has to be applied *after* every install — which is why the
+ * build script calls this file again before exporting.
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -70,10 +66,7 @@ function installSdkPackages() {
   return true;
 }
 
-/**
- * Raises the Gradle template to the configured SDK levels. Idempotent, and safe
- * to re-run after `npm run godot:android-template` overwrote the directory.
- */
+/** Raises the Gradle template to the configured SDK levels; safe to re-run. */
 function patchAndroidTemplate() {
   const build = join(GODOT_DIR, 'android', 'build');
   const configGradle = join(build, 'config.gradle');
@@ -134,9 +127,9 @@ function patchAndroidTemplate() {
 }
 
 /**
- * bundletool is a single jar on Maven Central. Only used to read the protobuf
- * manifest back out of a built AAB (see verify-aab.mjs), so a failure here is
- * not fatal for building — only for verifying.
+ * Fetches bundletool, used only to read the protobuf manifest back out of a
+ * built AAB (see verify-aab.mjs) — so a failure here blocks verification, not
+ * the build.
  */
 function fetchBundletool() {
   step('bundletool');

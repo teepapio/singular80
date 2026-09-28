@@ -26,11 +26,37 @@ static var _text: Dictionary = {}
 ## Every string the active catalogue emits. This is why two `resolve()`
 ## calls in a row return the same string.
 static var _values: Dictionary = {}
+## …and every string a substitution produced from one of them. A finished
+## sentence is in neither `_values` nor the catalogue: `Ui.label` gets
+## `Loc.t("ui.highscore_of", {"score": …})` — a German "Bestwert: 1.234" with no
+## `{name}` left in it — and measured against the catalogue it looked like an
+## untranslated source string. Rebuilt in `_apply`, which is what keeps it small:
+## one language holds one set of results at a time.
+static var _results: Dictionary = {}
 static var _numbers: Dictionary = {"decimal": ".", "group": ",", "percent": " %"}
 static var _catalogues: Dictionary = {}
 static var _registered := false
-## German template -> how many `%` placeholders it has. Only the source counts;
-## every other catalogue is measured against it before it is used.
+## The `Translation` objects this class handed to `TranslationServer`. Held so
+## `reset()` can take them back: registering a second time without removing the
+## first left a run's worth of catalogues on the server per reset — nine resets,
+## 27 objects, ~675 messages each, none of them freed — and `tr()` resolves
+## against the *oldest* registered one, so a stale catalogue could answer
+## differently from `Loc.t`.
+static var _translations: Array[Translation] = []
+## Whether `set_code` may write the player's choice to `user://singular80.cfg`.
+## `run_tests.gd` is a `--script` run and pins the language for every test it
+## loads; persisting that rewrote the real config behind the developer's back —
+## muted, loadout, server address, touch, highscores, stars, language all
+## replaced by the suite's "de", with no error anywhere and a game that started
+## in German again. So a `--script` run starts with persistence off, and only a
+## real launch has it on; nothing in the game turns it off.
+static var persist := not OS.get_cmdline_args().has("--script")
+## Source signatures, `{"section": {key: {form: signature}}}` — `{form: …}` with
+## the empty form for a plain string. Only the source is measured; every other
+## catalogue is compared against it before it is used. The section belongs in
+## the key: a key can sit in both `keys` and `text`, and the two halves speak
+## different placeholder grammars (`{name}` and `%`), so one table per key had
+## the `text` signature overwrite the `keys` one for the same id.
 static var _specifiers: Dictionary = {}
 ## Entries that are equal in every language on purpose — brand names, symbol
 ## patterns, loanwords. Mirrored from `locale/identical.json`; they leave the
@@ -54,16 +80,27 @@ static func boot() -> void:
 	if wanted != "" and _catalogues.has(wanted):
 		_apply(wanted)
 		return
+	# A stored language without a catalogue in this build — an `es` left over
+	# from a build that had one, or a config that came from elsewhere. Left
+	# alone it is invisible in the picker, so the player can never get back to
+	# it through the UI, and the next build that re-adds `es.json` switches them
+	# back without asking. Remember what was actually applied, once.
+	var unreconciled := wanted != ""
 	var system := system_code()
 	if system != "" and _catalogues.has(system):
 		_apply(system)
-		return
-	if _catalogues.has(SOURCE):
+	elif _catalogues.has(SOURCE):
 		_apply(SOURCE)
-		return
-	# No readable catalogue: the key *is* the German source text, so behaviour
-	# is exactly what it was before multi-language.
-	_code = SOURCE
+	else:
+		# No readable catalogue: the key *is* the German source text, so behaviour
+		# is exactly what it was before multi-language. The engine still has to
+		# hear it: `TranslationServer.set_locale` was skipped here, so `tr()` and
+		# `Control`'s own re-translation kept serving the project default while
+		# the rest of the game ran in the source.
+		_code = SOURCE
+		TranslationServer.set_locale(SOURCE)
+	if unreconciled:
+		_persist(_code)
 
 
 static func _ensure() -> void:
@@ -116,9 +153,7 @@ static func _load_identical() -> void:
 
 
 static func _load_catalogue(file: String, dir: DirAccess) -> void:
-	# `identical.json` lives in the same directory and is a tool, not a
-	# language. Reading it as one would put "identical" in the language picker.
-	if not file.ends_with(".json") or file == IDENTICAL_FILE:
+	if not _is_catalogue(file):
 		return
 	var raw := FileAccess.get_file_as_string("%s/%s" % [DIR, file])
 	var parsed: Variant = JSON.parse_string(raw)
@@ -133,10 +168,27 @@ static func _load_catalogue(file: String, dir: DirAccess) -> void:
 	_catalogues[code] = {
 		"name": str(catalogue.get("name", code)),
 		"native": str(catalogue.get("native", catalogue.get("name", code))),
-		"keys": _checked(code, catalogue.get("keys", {}), true),
-		"text": _checked(code, catalogue.get("text", {}), false),
+		"keys": _checked(code, "keys", catalogue.get("keys", {})),
+		"text": _checked(code, "text", catalogue.get("text", {})),
 		"numbers": numbers if numbers is Dictionary else {},
 	}
+
+
+## True for a file that is a language and nothing else.
+##
+## `DIR` also holds what the tooling puts there, and every `*.json` used to be
+## read as a language: `identical.json` was excluded by name, a stray
+## `notes.json` was not and put "notes" into the language picker. The name is
+## the only thing that tells the two apart at runtime, so it has to follow the
+## shape of a language code — two lower-case letters, then optional `-`
+## subtags — the same decision `scripts/locale.mjs` makes before it mirrors a
+## file at all.
+static func _is_catalogue(file: String) -> bool:
+	if not file.ends_with(".json") or file == IDENTICAL_FILE:
+		return false
+	var pattern := RegEx.new()
+	pattern.compile("^[a-z]{2}(-[A-Za-z0-9]+)*\\.json$")
+	return pattern.search(file) != null
 
 
 ## The `{name}` placeholders of a text, sorted, so two texts can be compared.
@@ -150,7 +202,8 @@ static func _placeholders(text: String) -> PackedStringArray:
 	return out
 
 
-## How many `%` placeholders a text has — `%%` does not count as one.
+## The conversion letter of every `%` placeholder in a text — `%%` does not
+## count as one.
 ##
 ## A space is deliberately not accepted as a flag. `printf` allows `% d`, but in
 ## this catalogue `% ` is a literal percent sign in prose — "+12 % Feuerrate",
@@ -158,8 +211,8 @@ static func _placeholders(text: String) -> PackedStringArray:
 ## guard report a German sentence and its English translation as incompatible
 ## over nothing but the case of one letter: `F` is not a conversion character,
 ## `f` is. The trade is one format style the game does not use.
-static func _count_specifiers(text: String) -> int:
-	var count := 0
+static func _specifier_letters(text: String) -> PackedStringArray:
+	var out := PackedStringArray()
 	var i := 0
 	while i < text.length():
 		if text[i] != "%":
@@ -169,57 +222,135 @@ static func _count_specifiers(text: String) -> int:
 			i += 2
 			continue
 		var j := i + 1
-		while j < text.length() and "-+#0123456789.*".contains(text[j]):
+		# `%1$s` is positional: the number is a flag, and a translation that
+		# renumbers the positions swaps the arguments.
+		while j < text.length() and "-+#0123456789.*$".contains(text[j]):
 			j += 1
-		if j < text.length() and "sdfxXo".contains(text[j]):
-			count += 1
+		if j < text.length() and "sdfxXoiegcbu".contains(text[j]):
+			out.append(text[j])
 		i = j + 1
-	return count
+	return out
 
 
-## Drops translations whose placeholders no longer match the German original.
+## What a text has to keep intact to be substitutable — the `{}` names, or the
+## conversion letters of the `%` placeholders.
+##
+## Letters, not a count: `%s` and `%d` both take one argument, so a count said
+## they were interchangeable. A translation that turned `%s` into `%d` passed
+## the guard and then handed a formatted score to `%d` — `Ui.format_number`
+## returns a String — which reads "0" on the caption.
+static func _signature(text: String, named: bool) -> String:
+	if named:
+		return ",".join(_placeholders(text))
+	return ",".join(_specifier_letters(text))
+
+
+## Drops translations whose placeholders no longer match the source original.
 ## A dropped placeholder is not a bad sentence, it is a crash mid-game:
 ## `String % Array` aborts when the counts disagree, and a `{name}` with no
 ## argument leaves a hole. A wrong-language sentence is an annoyance; a crashed
 ## game is a bug report filed by a player.
-## The two halves are checked differently on purpose: a `text` entry is a German
+## The two sections are checked differently on purpose, which is why the
+## section name is an argument and not a boolean: a `text` entry is a source
 ## template formatted with `%` by `Loc.f`, a `keys` entry is filled from named
 ## arguments with `{name}` by `Loc.t`. Counting `%` in a `{name}` sentence would
-## find nothing and accept everything.
-static func _checked(code: String, section: Variant, named: bool) -> Dictionary:
-	if not (section is Dictionary):
+## find nothing and accept everything, and the section is the only thing that
+## says which of the two a key is.
+static func _checked(code: String, section: String, entries: Variant) -> Dictionary:
+	if not (entries is Dictionary):
 		return {}
+	var named := section == "keys"
 	var out: Dictionary = {}
-	for key in section:
-		var value: Variant = section[key]
+	for key in entries:
+		var value: Variant = entries[key]
+		if value is Dictionary:
+			# A plural used to fall through the `is String` test below and be
+			# copied in untouched, so `coverage` — which compared
+			# `str(Dictionary)` — read a plural that had lost its "other" as
+			# fully translated.
+			if code == SOURCE:
+				_remember_plural(section, key, value, named)
+				out[key] = value
+			else:
+				var forms := _checked_plural(section, key, value, named)
+				if not forms.is_empty():
+					out[key] = forms
+			continue
 		if not (value is String):
 			out[key] = value
 			continue
 		if code == SOURCE:
-			_specifiers[key] = _signature(value, named)
+			_remember(section, key, _signature(value, named))
 			out[key] = value
 			continue
-		if not _specifiers.has(key) or _signature(value, named) == str(_specifiers[key]):
+		var want := _recalled(section, key)
+		if want.is_empty() or (want.has("") and _signature(value, named) == str(want[""])):
 			out[key] = value
 			continue
-		push_warning("Loc: '%s' in %s has different placeholders than the German text and stays unused."
+		push_warning("Loc: '%s' in %s has different placeholders than the source text and stays unused."
 			% [key, code])
 	return out
+
+
+## One plural entry, form by form.
+##
+## The source decides: a form the translation has and the source has not is a
+## form nobody asked for, a form whose `{}` names differ from the source form is
+## an entry `Loc.t` cannot fill, and a form the source has and the translation
+## has not is a half-finished entry that renders as "3 " in a list. Any of the
+## three drops the whole entry, and the source language answers instead — a
+## complete sentence the player can read beats half of one in their language.
+static func _checked_plural(section: String, key: String, forms: Dictionary, named: bool) -> Dictionary:
+	var want := _recalled(section, key)
+	if want.is_empty():
+		return forms
+	if want.has(""):
+		# The source has a plain string here, so a plural has no form of its own
+		# to be measured against.
+		push_warning("Loc: '%s' in a catalogue is a plural where the source is one string, and stays unused." % key)
+		return {}
+	var out: Dictionary = {}
+	for form in forms:
+		if not want.has(form):
+			push_warning("Loc: '%s/%s' in a catalogue has a plural form the source does not, and stays unused." % [key, form])
+			return {}
+		if _signature(str(forms[form]), named) != str(want[form]):
+			push_warning("Loc: '%s/%s' in a catalogue has different placeholders than the source text and stays unused."
+				% [key, form])
+			return {}
+		out[form] = forms[form]
+	if out.size() != want.size():
+		push_warning("Loc: '%s' in a catalogue is missing a plural form of the source, and stays unused." % key)
+		return {}
+	return out
+
+
+## The source signatures of one entry: form -> signature, the empty form for a
+## plain string. An entry the source has not got yields an empty Dictionary,
+## which the callers read as "nothing to compare against".
+static func _recalled(section: String, key: String) -> Dictionary:
+	return (_specifiers.get(section, {}) as Dictionary).get(key, {})
+
+
+static func _remember(section: String, key: String, signature: String) -> void:
+	if not _specifiers.has(section):
+		_specifiers[section] = {}
+	_specifiers[section][key] = {"": signature}
+
+
+static func _remember_plural(section: String, key: String, forms: Dictionary, named: bool) -> void:
+	var per_form: Dictionary = {}
+	for form in forms:
+		per_form[form] = _signature(str(forms[form]), named)
+	if not _specifiers.has(section):
+		_specifiers[section] = {}
+	_specifiers[section][key] = per_form
 
 
 ## What a text has to keep intact to be substitutable.
 ## The equal-on-purpose entries of one language.
 static func _locked(code: String) -> Dictionary:
 	return _identical.get(code, {})
-
-
-static func _signature(text: String, named: bool) -> String:
-	if named:
-		return ",".join(_placeholders(text))
-	var parts := PackedStringArray()
-	for index in _count_specifiers(text):
-		parts.append("s")
-	return ",".join(parts)
 
 
 ## Also hands the catalogues to Godot's `TranslationServer`, so `tr("ui.play")`
@@ -239,6 +370,7 @@ static func _register_translations() -> void:
 			for key in catalogue[section]:
 				_add_message(translation, str(key), catalogue[section][key])
 		TranslationServer.add_translation(translation)
+		_translations.append(translation)
 
 
 static func _add_message(translation: Translation, key: String, value: Variant) -> void:
@@ -263,6 +395,8 @@ static func _apply(code: String) -> void:
 	for name in numbers:
 		_numbers[name] = numbers[name]
 	_values = {}
+	# One language, one set of finished sentences; see `_results`.
+	_results = {}
 	for section in [_keys, _text]:
 		for value in section.values():
 			_collect_values(value, _values)
@@ -360,7 +494,15 @@ static func _game() -> Node:
 	return tree.root.get_node_or_null("Game")
 
 
+## Writes the player's choice through `Game`, so it lands in the one config
+## file. A test run must not: `run_tests.gd` pins a language on every reset, and
+## `Game.set_language` saves the whole config — muted, loadout, server address,
+## touch, highscores, stars — so a green suite would hand the developer who ran
+## it a game whose settings the suite had overwritten. `persist` is the switch,
+## and it is off wherever a `--script` run started it.
 static func _persist(code: String) -> void:
+	if not persist:
+		return
 	var game := _game()
 	if game != null and game.has_method("set_language"):
 		game.call("set_language", code)
@@ -396,7 +538,10 @@ static func resolve(value: String) -> String:
 	if value == "":
 		return ""
 	_ensure()
-	if _values.has(value):
+	# `_values` holds the templates, `_results` what came out of them: a caption
+	# the caller interpolated first has no `{name}` left to be recognised by and
+	# is in neither the catalogue nor `_values`.
+	if _values.has(value) or _results.has(value):
 		return value
 	if _text.has(value):
 		var found: Variant = _text[value]
@@ -421,7 +566,17 @@ static func f(template: String, values: Array) -> String:
 
 static func has(key: String) -> bool:
 	_ensure()
-	return _keys.has(key) or _text.has(key)
+	if _keys.has(key) or _text.has(key):
+		return true
+	# `_raw` falls back to the source, so a key whose translation was dropped or
+	# not written yet still answers — in the source language — from `t`. `has`
+	# has to answer for everything `t` can answer for, or a caller that asks
+	# first sees "no" for a caption it is about to get.
+	var source: Dictionary = _catalogues.get(SOURCE, {})
+	for section in ["keys", "text"]:
+		if (source.get(section, {}) as Dictionary).has(key):
+			return true
+	return false
 
 
 static func _raw(key: String, count: float = 0.0) -> String:
@@ -474,6 +629,11 @@ static func _interpolate(text: String, args: Dictionary) -> String:
 	var out := text
 	for name in args:
 		out = out.replace("{%s}" % name, str(args[name]))
+	# A finished sentence is a source string as far as `resolve` is concerned —
+	# `Ui.label(Loc.t("ui.highscore_of", {"score": …}))` hands it straight to the
+	# catalogue lookup — so it has to be recognisable as something this language
+	# already said. One language, one set: `_apply` drops it.
+	_results[out] = true
 	return out
 
 
@@ -523,10 +683,20 @@ static func _grouped(digits: String) -> String:
 # --- Coverage ---------------------------------------------------------------
 
 ## Share of keys translated in `code` (0.0 ... 1.0). An entry counts as translated
-## only if it differs from the German source — an entry filled in but left
-## unchanged is not done.
+## only if it differs from the source — an entry filled in but left unchanged is
+## not done.
+##
+## The unit is a plural *form*, not a plural: `ui.queue_waiting` needs `one` and
+## `other`, and comparing the two entries as one value said a catalogue that had
+## lost `other` was done. Half a plural rendered as "3 " in a queue, and 100 %
+## coverage is exactly the number nobody would have doubted.
 static func coverage(code: String) -> float:
 	_ensure()
+	# The source measured against itself: every entry is "unchanged", so it would
+	# report 0.0 % — and `missing` would name all of them. The source is the
+	# measure, not a translation of it.
+	if code == SOURCE:
+		return 1.0
 	var source: Dictionary = _catalogues.get(SOURCE, {})
 	if source.is_empty():
 		return 1.0
@@ -541,39 +711,78 @@ static func coverage(code: String) -> float:
 		for key in want:
 			if _locked(code).has(key):
 				continue
-			total += 1
-			if str(have.get(key, "")) != str(want[key]) and str(have.get(key, "")) != "":
-				done += 1
+			for form in _forms(want[key]):
+				total += 1
+				if _translated(have.get(key, null), form, _form(want[key], form)):
+					done += 1
 	return float(done) / float(total) if total > 0 else 1.0
 
 
 ## Keys still German in `code`. For tests, and for the language picker, which may
-## say how far a language has got.
+## say how far a language has got. A plural that is only half translated is named
+## by the form that is missing — `ui.queue_waiting/other` — the same spelling
+## `_add_message` gives it.
 static func missing(code: String) -> PackedStringArray:
 	_ensure()
+	var out := PackedStringArray()
+	if code == SOURCE:
+		return out
 	var source: Dictionary = _catalogues.get(SOURCE, {})
 	var catalogue: Dictionary = _catalogues.get(code, {})
-	var out := PackedStringArray()
 	for section in ["keys", "text"]:
 		var want: Dictionary = source.get(section, {})
 		var have: Dictionary = catalogue.get(section, {})
 		for key in want:
 			if _locked(code).has(key):
 				continue
-			var translated := str(have.get(key, ""))
-			if translated == "" or translated == str(want[key]):
-				out.append(key)
+			for form in _forms(want[key]):
+				if _translated(have.get(key, null), form, _form(want[key], form)):
+					continue
+				out.append(key if form == "" else "%s/%s" % [key, form])
 	return out
+
+
+## The units of comparison one entry is made of: the forms the source has, or the
+## single empty form of a plain string.
+static func _forms(entry: Variant) -> PackedStringArray:
+	if entry is Dictionary:
+		var out := PackedStringArray()
+		for form in entry:
+			out.append(str(form))
+		return out
+	return PackedStringArray([""])
+
+
+## The text of one unit, `""` where there is none.
+static func _form(entry: Variant, form: String) -> String:
+	if entry is Dictionary:
+		return str((entry as Dictionary).get(form, ""))
+	return str(entry) if entry != null else ""
+
+
+## Whether a unit is really translated: present, and not the source text.
+static func _translated(entry: Variant, form: String, reference: String) -> bool:
+	var text := _form(entry, form)
+	return text != "" and text != reference
 
 
 ## Clears the caches. Tests only: in the game the language loads exactly once.
 static func reset() -> void:
 	_booted = false
 	_registered = false
+	# Hand the catalogues back to the engine. `TranslationServer` keeps every
+	# `Translation` it was given for the life of the process, so re-registering
+	# after a reset without removing the old ones left a second, third, …
+	# catalogue per locale — and `tr()` resolved against the first of them, so
+	# what Godot said and what `Loc.t` said could drift apart.
+	for translation in _translations:
+		TranslationServer.remove_translation(translation)
+	_translations.clear()
 	_code = ""
 	_keys = {}
 	_text = {}
 	_values = {}
+	_results = {}
 	_numbers = {"decimal": ".", "group": ",", "percent": " %"}
 	_catalogues = {}
 	_specifiers = {}

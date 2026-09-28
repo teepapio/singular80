@@ -82,19 +82,29 @@ func _catalogue() -> void:
 func _resolution() -> void:
 	t.suite("Sprachen — Auflösung")
 	Loc.reset()
-	Loc.set_code("en")
+	Loc.set_code(PINNED)
 
-	t.equal(Loc.t("ui.close"), "Close", "Eine Kennung wird übersetzt")
-	t.equal(Loc.resolve("Vorschlag"), "Suggestion", "Ein deutscher Quellstring wird übersetzt")
+	t.equal(Loc.t("ui.close"), "Schließen", "Eine Kennung wird übersetzt")
+	t.equal(Loc.resolve("Vorschlag"), "Vorschlag", "Im Deutschen bleibt der Quellstring, wie er ist")
+	Loc.set_code("en")
+	t.equal(Loc.t("ui.close"), "Close", "Im Englischen wird dieselbe Kennung übersetzt")
+	t.equal(Loc.resolve("Suggestion"), "Suggestion", "Ein englischer Quellstring bleibt, wie er ist")
 	t.equal(Loc.resolve("gibt es nicht"), "gibt es nicht", "Unbekanntes bleibt unverändert")
 	t.equal(Loc.t("ui.gibt.es.nicht"), "ui.gibt.es.nicht", "Eine unbekannte Kennung zeigt sich selbst, nicht nichts")
+	# The frame translates, the value does not — and that is the bug this guards.
+	// A German string inside an English sentence can never be looked up, because
+	// the catalogue is keyed by English.
+	t.equal(Loc.resolve(Loc.t("ui.suggest_origin", {"game": "Board games"})), "From: Board games",
+		"Ein eingesetztes Argument bleibt unangetastet")
 
 	# The whole design rests on this: a caption may pass through `Ui.label` more
 	# than once without drifting. `Ui.label(Loc.t(...))` is a likely call, and
 	# „Lobby" is the same word in German and French while being a source string.
 	t.equal(Loc.resolve(Loc.t("ui.back_to_lobby")), Loc.t("ui.back_to_lobby"),
 		"Ein zweiter Durchlauf ändert nichts")
-	t.equal(Loc.resolve(Loc.resolve("Vorschlag")), "Suggestion", "Auch zweimal aufgelöst bleibt es übersetzt")
+	t.equal(Loc.resolve(Loc.resolve("Board games")), "Board games", "Auch zweimal aufgelöst bleibt es übersetzt")
+	Loc.set_code(PINNED)
+	t.equal(Loc.resolve(Loc.resolve("Brettspiele")), "Brettspiele", "…und im Deutschen ebenso")
 	t.check(Loc.has("ui.close"), "Eine vorhandene Kennung wird erkannt")
 	t.check(not Loc.has("ui.nein"), "Eine fehlende Kennung wird nicht behauptet")
 	t.suite_done()
@@ -109,11 +119,13 @@ func _placeholders() -> void:
 	t.equal(Loc.t("ui.suggest_origin", {"game": "Tetris"}), "Aus: Tetris",
 		"Ein zweiter benannter Platzhalter auch")
 	t.equal(Loc.f("Punkte: %s", ["12"]), "Punkte: 12", "Eine Vorlage wird übersetzt und dann formatiert")
+	t.equal(Loc.f("Points: %s", ["12"]), "Punkte: 12", "Dieselbe Vorlage aus der Quelle")
 
 	Loc.set_code("en")
 	t.equal(Loc.t("ui.server_caption", {"state": "offline"}), "Server: offline",
 		"Die Übersetzung setzt denselben Platzhalter ein")
-	t.equal(Loc.f("Punkte: %s", ["12"]), "Points: 12", "Die Vorlage wurde vor dem Formatieren übersetzt")
+	t.equal(Loc.f("Points: %s", ["12"]), "Points: 12", "Die Vorlage wurde vor dem Formatieren übersetzt")
+	t.equal(Loc.f("Punkte: %s", ["12"]), "Punkte: 12", "…und im Deutschen übersetzt")
 
 	# A missing argument leaves the hole visible instead of crashing. The
 	# alternative is a `%s` in production, which is a crash the player reports.
@@ -209,9 +221,14 @@ func _ui() -> void:
 	Loc.reset()
 	Loc.set_code("en")
 	# The seam: every caption in the game is created through one of these.
-	t.equal(Ui.label("Vorschlag").text, "Suggestion", "Ui.label übersetzt")
-	t.equal(Ui.button("Schließen", Vector2(120, 40)).text, "Close", "Ui.button übersetzt")
-	t.equal(Ui.title("Pferde-Parcours 3D").text, "Horse Course 3D", "Ui.title übersetzt")
+	t.equal(Ui.label("Suggestion").text, "Suggestion", "Ui.label lässt den Quellstring stehen")
+	t.equal(Ui.button("Close", Vector2(120, 40)).text, "Close", "Ui.button ebenso")
+	t.equal(Ui.title("Horse Course 3D").text, "Horse Course 3D", "Ui.title ebenso")
+	Loc.set_code(PINNED)
+	t.equal(Ui.label("Vorschlag").text, "Vorschlag", "Im Deutschen bleibt er deutsch")
+	t.equal(Ui.title("Pferde-Parcours 3D").text, "Pferde-Parcours 3D", "…auch der Spielname")
+	Loc.set_code("en")
+	t.equal(Ui.label("Vorschlag").text, "Vorschlag", "Ein deutscher String ist kein Quellstring mehr")
 	t.equal(Ui.label("SINGULAR 80").text, "SINGULAR 80", "Der Markenname bleibt wie er ist")
 	t.equal(Ui.label("").text, "", "Leerer Text wird nicht erfunden")
 

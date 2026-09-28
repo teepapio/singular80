@@ -3,14 +3,10 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * The slim APK is built by dropping a `.gdignore` into `med/` and `high/`,
- * running the export, and removing it again (see `scripts/build-apk-light.mjs`).
- * Those two files are the only mutation of the working tree, and if one of them
- * ever got committed the repository would be stuck in slim mode: every later
- * full build would quietly ship 52 MB less mesh and the gallery would offer
- * only the low tier. The build script cleans up in a `finally` and on SIGINT,
- * but a hard kill (`SIGKILL`, power loss) skips both — so the invariant is
- * asserted here, where it is checked on every `npm test`.
+ * A committed `.gdignore` in `med/`/`high/` would leave the repository in slim mode
+ * forever: every later full build would quietly ship less mesh and the gallery would
+ * offer only the low tier. The build script cleans up in a `finally` and on SIGINT,
+ * but a hard kill skips both — hence this invariant, checked on every `npm test`.
  */
 const root = join(import.meta.dirname, '..');
 const meshRoot = join(root, 'godot', 'assets', 'meshes');
@@ -38,8 +34,7 @@ describe('Leichtes APK — .gdignore', () => {
   });
 
   it('hat beide Stufen-Ordner als Ziel, damit der Build sie auch findet', () => {
-    // The script writes into exactly these two; if a rename ever happens the
-    // script and this test have to change together, and this fails loudly.
+    // The script writes into exactly these two; a rename must change this too, loudly.
     for (const tier of ['med', 'high']) {
       expect(existsSync(join(meshRoot, tier)), `${tier}/ fehlt`).toBe(true);
     }
@@ -53,16 +48,15 @@ describe('Leichtes APK — Export-Presets', () => {
   /**
    * The `[preset.N]` block of one preset, up to the next `[preset.M]`.
    *
-   * The options live in a sibling section called `[preset.N.options]`, which
-   * also starts with `[preset.` — so the boundary has to be the bare header,
-   * not just any line beginning with it.
+   * The options live in a sibling section `[preset.N.options]`, which also starts
+   * with `[preset.` — so the boundary has to be the bare header.
    */
   function section(name: string): string {
     const headers = [...cfg.matchAll(/^\[preset\.\d+\]$/gm)];
     expect(headers.length, 'Keine Preset-Sections in export_presets.cfg').toBeGreaterThan(0);
     const start = cfg.indexOf(`name="${name}"`);
     expect(start, `Preset "${name}" fehlt in export_presets.cfg`).toBeGreaterThan(-1);
-    // The header *owning* the name is the last one before it, not the first.
+    // The header owning the name is the last one before it, not the first.
     let header: (RegExpMatchArray & { index?: number }) | undefined;
     for (const candidate of headers) {
       if ((candidate.index ?? 0) < start) header = candidate;
@@ -74,10 +68,9 @@ describe('Leichtes APK — Export-Presets', () => {
   }
 
   it('gibt dem schlanken Preset einen eigenen Ausgabepfad', () => {
-    // Deliberately not the concrete filename: the name has churned between
-    // "leicht" and "slim" while two agents worked on this, and a test that pins
-    // the spelling breaks on a rename without catching a real defect. What must
-    // hold is that the two artifacts cannot overwrite each other.
+    // Deliberately not the concrete filename: it has churned between "leicht" and
+    // "slim", and pinning the spelling breaks on a rename without catching a real
+    // defect. What must hold is that the two artifacts cannot overwrite each other.
     const preset = section('Android (Leicht)');
     const path = /export_path="([^"]+)"/.exec(preset)?.[1] ?? '';
     expect(path, 'kein export_path im schlanken Preset').not.toBe('');
@@ -87,10 +80,9 @@ describe('Leichtes APK — Export-Presets', () => {
   });
 
   it('exportiert mit all_resources — "exclude" packt die Roh-GLB mit', () => {
-    // `export_filter="exclude"` lässt den Export die unbearbeiteten `.glb`
-    // mitnehmen. Ein exportiertes Spiel kann eine rohe `.glb` nicht laden,
-    // weil das Importieren in der Editor-Umgebung passiert — die Meshes wären
-    // im Paket und trotzdem unsichtbar.
+    // `export_filter="exclude"` packs the raw `.glb`. An exported game cannot load
+    // one — importing happens in the editor — so the meshes would be in the package
+    // and still invisible.
     for (const name of ['Android', 'Android (Leicht)', 'Google Play (AAB)']) {
       expect(section(name), name).toContain('export_filter="all_resources"');
       expect(section(name), name).not.toContain('export_files=');
@@ -119,18 +111,18 @@ describe('Leichtes APK — Export-Presets', () => {
       const preset = section(name);
       expect(preset, name).toContain('exclude_filter=');
       expect(preset, name).toContain('tests/*');
-      // `_*` fängt auch die abgeleiteten GDScript-Dateien ab.
+      // `_*` also catches the generated GDScript files.
       expect(preset, name).toMatch(/exclude_filter="[^"]*_/);
     }
   });
 
   it('hat in beiden Presets Kommentare mit ";" — ConfigFile bricht bei "#" ab', () => {
-    // Genau dieser Fehler hat das Play-Preset einmal unsichtbar gemacht: ein
-    // `#`-Kommentar mit `=` darin ist für Godots ConfigFile kein Kommentar.
+    // A `#` comment containing `=` is not a comment to Godot's ConfigFile; that
+    // mistake once made the Play preset invisible.
     for (const line of cfg.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed.startsWith('#')) continue;
-      // Nur Kommentarzeilen sind verboten; ein `#` in einem Wert ist erlaubt.
+      // Only comment lines are forbidden; a `#` inside a value is fine.
       expect(trimmed, `Keine "#"-Kommentare in export_presets.cfg: ${trimmed}`).not.toMatch(/^#/);
     }
   });

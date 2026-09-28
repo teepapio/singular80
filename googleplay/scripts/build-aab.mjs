@@ -6,7 +6,6 @@
  *
  * Steps, in the order the tools require them:
  *   1. content:sync   — content/*.json must be mirrored into the Godot project
- *                       (the repo's own test would fail otherwise)
  *   2. godot:import   — import the mirrored assets
  *   3. android-template + prepare-toolchain — the template ships with
  *                       compileSdk 35 and is rewritten by every install

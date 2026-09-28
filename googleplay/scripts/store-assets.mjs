@@ -10,13 +10,13 @@
  *
  * No ImageMagick, no Python, no npm install: shapes are rasterised from signed
  * distance fields and written as PNG by hand. The geometry mirrors
- * `godot/icon.svg` (rounded dark tile, gradient ring, diamond, core, base bar).
+ * `godot/icon.svg`.
  *
  * Two deliberate deviations from the in-app icon, because Play masks differently
- * on every surface:
- *   - the store icon is a full-bleed square (no rounded corners, no alpha at
- *     the edges), so any mask Play applies cuts background, never artwork;
- *   - the adaptive foreground keeps the mark inside the middle 66 % safe zone.
+ * on every surface: the store icon is a full-bleed square (no rounded corners,
+ * no alpha at the edges), so any mask Play applies cuts background and never
+ * artwork; the adaptive foreground keeps the mark inside the middle 66 % safe
+ * zone.
  */
 import { writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
@@ -51,10 +51,10 @@ function chunk(type, data) {
 }
 
 /**
- * `pixels` is RGBA bytes, `alpha: false` writes a 24-bit PNG.
+ * Writes RGBA bytes as a PNG; `alpha: false` writes a 24-bit PNG.
  *
- * Row filters matter a lot here: the artwork is smooth gradients, and with
- * filter "none" the 512 px icon lands right at Play's 1 MB limit. This is the
+ * Row filters matter: the artwork is smooth gradients, and with filter "none"
+ * the 512 px icon lands right at Play's 1 MB limit. The per-row choice is the
  * standard minimum-sum-of-absolute-differences heuristic from libpng.
  */
 function writePng(path, width, height, pixels, { alpha = true } = {}) {
@@ -188,7 +188,7 @@ const COLORS = {
   bar: hex('#0ea5e9'),
 };
 
-/** Draws the Singular 80 mark. `mode` picks full-bleed vs. adaptive safe zone. */
+/** Draws the Singular 80 mark; a `safeZone` below 1 clips it to the middle. */
 function drawMark(cv, { cx, cy, size, safeZone = 1, background = true, mono = false }) {
   const half = size / 2;
   for (let y = 0; y < cv.h; y += 1) {
@@ -204,23 +204,19 @@ function drawMark(cv, { cx, cy, size, safeZone = 1, background = true, mono = fa
         put(cv, x, y, [...bg, 1]);
       }
 
-      // Everything below is scaled into the adaptive safe zone.
+      // Everything below is skipped outside the safe zone.
       const k = inBox <= safeZone ? 1 : 0;
       if (k === 0) continue;
 
       const mark = mono ? [1, 1, 1] : mix(COLORS.markStart, COLORS.markEnd, diag);
 
-      // Ring: |d - 0.656| < 0.0195
       const d = Math.hypot(u, v);
       if (Math.abs(d - 0.656) < 0.0195) put(cv, x, y, [...mark, 0.85]);
 
-      // Diamond with vertices at (0,-0.625), (0.3125,0), (0,0.625), (-0.3125,0)
       if (Math.abs(u) + Math.abs(v) <= 0.3125) put(cv, x, y, [...mark, 1]);
 
-      // Core
       if (d <= 0.078) put(cv, x, y, [...COLORS.core, 1]);
 
-      // Base bar: x -0.156…0.156, y 0.625…0.672, radius 0.023
       if (Math.abs(v - 0.648) <= 0.023 && Math.abs(u) <= 0.156) {
         const corner = Math.max(Math.abs(u) - (0.156 - 0.023), Math.abs(v - 0.648) - 0);
         if (corner <= 0) put(cv, x, y, [...(mono ? [1, 1, 1] : COLORS.bar), 0.8]);
@@ -249,7 +245,6 @@ function featureGraphic(w, h) {
       put(cv, x, y, [...mix(base, hex('#1e2a52'), glow * 0.55 * glow), 1]);
     }
   }
-  // The mark, scaled to a bit under half the height and centred.
   drawMark(cv, {
     cx: W / 2,
     cy: H / 2,
@@ -304,14 +299,13 @@ function emit(name, width, height, bytes, alpha) {
 
 // Store icon: full bleed, no rounding — Play applies its own mask.
 emit('icon-512.png', 512, 512, square(512, { safeZone: 1 }), true);
-// Launcher icon for launchers without adaptive icon support.
 emit('icon-192.png', 192, 192, square(192, { safeZone: 1 }), true);
-// Adaptive layers: the foreground must survive a circular mask (66 % safe zone).
+// The adaptive foreground must survive a circular mask (66 % safe zone).
 emit('adaptive-background-432.png', 432, 432, square(432, { safeZone: 1 }), true);
 emit('adaptive-foreground-432.png', 432, 432, square(432, { safeZone: 1, background: false }), true);
 emit('adaptive-monochrome-432.png', 432, 432, square(432, { safeZone: 1, background: false, mono: true }), true);
 
-// Feature graphic: 1024×500, 24-bit PNG (no alpha channel — Play rejects alpha).
+// 24-bit PNG without an alpha channel — Play rejects alpha.
 {
   const W = 1024;
   const H = 500;
@@ -326,7 +320,6 @@ emit('adaptive-monochrome-432.png', 432, 432, square(432, { safeZone: 1, backgro
   }
   drawMark(cv, { cx: W, cy: H, size: H * 1.1, background: false });
   const rgba = downsample2x(cv, W, H);
-  // Drop the alpha channel: Play wants a plain 24-bit PNG here.
   const rgb = Buffer.alloc(W * H * 3);
   for (let i = 0; i < W * H; i += 1) {
     rgb[i * 3] = rgba[i * 4];

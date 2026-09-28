@@ -1,11 +1,8 @@
 /**
- * The repository backup: what goes into the file, and what happens when a
- * second machine reads it back.
- *
- * The cases that matter are the destructive ones. A merge that overwrites a
- * newer local decision, that renumbers a suggestion, or that brings a "running"
- * row back from a machine that is long gone would each lose something an operator
- * cannot get back — so each of them has a test that says so.
+ * The repository backup: what goes into the file, and what happens when a second
+ * machine reads it back. The cases that matter are the destructive ones — a merge
+ * that overwrites a newer decision, renumbers a suggestion, or revives a "running"
+ * row loses something the operator cannot get back.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -118,9 +115,8 @@ describe('buildSnapshot', () => {
   });
 
   it('lässt den Prompt weg und macht den Logpfad repo-relativ', () => {
-    // Der Prompt ist aus Vorschlag + Einstellungen ableitbar und kilobyte groß;
-    // im Repo wäre er der mit Abstand größte Brocken und bei jedem Versuch eine
-    // neue Zeile im Diff.
+    // The prompt is derivable and kilobytes large: in the repo it would be the
+    // biggest blob and a new diff line on every run.
     const suggestion = makeSuggestion();
     makeRun(suggestion);
     const snapshot = buildSnapshot(store, root);
@@ -168,8 +164,8 @@ describe('Datei', () => {
   });
 
   it('meldet kaputtes JSON statt einer leeren Historie', () => {
-    // Ein stilles `null` wäre hier das Schlimmste: die Datenbank sähe aus wie
-    // frisch, und der Betreiber dächte, es gab nie etwas zu sichern.
+    // A silent `null` would be the worst outcome: the database would look fresh and
+    // the operator would think there was never anything to back up.
     writeRaw('dashboard.json', '{ kaputt');
     expect(() => readSnapshotFile(backupFile())).toThrow(BackupFormatError);
   });
@@ -189,7 +185,7 @@ describe('mergeSnapshot', () => {
     const fresh = otherMachine();
     const report = mergeSnapshot(fresh, snapshot, { projectRoot: root });
     expect(report.suggestionsAdded).toBe(1);
-    // Die Id ist der ganze Punkt: „Vorschlag #42" muss dasselbe bleiben.
+    // The id is the whole point: "Vorschlag #42" must stay the same suggestion.
     const restored = fresh.getSuggestion(suggestion.id);
     expect(restored?.text).toBe('Vom anderen Rechner');
     expect(restored?.status).toBe('approved');
@@ -201,8 +197,7 @@ describe('mergeSnapshot', () => {
     store.addVote(suggestion.id, 'voter_aaaaaa');
     store.addVote(suggestion.id, 'voter_bbbbbb');
     const snapshot = buildSnapshot(store, root);
-    // Vorsicht: `votes` im Snapshot ist der Zähler, der beim Import überschrieben
-    // wird — die Tabelle ist die Wahrheit.
+    // `votes` in the snapshot is a counter the import overwrites — the table is truth.
     const fresh = otherMachine();
     mergeSnapshot(fresh, snapshot, { projectRoot: root });
     expect(fresh.getSuggestion(suggestion.id)?.votes).toBe(2);
@@ -213,7 +208,7 @@ describe('mergeSnapshot', () => {
     const snapshot = buildSnapshot(store, root);
     const fresh = otherMachine();
     mergeSnapshot(fresh, snapshot, { projectRoot: root });
-    // Hier wird er genehmigt und abgelehnt — `updatedAt` rückt vor.
+    // Approved then rejected here, so `updatedAt` moves past the file's.
     fresh.updateSuggestionStatus(suggestion.id, 'rejected');
     const localUpdatedAt = fresh.getSuggestion(suggestion.id)!.updatedAt;
 
@@ -228,7 +223,7 @@ describe('mergeSnapshot', () => {
     const snapshot = buildSnapshot(store, root);
     const fresh = otherMachine();
     mergeSnapshot(fresh, snapshot, { projectRoot: root });
-    // Ein Kollege hat die Datei später geschrieben und den Vorschlag umgesetzt.
+    // A colleague wrote the file later and implemented the suggestion.
     const remote: BackupSnapshot = {
       ...snapshot,
       writtenAt: snapshot.writtenAt + 1000,
@@ -244,8 +239,8 @@ describe('mergeSnapshot', () => {
     const run = makeRun(suggestion);
     const snapshot = buildSnapshot(store, root);
     const fresh = otherMachine();
-    // Diese Maschine kennt den Run nur als „läuft" (Rechnerabsturz), die Datei
-    // weiß, dass er erfolgreich war. Genau dafür gibt es `runsCompleted`.
+    // This machine knows the run only as "running" (a crash); the file knows it
+    // succeeded. That gap is what `runsCompleted` covers.
     fresh.createRun({ ...run, status: 'running', finishedAt: null, note: null, commitHash: null });
     const report = mergeSnapshot(fresh, snapshot, { projectRoot: root });
     expect(report.runsCompleted).toBe(1);
@@ -254,8 +249,8 @@ describe('mergeSnapshot', () => {
   });
 
   it('lässt einen laufenden Run laufen, wenn die Datei denselben Stand kennt', () => {
-    // Der Gegenfall: beide Seiten sagen „läuft". Nähme man das Ergebnis der
-    // Datei, wäre es das eines Prozesses, den diese Maschine nie gestartet hat.
+    // Both sides say "running" — the file's result would belong to a process this
+    // machine never started.
     const suggestion = makeSuggestion();
     const run = makeRun(suggestion, { status: 'running', finishedAt: null, note: null, commitHash: null });
     const snapshot = buildSnapshot(store, root);
@@ -267,9 +262,8 @@ describe('mergeSnapshot', () => {
   });
 
   it('bringt einen unfertigen Run aus der Datei als abgebrochen, nicht als laufend', () => {
-    // Er war auf der anderen Maschine noch „läuft". Aus einer JSON-Datei lässt
-    // sich kein Prozess fortsetzen, und ein erfundener laufender Run ist eine
-    // Lüge, die der Operator nicht mehr von der Wahrheit unterscheiden kann.
+    // No process resumes from a JSON file, and an invented "running" run is a lie
+    // the operator can no longer tell from the truth.
     const suggestion = makeSuggestion();
     makeRun(suggestion, { status: 'running', finishedAt: null, note: null, commitHash: null });
     const snapshot = buildSnapshot(store, root);
@@ -308,8 +302,8 @@ describe('mergeSnapshot', () => {
     snapshot.votes.push({ suggestionId: 9999, voterId: 'voter_zzzzzz', createdAt: 1 });
     const fresh = otherMachine();
     const report = mergeSnapshot(fresh, snapshot, { projectRoot: root });
-    // Die echte Stimme zählt, die ohne Vorschlag nicht — sonst würde der
-    // Zähler später beim Nachladen des Vorschlags um eins danebenliegen.
+    // The orphan vote must not count, or the counter is off by one once the
+    // suggestion is reloaded.
     expect(report.votesAdded).toBe(1);
     expect(fresh.listVotes()).toHaveLength(1);
   });
@@ -337,14 +331,12 @@ describe('diffSnapshot', () => {
     const a = makeSuggestion({ text: 'A' });
     makeRun(a);
     const snapshot = buildSnapshot(store, root);
-    // Hier noch nichts davon bekannt, dort auch nicht: 1 fehlt hier, 0 dort.
     const fresh = otherMachine();
     const diff = diffSnapshot(fresh, snapshot);
     expect(diff.missingHere).toBe(1);
     expect(diff.missingThere).toBe(0);
     expect(diff.runsMissingHere).toBe(1);
     makeSuggestion({ text: 'B' });
-    // Zwei hier, einer in der Datei → genau einer fehlt in der Datei.
     expect(diffSnapshot(store, snapshot).missingThere).toBe(1);
     expect(a.id).toBeGreaterThan(0);
   });

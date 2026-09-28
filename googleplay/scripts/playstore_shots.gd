@@ -1,15 +1,14 @@
 extends Node
-## Erzeugt echte Screenshots der Spiel-Screens für den Play-Store.
+## Renders real screenshots of the game's own screens for the Play store.
 ##
-## Kopiert von googleplay/scripts/screenshots.mjs nach godot/ (Präfix `_`, wird
-## von export_presets.cfg aus jedem Build ausgeschlossen). Der `_`-Prefix ist
-## wichtig: das Skript gehört nicht ins AAB.
+## Copied into godot/ by googleplay/scripts/screenshots.mjs under a `_` prefix,
+## which export_presets.cfg excludes from every build — the script must not end
+## up in the AAB.
 ##
-## Aufruf (über screenshots.mjs):
 ##   godot --headless --path godot res://_playstore_shots.tscn -- <frames> <ziel> <screens...>
 ##
-## Das Zielverzeichnis kommt als drittes Kommandozeilen-Argument (nach `--`),
-## damit das Skript ohne weitere Dateien auskommt.
+## The target directory is the second argument after `--`, so no further files
+## are needed.
 
 var frames := 4
 var target_frames := 4
@@ -37,9 +36,9 @@ func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(out_dir)
 	print("SHOTS-ARGS ", args, " → ", screens)
 	print("SHOTS-DISPLAY ", DisplayServer.get_name(), " adapter=", RenderingServer.get_video_adapter_name())
-	# --headless wählt zwingend den Dummy-Renderer: es werden keine Frames
-	# gezeichnet, frame_post_draw feuert nie, das Ergebnis wäre ein Schwarzbild.
-	# Lieber sofort abbrechen als zehn Minuten auf ein Bild zu warten.
+	# `--headless` always picks the dummy renderer: no frames are drawn,
+	# `frame_post_draw` never fires, and the result would be a black image.
+	# Better to bail out at once than to wait ten minutes for one.
 	if DisplayServer.get_name() == "headless":
 		print("SHOTS-NO-RENDERER")
 		get_tree().quit(3)
@@ -52,7 +51,7 @@ func _ready() -> void:
 
 
 func _payload_for(name: String) -> Dictionary:
-	## "id:key=value;key=value" schaltet Debug-Daten für den Screenshot frei.
+	## "id:key=value;key=value" switches debug data on for this screenshot.
 	var out := {}
 	var parts := name.split(":", true, 1)
 	if parts.size() < 2:

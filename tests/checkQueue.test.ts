@@ -7,13 +7,10 @@ import { CheckRunner, __testing } from '../server/checkrunner';
 import { CHECK_SPECS, CHECKS_BY_ID, findingToSuggestionText } from '../server/checks/catalogue';
 
 /**
- * The check queue end to end against a real temporary database: enqueue, run,
- * verdict, promote.
- *
- * The analysers themselves are covered in `checks.test.ts`; what matters here is
- * that the queue wires them to storage correctly — a finding that never reaches
- * the database, or a check that stays `queued` forever, is the failure a unit
- * test on the analyser would happily miss.
+ * The check queue end to end against a real temp database: enqueue, run, verdict,
+ * promote. The analysers are covered in `checks.test.ts`; what matters here is the
+ * wiring to storage — a finding that never reaches the database, or a check stuck in
+ * `queued`, is what a unit test on the analyser misses.
  */
 let dataDir: string;
 let projectRoot: string;
@@ -23,8 +20,8 @@ beforeEach(() => {
   dataDir = mkdtempSync(join(tmpdir(), 's80-checks-'));
   projectRoot = mkdtempSync(join(tmpdir(), 's80-checks-proj-'));
   store = new Store(dataDir);
-  // One file with one dead button and one print in `_process`, so both the
-  // `actions` and the `logs` family have something real to find.
+  // One dead button and one print in `_process`, so the `actions` and `logs` families
+  // both have something real to find.
   const dir = join(projectRoot, 'godot', 'src', 'game', 'demo');
   mkdirSync(dir, { recursive: true });
   writeFileSync(
@@ -147,8 +144,8 @@ describe('Prüfwarteschlange — Pause und Neustart', () => {
     const runner = new CheckRunner({ projectRoot, store });
     runner.setPaused(true);
     runner.enqueue('actions-buttons');
-    // A static check runs synchronously, so the only way to see it queued is a
-    // paused queue — which is exactly the state an operator leaves it in.
+    // A static check runs synchronously, so only a paused queue shows one queued —
+    // which is the state an operator leaves it in.
     expect(runner.isPaused()).toBe(true);
     expect(runner.queueState().queue).toHaveLength(1);
     runner.setPaused(false);
@@ -158,7 +155,7 @@ describe('Prüfwarteschlange — Pause und Neustart', () => {
     const first = new CheckRunner({ projectRoot, store });
     first.setPaused(true);
     first.enqueue('logs-spam');
-    // A second runner over the same database is a restart.
+    // A second runner over the same database stands in for a restart.
     const second = new CheckRunner({ projectRoot, store });
     expect(second.isPaused()).toBe(true);
     expect(second.queueState().queue.map((c) => c.specId)).toEqual(['logs-spam']);
@@ -168,7 +165,7 @@ describe('Prüfwarteschlange — Pause und Neustart', () => {
     const first = new CheckRunner({ projectRoot, store });
     first.setPaused(true);
     first.enqueue('logs-spam');
-    // Simulate a crash: the row says `running` although nothing is running.
+    // Simulated crash: the row says `running` although nothing runs.
     const record = store.listChecks()[0];
     record.status = 'running';
     store.updateCheck(record);

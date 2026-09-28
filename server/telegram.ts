@@ -59,6 +59,39 @@ function clip(value: string, limit = MAX_MESSAGE): string {
  * sit in the request path of a player submission, and a broken channel must not
  * lose a suggestion — it is stored anyway.
  */
+/**
+ * Rewrites a message that is already in the chat.
+ *
+ * This is what keeps the channel short. A task arrives as number plus text, and
+ * when the run ends the *same* message shrinks to a single line. One task, one
+ * message, for its whole life — instead of one message per event.
+ */
+export async function editMessageText(
+  messageId: string,
+  text: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isConfigured()) return { ok: false, error: 'Kein Telegram konfiguriert' };
+  try {
+    const res = await fetch(`${API}/bot${token()}/editMessageText`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId(),
+        message_id: Number(messageId),
+        text: clip(text),
+        parse_mode: 'HTML',
+      }),
+    });
+    if (!res.ok) {
+      const raw = await res.text().catch(() => '');
+      return { ok: false, error: explain(res.status, raw) };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+}
+
 /** How often a send is retried before the caller is told it failed. */
 const SEND_ATTEMPTS = 3;
 
@@ -72,7 +105,7 @@ const SEND_ATTEMPTS = 3;
  * network outage. One retry resolves it; without one, the answer to `/task` is
  * lost while the task itself runs, and the owner cannot tell the two apart.
  */
-export async function sendMessage(text: string): Promise<{ ok: boolean; error?: string }> {
+export async function sendMessage(text: string): Promise<{ ok: boolean; error?: string; messageId?: string }> {
   if (!isConfigured()) {
     return { ok: false, error: 'Kein Telegram konfiguriert (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID)' };
   }
@@ -91,7 +124,12 @@ export async function sendMessage(text: string): Promise<{ ok: boolean; error?: 
           disable_web_page_preview: true,
         }),
       });
-      if (res.ok) return { ok: true };
+      if (res.ok) {
+        // The id is what makes "write the outcome into that message" possible
+        // instead of appending a new one.
+        const data = (await res.json().catch(() => null)) as { result?: { message_id?: number } } | null;
+        return { ok: true, messageId: data?.result?.message_id ? String(data.result.message_id) : undefined };
+      }
       const raw = await res.text().catch(() => '');
       last = explain(res.status, raw);
       // A rejected message will be rejected identically on the next try — only a
@@ -147,17 +185,15 @@ export async function notifyNewSuggestion(
  * is a schema change a second channel is not worth; the status change stays in
  * the chat from here on.
  */
-export async function notifyRunResult(
-  suggestion: Suggestion,
-  run: RunRecord,
-  _dashboardUrl: string,
-): Promise<{ ok: boolean; error?: string }> {
-  // Number, outcome, commit. The commit is the one thing the owner truly needs
-  // after a run: it is where to look at what the agent did.
-  const line = run.status === 'succeeded' ? 'umgesetzt' : `fehlgeschlagen (${escapeHtml(run.status)})`;
-  return sendMessage(
-    `#${suggestion.id} ${line}${run.commitHash ? ` ${run.commitHash}` : ''}`,
-  );
+/**
+ * The final line of a task, and the only one the owner ever needs to read.
+ *
+ * Deliberately three or four words. The task text is still one scroll up, the
+ * commit is in `CHANGELOG.md` and on GitHub, and a line that has to be read
+ * twice is a line that does not get read at all.
+ */
+export function runResultText(suggestionId: number, ok: boolean): string {
+  return ok ? `Aufruf ${suggestionId} beendet` : `Aufruf ${suggestionId} fehlgeschlagen`;
 }
 
 /** The dashboard's "Test senden" button — the same check as in real operation. */

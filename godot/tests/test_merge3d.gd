@@ -1,12 +1,9 @@
 class_name TestMerge3d
 extends RefCounted
 ## Rule tests for the Merge 3D editions (Christmas and Halloween) and the Tipp
-## button on the real screen.
-##
-## The screen script is never named statically — `test_metro_screens.gd`
-## explains why: that would pull the autoload references of the screen into the
-## compile chain of `run_tests.gd`, which runs before the engine registers them.
-## The screen is reached through the router instead, exactly as a player would.
+## button on the real screen. The screen is reached through the router, never
+## named statically: that would pull its autoload references into the compile
+## chain of `run_tests.gd`, which runs before the engine registers them.
 
 var t: TestKit
 var _router: Node

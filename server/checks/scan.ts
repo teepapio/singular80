@@ -3,15 +3,14 @@
  *
  * Why not a parser: the checks answer three narrow questions about source text
  * ("does this button have a callback", "does this per-frame function log",
- * "does this hot loop allocate"). A full grammar would be a large dependency
- * and would still have to survive GDScript's four syntaxes. This reads the
- * shape of the code instead, and every rule below is covered by a test so a
- * wrong answer is a failing test rather than a wrong verdict on a player's
- * phone.
+ * "does this hot loop allocate"). A full grammar would be a large dependency and
+ * would still have to survive GDScript's four syntaxes. This reads the shape of
+ * the code instead, and every rule below is covered by a test, so a wrong answer
+ * is a failing test rather than a wrong verdict on a player's phone.
  *
  * GDScript is indentation-scoped, so a function body is simply "the following
- * lines that are indented deeper". That is far more reliable here than trying
- * to track braces, which GDScript does not use.
+ * lines that are indented deeper" — far more reliable here than tracking braces,
+ * which GDScript does not use.
  *
  * Not a security boundary: it never evaluates anything.
  */
@@ -170,11 +169,9 @@ export function statements(source: string): GdStatement[] {
 const FUNC_RE = /^(?:static\s+)?func\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/;
 
 /**
- * Every function in the file with its body.
- *
- * Nested `func` keywords are lambdas; they stay part of the enclosing body,
- * which is what we want — a `print` inside a lambda called per frame is still a
- * `print` per frame.
+ * Every function in the file with its body. Nested `func` keywords are lambdas
+ * and stay part of the enclosing body: a `print` inside a lambda called per frame
+ * is still a `print` per frame.
  */
 export function functionsOf(source: string): GdFunction[] {
   const stmts = statements(source);
@@ -298,13 +295,10 @@ export function callsOf(source: string, callee: string): GdCall[] {
 }
 
 /**
- * Calls of `callee` inside the body of a function, with line numbers corrected
- * to the file.
- *
- * `callsOf` numbers from 1 because it is handed a fragment. Scanning a
- * function body means the fragment starts at some real line, so every hit is
- * shifted by that offset — otherwise a finding on the third line of a body
- * would point at line 3 of the file.
+ * Calls of `callee` inside a function body, with line numbers corrected to the
+ * file. `callsOf` numbers from 1 because it is handed a fragment, so every hit is
+ * shifted by the fragment's real start line — otherwise a finding on the third
+ * line of a body would point at line 3 of the file.
  */
 export function callsInFunction(fn: GdFunction, callee: string): GdCall[] {
   if (fn.body.length === 0) return [];

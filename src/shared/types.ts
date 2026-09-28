@@ -16,22 +16,15 @@ export type SuggestionStatus =
   | 'failed';
 
 /**
- * `source` of an order the operator typed into the dashboard's task composer
- * instead of a player submitting it. It travels the same road as a player
- * suggestion — same queue, same runner, same commit — but it is not one: no
- * votes, no Discord post, and it starts out `approved`, because the operator is
- * the one asking for it. Keeping it a suggestion rather than a second entity is
- * what lets the composer borrow scope prediction, retries and history for free.
+ * `source` of an order the operator typed into the dashboard's task composer.
+ * Travels the same road as a player suggestion, so it borrows scope prediction,
+ * retries and history — but no votes, no Discord post, and it starts `approved`.
  */
 export const OPERATOR_SOURCE = 'operator';
 
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
-/**
- * What a deployed-version check looks at. The three kinds are the three
- * player-visible complaints the queue exists for: a lagging game, a noisy log,
- * and buttons that do nothing.
- */
+/** What a deployed-version check looks at: a laggy game, a noisy log, dead buttons. */
 export type CheckKind = 'actions' | 'logs' | 'performance';
 
 /** How a check is carried out. */
@@ -76,8 +69,7 @@ export interface CheckSpec {
   targets?: string[];
   /**
    * Thresholds for a device probe, so the verdict is a number and not an
-   * impression: `minFps`, `maxFrameMs` (p95), `maxLogLinesPerSecond`,
-   * `maxMemoryMb`.
+   * impression: `minFps`, `maxFrameMs` (p95), `maxLogLinesPerSecond`, `maxMemoryMb`.
    */
   limits?: CheckLimits;
 }
@@ -232,8 +224,8 @@ export interface Settings {
   autoApprove: boolean;
   autoApproveScore: number;
   /**
-   * Hard timeout per run in minutes. 0 = no timeout (a hung agent then blocks
-   * the queue forever, which is exactly what this setting exists to prevent).
+   * Hard timeout per run in minutes. 0 = no timeout, i.e. a hung agent blocks
+   * the queue forever, which is exactly what this setting exists to prevent.
    */
   runTimeoutMinutes: number;
   /** Retries per run: 0 = none, 1 = one retry, N = up to N retries. */
@@ -241,11 +233,9 @@ export interface Settings {
   /** Base backoff in seconds before the first retry; doubles with every attempt. */
   retryBackoffSeconds: number;
   /**
-   * How many opencode sessions may run at the same time. 1 = the old serial
-   * queue. Runs are only admitted to a free lane when their scope does not
-   * collide with a lane that is already busy, so this is an upper bound and not
-   * a promise: three lanes can still sit idle because everything left in the
-   * queue wants the same files.
+   * How many opencode sessions may run at once. An upper bound, not a promise: a
+   * run is only admitted to a free lane when its scope does not collide with a
+   * busy one, so lanes can sit idle while everything queued wants the same files.
    */
   maxParallelRuns: number;
 }
@@ -268,17 +258,14 @@ export interface QueueState {
    * `activeRuns[0]` is the run that has had the most time to make progress.
    */
   activeRuns: RunRecord[];
-  /**
-   * The oldest running run, or null. Kept next to `activeRuns` because a single
-   * caller (the API health check, an older dashboard) only ever needs one.
-   */
+  /** The oldest running run, for callers that only ever need one (health check). */
   activeRun: RunRecord | null;
   /** Runs waiting to start, in the order they will start. */
   queue: RunRecord[];
   /**
-   * Ids of queued runs that cannot start yet because a busy lane already claims
-   * their scope. Purely informational — it explains an empty free lane to the
-   * operator instead of leaving a run "waiting" with no visible reason.
+   * Queued runs that cannot start because a busy lane already claims their scope.
+   * Purely informational: explains an empty free lane instead of leaving a run
+   * "waiting" with no visible reason.
    */
   blockedRunIds: string[];
 }

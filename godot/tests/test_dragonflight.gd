@@ -46,7 +46,7 @@ func _alleles() -> void:
 	t.equal(DragonFlight.allele_pair({"feueratem": "F"}, "feueratem"), "", "Ein einzelnes Allel ist kein Paar")
 	t.equal(DragonFlight.allele_pair({"feueratem": "FF"}, "gibtsnicht"), "", "Unbekanntes Gen bleibt leer")
 
-	# Wie viele kleine Buchstaben ein Drache trägt: 0, 1 oder 2.
+	# How many lowercase alleles a dragon carries: 0, 1 or 2.
 	t.equal(DragonFlight.recessive_allele_count({"riesenwuchs": "RR"}, "riesenwuchs"), 0, "RR trägt nichts")
 	t.equal(DragonFlight.recessive_allele_count({"riesenwuchs": "Rr"}, "riesenwuchs"), 1, "Rr trägt eines")
 	t.equal(DragonFlight.recessive_allele_count({"riesenwuchs": "rR"}, "riesenwuchs"), 1, "rR zählt genauso")
@@ -58,21 +58,21 @@ func _alleles() -> void:
 
 func _states() -> void:
 	t.suite("Drachenflug — Blutbild")
-	# Der Kern des Ganzen: ein rezessives Merkmal ist versteckt, aber als
-	# Träger sichtbar. Ein dominantes hat nichts zu verbergen.
+	# The core of it: a recessive trait is hidden but visible as a carrier. A
+	# dominant one has nothing to hide.
 	t.equal(DragonFlight.gene_state({"riesenwuchs": "rr"}, "riesenwuchs"), DragonFlight.GENE_SHOWS, "rr zeigt Riesenwuchs")
 	t.equal(DragonFlight.gene_state({"riesenwuchs": "Rr"}, "riesenwuchs"), DragonFlight.GENE_CARRIER, "Rr ist ein Träger")
 	t.equal(DragonFlight.gene_state({"riesenwuchs": "RR"}, "riesenwuchs"), DragonFlight.GENE_CLEAR, "RR ist frei")
 	t.check(DragonFlight.is_carrier({"riesenwuchs": "Rr"}, "riesenwuchs"), "Ein Träger wird erkannt")
 	t.check(not DragonFlight.is_carrier({"riesenwuchs": "RR"}, "riesenwuchs"), "Ein sauberer Drache ist kein Träger")
-	# Ein dominantes Gen braucht nur ein Allel — da gibt es keinen Blinden.
+	# A dominant gene needs only one allele, so there is no blind carrier.
 	t.equal(DragonFlight.gene_state({"feueratem": "Fa"}, "feueratem"), DragonFlight.GENE_SHOWS, "Ein Feueratem-Allel zeigt sich")
 	t.check(not DragonFlight.is_carrier({"feueratem": "aa"}, "feueratem"), "Dominante Gene werden nie zum Träger")
 	t.equal(DragonFlight.gene_state({}, "gibtsnicht"), DragonFlight.GENE_CLEAR, "Unbekanntes Gen ist frei")
 
-	# Der Zustand muss zur Expression passen, sonst widersprechen sich Anzeige
-	# und Werte. Zwei kleine Allele zeigen ein rezessives Merkmal und lassen
-	# ein dominantes verschwinden — die Erbgang-Logik steckt in einer Zeile.
+	# State and expression must agree, or the readout contradicts the numbers.
+	# Two lowercase alleles show a recessive trait and silence a dominant one —
+	# the whole inheritance rule per gene, in one line.
 	for gene in DragonFlight.TRAITS:
 		var id := str(gene["id"])
 		var dom := str(gene["dom"])
@@ -88,7 +88,7 @@ func _states() -> void:
 			DragonFlight.GENE_CARRIER if recessive else DragonFlight.GENE_SHOWS,
 			"Gemischtes Paar ist Träger oder sichtbar bei '%s'" % id)
 
-	# Der vollständige Genotyp: eine Zeile je Merkmal, in Registry-Reihenfolge.
+	# Full genotype: one row per trait, in registry order — the screen relies on it.
 	var genome := DragonFlight.random_genome()
 	var rows := DragonFlight.genotype(genome)
 	t.equal(rows.size(), DragonFlight.TRAITS.size(), "Jedes Merkmal hat eine Zeile")
@@ -101,8 +101,7 @@ func _states() -> void:
 			shown += 1
 	t.equal(shown, DragonFlight.expressed_traits(genome).size(), "Die angezeigten Merkmale stimmen mit der Expression überein")
 
-	# Verdeckte Träger: nur rezessive, und das seltenste zuerst — das ist die
-	# Liste "diese Linie lohnt sich".
+	# Hidden carriers only, rarest first: this is the "worth the line" list.
 	var carrier := _dragon(1, {"riesenwuchs": "Rr", "nachtfuchs": "Nn", "zaeherz": "Zz"})
 	var carried := DragonFlight.carried_traits(carrier["alleles"])
 	t.equal(carried, ["nachtfuchs", "riesenwuchs", "zaeherz"], "Alle drei rezessiven Träger, seltenstes zuerst")
@@ -115,8 +114,8 @@ func _states() -> void:
 
 func _candidates() -> void:
 	t.suite("Drachenflug — Zuchtziel")
-	# Die Punktzahl ist die Zahl des Allels, das das Ziel braucht: bei einem
-	# rezessiven Ziel das kleine, bei einem dominanten das grosse.
+	# The score counts the alleles the goal needs: lowercase for a recessive
+	# goal, uppercase for a dominant one.
 	t.equal(DragonFlight.goal_allele_count({"riesenwuchs": "rr"}, "riesenwuchs"), 2, "Zwei kleine Allele sind die volle Punktzahl")
 	t.equal(DragonFlight.goal_allele_count({"riesenwuchs": "Rr"}, "riesenwuchs"), 1, "Ein Träger hat die halbe Punktzahl")
 	t.equal(DragonFlight.goal_allele_count({"riesenwuchs": "RR"}, "riesenwuchs"), 0, "Ohne Träger gibt es nichts")
@@ -124,8 +123,7 @@ func _candidates() -> void:
 	t.equal(DragonFlight.goal_allele_count({"feueratem": "aa"}, "feueratem"), 0, "Kein dominantes Allel, kein Ziel")
 	t.equal(DragonFlight.goal_allele_count({}, "gibtsnicht"), 0, "Unbekanntes Ziel ist neutral")
 
-	 # Die Kandidatenliste: Träger zuerst, dann der Rest, und sie umfasst nur
-	 # echte Drachen — keine Eier.
+	# Candidate list: carriers first, and only real dragons — never eggs.
 	var profile := _profile_with([
 		_dragon(1, {"riesenwuchs": "RR"}, 4),
 		_dragon(2, {"riesenwuchs": "Rr"}, 2),
@@ -142,13 +140,13 @@ func _candidates() -> void:
 	t.equal(uids, [3, 2], "Zeigt das Merkmal zuerst, dann der Träger")
 	t.equal(int(candidates[0]["score"]), 2, "Der beste Kandidat hat die volle Punktzahl")
 	t.equal(DragonFlight.target_candidates(profile, "riesenwuchs", 1).size(), 1, "Das Limit greift")
-	# Trägt niemand das Ziel, bleibt die Liste offen — dann sieht der Spieler
-	# wenigstens, dass der Stall leer ist, statt eine leere Liste zu bekommen.
+	# If nobody carries the goal the list stays open, so the player sees the
+	# whole stable instead of an empty list.
 	var hopeless := _profile_with([_dragon(1, {"riesenwuchs": "RR"}), _dragon(2, {"riesenwuchs": "RR"})])
 	t.equal(DragonFlight.target_candidates(hopeless, "riesenwuchs", 0).size(), 2,
 		"Ohne Träger zeigt die Liste den ganzen Stall")
 
-	# Träger zählen beantwortet die Frage "kann ich das überhaupt züchten".
+	# The carrier count answers "can I breed this at all".
 	t.equal(DragonFlight.goal_carriers(profile, "riesenwuchs"), 2, "Zeiger und Träger zählen als Träger")
 	t.equal(DragonFlight.goal_carriers(hopeless, "riesenwuchs"), 0,
 		"Ein reiner Bestand bringt kein rezessives Ziel")
@@ -159,8 +157,8 @@ func _candidates() -> void:
 
 func _best_pair() -> void:
 	t.suite("Drachenflug — Beste Paarung")
-	# Ein rezessives Merkmal braucht zwei Eltern, die beide ein kleines Allel
-	# weitergeben — sicher ist das nur, wenn beide es zeigen (rr).
+	# A recessive trait needs two parents that both pass a lowercase allele;
+	# only both expressing (rr) is a certainty.
 	var two_expressers := _profile_with([
 		_dragon(1, {"riesenwuchs": "rr"}),
 		_dragon(2, {"riesenwuchs": "rr"}),
@@ -174,7 +172,7 @@ func _best_pair() -> void:
 		_dragon(1, {"riesenwuchs": "Rr"}), _dragon(2, {"riesenwuchs": "Rr"})]), "riesenwuchs")["chance"]),
 		0.25, 0.0001, "Zwei Träger sind nur auf 25 %")
 
-	# Die beste Paarung durchsucht den ganzen Stall, nicht nur die ersten zwei.
+	# The best pair scans the whole stable, not just the first two dragons.
 	var mixed := _profile_with([
 		_dragon(1, {"riesenwuchs": "RR"}),
 		_dragon(2, {"riesenwuchs": "RR"}),
@@ -187,11 +185,11 @@ func _best_pair() -> void:
 	t.equal(picked, [3, 4], "Die beiden Zeiger sind das beste Paar")
 	t.almost(float(best["chance"]), 1.0, 0.0001, "Und bringen es sicher")
 
-	# Nur ein Träger: 0 %, und das muss der Bildschirm auch sagen können.
+	# A single carrier means 0 %, and the screen has to be able to say so.
 	var lonely := _profile_with([_dragon(1, {"riesenwuchs": "Rr"}), _dragon(2, {"riesenwuchs": "RR"})])
 	t.almost(float(DragonFlight.best_pair(lonely, "riesenwuchs")["chance"]), 0.0, 0.0001,
 		"Ein einzelner Träger reicht nicht")
-	# Bei einem dominanten Ziel zählt der Zeiger allein schon.
+	# For a dominant goal one expresser is enough.
 	var fire := _profile_with([
 		_dragon(1, {"feueratem": "aa"}), _dragon(2, {"feueratem": "aa"}), _dragon(3, {"feueratem": "FF"})])
 	var fire_best := DragonFlight.best_pair(fire, "feueratem")
@@ -207,9 +205,8 @@ func _best_pair() -> void:
 
 func _egg_readout() -> void:
 	t.suite("Drachenflug — Ei-Vorschau")
-	# Das Genom ist beim Legen schon gewürfelt, also kann der Bildschirm die
-	# Wahrheit zeigen: was schlüpft, was wird weitergetragen, und ob es selten
-	# genug ist, um auf die Linie zu warten.
+	# The genome is already rolled at lay time, so the screen can tell the truth:
+	# what hatches, what is carried on, and whether it is rare enough to wait for.
 	var egg := _dragon(9, {"riesenwuchs": "rr", "nachtfuchs": "Nn", "feueratem": "aa"}, 2)
 	var readout := DragonFlight.egg_readout(egg)
 	t.equal(readout["traits"], ["riesenwuchs"], "Das Ei zeigt genau, was es zeigt")

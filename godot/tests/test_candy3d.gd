@@ -1,21 +1,14 @@
 class_name TestCandy3d
 extends RefCounted
-## Tests for "Candy Crush 3D" that belong to this game.
+## Tests for "Candy Crush 3D" that belong to this game. `TestCandyMatch3` holds
+## the pure rules; what is here is what a rules test cannot reach — the run
+## summary, the screen's frame loop, the clocks its timers read and the panels it
+## builds. The combination table is the exception: pure as well, but a rule nobody
+## can see on the board is a rule nobody uses, so table, preview and result row
+## are checked together.
 ##
-## `TestCandyMatch3` holds the rules — board, generator, stars, undo — because
-## those are pure functions that need no scene. What is here is what a rules
-## test cannot reach: the run summary, the screen's own frame loop, the clocks
-## its timers read and the panels it builds. Own file, so this game and the
-## shared sweep in `test_screens.gd` never edit the same lines.
-##
-## The combination table is the exception: its rules are pure too, but a rule
-## nobody can see on the board is a rule nobody uses — so table, preview and
-## result row are checked together in one suite.
-##
-## The screen script is never referenced statically: a static reference would
-## pull it into `run_tests.gd`'s compile chain, which happens before the
-## autoloads are registered, and every autoload inside the screen would then
-## fail to resolve. `test_metro_screens.gd` avoids the same trap the same way.
+## The screen script is never referenced statically: that would pull it into
+## `run_tests.gd`'s compile chain, which runs before the autoloads are registered.
 
 ## The two cells the combination tests fire from: column 3, rows 4 and 5.
 ## Written as `row * 8 + col`, because that is what `cell_index` does.
@@ -161,12 +154,10 @@ func _step(score: int, chain: int, cleared: int, created: int) -> Dictionary:
 	return {"score": score, "chain": chain, "cleared": cells, "created": made, "clearedColors": colors}
 
 
-## The screen's timers must run on the delta it is handed.
-##
-## `WorldScreen` only ticks `elapsed` inside `_process`. A screen that reads
-## `elapsed` for its cascade therefore freezes the moment it is stepped from
-## anywhere else, and a board stuck in the busy mode is a board the player
-## cannot touch — which is exactly what the shared sweep walked into.
+## The screen's timers must run on the delta it is handed. `WorldScreen` only
+## ticks `elapsed` inside `_process`, so a screen that reads `elapsed` for its
+## cascade freezes the moment it is stepped from anywhere else — and a board stuck
+## in the busy mode is a board the player cannot touch.
 func _clock(tree: SceneTree) -> void:
 	t.suite("Candy Crush — Frame-Takt")
 	var screen = await _open_candy(tree)
@@ -332,23 +323,23 @@ func _table() -> void:
 	for col in [1, 5]:
 		t.check(not columns.has(m.cell_index(col, 4)), "Spalte %d bleibt stehen" % col)
 
-	# Quer zueinander räumt beides: drei Reihen und drei Spalten.
+	# A cross clears both axes: three rows and three columns.
 	var cross := m.combo_blast(_combo_board(m.SPECIAL_ROW, m.SPECIAL_COL), _A, _B)
 	t.equal(cross.size(), m.COLS * 3 + m.ROWS * 3 - 9, "Blitzkreuz: drei Reihen und drei Spalten")
 	t.check(cross.has(m.cell_index(2, 4)) and cross.has(m.cell_index(4, 6)), "Das Kreuz reicht in alle vier Ecken des Sprungs")
 	t.check(not cross.has(m.cell_index(1, 3)), "Was weder in einer Reihe noch Spalte liegt, bleibt")
-	# Verpackt mit Streifen ist dasselbe Kreuz — nur stärker als ein einzelnes Verpacktes.
+	# Wrapped plus striped is the same cross, only stronger than a single wrapped candy.
 	var single_wrapped: Array = []
 	m.blast_cells(_combo_board(m.SPECIAL_WRAPPED, m.SPECIAL_NONE), _A, single_wrapped, {})
 	t.check(cross.size() > single_wrapped.size() * 3, "Kreuzfeuer ist mehr als dreimal ein einzelnes Verpacktes")
 
-	# Zwei Verpackte sprengen ein Fünf-mal-Fünf-Feld.
+	# Two wrapped candies blow a five-by-five field.
 	var square := m.combo_blast(_combo_board(m.SPECIAL_WRAPPED, m.SPECIAL_WRAPPED), _A, _B)
 	t.equal(square.size(), 25, "Die Detonation räumt 5 × 5")
 	t.check(square.has(m.cell_index(1, 3)) and square.has(m.cell_index(5, 7)), "Sie reicht zwei Felder in jede Richtung")
 	t.check(not square.has(m.cell_index(0, 2)), "Am Rand der Detonation steht noch etwas")
 
-	# Zwei Farbbomben räumen das ganze Brett.
+	# Two colour bombs clear the whole board.
 	t.equal(m.combo_blast(_combo_board(m.SPECIAL_BOMB, m.SPECIAL_BOMB), _A, _B).size(), m.CELL_COUNT,
 		"Die Farbflut kennt keine Grenze")
 
@@ -360,7 +351,7 @@ func _table() -> void:
 ## test can tell "the colour went" from "the lines went" from "the squares went".
 func _colour_bomb() -> void:
 	var m := CandyMatch3
-	# Farbwelle: the colour, and nothing around it.
+	# Colour wave: the colour, and nothing around it.
 	var plain := _bomb_board(m.SPECIAL_NONE)
 	var sparse := _sparse_cells(plain)
 	t.equal(sparse.size(), 6, "Die Farbe liegt sechsmal verstreut auf dem Brett")
@@ -373,7 +364,7 @@ func _colour_bomb() -> void:
 	t.check(cleared.has(_A), "Die Farbbombe geht mit")
 	t.check(not cleared.has(_WATCH), "Die Farbwelle holt nichts aus der Nachbarschaft")
 
-	# Zündschnur: the whole colour turns striped, so it takes its lines along.
+	# Striped: the whole colour turns striped, so it takes its lines along.
 	var fuse := _bomb_board(m.SPECIAL_ROW)
 	var fuse_sparse := _sparse_cells(fuse)
 	var fuse_cleared := _cleared_by(fuse)
@@ -386,8 +377,8 @@ func _colour_bomb() -> void:
 	t.check(_row_gone(fuse_cleared, 0), "Reihe 0 ist restlos weg")
 	t.check(not _row_gone(fuse_cleared, 2), "Reihe 2 ohne Farbe bleibt stehen")
 
-	# Farbsturm: the same colour, but every one of them explodes in its own three
-	# by three area — a wrapped partner must not be watered down to a stripe.
+	# Colour storm: the same colour, but every one of them explodes in its own
+	# three by three area — a wrapped partner must not be watered down to a stripe.
 	var storm := _bomb_board(m.SPECIAL_WRAPPED)
 	var storm_sparse := _sparse_cells(storm)
 	var storm_cleared := _cleared_by(storm)

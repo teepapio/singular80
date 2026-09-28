@@ -1,19 +1,12 @@
 class_name TestTetris
 extends RefCounted
 ## Tests for the rotation of Tetris: the Super Rotation System, its kick tables
-## and the T-Spin preview they make possible.
-##
-## Rotation is the feature the rest of the game leans on. T-Spin scoring, the
-## Back-to-Back chain and the violet marks on the board all hang off the last
-## move having been a turn — and a turn only lands in a notch because the piece
-## is dropped or shoved there. So the rules are checked here without a scene: a
-## matrix must survive a turn, the tables must be complete, a jammed piece must
-## be freed by a kick that reaches *upwards*, and a real T-Spin-Triple board must
-## produce a preview that names the turn and the three rows.
-##
-## The piece boxes mirror `TetrisScreen.PIECES`; the screen is not referenced by
-## name on purpose, because a static reference would pull it into the compile
-## chain of `run_tests.gd`, which runs before the engine registers the autoloads.
+## and the T-Spin preview. T-Spin scoring, the Back-to-Back chain and the violet
+## board marks all hang off the last move having been a turn — and a turn only
+## lands in a notch because the piece was dropped or shoved there. The piece
+## boxes mirror `TetrisScreen.PIECES`; the screen is never named statically,
+## because that would pull it into the compile chain of `run_tests.gd`, which
+## runs before the autoloads are registered.
 
 var t: TestKit
 

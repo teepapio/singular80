@@ -2,10 +2,10 @@
  * Creates the *upload* keystore for Google Play.
  *
  * Play App Signing is mandatory: the key you upload with is only an "upload
- * key", Google re-signs the app with its own app-signing key. The upload key
- * still has to exist forever - if it is lost you must ask Google to reset it,
- * which takes days. So it is created *outside* the repository, next to your
- * Android debug keystore, and the passwords are asked for interactively.
+ * key" and Google re-signs the app with its own app-signing key. Losing the
+ * upload key means asking Google to reset it, which takes days — so it is
+ * created *outside* the repository, next to the Android debug keystore, and the
+ * passwords are asked for interactively.
  *
  *   npm run keystore            → creates ~/.android/play-upload.keystore
  *   npm run keystore -- --path /secure/place/upload.keystore

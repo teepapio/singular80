@@ -12,8 +12,7 @@
  * same manifest that decides file ownership. One source of truth means a game
  * agent cannot end up testing the wrong thing because a list drifted.
  *
- * `--full` forces the complete catalogue even when a scope is given, which is
- * the escape hatch before a merge.
+ * `--full` forces the complete catalogue even when a scope is given.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
@@ -65,8 +64,7 @@ if (names.length && !full) {
  * `user://singular80.cfg`. Two concurrent runs then race on that
  * read-modify-write, and a green run silently clobbers real progress. Godot has
  * no `--user-data-dir` flag, but on Linux it derives the path from
- * `XDG_DATA_HOME`, so overriding that is enough — and it makes parallel agent
- * runs safe instead of merely lucky.
+ * `XDG_DATA_HOME`, so overriding that is enough.
  */
 const userHome = mkdtempSync(join(tmpdir(), 's80-test-'));
 mkdirSync(join(userHome, 'godot', 'app_userdata'), { recursive: true });
@@ -74,8 +72,7 @@ const keep = argv.includes('--keep-userdata');
 
 /**
  * A wall-clock ceiling. Without it a suite that fails to *compile* leaves the
- * SceneTree running forever, because the crash happens before `quit()` — a
- * silent hang is much harder to diagnose than a timeout that says so.
+ * SceneTree running forever, because the crash happens before `quit()`.
  */
 const budgetSeconds = Number(flag('timeout') ?? (names.length && !full ? 240 : 900));
 const cmd = spawnSync(

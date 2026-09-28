@@ -1,8 +1,7 @@
 /**
- * Shared helpers for the googleplay/* scripts.
- *
- * Deliberately dependency free (no npm install needed) and side effect free:
- * every script in this folder is safe to run and reports its own status.
+ * Shared helpers for the googleplay/* scripts — dependency free and side effect
+ * free, so every script in this folder can be run on its own and reports its
+ * own status.
  */
 import { existsSync, readFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -106,7 +105,6 @@ export function ensureDir(dir) {
   return dir;
 }
 
-/** Godot's own version string, e.g. `4.5.1.stable.official.f62fdbde1`. */
 export function godotVersion() {
   const res = tryRun('godot', ['--version']);
   return res.code !== 0 ? null : res.out.trim();
@@ -126,6 +124,8 @@ export function androidSdkRoot() {
 export function sdkmanager() {
   const root = androidSdkRoot();
   if (!root) return null;
+  // `latest` is the documented layout, but some SDK managers ship versioned
+  // directories instead, so fall back to scanning.
   const direct = join(root, 'cmdline-tools', 'latest', 'bin', 'sdkmanager');
   if (existsSync(direct)) return direct;
   const tools = join(root, 'cmdline-tools');

@@ -1,11 +1,8 @@
 class_name TestMetro
 extends RefCounted
-## Rule tests for "Metropol 3D" — the 3D metro-network builder.
-##
-## Kept in its own file next to `metro.gd` so the game's rule coverage travels
-## with the game and stays independent of the other suites. The screen side
-## lives in `test_metro_screens.gd`, which has to load the screen at runtime
-## (see the comment there).
+## Rule tests for "Metropol 3D" — the 3D metro-network builder. Kept in its own
+## file next to `metro.gd` so the game's rule coverage travels with it; the screen
+## side lives in `test_metro_screens.gd`.
 
 var t: TestKit
 

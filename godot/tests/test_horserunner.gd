@@ -130,7 +130,7 @@ func _near_miss() -> void:
 		var label := str(kind)
 		var spec := HorseRunner.obstacle_spec(label)
 
-		# Sprung über den Block: spät = knapp, zu spät = Sturz, mittig = sicher.
+		# Jumping the block: too late hits, too early falls, dead centre is safe.
 		var sweep := _jump_sweep(spec)
 		var counts: Dictionary = sweep["counts"]
 		t.check(int(counts[HorseRunner.PASS_HIT]) > 0, "%s: Zu spät gesprungen trifft" % label)
@@ -142,12 +142,12 @@ func _near_miss() -> void:
 		var band: float = float(sweep["band"])
 		t.check(band > 0.04, "%s: Der Haarseil ist breiter als zwei Frames (%.0f ms)" % [label, band * 1000.0])
 		t.check(band < 0.25, "%s: Der Haarseil bleibt schwierig (%.0f ms)" % [label, band * 1000.0])
-		# Genau dort, wo der Sprung gerade noch trägt, ist auch der Beinahe-Treffer.
+		# The hairline sits exactly at the edge of the window that clears the block.
 		t.check(absf(float(sweep["first_near"]) - float(sweep["clears"])) < 0.01,
 			"%s: Der Haarseil liegt an der Kante des Sprungfensters" % label)
 
-		# Nebeneinander: im freien Feld steht das Pferd zu weit weg, erst auf der
-		# Linie zwischen zwei Blöcken zählt der Pass.
+		# Sideways: in the open lane the horse is too far away, only on the line
+		# between two blocks does the pass count.
 		t.almost(HorseRunner.lateral_gap(HorseRunner.lane_x(1), HorseRunner.lane_x(0), spec),
 			HorseRunner.LANE_WIDTH - float(spec["halfWidth"]) - HorseRunner.HORSE_RADIUS, 0.0001,
 			"%s: Abstand zur Nachbarspur" % label)
@@ -158,7 +158,7 @@ func _near_miss() -> void:
 		t.equal(_side_sweep(spec, HorseRunner.jump_apex()), PackedStringArray([HorseRunner.PASS_CLEAR]),
 			"%s: Hoch über dem Block gibt es nichts zu holen" % label)
 
-	# Die Kanten liegen genau auf dem Spielraum.
+	# The edges sit exactly on the graze margin.
 	var rock := HorseRunner.obstacle_spec(HorseRunner.OBSTACLE_ROCK)
 	var touch: float = float(rock["halfWidth"]) + HorseRunner.HORSE_RADIUS
 	t.almost(HorseRunner.lateral_gap(touch + HorseRunner.GRAZE_MARGIN, 0.0, rock), HorseRunner.GRAZE_MARGIN, 0.0001,

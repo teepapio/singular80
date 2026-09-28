@@ -71,7 +71,7 @@ func _capture_analysis() -> void:
 	t.check(Checkers.best_capture(opening, Checkers.WHITE).is_empty(), "Ohne Schlagzug gibt es keinen Tipp")
 	t.check(Checkers.best_capture(opening, Checkers.BLACK).is_empty(), "Auch Schwarz hat zum Start keinen Schlagzug")
 
-	# Weiß (5,2) springt über (4,3) nach (3,4) und über (2,3) nach (1,2).
+	# White (5,2) jumps (4,3) to (3,4), then (2,3) to (1,2).
 	var chain := _board({
 		_at(5, 2): Checkers.WHITE_MAN,
 		_at(4, 3): Checkers.BLACK_MAN,
@@ -90,7 +90,7 @@ func _capture_analysis() -> void:
 	t.equal(int(_chain_ends_at(best)[0]), _at(1, 2), "Der Tipp endet auf dem letzten Landefeld")
 	t.equal(Checkers.count_pieces(Checkers.apply_turn(chain, best), Checkers.BLACK), 0, "Der Tippzug räumt beide Steine weg")
 
-	# Derselbe Stein kann auch nur einen schlagen — der Tipp nimmt die Kette.
+	# The same piece can also take only one — the hint takes the longer chain.
 	var shorter := _board({
 		_at(5, 2): Checkers.WHITE_MAN,
 		_at(4, 3): Checkers.BLACK_MAN,
@@ -102,7 +102,7 @@ func _capture_analysis() -> void:
 	t.equal(int((twice[0] as Dictionary)["captures"]), 2, "Die längere Kette gewinnt")
 	t.equal(Checkers.count_pieces(Checkers.apply_turn(shorter, Checkers.best_capture(shorter, Checkers.WHITE)), Checkers.BLACK), 1, "Der kurze Sprung übrig gelassen")
 
-	# Zwei schlagende Steine: der stärkere steht vorn.
+	# Two capturing pieces: the stronger one comes first.
 	var both := _board({
 		_at(5, 2): Checkers.WHITE_MAN,
 		_at(4, 3): Checkers.BLACK_MAN,
@@ -117,7 +117,7 @@ func _capture_analysis() -> void:
 	t.equal(int((marks[1] as Dictionary)["captures"]), 1, "Der zweite Stein schlägt genau einen")
 	t.equal(int(_chain_ends_at(Checkers.best_capture(both, Checkers.WHITE))[0]), _at(1, 2), "Der Tipp folgt der Reihenfolge")
 
-	# Gleiche Zahl geschlagener Steine: die Dame wird vorgezogen.
+	# Equal capture counts: the king is promoted in the ranking.
 	var kings := _board({
 		_at(5, 0): Checkers.WHITE_KING,
 		_at(4, 1): Checkers.BLACK_MAN,
@@ -129,10 +129,10 @@ func _capture_analysis() -> void:
 	t.equal(int((ranked[0] as Dictionary)["from"]), _at(5, 0), "Bei Gleichstand gewinnt die Dame")
 	t.equal(int(_chain_ends_at(Checkers.best_capture(kings, Checkers.WHITE))[0]), _at(3, 2), "Die Dame ist der Tipp")
 
-	# Derselbe Aufbau, dieselbe Antwort: der Hinweis springt nicht.
+	# Same position, same answer: the hint does not jitter between calls.
 	t.equal(Checkers.best_capture(kings, Checkers.WHITE), Checkers.best_capture(kings, Checkers.WHITE), "Der Tipp ist reproduzierbar")
 
-	# Eine Dame mit zwei gleich langen Sprüngen zählt als eine Marke.
+	# A king with two equal-length jumps still counts as one mark.
 	var twin := _board({
 		_at(3, 2): Checkers.WHITE_KING,
 		_at(2, 1): Checkers.BLACK_MAN,
@@ -141,7 +141,7 @@ func _capture_analysis() -> void:
 	t.equal(Checkers.capture_candidates(twin, Checkers.WHITE).size(), 1, "Zwei Sprünge, eine Marke")
 	t.equal(int((Checkers.capture_candidates(twin, Checkers.WHITE)[0] as Dictionary)["captures"]), 1, "Die Marke zählt den besten Sprung")
 
-	# Kein Schlag für eine Seite, die nichts zu schlagen hat.
+	# No capture for a side that has nothing to capture.
 	var lone := _board({_at(6, 5): Checkers.BLACK_MAN})
 	t.check(Checkers.best_capture(lone, Checkers.BLACK).is_empty(), "Ein einzelner Stein ohne Nachbar schlägt nicht")
 	t.suite_done()
@@ -155,18 +155,18 @@ func _movable_pieces() -> void:
 	t.equal(Checkers.movable_squares(lone, Checkers.WHITE), [_at(4, 1)], "Der einzige Stein zieht")
 	t.equal(Checkers.movable_squares(lone, Checkers.BLACK), [], "Die Gegenseite hat nichts zum Ziehen")
 
-	# Ein Stein auf der letzten Reihe kann nicht mehr vor.
+	# A man on the last rank cannot move forward any more.
 	var stuck := _board({_at(0, 1): Checkers.WHITE_MAN})
 	t.equal(Checkers.movable_squares(stuck, Checkers.WHITE), [], "Reihe 0 ist blockiert")
 
-	# Der Rückraum zählt mit — dort zieht ein Stein nach vorne.
+	# The home half counts too — a man there moves forward.
 	var back := _board({_at(6, 5): Checkers.WHITE_MAN})
 	t.equal(Checkers.movable_squares(back, Checkers.WHITE), [_at(6, 5)], "Ein Stein im Rückraum zieht")
 	var black_back := _board({_at(6, 5): Checkers.BLACK_MAN})
 	t.equal(Checkers.movable_squares(black_back, Checkers.WHITE), [], "Ein schwarzer Stein ist kein Zug für Weiß")
 
-	# Ein eingeklemmter Stein steht nicht in der Liste: vor ihm stehen Gegner,
-	# und über ihnen ist das Landefeld besetzt.
+	# A blocked man is absent from the list: opponents in front, landing square
+	# behind them occupied.
 	var blocked := _board({
 		_at(4, 1): Checkers.WHITE_MAN,
 		_at(3, 0): Checkers.BLACK_MAN,

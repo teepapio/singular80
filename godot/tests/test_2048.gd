@@ -1,12 +1,9 @@
 class_name Test2048
 extends RefCounted
-## Tests for 2048 and its one-move preview (the "ghost" tile).
-##
-## The ghost is the tile the next move adds. It is already on the board, it
-## rides along with the slide and with that move it becomes permanent. The rules
-## are pure functions, so they are checked here without a scene; the screen suite
-## at the end drives the real screen so the snapshot, the undo and the endgame
-## cannot drift away from the logic.
+## Tests for 2048 and its one-move preview, the "ghost" tile: the tile the next
+## move adds, already on the board, which rides along with the slide and becomes
+## permanent in that move. The rules are pure functions; the screen suite at the
+## end drives the real screen so snapshot, undo and endgame cannot drift.
 
 var t: TestKit
 ## Autoloads are not registered in `--script` mode, so they are fetched by path.

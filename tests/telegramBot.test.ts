@@ -7,20 +7,18 @@ import { createApp } from '../server/app';
 import { Store } from '../server/db';
 
 /**
- * Der Telegram-Bot ist eine zweite Oberfläche auf dieselbe Warteschlange. Das
- * ist genau die Stelle, an der zwei Wahrheiten entstehen könnten, also wird hier
- * nicht die Formatierung geprüft (das macht `telegram.test.ts`), sondern die
- * Verbindung: Ein Befehl aus dem Chat muss denselben Lauf erzeugen, den auch
- * der Dashboard-Knopf erzeugt — und beide Enden müssen es sehen.
+ * The Telegram bot is a second surface on the same queue, so this is where two truths
+ * could appear. Formatting lives in `telegram.test.ts`; here the wiring is checked: a
+ * chat command must produce the same run the dashboard button produces, and both ends
+ * must see it.
  */
 
 const runIds: string[] = [];
 
 function harness() {
   const dir = mkdtempSync(join(tmpdir(), 's80-tgbot-'));
-  // Der Bot pollt Telegram, sobald ein Token dasteht. Im Test darf davon nichts
-  // nach draußen gehen — eine Testsuite, die echte Aufrufe macht, ist
-  // langsamer als sie sein darf und scheitert ohne Netz.
+  // The bot polls Telegram as soon as a token exists; in a test nothing may go out —
+  // a suite that really calls is slower than allowed and fails without network.
   vi.stubGlobal(
     'fetch',
     vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, result: [] }) }),
@@ -39,8 +37,7 @@ function harness() {
     contentDir: join(process.cwd(), 'content'),
     projectRoot: process.cwd(),
     distDir: join(dir, 'dist'),
-    // Ohne Runner darf kein Lauf entstehen; die Tests prüfen die Verdrahtung,
-    // nicht den Agenten.
+    // Without a runner no run may appear: these tests check the wiring, not the agent.
     runnerEnabled: false,
   });
   return { dir, store, suggestion, app };
@@ -68,8 +65,7 @@ describe('Bot und Dashboard teilen sich die Wahrheit', () => {
   });
 
   it('meldet dem Runner ab, dass kein Token hinterlegt ist', async () => {
-    // Ohne Token darf der Bot nicht pollen: sonst schlägt der Server im
-    // Sekundentakt gegen die Telegram-API.
+    // No token, no polling — otherwise the server hits the Telegram API every second.
     const { dir, app } = harness();
     try {
       const internals = (app as unknown as { _singular80: { bot: { running: boolean } } })._singular80;
@@ -94,9 +90,8 @@ describe('Bot und Dashboard teilen sich die Wahrheit', () => {
   });
 
   it('löscht einen Vorschlag samt seiner Spuren', async () => {
-    // Testeinträge aus dem Spiel und Doubletten sollen wirklich wegkönnen, nicht
-    // nur auf `rejected` gesetzt werden — der Eintrag bliebe sonst in der
-    // Historie und in `backup/dashboard.json` stehen.
+    // Test entries and duplicates must really go, not just be `rejected` — otherwise
+    // they stay in the history and in `backup/dashboard.json`.
     const { dir, store, app } = harness();
     try {
       const id = store.listSuggestions()[0].id;
@@ -121,8 +116,7 @@ describe('Bot und Dashboard teilen sich die Wahrheit', () => {
   });
 
   it('lässt einen Vorschlag, zu dem ein Kind gehört, mit dem Kind weiterleben', async () => {
-    // Kinder aus einer Aufteilung sind eigene Arbeit und dürfen nicht mit dem
-    // Elternteil verschwinden.
+    // A child from a split is its own work and must not vanish with its parent.
     const { dir, store, app } = harness();
     try {
       const parent = store.listSuggestions()[0];
@@ -147,16 +141,16 @@ describe('Bot und Dashboard teilen sich die Wahrheit', () => {
   });
 
   it('legt den Telegram-Zustand neben die Datenbank, nicht ins Repository', async () => {
-    // The polling state is per-machine bookkeeping. In `data/` it is ignored
-    // and disposable; committed, every machine would fight over one offset.
+    // Per-machine bookkeeping: in `data/` it is ignored and disposable; committed,
+    // every machine would fight over one offset.
     const ROOT = join(import.meta.dirname, '..');
     // `check-ignore` exits 0 when the path *is* ignored, which is what we want here.
     expect(spawnSync('git', ['-C', ROOT, 'check-ignore', '-q', 'data/telegram-bot.json']).status).toBe(0);
   });
 
   it('meldet Telegram nur als eingerichtet oder nicht — nie mit Token', async () => {
-    // `/api/settings` geht an jedes offene Fenster. Der Token darf dort nicht
-    // auftauchen, sonst läse jeder im Netz den Schlüssel zum Bot mit.
+    // `/api/settings` goes to every open window; a token there hands the key to the
+    // bot to everyone on the network.
     process.env.TELEGRAM_BOT_TOKEN = 'streng-geheim';
     process.env.TELEGRAM_CHAT_ID = '42';
     const { dir, app } = harness();
@@ -171,9 +165,8 @@ describe('Bot und Dashboard teilen sich die Wahrheit', () => {
   });
 
   it('lässt einen Statuswechsel aus dem Chat im Dashboard ankommen', async () => {
-    // Das ist die geforderte Synchronisierung: was der Typ im Chat tippt,
-    // steht danach im Dashboard — und umgekehrt, weil beide `setStatus`
-    // benutzen.
+    // The requested sync: what is typed in chat shows up in the dashboard and the
+    // other way round, because both go through `setStatus`.
     const { dir, store, app } = harness();
     try {
       const internals = (app as unknown as {
@@ -182,7 +175,7 @@ describe('Bot und Dashboard teilen sich die Wahrheit', () => {
       const list = store.listSuggestions();
       const id = list[0].id;
       const bot = internals.bot;
-      // Der Antwortweg ist Telegram selbst; hier zählt nur der Seiteneffekt.
+      // The reply path is Telegram itself; only the side effect is checked here.
       const before = Date.now();
       void bot;
       const res = await app.inject({

@@ -51,13 +51,9 @@ func allow(name: String) -> void:
 
 ## Switches to a screen and waits exactly as long as the switch takes.
 ##
-## `Router.go_to` ignores requests while a fade is still running. A fixed sleep
-## after another screen's switch is therefore a race: the request is dropped on
-## the floor and the suite quietly inspects the *previous* screen — which then
-## fails on some property it never had. This drains a running transition,
-## issues the request, then polls until the router both reports the new screen
-## and accepts requests again. The cap keeps a broken screen from hanging the
-## run, and the return value says whether it ever arrived.
+## `Router.go_to` drops requests while a fade runs, so a fixed sleep after
+## another screen's switch is a race — the suite would inspect the *previous*
+## screen. The cap keeps a broken screen from hanging the run.
 func goto(router: Node, tree: SceneTree, screen_id: String, data: Dictionary = {}, cap := 2.0) -> bool:
 	if router == null:
 		return false

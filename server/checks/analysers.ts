@@ -5,19 +5,17 @@
  *
  * - `actions`  — "the button does nothing". `Ui.button()` and
  *   `add_action_button()` connect their callback only `if on_press.is_valid()`,
- *   so a button with a missing callback renders perfectly, looks right, and
- *   silently swallows the tap. That is invisible in a screenshot and in a code
- *   review that only looks at the layout.
+ *   so a button with a missing callback renders perfectly and silently swallows
+ *   the tap — invisible in a screenshot and in a review that only reads layout.
  * - `logs`     — "the game is loud". `print` in a per-frame function is ~60
  *   lines a second, and on Android logcat is a real cost: it shows up as
  *   stuttering and it buries the one line that matters.
- * - `performance` — "it lags". The static half catches the causes that are
- *   visible in source: allocating in a per-frame function, or a loop bounded
- *   by something the player can grow.
+ * - `performance` — "it lags". The static half catches the causes visible in
+ *   source: allocating in a per-frame function, or a loop bounded by something
+ *   the player can grow.
  *
- * These are static checks, so they need no device and no APK. The queue pairs
- * them with a device probe of the same name (see `catalogue.ts`) for the facts
- * only a real phone can produce.
+ * These need no device and no APK. The queue pairs them with a device probe of
+ * the same name (see `catalogue.ts`) for the facts only a real phone produces.
  */
 import {
   callsInFunction,
@@ -202,10 +200,9 @@ function isEmptyish(arg: string | undefined): boolean {
 /**
  * `actions` — buttons that render but do nothing.
  *
- * `Ui.button` connects only when the callable is valid, so a missing callback
- * is not an error anywhere: the tree builds, the screenshot looks right, the
- * test suite passes. This is the check that turns "the button does nothing"
- * into a failing check.
+ * `Ui.button` connects only when the callable is valid, so a missing callback is
+ * not an error anywhere: the tree builds, the screenshot looks right, the test
+ * suite passes. This check turns "the button does nothing" into a failing check.
  */
 export function checkActions(input: CheckInput): CheckFinding[] {
   const findings: CheckFinding[] = [];
@@ -279,15 +276,10 @@ const ASSIGNED_BUTTON_RE =
  * A variable a button is bound to, if the statement assigns one.
  *
  * A button does not have to receive its callback at construction. The idiomatic
- * split form builds the node first and connects it a few lines later, because
- * the handler is long and inlining a lambda would bury it:
- *
- *     var send := Ui.button("Absenden", Vector2(160, 48), UiTheme.ACCENT)
- *     send.pressed.connect(func() -> void: …)
- *
- * Flagging the first line as a dead button would be a false positive on the
- * project's own suggest dialog, so the variable is resolved and the file is
- * searched for a later connection to it.
+ * split form builds the node first and connects it a few lines later, because the
+ * handler is long and inlining a lambda would bury it. Flagging the first line as
+ * a dead button would be a false positive on the project's own suggest dialog, so
+ * the variable is resolved and the file is searched for a later connection to it.
  */
 function assignedName(statement: string): string | null {
   const match = ASSIGNED_BUTTON_RE.exec(statement);

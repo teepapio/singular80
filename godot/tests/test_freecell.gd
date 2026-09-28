@@ -2,11 +2,9 @@ class_name TestFreecell
 extends RefCounted
 ## Rule tests for FreeCell: the supermove capacity, the safety test and above all
 ## the "Tipp" — every move `Cards.freecell_suggest` proposes has to be a legal
-## move, because that is the promise the hint makes to the player.
-##
-## The rules run in the plain logic phase of the headless suite: the board is
-## four arrays of cards, so none of this needs a scene. `ScreenChecks` then
-## takes the same feature to the real screen.
+## move, because that is the promise the hint makes to the player. The board is
+## four arrays of cards, so none of this needs a scene; `ScreenChecks` takes the
+## same feature to the real screen.
 
 var t: TestKit
 
@@ -192,15 +190,15 @@ func _sequences() -> void:
 
 func _capacity() -> void:
 	t.suite("FreeCell — Supermove-Kapazität")
-	# Ohne freie Zelle und ohne leeren Stapel bleibt genau eine Karte.
+	# With no free cell and no empty pile exactly one card may move.
 	t.equal(Cards.freecell_capacity(cells_free(0), mostly_full(0), 0), 1, "Nichts frei: nur eine Karte")
 	t.equal(Cards.freecell_capacity(cells_free(1), mostly_full(0), 0), 2, "Eine Zelle verdoppelt")
-	# Auf einen leeren Stapel zählt der Stapel selbst nicht mit.
+	# An empty pile does not count as one of the empties.
 	t.equal(Cards.freecell_capacity(cells_free(1), mostly_full(1), 0), 2, "Ein leerer Stapel wie eine Zelle")
 	t.equal(Cards.freecell_capacity(cells_free(1), mostly_full(2), 0), 4, "Jeder weitere Leerstapel verdoppelt")
 	t.equal(Cards.freecell_capacity(cells_free(1), mostly_full(3), 0), 8, "Drei Leerstapel: acht Karten")
 	t.equal(Cards.freecell_capacity(cells_free(4), mostly_full(1), 0), 5, "Vier Zellen zählen jede für sich")
-	# Auf einen belegten Stapel zählt sein eigener Platz mit.
+	# An occupied pile does count its own slot.
 	t.equal(Cards.freecell_capacity(cells_free(1), mostly_full(0), 1), 2, "Der belegte Stapel verdoppelt mit")
 	t.equal(Cards.freecell_capacity(cells_free(0), mostly_full(2), 0), 2, "Ohne Zelle tragen zwei Leerstapel zwei Karten")
 	t.suite_done()
@@ -228,7 +226,7 @@ func _hint_text() -> void:
 	t.equal(str(home["kind"]), "safe", "Ein Ass geht nach Hause")
 	t.check(Cards.freecell_hint_text(home).contains("Pik-Fundament"), "Der Text nennt das Fundament")
 
-	# 4♦ 3♠ 2♥ neben dem Kreuz-5: eine Folge, die komplett umsetzt.
+	# 4♦ 3♠ 2♥ beside the 5♣: a run that clears completely.
 	var cols := board([["4K", "3P", "2H"], ["5C"]])
 	var run: Dictionary = first_of(Cards.freecell_suggest(four_empty_cells(), none, cols, 8), "build")
 	t.equal(int(run["count"]), 3, "Die ganze Folge wird als ein Zug vorgeschlagen")
@@ -237,12 +235,12 @@ func _hint_text() -> void:
 	t.check(text.contains("+2"), "und sagt, wie viele mitkommen")
 	t.check(text.contains(Cards.label_of(cols[1][0])), "und worauf die Folge passt")
 
-	# Eine Zellenkarte, die einen leeren Stapel belegt.
+	# A cell card that takes an empty pile.
 	cols = board([["9H"], [], [], [], [], [], [], []])
 	var shift: Dictionary = first_of(Cards.freecell_suggest(free_cells_of(["7C"]), none, cols, 8), "shift")
 	t.check(Cards.freecell_hint_text(shift).contains("Zelle 1"), "Eine Zellenkarte gibt die Zelle frei")
 
-	# Eine einzelne Karte beiseitelegen.
+	# A single card set aside.
 	cols = board([["7H", "6P"]])
 	var park: Dictionary = first_of(Cards.freecell_suggest(four_empty_cells(), none, cols, 8), "park")
 	t.check(park.size() > 0, "Der Ausgrabungszug wird überhaupt vorgeschlagen")
@@ -254,7 +252,7 @@ func _suggestion() -> void:
 	t.suite("FreeCell — Tippvorschlag")
 	var none := foundations_of([0, 0, 0, 0])
 
-	# Eine sichere Karte schlägt alles.
+	# A safe card beats everything.
 	var cells := free_cells_of(["0P"])
 	var cols := board([["5H", "6P", "7K"]])
 	var list := Cards.freecell_suggest(cells, none, cols)
@@ -262,7 +260,7 @@ func _suggestion() -> void:
 	t.equal(str(list[0]["kind"]), "safe", "Die sichere Karte kommt zuerst")
 	t.check(int(list[0]["score"]) - int(list[1]["score"]) > 100, "Und mit Abstand vor allen anderen")
 
-	# Ohne sichere Karte: die Folge 7♦ 6♠ 5♥ passt auf die Spalte mit der 8♠.
+	# With no safe card: the run 7♦ 6♠ 5♥ fits onto the 8♠.
 	cols = board([["8C", "7K", "6P", "5H"], ["8P"], ["12P"], ["9H"], ["3K"], ["4K"], ["11H"], ["5C"]])
 	list = Cards.freecell_suggest(four_empty_cells(), none, cols)
 	var run: Dictionary = moving_of(list, "build", 3)
@@ -272,27 +270,27 @@ func _suggestion() -> void:
 		t.check(is_legal(four_empty_cells(), none, cols, move),
 				"Zug erlaubt: %s" % Cards.freecell_hint_text(move))
 
-	# Eine Folge, die den ganzen Stapel aufräumt, ist der beste Zug überhaupt.
+	# A run that empties the whole pile is the best move there is.
 	cols = board([["7K", "6P", "5H"], ["8C"]])
 	list = Cards.freecell_suggest(four_empty_cells(), none, cols)
 	t.equal(int(list[0]["score"]), 300, "Ein leerer Stapel ist das wertvollste Ziel")
 	t.check(Cards.freecell_hint_text(list[0]).contains("wird frei"), "Der Text sagt, dass die Spalte leer wird")
 	t.check(is_legal(four_empty_cells(), none, cols, list[0]), "und der Zug ist erlaubt")
 
-	# Eine Zellenkarte belegt einen leeren Stapel und macht so wieder Platz.
+	# A cell card on an empty pile frees one up again.
 	cols = board([["9H"], [], [], [], [], [], [], []])
 	cells = free_cells_of(["7C"])
 	list = Cards.freecell_suggest(cells, none, cols)
 	t.equal(str(list[0]["kind"]), "shift", "Die Zellenkarte wandert in den leeren Stapel")
 	t.check(is_legal(cells, none, cols, list[0]), "und das ist erlaubt")
 
-	# Das Ausgraben: die oberste Karte weg, darunter wird eine Folge frei.
+	# Digging out: top card gone, a run underneath becomes available.
 	cols = board([["7H", "6P"], ["12P"], ["9H"], ["3K"], ["8P"], ["4K"], ["11H"], ["5C"]])
 	list = Cards.freecell_suggest(four_empty_cells(), none, cols)
 	t.check(kinds(list).has("park"), "Auch das Ausgraben wird gefunden")
 	t.check(is_legal(four_empty_cells(), none, cols, first_of(list, "park")), "und ist erlaubt")
 
-	# Die Liste lässt sich begrenzen und ist absteigend sortiert.
+	# The list can be limited and is sorted descending.
 	var many := Cards.freecell_suggest(four_empty_cells(), none, cols, 3)
 	t.equal(many.size(), 3, "Die Vorschlagsliste lässt sich begrenzen")
 	t.check(Cards.freecell_suggest(four_empty_cells(), none, cols).size() > 3, "Es waren auch mehr Vorschläge da")
@@ -340,7 +338,7 @@ func _legality() -> void:
 	t.equal(bad, 0, "Kein einziger Vorschlag war unzulässig (%d geprüft)" % checked)
 	t.check(checked > 20, "Genug Vorschläge durchgelaufen")
 
-	# Dichter als am Anfang einer Partie.
+	# Denser than at the start of a game.
 	var tight := board([["8P", "7H", "6K"], ["5P", "4H", "3K"], ["2P", "1H"]])
 	for move in Cards.freecell_suggest(four_empty_cells(), none, tight, 12):
 		t.check(is_legal(four_empty_cells(), none, tight, move),
@@ -365,9 +363,9 @@ func _dead_end() -> void:
 	t.suite_done()
 
 
-## Der Tipp muss auf einem echten, frisch gemischten Brett funktionieren — nicht
-## nur auf den Lagen, die man sich ausdenkt. 40 Partien, jeder Vorschlag gegen
-## die unabhängig nachgezählten Regeln geprüft.
+## The hint has to work on a real, freshly dealt board — not just on layouts
+## someone made up. 40 games, every proposal checked against independently
+## re-derived rules.
 func _opening() -> void:
 	t.suite("FreeCell — Tipp am Anfang")
 	var none := foundations_of([0, 0, 0, 0])
@@ -400,11 +398,9 @@ func _opening() -> void:
 # --- the same feature on the real screen ------------------------------------
 
 ## The hint as the player meets it: a button, a price, a highlight that fades
-## and a board that forgets the tip as soon as it changes.
-##
-## The screen is duck-typed through the router — naming `FreeCellScreen` would
-## pull it into the compile chain of `run_tests.gd`, which runs before the
-## autoloads exist.
+## and a board that forgets the tip as soon as it changes. The screen is
+## duck-typed through the router — naming `FreeCellScreen` would pull it into
+## the compile chain of `run_tests.gd`, which runs before the autoloads exist.
 class ScreenChecks:
 	extends RefCounted
 
@@ -439,7 +435,7 @@ class ScreenChecks:
 		t.check(_button_text(screen).contains("Tipp"), "Es gibt eine Tipp-Taste")
 		t.check(_button_text(screen).contains(str(_cost)), "und die nennt ihren Preis")
 
-		# Ein fester Punktestand, damit die Kosten eindeutig bleiben.
+		# A fixed score, so the prices stay unambiguous.
 		screen.score = 200
 		var first: String = ""
 		screen.hint()
@@ -452,18 +448,18 @@ class ScreenChecks:
 		t.check(str(screen._help_label.text).contains(first), "Der Text steht auch in der Zeile")
 		t.equal(screen._view._hint_rects().size(), 2, "Quelle und Ziel leuchten auf")
 
-		# Zwei Tipps hintereinander zeigen zwei verschiedene Züge.
+		# Two tips in a row show two different moves.
 		screen.hint()
 		t.equal(screen.hints_used, 2, "Der zweite Tipp zählt auch")
 		t.equal(screen.score, 200 - 2 * _cost, "und kostet erneut")
 		t.check(Cards.freecell_hint_text(screen.hint_move) != first, "Er schlägt etwas anderes vor")
 
-		# Ein Zug wischt den Tipp vom Brett — er zeigte auf alte Felder.
+		# A move wipes the tip off the board — it was pointing at old squares.
 		screen.selection = {"from": "col", "index": 0, "start": (screen.columns[0] as Array).size() - 1}
 		t.check(screen._try_move_to_cell(0), "Die unterste Karte kommt in die freie Zelle")
 		t.check(screen.hint_move.is_empty(), "Der Tipp ist mit dem Zug verschwunden")
 
-		# Und zurücknehmen holt den Zug zurück, nicht die Tippkosten.
+		# Undo takes the move back, not the tip's price.
 		var after_move: int = screen.score
 		screen.hint()
 		var paid: int = screen.score
@@ -472,14 +468,14 @@ class ScreenChecks:
 		t.equal(screen.score, paid, "Zurück holt den Zug, nicht die Tippkosten")
 		t.check(screen.hint_move.is_empty(), "und der Tipp ist weg")
 
-		# Das Aufleuchten endet von allein, statt über dem Brett zu stehen.
+		# The glow ends on its own instead of standing over the board.
 		screen.hint()
 		t.check(screen.hint_life > 0.0, "Der Tipp leuchtet eine Weile")
 		screen._process(_life + 1.0)
 		t.equal(screen.hint_life, 0.0, "und erlischt von allein")
 		t.check(screen.hint_move.is_empty(), "Der Tipp verschwindet mit")
 
-		# Eine Lage ohne jeden sinnvollen Zug sagt das auch.
+		# A position with no sensible move says so too.
 		screen.columns = _stuck_board()
 		screen.free_cells = [Cards.Card.new(2, 0), Cards.Card.new(2, 1), Cards.Card.new(2, 2), Cards.Card.new(2, 3)]
 		var quiet: int = screen.score
@@ -488,7 +484,7 @@ class ScreenChecks:
 		t.equal(screen.score, quiet, "und das kostet nichts")
 		t.check(str(screen._help_label.text).contains("R"), "Der Hinweis nennt die Taste für neu mischen")
 
-		# Eine neue Partie beginnt ohne Schulden.
+		# A new game starts without debt.
 		screen.new_deal()
 		t.equal(screen.hints_used, 0, "Ein neues Spiel zählt die Tipps neu")
 		t.check(screen.hint_move.is_empty(), "und ohne Tipp")

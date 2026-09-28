@@ -1,7 +1,7 @@
 /**
- * Verifies the built AAB against the things Google Play actually rejects, so
- * the failure shows up here instead of as a "your app targets an old version of
- * Android" mail three days later.
+ * Verifies the built AAB against the things Google Play rejects, so the failure
+ * shows up here instead of as a "your app targets an old version of Android"
+ * mail three days later.
  *
  * An AAB's base/manifest/AndroidManifest.xml is binary protobuf, so this script
  * asks the real tools instead of guessing:
@@ -9,8 +9,7 @@
  *   - `jarsigner -verify`         → an AAB is signed like a JAR (v1 scheme)
  *   - `unzip -l`                 → structure and native ABIs
  *
- * Usage:  node scripts/verify-aab.mjs [path/to/file.aab]
- * Env:    PLAY_KEYSTORE_SHA256=<hex sha256 of the upload certificate, colons ok>
+ * Env: PLAY_KEYSTORE_SHA256=<hex sha256 of the upload certificate, colons ok>
  */
 import { existsSync, readFileSync, statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -61,12 +60,10 @@ if (!cfg.android.architectures['armeabi-v7a']) {
 }
 
 // --- manifest ---------------------------------------------------------------
-// Priority 1: bundletool reads the protobuf manifest out of the bundle. The jar
-//   on dl.google.com is the *library* (no Main-Class); put the
-//   `bundletool-all-<version>.jar` from the GitHub release into build/tools/ to
-//   enable this path.
-// Priority 2: the merged manifest Gradle wrote during this very build — plain
-//   XML, same build, no extra dependency.
+// Two sources, because the jar on dl.google.com is the bundletool *library*
+// (no Main-Class) — the `bundletool-all-<version>.jar` from the GitHub release in
+// build/tools/ enables source 1, and source 2 is the merged manifest Gradle
+// wrote during this very build (plain XML, no extra dependency).
 let manifest = '';
 const jar = bundletool();
 if (jar && existsSync(jar)) {
@@ -84,11 +81,10 @@ if (!manifest) {
   const merged = findMergedManifest();
   if (merged) {
     const age = (statSync(aabPath).mtimeMs - statSync(merged).mtimeMs) / 1000;
-    // The merged manifest is a *build artefact of one export*. A different
-    // build (e.g. the slim APK) leaves a newer one behind, and reading that
-    // would check the wrong file — a green result for a manifest that was never
-    // in this bundle. Only accept one from the same build: written shortly
-    // before the bundle and not a minute after it.
+    // A merged manifest is a *build artefact of one export*. Another build (the
+    // slim APK, say) leaves a newer one behind, and reading that would check the
+    // wrong file — a green result for a manifest that was never in this bundle.
+    // Only accept one written shortly before the bundle.
     if (age < -30 || age > 120) {
       abort(
         `Kein Manifest aus diesem Build gefunden.\n` +
@@ -191,10 +187,7 @@ if (todos.length) {
 if (problems > 0) abort(`${problems} Problem(e) gefunden.`);
 done('AAB ist bereit für den Play-Upload.');
 
-/**
- * Newest `bundle_manifest/**\/AndroidManifest.xml` below Gradle's build dir.
- * That is the manifest AGP turns into `base/manifest/AndroidManifest.xml`.
- */
+/** Newest `bundle_manifest/**\/AndroidManifest.xml` under Gradle's build dir. */
 function findMergedManifest() {
   const roots = [
     join(ANDROID_BUILD, 'intermediates', 'bundle_manifest'),

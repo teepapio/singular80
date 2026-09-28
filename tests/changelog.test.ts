@@ -3,14 +3,13 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendChangelog, entryLine } from '../server/changelog';
+import { appendChangelog, entryLine, sessionEntryLine } from '../server/changelog';
 
 /**
- * The changelog is the one file the owner actually reads. Its contract is
- * narrow on purpose — one or two lines per implemented suggestion — and a
- * contract that narrow is only worth anything if it is enforced. A changelog
- * that grows into paragraphs stops being read, and then it is worse than none,
- * because it still looks maintained.
+ * The changelog is the one file the owner actually reads, so its contract — one or
+ * two lines per implemented suggestion — is only worth something if it is enforced.
+ * Paragraphs stop it from being read, and then it is worse than none, because it
+ * still looks maintained.
  */
 
 const SUGGESTION = { id: 42, text: 'Der Slime soll beim Springen Staub aufwirbeln' } as never;
@@ -49,11 +48,42 @@ describe('Changelog line', () => {
   });
 });
 
+describe('Changelog line for a session change', () => {
+  it('carries "edi:" instead of a suggestion number', () => {
+    // Work from a normal session has no suggestion behind it. Without the prefix the
+    // file mixes "the bot implemented #12" and "I fixed what you reported" in one
+    // voice, and the first looks as automatic as the second.
+    expect(sessionEntryLine('Server ist vom Gerät erreichbar')).toBe('- **edi:** Server ist vom Gerät erreichbar');
+  });
+
+  it('clips and flattens exactly like the other line', () => {
+    const line = sessionEntryLine('a\nb   c '.repeat(200));
+    expect(line).not.toMatch(/[\n\r]/);
+    expect(line.length).toBeLessThan(160);
+    expect(line).toContain('…');
+  });
+});
+
 describe('The changelog in the repository', () => {
   const ROOT = join(import.meta.dirname, '..');
 
   it('exists — without the file the runner silently does nothing', () => {
     expect(() => readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8')).not.toThrow();
+  });
+
+  it('tells the two kinds of entry apart', () => {
+    // Both belong in the file and must stay tellable apart: a number is a suggestion,
+    // `edi:` is work the owner asked for directly.
+    const lines = readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8')
+      .split('\n')
+      .filter((l) => l.startsWith('- '));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line).toMatch(/^- \*\*(\#\d+|edi:)\*\*/);
+      expect(line.split('\n').length).toBe(1);
+      expect(line.length).toBeLessThan(200);
+    }
+    expect(lines.some((l) => l.startsWith('- **edi:**'))).toBe(true);
   });
 
   it('holds at most two lines per entry', () => {
@@ -68,23 +98,20 @@ describe('The changelog in the repository', () => {
   });
 
   it('is not ignored by git, or it would quietly stop growing', () => {
-    // `check-ignore` exits 1 when the file is *not* ignored — the inverted exit
-    // code is the expected result here.
+    // `check-ignore` exits 1 when the file is *not* ignored; that inversion is expected.
     expect(spawnSync('git', ['-C', ROOT, 'check-ignore', '-q', 'CHANGELOG.md']).status).toBe(1);
   });
 });
 
 describe('The changelog commit touches only its own file', () => {
-  // Checked rather than trusted: a `git add -A` in changelog.ts would commit
-  // whatever a concurrent session left in the tree, and that has happened here
-  // before.
+  // Checked rather than trusted: a `git add -A` in changelog.ts would commit whatever a
+  // concurrent session left in the tree, and that has happened here before.
   it('never sweeps in unrelated work', () => {
     const dir = mkdtempSync(join(tmpdir(), 's80-changelog-'));
     const remote = mkdtempSync(join(tmpdir(), 's80-changelog-remote-'));
     try {
-      // A real remote on disk: the function pushes, and without one the push
-      // fails and it reports `false` even though the commit was fine. That
-      // would make this test measure the sandbox instead of the code.
+      // A real remote on disk: the function pushes, and without one the push fails and
+      // it reports `false` even though the commit was fine.
       execFileSync('git', ['-C', remote, 'init', '-q', '--bare', '-b', 'main']);
       const env = {
         ...process.env,
@@ -95,8 +122,8 @@ describe('The changelog commit touches only its own file', () => {
       };
       const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', env });
       git('init', '-q', '-b', 'main');
-      // The same identity the real repository carries in `.git/config`.
-      // Without it `git commit` refuses and the test measures the sandbox.
+      // The identity the real repository carries in `.git/config`; without it
+      // `git commit` refuses and the test measures the sandbox.
       git('config', 'user.name', 'Singular 80');
       git('config', 'user.email', 'singular80@users.noreply.github.com');
       git('remote', 'add', 'origin', remote);

@@ -1,9 +1,8 @@
 class_name TestScreens
 extends RefCounted
 ## Integration tests: every screen must build, run and clean up without errors.
-##
-## These run inside a real scene tree (headless) so the autoloads, the router
-## and the actual game scripts are exercised, not just the pure logic.
+## They run inside a real (headless) scene tree, so the autoloads, the router and
+## the actual game scripts are exercised, not just the pure logic.
 
 var t: TestKit
 var tree: SceneTree
@@ -119,11 +118,11 @@ func _wants(screen_id: String) -> bool:
 
 ## Switches to a screen and waits only as long as the switch actually takes.
 ##
-## The sweep used to sleep a fixed 0.45 s per screen — roughly 11 s of the
-## suite's wall clock spent doing nothing. The router publishes `current_id` as
-## soon as the screen is in the tree, so polling ends the wait after the fade
-## (0.12 s) instead of guessing: faster, and it cannot under-wait a screen that
-## is slow to build. The cap keeps a broken screen from hanging the run.
+## The sweep used to sleep a fixed 0.45 s per screen — about 11 s of the suite's
+## wall clock spent doing nothing. The router publishes `current_id` as soon as the
+## screen is in the tree, so polling ends the wait after the fade (0.12 s) instead
+## of guessing: faster, and it cannot under-wait a slow screen. The cap keeps a
+## broken screen from hanging the run.
 func _goto(screen_id: String, data: Dictionary = {}, cap := 2.0) -> bool:
 	return await t.goto(router, tree, screen_id, data, cap)
 
@@ -429,7 +428,7 @@ func _mesh_gallery_flow() -> void:
 	for key in keys:
 		t.check(AssetRegistry.exists(str(key)), "Sockel '%s' zeigt ein gebündeltes Mesh" % str(key))
 
-	# Vormerken wie der Spieler es tut: an einen Sockel stellen und E drücken.
+	# Marking like a player does: stand at a pedestal and press E.
 	gallery.active_pedestal = 0
 	gallery._toggle_mark()
 	t.check(MeshGallery.is_marked(MeshGallery.shared_marks(), str(gallery.visible_keys()[0])),
@@ -440,12 +439,12 @@ func _mesh_gallery_flow() -> void:
 	gallery.active_pedestal = 0
 	gallery._toggle_mark()
 
-	# Die Notiz landet in der Merkliste …
+	# The note lands in the mark list …
 	gallery._refresh()
 	t.check(not str(gallery._info_name.text).is_empty(), "Die Infokarte nennt das Mesh")
 	t.check(not str(gallery._info_meta.text).is_empty(), "Die Infokarte nennt Stufe und Dreieckzahl")
 
-	# … und der Review-Screen macht daraus einen fertigen Text.
+	# … and the review screen turns it into a finished text.
 	await _goto("mesh_review")
 	var review = router.current_screen
 	t.check(review != null, "Die Review-Seite öffnet")
@@ -455,14 +454,14 @@ func _mesh_gallery_flow() -> void:
 	t.check(str(review._draft.text).contains(str(keys[0])), "Der Vorschlag nennt das Mesh")
 	t.check(review._submit_button.disabled == false, "Absenden ist möglich")
 
-	# Eine Notiz fließt in den Text ein.
+	# A note flows into the text.
 	var before := str(review._draft.text)
 	MeshGallery.set_marks(MeshGallery.set_note(MeshGallery.shared_marks(), str(keys[0]), "Flügel zu kantig"))
 	review._rebuild()
 	t.check(str(review._draft.text).contains("Flügel zu kantig"), "Die Notiz steht im Vorschlag")
 	t.check(str(review._draft.text) != before, "Der Vorschlag hat sich geändert")
 
-	# Absenden ohne Server landet in der Offline-Warteschlange.
+	# Submitting without a server lands in the offline queue.
 	api._queue.clear()
 	review._submit()
 	await tree.create_timer(0.4).timeout
@@ -471,8 +470,7 @@ func _mesh_gallery_flow() -> void:
 		t.check(str((api._queue[0] as Dictionary)["text"]).contains("Mesh-Galerie"),
 			"Der Vorschlag trägt seine Herkunft mit sich")
 	api._queue.clear()
-	# Offline ist nur in die Warteschlange gesendet: die Liste bleibt, damit der
-	# Spieler den Text noch kopieren kann.
+	# Offline only queues it: the list stays, so the player can still copy the text.
 	t.equal(MeshGallery.mark_count(MeshGallery.shared_marks()), 1,
 		"Nach dem Offline-Senden bleibt die Liste erhalten")
 	MeshGallery.set_marks(MeshGallery.clear_marks())

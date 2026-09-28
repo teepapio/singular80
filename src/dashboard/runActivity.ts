@@ -93,11 +93,11 @@ export function describeRunActivity(input: {
  * Tells whether the dashboard should ask the server to clean up stuck runs on
  * its own, without waiting for the user to click the cleanup button.
  *
- * Several running rows are *not* a reason on their own any more: the queue runs
- * one session per lane, so `runningCount === capacity` is the normal case and
- * the old "more than one is a phantom" rule would have wiped live runs. What
- * still is a reason is a run count the configured number of lanes cannot hold,
- * or a run the server has already reported as process-less.
+ * Several running rows are *not* a reason on their own: the queue runs one
+ * session per lane, so `runningCount === capacity` is normal, and the old
+ * "more than one is a phantom" rule would have wiped live runs. What still is a
+ * reason: a run count the configured lanes cannot hold, or a run the server has
+ * already reported as process-less.
  */
 export function needsRunCleanup(input: {
   /** Number of runs currently marked as `running` in the database. */

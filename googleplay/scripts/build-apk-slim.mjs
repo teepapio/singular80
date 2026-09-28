@@ -3,35 +3,24 @@
  *
  *   npm run build:apk
  *
- * Why the folders leave the project instead of being deleted: `AssetRegistry`
- * and two test suites compare the mesh folders against the registry, and a
- * parallel agent works in this very tree. Taking the two folders out of *one
- * export* leaves the repository intact — the gallery then offers only the
- * low-poly level, which is exactly what it already does when the LOD generator
- * has not run.
+ * The two folders are only hidden from *one* export, never deleted: the mesh
+ * tree is versioned, `AssetRegistry` and the test suites compare it against the
+ * registry, and a parallel agent works in this very tree. The gallery then
+ * offers the low-poly level only, which is what it already does when the LOD
+ * generator has not run.
  *
- * Why `.gdignore` and not `exclude_filter`
- * ---------------------------------------
- * Both work, and both were measured on real artifacts, file by file, comparing
- * the md5 sums from the `.import` files (an imported mesh is stored as
- * `assets/.godot/imported/<name>.glb-<md5>.scn`, and `<name>` is identical for
- * all three tiers, so a name-based check proves nothing):
+ * Two traps, both measured on real artifacts:
+ *   - `exclude_filter` *does* reach imported resources (0/155 med and high each
+ *     way), but `.gdignore` is used here because it also survives a preset that
+ *     a foreign agent regenerated without the pattern.
+ *   - `export_filter="exclude"` is worse than useless: it ships the raw `.glb`
+ *     sources, and an exported game cannot load a raw `.glb` — importing
+ *     happens in the editor.
  *
- *   exclude_filter `assets/meshes/med/*, assets/meshes/high/*` → 0/155 med, 0/155 high
- *   .gdignore in med/ and high/                                → 0/155 med, 0/155 high
- *
- * An earlier note here claimed the filter cannot reach imported resources. That
- * was measured on a build made *before* the filter was in the preset, and the
- * claim does not hold. `exclude_filter` needs no cleanup and is the more robust
- * choice; `.gdignore` mutates the versioned mesh tree, which is why it needs the
- * `finally`, the signal handlers, the entry check and `tests/lightApk.test.ts`
- * below. `export_filter="exclude"` is genuinely useless here: it ships the raw
- * `.glb` sources, and an exported game cannot load a raw `.glb`, because
- * importing happens in the editor.
- *
- * The exclusion is verified afterwards, not assumed: an APK that still weighs
- * 120 MB means the mechanism did not take effect, and that is the failure this
- * script exists to catch.
+ * "Export succeeded" is not proof. An APK that still weighs 120 MB means the
+ * mechanism did not take effect, and that is the failure this script catches:
+ * the package contents are compared against the md5 sums in the `.import` files
+ * below, because a name-based check proves nothing (see `importedTargets`).
  */
 import { existsSync, readFileSync, statSync, readdirSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -48,16 +37,10 @@ const MESH_DIR = join(GODOT_DIR, 'assets', 'meshes');
 const LIFT_DIRS = [join(MESH_DIR, 'med'), join(MESH_DIR, 'high')];
 const LIFT_MARKS = LIFT_DIRS.map((dir) => join(dir, '.gdignore'));
 
-/**
- * Puts the folders back, whatever happened.
- *
- * The two `.gdignore` files are the only mutation of the working tree. A build
- * that died between writing and removing them would leave the repository in
- * slim mode, and every later full build would quietly ship 52 MB less mesh. So
- * the removal runs from a `finally` *and* on SIGINT/SIGTERM, the entry check
- * refuses to build on top of a stale pair, and `tests/lightApk.test.ts` fails if
- * one is ever committed.
- */
+// The `.gdignore` files are the only mutation of the working tree, and a build
+// killed between writing and removing them would leave the repository in slim
+// mode — every later full build would quietly ship 50 MB less mesh. Hence the
+// `finally`, the signal handlers, the entry check and tests/lightApk.test.ts.
 let restored = false;
 function restoreLifts() {
   if (restored) return;
@@ -65,7 +48,7 @@ function restoreLifts() {
   for (const mark of LIFT_MARKS) rmSync(mark, { force: true });
   info('med/ und high/ wieder im Projekt (.gdignore entfernt).');
   // The meshes have to be back before anything else runs, or the next
-  // `test:game` reports 310 missing tiers.
+  // `test:game` reports the missing tiers.
   tryRun('godot', ['--headless', '--path', 'godot', '--import'], { cwd: REPO, timeout: 900_000 });
 }
 for (const signal of ['SIGINT', 'SIGTERM']) {
@@ -75,9 +58,8 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
     process.exit(130);
   });
 }
-// `abort()` ruft process.exit() und überspringt dabei jedes `finally`. Ohne
-// diesen Hook bliebe ein Fehler *nach* dem Anlegen der Marker liegen — und der
-// Baum bliebe stillschweigend dünn, genau das, worunter der Guard unten wacht.
+// `abort()` calls process.exit() and skips every `finally`, so without this hook
+// a failure *after* the markers were written would leave the tree silently thin.
 process.on('exit', restoreLifts);
 
 let problems = 0;
@@ -116,7 +98,8 @@ if (slim.length === 0) {
   abort(`Kein Preset schließt ${EXCLUDE_MARKER} aus.`);
 }
 if (slim.length > 1) {
-  // Two agents can each add one. Ambiguity would silently pick the wrong build.
+  // Two agents can each add one; picking the wrong one would ship a different
+  // build than the name says.
   warn(`${slim.length} Presets schließen die Meshes aus: ${slim.map((p) => `[${p.index}] ${p.name}`).join(', ')}`);
   info(`Verwendet wird "${cfg.android.slim.name}" — die anderen bitte entfernen.`);
 }
@@ -128,18 +111,18 @@ const verifyOnly = process.argv.includes('--verify-only');
 ensureDir(BUILD_DIR);
 // The output path belongs to the preset: an adopted preset keeps the path its
 // author chose. The fallback mirrors `SLIM_APK_PATH` in
-// `install-export-preset.mjs` — deliberately not imported from there, because
-// that module rewrites `export_presets.cfg` when it loads.
+// `install-export-preset.mjs` — deliberately not imported, because that module
+// rewrites `export_presets.cfg` when it loads.
 const apkPath = preset.path || join(BUILD_DIR, 'singular80-leicht.apk');
 info(`Ausgabe: ${apkPath}`);
 
 // --- signing ----------------------------------------------------------------
-// A preset that was regenerated elsewhere carries no keystore, and Godot then
+// Signing: a preset regenerated elsewhere carries no keystore and Godot then
 // refuses to export ("Could not find release keystore"). Inject one for the
-// build and put the original three lines back in the `finally` — this file is
-// shared with another agent.
+// build and restore the original three lines afterwards — this file is shared
+// with another agent.
 //
-// Debug keystore first: every other APK in this repo is signed with it, so
+// Debug keystore first: every other APK in the repo is signed with it, so
 // `adb install -r` upgrades the installed app instead of refusing to. Signing a
 // sideload build with the Play *upload* key would break exactly that.
 const debugKeystore = join(process.env.HOME ?? '', '.android', 'debug.keystore');
@@ -161,6 +144,9 @@ function setKeystore(credentials) {
     const chunk = text.slice(start, end);
     if (!/^[ \t]*keystore\/release=/m.test(chunk)) return null;
     const patched = chunk
+      // A preset block spans the header *and* its `.options` section, so the
+      // boundary is the next bare `[preset.N]` header. `indexOf('\n[preset.')`
+      // stops at `[preset.N.options]` and cuts the keystore lines off.
       .replace(/^[ \t]*keystore\/release="[^"]*"/m, `keystore/release="${credentials.path}"`)
       .replace(/^[ \t]*keystore\/release_user="[^"]*"/m, `keystore/release_user="${credentials.user}"`)
       .replace(/^[ \t]*keystore\/release_password="[^"]*"/m, `keystore/release_password="${credentials.password}"`);
@@ -201,8 +187,8 @@ function signPreset() {
 }
 
 if (!verifyOnly) {
-  // A stale pair means an earlier run was killed. Building on top of it would
-  // hide the problem, so stop and say what to do.
+  // A stale pair means an earlier run was killed; building on top of it would
+  // hide the problem.
   const stale = LIFT_MARKS.filter((mark) => existsSync(mark));
   if (stale.length > 0) {
     abort(
@@ -223,9 +209,9 @@ if (!verifyOnly) {
     abort('Toolchain-Vorbereitung fehlgeschlagen.');
   }
 
-  // The actual exclusion: take the two folders out of the project, then let the
+  // The exclusion itself: hide the two folders from the project, then let the
   // editor re-index what is left. Nothing in the export output would say so if
-  // this silently stopped working, which is what the md5 check below is for.
+  // this silently stopped working — the md5 comparison below is the only proof.
   step('4/5 Release-APK bauen (Detailstufen aus dem Projekt nehmen)');
   try {
     for (const dir of LIFT_DIRS) mkdirSync(dir, { recursive: true });
@@ -267,30 +253,23 @@ const entries = listing.out
   .filter(Boolean);
 const inApk = new Set(entries);
 
-/**
- * The decisive check.
- *
- * A name-based filter is worthless here: an imported mesh is stored as
- * `assets/.godot/imported/<name>.glb-<md5>.scn`, and `<name>` is identical for
- * all three tiers. So the tiers can only be told apart by the md5 that the
- * repo's `.import` files record — which is exactly what is compared here: the
- * md5 of every low-poly mesh has to be in the APK, and the md5 of every
- * med/high mesh must not be.
- */
+// Collects, per tier, the `assets/…` path every imported mesh ends up at in the
+// APK. The tiers are only distinguishable by the md5 the `.import` files
+// record, so a name-based check would call a full mesh set a clean slim build.
 function importedTargets(tier) {
   const root = join(GODOT_DIR, 'assets', 'meshes');
   const dir = tier === 'low' ? root : join(root, tier);
   if (!existsSync(dir)) return [];
   const out = [];
   // The mesh folders are grouped by collection (`pang/`, `candy/`, …), so a
-  // flat readdir would silently see only the ~24 ungrouped meshes and report a
-  // green check on a quarter of the truth.
+  // flat readdir would silently see only the ungrouped meshes and report a
+  // green check on a fraction of the truth.
   const walk = (current, prefix) => {
     for (const entry of readdirSync(current, { withFileTypes: true })) {
       if (entry.isDirectory()) {
         // `med/` and `high/` live inside the low mesh root, so the low walk has
         // to step over them — otherwise it counts all three tiers and reports
-        // 310 "missing" meshes that were never supposed to be in the APK.
+        // the med/high meshes as "missing" when they were never meant to ship.
         if (tier === 'low' && (entry.name === 'med' || entry.name === 'high')) continue;
         walk(join(current, entry.name), `${prefix}${entry.name}/`);
         continue;
@@ -321,7 +300,7 @@ check(leaked.length === 0, `Keines der ${rich.length} med-/high-Meshes ist im Pa
 const lodEntry = [...inApk].find((e) => e.endsWith('lod.json'));
 check(Boolean(lodEntry), `lod.json ist dabei (${lodEntry}).`, 'lod.json fehlt — die Galerie zeigt keine Dreieckszahlen.');
 
-// Kein Quell-GLB wird unverändert mitgeliefert — Godot importiert sie.
+// No raw .glb is ever shipped unchanged — Godot imports them.
 const raw = [...inApk].filter((e) => /assets\/meshes\/.*\.glb$/.test(e));
 check(raw.length === 0, 'Keine Roh-GLB im Paket (nur die importierten).', `${raw.length} Roh-GLB im Paket — der Export hat die Quellen mitgenommen.`);
 
@@ -359,8 +338,8 @@ if (aapt2) {
   warn('aapt2 fehlt → Paketname und Permissions nicht geprüft.');
 }
 
-// Größe gegen das volle APK stellen, sonst sieht man den Gewinn nicht. Das volle
-// APK landet je nach Skript in `build/` des Repos oder hier.
+// Report the win against the full APK, which lands in the repo's `build/` or in
+// this folder depending on which script built it.
 const full = [join(BUILD_DIR, 'singular80.apk'), join(REPO, 'build', 'singular80.apk')].find((p) => existsSync(p));
 if (full) {
   const fullMb = statSync(full).size / 1024 / 1024;

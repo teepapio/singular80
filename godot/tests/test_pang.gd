@@ -1,15 +1,13 @@
 class_name TestPang
 extends RefCounted
-## Rule tests for "Pang 3D" — the 1990 arcade original.
+## Rule tests for "Pang 3D" — the 1990 arcade original. The shared suites carry
+## the campaign, the arena constants and the save data; everything about a
+## *hit*, the ball budget and the reinforcement waves lives here.
 ##
-## This file is Pang's own. The shared suites carry the campaign, the arena
-## constants and the save data; everything about a *hit*, about the ball budget
-## and about the reinforcement waves lives here. The headline rule is the
-## two-shot trick — the smallest ball arms itself on the first harpoon and pops
-## on the second — because that is the mechanic the original is known for and
-## the one a player has to be able to rely on. The second headline is the wave
-## warning: a reinforcement announces the flank it will drop over and counts
-## down before it falls, so the arrival is a decision and not an interruption.
+## Two rules are the reason this game is the game: the two-shot trick (the
+## smallest ball arms on the first harpoon and pops on the second) and the wave
+## warning (a reinforcement names the flank it drops over and counts down, so the
+## arrival is a decision and not an interruption).
 
 var t: TestKit
 
@@ -189,10 +187,9 @@ func _reinforcements() -> void:
 		t.check(waves >= previous, "Die Wellen kommen später dazu, nicht früher weg (Level %d)" % level)
 		previous = waves
 
-	# A wave that never arrives would make its level unclearable, a wave with a
-	# negative trigger would arrive on the first frame. Both are rejected. Being
-	# due is not the same as falling: the announcement owns the gap between the
-	# two, which is what the warning suite below pins down.
+	# A wave that never arrives would make its level unclearable, one with a
+	# negative trigger would arrive on the first frame. Being due is not the same
+	# as falling: the announcement owns the gap, which the warning suite pins down.
 	var wave := {"index": 0, "trigger": 5, "maxDelay": 11.0, "balls": [{"x": 0.0, "y": 15.0, "size": 3}]}
 	t.check(not Pang.wave_due(wave, 20, 0.0), "Ein volles Brett wartet auf die Welle")
 	t.check(not Pang.wave_due(wave, 6, 0.0), "Ein randvolles Brett wartet noch")
@@ -320,17 +317,13 @@ func _ball_budget() -> void:
 
 
 # --- the wave warning -------------------------------------------------------
-# A reinforcement used to fall out of the ceiling with nothing but a sound and
-# a shake. It is now announced first: the flank it will arrive over lights up,
-# a countdown runs, and only then do the balls drop. The clock keeps ticking
-# while the player decides, so the warning is paid for in seconds. Three things
-# have to hold for that to be a decision rather than decoration, and each gets
-# its own block below:
-#
-#   * the batch always comes over *one* flank, so there is a safe side to run to
-#   * the timeline always runs silent → announced → falling, and never skips a
-#     step, not even when the board empties in the same frame
-#   * what the floor, the number and the HUD text promise is the same arrival
+# A reinforcement used to fall out of the ceiling with nothing but a sound and a
+# shake. Now it is announced first, and the clock keeps ticking while the player
+# decides — so the warning is paid for in seconds. Three things have to hold for
+# that to be a decision rather than decoration: the batch always comes over *one*
+# flank, so there is a safe side; the timeline runs silent → announced → falling
+# and never skips a step; and the floor, the number and the HUD text promise the
+# same arrival.
 
 ## A hand-written wave, so the rules can be read without walking a level. Two
 ## balls over one flank, an own `warnTime` and the usual trigger.

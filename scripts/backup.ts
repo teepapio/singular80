@@ -1,13 +1,12 @@
 /**
- * `npm run backup` — the dashboard's memory, as a file in the repository.
+ * `npm run backup` — the dashboard's history, as a file in the repository.
  *
- *   npm run backup            status: was steht in der Datei, was fehlt hier?
- *   npm run backup -- write   Momentaufnahme schreiben (das gehört dann ins Git)
- *   npm run backup -- read    Datei einlesen und mit der Datenbank zusammenführen
+ *   npm run backup            status: what the file holds, what is missing here
+ *   npm run backup -- write   write a snapshot (that file belongs in Git)
+ *   npm run backup -- read    read the file and merge it into the database
  *
- * The dashboard has buttons for all three; this script exists for the moments the
- * dashboard is not open — a cron job, a fresh clone, or a machine whose database
- * is gone and whose repository is not.
+ * The dashboard has buttons for all three; this script is for when it is not
+ * open — a cron job, a fresh clone, a machine whose database is gone.
  */
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';

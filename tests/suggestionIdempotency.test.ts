@@ -1,13 +1,11 @@
 /**
- * Die Offline-Warteschlange des Spiels schickt denselben `clientKey` erneut,
- * wenn die Antwort auf den ersten Versuch verlorenging. Der Server darf daraus
- * keine zweite Zeile, keine zweite Discord-Nachricht und kein zweites
- * `suggestion:new` machen.
+ * The game's offline queue resends the same `clientKey` when the first answer was
+ * lost. The server must turn that into no second row, no second Discord message and
+ * no second `suggestion:new`.
  *
- * `app.inject` statt `listen`: es bindet keinen Port. Der Runner bleibt aus,
- * `OPENCODE_BIN` zeigt trotzdem auf einen Stub und `projectRoot` auf ein
- * temporäres Verzeichnis — sonst könnte ein Test durch die Hintertür doch einen
- * echten Agenten im echten Arbeitsbaum starten.
+ * `app.inject` instead of `listen`: no port is bound. The runner stays off, but
+ * `OPENCODE_BIN` still points at a stub and `projectRoot` at a temp dir, so no test
+ * can start a real agent in the real working tree by the back door.
  */
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
@@ -160,8 +158,8 @@ describe('POST /api/suggestions mit clientKey', () => {
     expect(api.events().map((e) => e.type)).toEqual(['suggestion:new']);
 
     const second = await api.post({ text, author: 'Spiel', clientKey: 'sug-silent' });
-    // No second post to Discord, no second event, and nothing was written: the
-    // Discord message id of the first submit is still the one on the row.
+    // No second Discord post, no second event, and nothing written: the row still
+    // carries the message id of the first submit.
     expect(webhookCalls).toBe(1);
     expect(api.events().map((e) => e.type)).toEqual(['suggestion:new']);
     expect(second.headers['x-suggestion-replay']).toBe('1');
@@ -225,8 +223,8 @@ describe('Unbrauchbarer clientKey', () => {
       expect(res.status).toBe(200);
       expect(res.body.clientKey).toBeNull();
     }
-    // Ignored, not rejected: every one of them is its own suggestion, exactly
-    // like a client build that does not know the field.
+    // Ignored, not rejected: each is its own suggestion, like a client build that
+    // does not know the field.
     expect(api.count()).toBe(6);
     await api.close();
   });
@@ -237,8 +235,8 @@ describe('Unbrauchbarer clientKey', () => {
     const a = await api.post({ text, clientKey: long });
     const b = await api.post({ text, clientKey: long });
     expect(a.body.clientKey).toBeNull();
-    // Truncating would let two keys with a common 64-char prefix collapse into
-    // one row and hand a retry somebody else's suggestion.
+    // Truncating would let two keys with a common 64-char prefix collapse into one row
+    // and hand a retry somebody else's suggestion.
     expect(b.body.id).not.toBe(a.body.id);
     expect(api.count()).toBe(2);
     await api.close();
@@ -295,9 +293,9 @@ describe('Store: Idempotenz auf Datenbankebene', () => {
   });
 
   it('gewinnt gegen einen zweiten Prozess auf derselben Datei', () => {
-    // Two `Store`s on one file stand in for two server processes (or two
-    // retries in flight). The unique index is what stops the second one; a
-    // read-then-write in the route would have inserted a duplicate here.
+    // Two `Store`s on one file stand in for two server processes (or two retries in
+    // flight). Only the unique index stops the second; a read-then-write in the
+    // route would have inserted a duplicate here.
     const dataDir = tempDir('singular80-idem-race-');
     const first = new Store(dataDir);
     const second = new Store(dataDir);
@@ -311,9 +309,8 @@ describe('Store: Idempotenz auf Datenbankebene', () => {
 
   it('wirft einen anderen Datenbankfehler unverändert weiter', () => {
     const store = new Store(tempDir('singular80-idem-ddl-'));
-    // The catch only knows about the uniqueness conflict. Anything else — a
-    // closed database, a broken file — has to reach the caller instead of being
-    // mistaken for a replay.
+    // The catch only knows the uniqueness conflict. Anything else — a closed
+    // database, a broken file — must reach the caller instead of looking like a replay.
     store.db.close();
     expect(() => store.createSuggestionOnce(input('k'))).toThrow();
   });
@@ -373,7 +370,7 @@ describe('Migration einer alten Datenbank', () => {
       .get() as { sql: string } | undefined;
     expect(index?.sql).toContain('UNIQUE');
     expect(index?.sql).toContain('client_key IS NOT NULL');
-    // The two old rows both have NULL, which a plain UNIQUE would have rejected.
+    // Both old rows have NULL, which a plain UNIQUE would have rejected.
     expect(() => store.createSuggestionOnce({ text: 'Neu ohne Schlüssel', author: 'Neu', source: 'game', category: 'ui', canonicalId: null })).not.toThrow();
     expect(store.listSuggestions()).toHaveLength(3);
   });
@@ -396,8 +393,7 @@ describe('Migration einer alten Datenbank', () => {
   it('überlebt ein zweites Öffnen derselben Datenbank', () => {
     const { store, dataDir } = legacyStore();
     store.createSuggestionOnce({ text: 'Einmal', author: 'Spiel', source: 'game', category: 'ui', canonicalId: null, clientKey: 'dauerhaft' });
-    // Migration must be idempotent: the second open finds the column and the
-    // index already there and must not throw "duplicate column".
+    // Migration must be idempotent: the second open must not throw "duplicate column".
     const again = new Store(dataDir);
     const res = again.createSuggestionOnce({ text: 'Einmal', author: 'Spiel', source: 'game', category: 'ui', canonicalId: null, clientKey: 'dauerhaft' });
     expect(res.created).toBe(false);

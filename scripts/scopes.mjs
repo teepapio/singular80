@@ -139,8 +139,7 @@ const SCOPE_SUITES = {
     'Sprachen — Oberfläche'],
   content: ['Content', 'Content-Integrität', 'Content-Synchronisation'],
   dashboard: [],
-  tests: ['Farm-Audit — freier Knopf', 'Farm-Audit — zugedeckter Knopf',
-    'Farm-Audit — Geometrie', 'Farm-Audit — untätig ohne Schalter'],
+  tests: [],
 };
 
 /** Screens each scope should open in the integration sweep. */

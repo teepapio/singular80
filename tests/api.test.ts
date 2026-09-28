@@ -38,12 +38,11 @@ interface Api {
 }
 
 /**
- * Boots the API with a temp database. `runnerEnabled: false` skips the runner.
+ * Boots the API with a temp database; `runnerEnabled: false` skips the runner.
  *
- * `OPENCODE_BIN` points at a stub and `projectRoot` at a temp directory: the
- * `implement` route really does enqueue a run, and without both of those it
- * would start a real agent in the real working tree — which is exactly what the
- * production runner is for and what a test must never do.
+ * `OPENCODE_BIN` points at a stub and `projectRoot` at a temp dir: the `implement`
+ * route really enqueues a run, and without both it would start a real agent in the
+ * real working tree.
  */
 async function boot(runnerEnabled = true): Promise<Api> {
   const dataDir = mkdtempSync(join(tmpdir(), 'singular80-api-'));
@@ -236,7 +235,7 @@ describe('Migration einer bestehenden Datenbank', () => {
 
     const store = new Store(dataDir);
     const old = store.getRun('run_alt')!;
-    // New columns read back as "first attempt, no timeout, no scope" — not null.
+    // New columns read back as "first attempt, no timeout, no scope", not null.
     expect(old.attempt).toBe(1);
     expect(old.maxAttempts).toBe(1);
     expect(old.timeoutMs).toBe(0);
@@ -295,14 +294,13 @@ describe('Runner-Politik in den Einstellungen', () => {
 describe('POST /api/tasks', () => {
   it('legt einen Betreiberauftrag an und stellt ihn sofort in die Schlange', async () => {
     const api = await boot();
-    // Pause, damit der Run nicht schon gestartet ist und die Werte sich nicht
-    // unter dem Test verschieben.
+    // Pause first so the run cannot start and shift the values under the test.
     await api.post('/api/runner/pause', { paused: true });
     const res = await api.post<{ run: RunRecord; suggestion: SuggestionView }>('/api/tasks', {
       text: 'Pang: die Bälle sollen schneller fliegen',
     });
     expect(res.status).toBe(200);
-    // Kein Abstimmungsweg: der Auftrag startet genehmigt, ohne Spieler, ohne Discord.
+    // No voting round: starts approved, without a player and without Discord.
     expect(res.body.suggestion.status).toBe('approved');
     expect(res.body.suggestion.source).toBe('operator');
     expect(res.body.suggestion.author).toBe('Betreiber');
@@ -329,7 +327,7 @@ describe('PUT /api/settings (Spuren)', () => {
     expect((await api.get<{ maxParallelRuns: number }>('/api/settings')).body.maxParallelRuns).toBe(3);
     const saved = await api.put<{ maxParallelRuns: number }>('/api/settings', { maxParallelRuns: 5 });
     expect(saved.body.maxParallelRuns).toBe(5);
-    // 0 Spuren hieße "kein Run startet" — das muss die Klemme verhindern.
+    // 0 lanes would mean "no run ever starts" — the clamp has to prevent that.
     const clamped = await api.put<{ maxParallelRuns: number }>('/api/settings', { maxParallelRuns: 0 });
     expect(clamped.body.maxParallelRuns).toBe(1);
     const high = await api.put<{ maxParallelRuns: number }>('/api/settings', { maxParallelRuns: 99 });
@@ -358,7 +356,6 @@ describe('Backup im Repository', () => {
     await newSuggestion(api, 'Poker: Chips anders verteilen');
     await api.post('/api/backup/write', {});
     const first = await api.post<{ report: { suggestionsAdded: number } }>('/api/backup/read', {});
-    // Alles ist schon da: der Import darf nichts erfinden.
     expect(first.body.report.suggestionsAdded).toBe(0);
     const second = await api.post<{ report: { suggestionsAdded: number } }>('/api/backup/read', {});
     expect(second.body.report.suggestionsAdded).toBe(0);
@@ -377,7 +374,7 @@ describe('Backup im Repository', () => {
     writeFileSync(join(api.projectRoot, 'backup', 'dashboard.json'), '{ kaputt');
     const res = await api.post<{ error: string }>('/api/backup/read', {});
     expect(res.status).toBe(400);
-    // Und der Status sagt dasselbe, damit das Panel nicht „alles in Ordnung" zeigt.
+    // The status says the same, so the panel cannot show "all fine".
     const status = await api.get<{ error: string | null }>('/api/backup');
     expect(status.body.error).toContain('gültiges JSON');
   });

@@ -6,12 +6,10 @@ import { appendSessionEntry } from '../server/changelog';
  * `npm run changelog -- "was sich geändert hat"` — one line in `CHANGELOG.md`
  * for a change that did **not** come from a suggestion.
  *
- * Why this exists as a command: the runner writes the entries for implemented
- * suggestions, because only it knows a run succeeded. But plenty of work never
- * touches a suggestion — the owner reports a bug in a normal session, an agent
- * fixes it. Without a way to add that line, the changelog would show a history
- * that is only half of what happened, and the missing half is exactly the part
- * the owner asked about.
+ * The runner writes the entries for implemented suggestions, because only it
+ * knows a run succeeded. Work that never touches a suggestion — the owner
+ * reports a bug in a normal session, an agent fixes it — would otherwise be
+ * missing from the changelog, and that is exactly the part the owner asks about.
  *
  * The entry is prefixed `edi:` (see `sessionEntryLine`) so it is visibly not a
  * suggestion number.

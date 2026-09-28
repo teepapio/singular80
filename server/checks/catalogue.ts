@@ -1,9 +1,9 @@
 /**
  * The catalogue of deployed-version checks.
  *
- * A check is one thing worth looking at on a build that is already on a phone.
- * The three families are the three complaints that reach support and that no
- * headless test suite can see:
+ * A check is one thing worth looking at on a build already on a phone. The three
+ * families are the complaints that reach support and that no headless test suite
+ * can see:
  *
  * - `actions`  — "the button does nothing"
  * - `logs`     — "the game is noisy/laggy"
@@ -11,13 +11,13 @@
  *
  * Each family exists twice: a `static` probe that reads the source and needs
  * nothing but the repository, and a `device` probe that measures the installed
- * app. The static one is what runs unattended, because it is deterministic and
- * cheap; the device one is what an operator starts when a static check found
- * nothing but a player still complains.
+ * app. The static one runs unattended because it is deterministic and cheap; the
+ * device one is what an operator starts when static found nothing but a player
+ * still complains.
  *
- * The static globs are deliberately coarse. A check that only looked at one
- * screen would go green while the same defect sat in the next one, and a queue
- * that reports "all clear" on a partial view is worse than no queue.
+ * The static globs are deliberately coarse: a check that looked at one screen
+ * would go green while the same defect sat in the next one, and a queue
+ * reporting "all clear" on a partial view is worse than no queue.
  */
 import type { CheckKind, CheckSpec } from '../../src/shared/types.js';
 

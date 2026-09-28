@@ -99,9 +99,8 @@ describe('needsRunCleanup', () => {
   });
 
   it('hält mehrere laufende Runs für normal — das sind die Spuren', () => {
-    // Drei Spuren, drei laufende Runs: der Normalfall, seit es Lanes gibt.
-    // Die alte Regel ("mehr als einer ist ein Phantom") würde hier einen
-    // lebenden Run abschießen.
+    // Three lanes, three running runs: the normal case since lanes exist. The old
+    // rule ("more than one is a phantom") would kill a live run here.
     expect(needsRunCleanup({ runningCount: 3, capacity: 3 })).toBe(false);
     expect(needsRunCleanup({ runningCount: 2, capacity: 1 })).toBe(true);
   });

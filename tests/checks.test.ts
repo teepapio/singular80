@@ -79,8 +79,8 @@ describe('Check: actions — tote Knöpfe', () => {
   });
 
   it('akzeptiert add_action_button mit Action, auch ohne Callback', () => {
-    // Die Action speist den InputMap und damit Tastatur und Gamepad mit — der
-    // Knopf funktioniert, er ist nur nicht zusätzlich an einen Callback gebunden.
+    // The action feeds the InputMap, hence keyboard and gamepad: the button works,
+    // it is just not additionally bound to a callback.
     const found = checkActions(src('var b := add_action_button("Feuer", 62.0, &"fire")'));
     expect(found).toHaveLength(0);
   });
@@ -102,9 +102,8 @@ describe('Check: actions — tote Knöpfe', () => {
   });
 
   it('erkennt den Knopf, der erst danach verbunden wird', () => {
-    // Die Form aus `suggest_dialog.gd`: Node bauen, Handler ein paar Zeilen
-    // später anhängen. Ohne diese Auflösung meldet der Check den Knopf als tot
-    // — ein Fehlalarm auf dem eigenen Dialog des Projekts.
+    // The shape from `suggest_dialog.gd`: build the node, attach the handler a few
+    // lines later. Without that resolution the check calls the button dead.
     const real = [
       'var send := Ui.button("Absenden", Vector2(160, 48), UiTheme.ACCENT)',
       'actions.add_child(send)',
@@ -125,7 +124,7 @@ describe('Check: actions — tote Knöpfe', () => {
   });
 
   it('verwechselt zwei gleichnamige Variablen nicht', () => {
-    // `send` wird verdrahtet, `other` nicht — beide sind Buttons.
+    // `send` is wired, `other` is not — both are buttons.
     const source = [
       'var send := Ui.button("Senden", Vector2(160, 48), UiTheme.ACCENT)',
       'var other := Ui.button("Verwerfen", Vector2(160, 48), UiTheme.PANEL_LIGHT)',
@@ -137,8 +136,7 @@ describe('Check: actions — tote Knöpfe', () => {
   });
 
   it('meldet zwei Knöpfe auf derselben Datei mit verschiedenen Zeilen', () => {
-    // Ein Fund pro Zeile: landen beide auf Zeile 1, verschluckt `dedupe` einen
-    // und der Bericht nennt nur die Hälfte der toten Knöpfe.
+    // One finding per line: if both landed on line 1, `dedupe` would swallow one.
     const source = [
       'var a := add_action_button("◀", 56.0, &"", func() -> void: _shift(-1))', // Zeile 1
       'var b := add_action_button("▶", 56.0, &"", func() -> void: _shift(1))', // Zeile 2

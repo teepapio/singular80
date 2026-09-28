@@ -2,22 +2,20 @@
  * Writes the release export presets into godot/export_presets.cfg.
  *
  * Godot only ever reads res://export_presets.cfg, so the presets have to live
- * there - but they are *generated* here, from config/app.json, so that there is
- * exactly one place where the package name, version code and SDK levels live.
+ * there — but they are *generated* here, from config/app.json, so that the
+ * package name, version code and SDK levels exist in exactly one place.
  *
  * Two presets, both managed by this script:
  *
- *   [1] Google Play (AAB)          signed app bundle, everything included
- *   [2] Android (APK, schlank)     plain APK *without* the med/ and high/
- *                                   meshes — roughly 45 MB smaller, the mesh
- *                                   gallery then only offers the low-poly
- *                                   level
+ *   [1] Google Play (AAB)        signed app bundle, everything included
+ *   [2] Android (Leicht)         plain APK *without* the med/ and high/ meshes,
+ *                                 so the mesh gallery offers the low-poly level
+ *                                 only
  *
- * The existing `Android` (APK) preset in the repo is left alone: it is the
- * full-size debug/sideload build the rest of the project uses.
+ * The existing `Android` (APK) preset is left alone: it is the full-size
+ * sideload build the rest of the project uses.
  *
- * Idempotent: running it twice leaves the file byte-identical, and it only ever
- * touches its own indices.
+ * Idempotent, and it only ever touches its own indices.
  */
 import { readFileSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,12 +33,10 @@ const BASE_EXCLUDE = 'tests/*, shot.gd, shot.tscn, probe.gd, _*, android/build/*
 /**
  * Additionally names the two richer detail levels.
  *
- * This is an *identification* marker, not the mechanism: `exclude_filter` only
- * applies to non-resource files, and an imported `.glb` is a resource. Measured
- * on this project, with these two patterns in the filter the export still
- * packed all 155 med and all 155 high meshes. The slim build therefore drops
- * the folders with `.gdignore` (see `build-apk-slim.mjs`); the pattern stays so
- * the preset can be recognised as the slim one.
+ * Only an *identification* marker, not the mechanism: an imported `.glb` is a
+ * resource, and `exclude_filter` does reach those. `build-apk-slim.mjs` drops
+ * the folders with `.gdignore` and verifies the result; the pattern stays so the
+ * preset can be recognised as the slim one.
  */
 const SLIM_EXCLUDE = `${BASE_EXCLUDE}, assets/meshes/med/*, assets/meshes/high/*`;
 
@@ -156,16 +152,13 @@ function stripIndex(text, index) {
 /**
  * Rewrites `#` comment lines to `;`.
  *
- * Godot's ConfigFile does **not** treat `#` as a comment. It strips the
+ * Godot's ConfigFile does **not** treat `#` as a comment: it strips the
  * whitespace, concatenates the line with the next one and — as soon as an `=`
- * appears — stores the result under a mangled key. In the shipped file that
- * silently destroyed `include_filter` and `exclude_filter` in the `Android`
- * preset, which is why the Godot exporter prints
- *
- *   ERROR: Couldn't find the given section "preset.0" and key "include_filter"
- *
- * and why `tests/*.gd` ended up inside the release build. `;` is the comment
- * character Godot really uses.
+ * appears — stores the result under a mangled key. That silently destroyed
+ * `include_filter` and `exclude_filter` in the shipped file, the exporter then
+ * reported `Couldn't find the given section "preset.0" and key "include_filter"`,
+ * and `tests/*.gd` ended up in the release build. `;` is the comment character
+ * Godot really uses.
  */
 function repairHashComments(text) {
   let repaired = 0;
@@ -184,9 +177,8 @@ function repairHashComments(text) {
  * Rewrites the `exclude_filter` inside an existing preset block and returns the
  * previous file content, or null when the preset vanished.
  *
- * Only that one line. The preset keeps its own `export_path` and every other
- * choice its author made — another agent's test asserts on them, and a
- * read-modify-write that "improves" a stranger's block is how two agents lose
+ * Only that one line — the preset keeps its own `export_path` and every other
+ * choice its author made. "Improving" a stranger's block is how two agents lose
  * each other's work.
  */
 function patchAdopted(file, preset) {
@@ -205,7 +197,7 @@ function patchAdopted(file, preset) {
     const patched = chunk.replace(
       /^[ \t]*exclude_filter="[^"]*"/m,
       // A missing med/ exclusion is the one thing that must never slip through:
-      // the build would then silently ship 50 MB more than promised.
+      // the build would then ship 50 MB more than the preset promises.
       `exclude_filter="${preset.exclude}"`,
     );
     writeFileSync(file, current.slice(0, start) + patched + current.slice(end));
@@ -266,8 +258,8 @@ for (const preset of wanted) {
     preset.index = existing.get(preset.name).index;
     continue;
   }
-  // A slim preset that somebody else already made is adopted instead of writing a
-  // second one doing the same job.
+  // Adopt a slim preset somebody else already made instead of writing a second
+  // one that does the same job.
   if (preset.adopt?.length) {
     const adopted = preset.adopt.find((name) => existing.has(name));
     if (adopted) {
@@ -300,8 +292,8 @@ if (repaired.repaired > 0) {
   ok(`${repaired.repaired} "#"-Kommentarzeile(n) zu ";" — Godots ConfigFile hatte include_filter/exclude_filter verschluckt.`);
 }
 
-// Cheap lint before anything else: a broken file makes the preset vanish
-// without a warning, and the export then fails with a confusing message.
+// Cheap lint first: a broken file makes the preset vanish without a warning, and
+// the export then fails with a confusing message.
 for (const preset of wanted) {
   if (preset.adopted) continue;
   for (const [n, line] of block(cfg, preset).split('\n').entries()) {
@@ -332,8 +324,8 @@ for (const preset of wanted) {
 }
 
 // Authoritative check: let Godot parse the file and look every preset up. The
-// harness lives next to this script and is copied into godot/ with a `_`
-// prefix, which the exclude filters already exclude from every build.
+// harness is copied into godot/ with a `_` prefix, which the exclude filters
+// already keep out of every build.
 const harness = join(GODOT_DIR, '_cfgtest.gd');
 copyFileSync(join(HERE, 'validate-presets.gd'), harness);
 for (const preset of wanted) {
@@ -349,7 +341,6 @@ for (const preset of wanted) {
   ok(line.trim());
 }
 
-// Belt and braces: the filters actually made it into the file.
 const written = readFileSync(PRESETS, 'utf8');
 for (const preset of wanted) {
   if (!written.includes(`name="${preset.name}"`)) abort(`"${preset.name}" fehlt in der geschriebenen Datei.`);

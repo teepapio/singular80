@@ -88,7 +88,7 @@ func _checkers() -> void:
 	t.check(Checkers.is_playable(0, 1), "Feld (0,1) ist spielbar")
 	t.check(not Checkers.is_playable(0, 0), "Feld (0,0) ist nicht spielbar")
 
-	# Ein einzelner Schritt nach vorne.
+	# A single step forward.
 	var single := PackedInt32Array()
 	single.resize(64)
 	for i in 64:
@@ -99,7 +99,7 @@ func _checkers() -> void:
 	for step in steps:
 		t.check(Checkers.row_of(int((step as Array)[1])) == 1, "Der Schritt führt eine Reihe nach vorne")
 
-	# Sprung über einen gegnerischen Stein.
+	# A jump over an opposing stone.
 	var jump := PackedInt32Array()
 	jump.resize(64)
 	for i in 64:
@@ -121,7 +121,7 @@ func _checkers() -> void:
 	t.check(not capture_turn.is_empty(), "Ein Schlagzug wird erzeugt")
 	t.equal(Checkers.count_pieces(Checkers.apply_turn(jump, capture_turn), Checkers.BLACK), 0, "Der geschlagene Stein verschwindet")
 
-	# Beförderung zur Dame beendet die Kette.
+	# Promotion to a king ends the chain.
 	t.equal(Checkers.promote_piece(Checkers.WHITE_MAN, Checkers.index_of(0, 1)), Checkers.WHITE_KING, "Reihe 0 befördert zu Dame")
 	t.equal(Checkers.promote_piece(Checkers.WHITE_MAN, Checkers.index_of(3, 1)), Checkers.WHITE_MAN, "Sonst keine Beförderung")
 	t.check(Checkers.opposite(Checkers.WHITE) == Checkers.BLACK, "opposite vertauscht die Seiten")
@@ -145,7 +145,7 @@ func _cards_and_holodem() -> void:
 	t.check(not Cards.is_red_suit(0) and not Cards.is_red_suit(3), "Pik und Kreuz sind schwarz")
 	t.equal(Cards.label_of(Cards.Card.new(0, 0)), "A♠", "Ass Pik wird korrekt beschriftet")
 
-	# Bewertung: Royal Flush schlägt alles.
+	# Ranking: a Royal Flush beats everything.
 	var royal := [
 		Cards.Card.new(0, 0), Cards.Card.new(12, 0), Cards.Card.new(11, 0),
 		Cards.Card.new(10, 0), Cards.Card.new(9, 0),
@@ -176,7 +176,7 @@ func _cards_and_holodem() -> void:
 	]
 	t.equal(Holdem.evaluate7(flush).category, 5, "Flush erkannt")
 
-	# Eine vollständige Hand verläuft ohne Fehler durch den Rundenablauf.
+	# A full hand runs through the round flow without errors.
 	var game := Holdem.HoldemGame.new({"playerCount": 4, "startingChips": 1000, "smallBlind": 10, "bigBlind": 20})
 	t.equal(game.players.size(), 4, "Vier Spieler am Tisch")
 	t.equal(game.pot, 0, "Der Pot startet leer")
@@ -226,7 +226,7 @@ func _twenty48() -> void:
 	t.equal(Twenty48.at(plan["values"], 3, 0), 4, "Die 4 landet ganz links")
 	t.equal((plan["merges"] as Array).size(), 1, "Eine Verschmelzung wird gemeldet")
 
-	# Ein frisch erzeugtes Feld darf im selben Zug nicht erneut verschmelzen.
+	# A freshly created tile may not merge again in the same move.
 	var triple := Twenty48.empty_board()
 	triple[3][0] = 2
 	triple[3][1] = 2
@@ -414,7 +414,7 @@ func _horse_runner() -> void:
 func _pang() -> void:
 	t.suite("Pang")
 
-	# Kugelstufen: schrumpfend im Radius, schneller werdend, ärmer werdend.
+	# Ball sizes: shrinking radius, rising speed, falling score.
 	for level in range(Pang.SIZE_LARGEST, Pang.SIZE_SMALLEST + 1):
 		var spec := Pang.size_spec(level)
 		t.check(float(spec["radius"]) > 0.0, "Stufe %d hat einen Radius" % level)
@@ -428,14 +428,14 @@ func _pang() -> void:
 	t.equal(Pang.points_for(Pang.SIZE_LARGEST), 100, "Größte Kugel zahlt 100")
 	t.equal(Pang.points_for(Pang.SIZE_SMALLEST), 10, "Kleinste Kugel zahlt 10")
 
-	# Die Sprunggeschwindigkeit muss die Sprunghöhe auch wirklich erreichen.
+	# The jump velocity has to actually reach the jump height.
 	for level in range(Pang.SIZE_LARGEST, Pang.SIZE_SMALLEST + 1):
 		var apex: float = (Pang.jump_velocity(level) * Pang.jump_velocity(level)) / (2.0 * Pang.GRAVITY)
 		t.almost(apex, Pang.bounce_of(level), 0.001, "Stufe %d erreicht die Sprunghöhe" % level)
 	t.check(Pang.speed_of(Pang.SIZE_SMALLEST) > Pang.speed_of(Pang.SIZE_LARGEST), "Kleine Kugeln sind schneller")
 
-	# Das Spiel ist die Kette: die kleinste Stufe ist das Ende, alles darüber
-	# teilt sich in zwei der nächsten Stufe.
+	# The game is the chain: the smallest size is the end, everything above splits
+	# into two of the next size.
 	t.check(Pang.SIZE_SMALLEST == 4, "Vier Kugelstufen wie im Original")
 	t.check(Pang.SIZE_LARGEST == 1, "Stufe 1 ist die größte")
 	var chain := 1
@@ -447,7 +447,7 @@ func _pang() -> void:
 	t.check(Pang.clear_bonus(5, 90.0) > Pang.clear_bonus(5, 30.0), "Restzeit zahlt sich aus")
 	t.check(Pang.clear_bonus(5, 0.0) > 0, "Es gibt auch eine Grundprämie")
 
-	# Haken.
+	# Harpoons.
 	t.equal(Pang.max_harpoons(0), Pang.BASE_HARPOONS, "Ein Haken am Anfang")
 	t.equal(Pang.max_harpoons(1), 2, "Doppelhaken verdoppelt")
 	t.equal(Pang.max_harpoons(99), Pang.MAX_HARPOONS, "Haken sind gedeckelt")
@@ -456,7 +456,7 @@ func _pang() -> void:
 	t.check(Pang.HARPOON_HOLD_TIME < 3.0, "Der Haken verschwindet aber wieder")
 	t.check(Pang.PLAYER_MOVE_SPEED > 0.0, "Der Spieler kann laufen")
 
-	# Bonus-Tabelle: gewichtet, deterministisch und vollständig belegt.
+	# Bonus table: weighted, deterministic and fully filled.
 	var seen := {}
 	for i in 200:
 		var picked := Pang.roll_bonus(float(i) / 200.0)
@@ -472,7 +472,7 @@ func _pang() -> void:
 	t.check(Pang.EXTRA_TIME_AMOUNT > 0.0, "Der Zeitbonus schenkt Zeit")
 	t.check(Pang.is_frozen(1.0) and not Pang.is_frozen(0.0), "Der Frost wirkt nur solange er läuft")
 
-	# Hindernisse: Kisten zerbrechen, Plattformen fangen den Haken.
+	# Obstacles: crates break, platforms catch the harpoon.
 	t.check(AssetRegistry.exists(str(Pang.obstacle_spec(Pang.OBSTACLE_BREAKABLE)["asset"])), "Kistenmesh existiert")
 	t.check(AssetRegistry.exists(str(Pang.obstacle_spec(Pang.OBSTACLE_FIXED)["asset"])), "Plattformmesh existiert")
 	for kind in [Pang.OBSTACLE_BREAKABLE, Pang.OBSTACLE_FIXED]:
@@ -482,7 +482,7 @@ func _pang() -> void:
 	t.check(int(Pang.obstacle_spec(Pang.OBSTACLE_BREAKABLE)["hp"]) > 0, "Die Kiste ist zerstörbar")
 	t.check(int(Pang.obstacle_spec(Pang.OBSTACLE_FIXED)["hp"]) == 0, "Die Plattform ist unzerstörbar")
 
-	# Die Kampagne: jeder Level muss spielbar sein und ist reproduzierbar.
+	# The campaign: every level must be playable and is reproducible.
 	for level in range(1, Pang.TOTAL_LEVELS + 1):
 		var layout := Pang.level_data(level)
 		t.equal(Pang.validate_level(layout).size(), 0, "Level %d ist spielbar" % level)
@@ -493,7 +493,7 @@ func _pang() -> void:
 	t.equal(Pang.validate_level({"level": 1, "balls": [{"x": 900.0, "y": 1.0, "size": 2}]}).size() > 0, true, "Kugeln außerhalb werden erkannt")
 	t.equal(Pang.validate_level({"level": 1, "balls": [{"x": 0.0, "y": 8.0, "size": 9}]}).size() > 0, true, "Ungültige Stufen werden erkannt")
 
-	# Die Schwierigkeit steigt monoton, ohne Sprünge.
+	# Difficulty rises monotonically, without jumps.
 	var early := Pang.level_config(1)
 	var middle := Pang.level_config(Pang.TOTAL_LEVELS / 2)
 	var late := Pang.level_config(Pang.TOTAL_LEVELS)
@@ -509,7 +509,7 @@ func _pang() -> void:
 	t.check(Pang.par_time(10) < Pang.par_time(40 % Pang.TOTAL_LEVELS + 1), "Die Sollzeit wächst")
 	t.check(not Pang.level_title(7).is_empty(), "Jeder Level hat einen Titel")
 
-	# Das Spielfeld muss den Spieler und den Bühnenrahmen immer enthalten.
+	# The playfield must always contain the player and the stage frame.
 	t.check(Pang.PLAYER_TOP_Y < Pang.CEILING_Y, "Der Spieler passt unter die Decke")
 	t.check(Pang.PLAYER_HITBOX_TOP < Pang.PLAYER_TOP_Y, "Die Trefferbox ist niedriger als die Figur")
 	t.check(Pang.PLAYER_HITBOX_HALF_WIDTH < Pang.PLAYER_HALF_WIDTH, "Die Trefferbox ist schmaler als die Figur")
@@ -521,17 +521,16 @@ func _pang() -> void:
 	t.check(Pang.ARENA_HALF_WIDTH * 2.0 > 10.0, "Die Arena ist breit genug zum Ausweichen")
 	t.check(Pang.LEVELS_PER_PAGE > 0, "Die Level-Auswahl ist seitenweise")
 
-	# Speicherstände laufen auch ohne Szene-Baum (headless Runner) sauber durch.
-	# Der Runner teilt sich den Speicher mit dem Rest der Suite, also wird der
-	# Ausgangszustand eingefangen statt ein frisches Profil vorausgesetzt.
+	# Saves work without a scene tree (the headless runner). The runner shares the
+	# profile with the rest of the suite, so the start state is captured instead of
+	# assuming a fresh profile.
 	var start_unlocked := Pang.unlocked_level()
 	t.check(start_unlocked >= Pang.FIRST_UNLOCKED, "Mindestens Level 1 ist offen")
 	t.check(Pang.is_unlocked(1), "Level 1 ist immer offen")
 	t.check(Pang.is_unlocked(start_unlocked), "Der am weitesten freigeschaltete Level ist offen")
 	t.check(not Pang.is_unlocked(start_unlocked + 1), "Der nächste Level ist noch gesperrt")
-	# Freischalten wächst nur und wird auf die Kampagne geklemmt. Der Wert ist
-	# dauerhaft gespeichert, deshalb wird der Zustand davor eingefangen statt ein
-	# frisches Profil vorausgesetzt.
+	# Unlocking only grows and is clamped to the campaign. The value is permanently
+	# stored, so the state before it is captured rather than assuming a fresh profile.
 	var before_unlock := Pang.unlocked_level()
 	t.equal(Pang.unlock_level(1), before_unlock, "Ein niedrigerer Level ändert nichts")
 	t.equal(Pang.unlock_level(0), before_unlock, "Level 0 wird ignoriert")
@@ -574,7 +573,7 @@ func _inventory() -> void:
 	t.equal(small.count("potion"), 7, "Sieben Tränke übrig")
 	t.equal(small.remove("potione", 5), 0, "Unbekannte Items lassen sich nicht entfernen")
 
-	# Ein volles Inventar nimmt nichts mehr an.
+	# A full inventory accepts nothing more.
 	t.check(bag.is_full(), "Das Inventar ist nach dem Überlaufen voll")
 	t.equal(int(bag.add("sword")["added"]), 0, "Ein volles Inventar nimmt kein Schwert an")
 
@@ -604,7 +603,7 @@ func _inventory() -> void:
 	t.equal(restored.count("sword"), gear.count("sword"), "Snapshot erhält den Bestand")
 	t.equal(restored.equipped_in("weapon").id, "sword", "Snapshot erhält die Ausrüstung")
 
-	# Der Snapshot muss echtes JSON überstehen — er landet als Text auf der Platte.
+	# The snapshot has to survive real JSON — it lands on disk as text.
 	var on_disk: Variant = JSON.parse_string(JSON.stringify(snapshot))
 	t.check(on_disk is Dictionary, "Snapshot ist JSON-serialisierbar")
 	var reloaded := ItemInventory.from_json({"capacity": 4, "catalog": catalog}, on_disk)
@@ -618,7 +617,7 @@ func _inventory() -> void:
 	t.equal(restored.currency(), 7, "Währung wird geladen")
 	t.equal(restored.equipped_in("weapon").id, "sword", "Ausrüstung wird geladen")
 
-	# Sortieren und Kompaktieren.
+	# Sorting and compacting.
 	var messy := ItemInventory.new({"capacity": 5, "catalog": catalog})
 	messy.set_slot(3, ItemInventory.ItemStack.new("potion", 2))
 	messy.set_slot(1, ItemInventory.ItemStack.new("sword", 1))
@@ -632,7 +631,7 @@ func _inventory() -> void:
 	var purse := ItemInventory.new({"capacity": 2, "catalog": catalog, "currency": 100})
 	t.equal(purse.add_currency(-1000), 0, "Währung bleibt nie negativ")
 	t.check(not purse.spend(99999), "Ausgeben ohne Deckung scheitert")
-	# `purse` ist durch den clamp oben leer — zum Ausgeben ein frisches Portemonnaie.
+	# The clamp above emptied `purse` — a fresh purse to spend from.
 	var payer := ItemInventory.new({"capacity": 2, "catalog": catalog, "currency": 100})
 	t.check(payer.spend(100), "Ausgeben mit Deckung klappt")
 	t.equal(payer.currency(), 0, "Währung ist aufgebraucht")
@@ -676,7 +675,7 @@ func _lobby() -> void:
 	t.almost(Lobby.minimap_point(0.0, 0.0, map_size, map_padding, Lobby.MINIMAP_WORLD_RADIUS).x, map_size * 0.5, 0.001, "Mittelpunkt liegt in der Kartenmitte")
 	t.equal(Lobby.distance_sq(0, 0, 3, 4), 25.0, "Abstandsquadrat")
 
-	# Registry: jeder Eintrag zeigt auf einen echten Screen.
+	# Registry: every entry points at a real screen.
 	for game in GameRegistry.GAMES:
 		var screen := str(game["screen"])
 		t.check(Router.SCREEN_SCRIPTS.has(screen), "Screen '%s' ist registriert" % screen)
@@ -701,7 +700,7 @@ func _asset_registry() -> void:
 	t.equal(AssetRegistry.missing().size(), 0, "Kein registriertes Mesh fehlt auf der Platte")
 	t.equal(AssetRegistry.unlisted().size(), 0, "Jedes Mesh auf der Platte ist registriert")
 
-	# Jede Galerie-Sektion bekommt Inhalt, und jeder Key landet genau einmal.
+	# Every gallery section gets content, and every key lands in exactly one.
 	var total := 0
 	for group in AssetRegistry.GROUPS:
 		var keys := AssetRegistry.keys_in_group(str(group["id"]))
@@ -711,7 +710,7 @@ func _asset_registry() -> void:
 	for key in AssetRegistry.KEYS:
 		t.check(str(AssetRegistry.GROUPS[0].keys()) != "" or true, "Sektionen sind benannt")
 
-	# Die Themen der Spiele verweisen nur auf existierende Meshes.
+	# The game themes only reference existing meshes.
 	for tier in AssetRegistry.MERGE_KEYS:
 		t.check(AssetRegistry.exists(tier), "Merge-Mesh '%s' existiert" % tier)
 	for theme_id in [CrystalTower.THEME_CLASSIC, CrystalTower.THEME_CHRISTMAS, CrystalTower.THEME_HALLOWEEN]:
@@ -728,7 +727,7 @@ func _asset_registry() -> void:
 		t.check(AssetRegistry.exists(str(weapon["asset"])), "Waffenmesh '%s' existiert" % str(weapon["asset"]))
 	for entry in DragonRpg.LOOT_TABLE:
 		t.check(AssetRegistry.exists(str(entry["asset"])), "Lootmesh '%s' existiert" % str(entry["asset"]))
-	# Das Spielfeld muss den Spieler und den Bühnenrahmen immer enthalten.
+	# The playfield must always contain the player and the stage frame.
 	t.check(Pang.PLAYER_TOP_Y < Pang.CEILING_Y, "Der Spieler passt unter die Decke")
 	t.check(Pang.PLAYER_HITBOX_TOP < Pang.PLAYER_TOP_Y, "Die Trefferbox ist niedriger als die Figur")
 	t.check(Pang.PLAYER_HITBOX_HALF_WIDTH < Pang.PLAYER_HALF_WIDTH, "Die Trefferbox ist schmaler als die Figur")
@@ -738,9 +737,9 @@ func _asset_registry() -> void:
 	t.check(Pang.INVULN_TIME > 0.0, "Ein Treffer kostet kurz Unverwundbarkeit")
 	t.check(Pang.RESPAWN_TIME > 0.0, "Nach einem Treffer wird neu aufgebaut")
 	t.check(Pang.PLAYER_MOVE_SPEED > 0.0, "Der Spieler kann laufen")
-	# Der Boden muss unterhalb der Spielerbox liegen, sonst gäbe es nichts zu laufen.
+	# The floor has to lie below the player box, or there is nothing to walk on.
 	t.check(Pang.FLOOR_Y <= 0.0, "Der Boden liegt auf Höhe 0")
-	# Der Schussweg muss durch die ganze Arena passen.
+	# The shot path has to fit through the whole arena.
 	t.check(Pang.ARENA_HALF_WIDTH * 2.0 > 10.0, "Die Arena ist breit genug zum Ausweichen")
 	t.check(Pang.LIVES >= 1, "Es gibt mindestens ein Leben")
 	t.check(Pang.LEVELS_PER_PAGE > 0, "Die Level-Auswahl ist seitenweise")
@@ -798,7 +797,7 @@ func _dragon_flight() -> void:
 	for entry in DragonFlight.POWERUPS:
 		t.check(AssetRegistry.exists(str(entry["asset"])), "Power-up '%s' hat ein Mesh" % str(entry["id"]))
 
-	# Die Level müssen durchgehend schwerer werden.
+	# Levels must get harder all the way.
 	var previous := 0.0
 	for n in range(1, DragonFlight.level_count() + 1):
 		var level_def := DragonFlight.level(n)
@@ -812,7 +811,7 @@ func _dragon_flight() -> void:
 	t.check(DragonFlight.concurrent_for(1) < DragonFlight.concurrent_for(30), "Späte Level haben mehr Gegner")
 	t.check(DragonFlight.spawn_gap(DragonFlight.level(1)) > 0.0, "Spawn-Abstand ist positiv")
 
-	# Sterne und Freischaltung.
+	# Stars and unlocking.
 	t.equal(DragonFlight.stars_for_run(false, 1.0), 0, "Nicht beendet heißt keine Sterne")
 	t.equal(DragonFlight.stars_for_run(true, 1.0), 3, "Unversehrt sind drei Sterne")
 	t.equal(DragonFlight.stars_for_run(true, 0.6), 2, "Halbe Hülle sind zwei Sterne")
@@ -837,14 +836,14 @@ func _dragon_flight() -> void:
 func _flight_genetics() -> void:
 	t.suite("Drachenflug — Vererbung")
 	t.equal(DragonFlight.expressed_traits({}).size(), 0, "Ohne Allele gibt es keine Merkmale")
-	# Ein dominantes Merkmal braucht ein einziges Allel, ein rezessives zwei.
+	# A dominant trait needs one allele, a recessive one two.
 	var dominant := {"feueratem": "Fa"}
 	t.check(DragonFlight.expressed(dominant, "feueratem"), "Dominantes Merkmal zeigt mit einem Allel")
 	t.check(not DragonFlight.expressed(dominant, "eisenhaut"), "Fremdes Merkmal zeigt nicht")
 	t.check(DragonFlight.expressed({"riesenwuchs": "rr"}, "riesenwuchs"), "Rezessiv zeigt mit zwei Allelen")
 	t.check(not DragonFlight.expressed({"riesenwuchs": "Rr"}, "riesenwuchs"), "Ein rezessives Allel bleibt verborgen")
 	t.check(not DragonFlight.expressed({"riesenwuchs": "RR"}, "riesenwuchs"), "Zwei dominante Allele zeigen ein rezessives Merkmal nicht")
-	# Alle Merkmale eines Zufallsgenoms müssen genau den ausgewiesenen entsprechen.
+	# Every trait of a random genome must match exactly the reported one.
 	var genome := DragonFlight.random_genome()
 	t.equal(genome.size(), DragonFlight.TRAITS.size(), "Jedes Merkmal hat ein Allelpaar")
 	var expressed := DragonFlight.expressed_traits(genome)
@@ -853,7 +852,7 @@ func _flight_genetics() -> void:
 	for id in expressed:
 		t.check(DragonFlight.trait_by_id(id) != {}, "Merkmal '%s' ist bekannt" % id)
 
-	# Kreuzung: ein Kind kann nur Allele tragen, die die Eltern hatten.
+	# Crossing: a child can only carry alleles the parents had.
 	var carrier_a := {}
 	var carrier_b := {}
 	for gene in DragonFlight.TRAITS:
@@ -871,7 +870,7 @@ func _flight_genetics() -> void:
 			t.check(pair[i] == str(gene["dom"]) or pair[i] == str(gene["dom"]).to_lower(),
 				"Allel '%s' ist dominant oder rezessiv" % id)
 
-	# Zwei Träger eines rezessiven Merkmals bekommen es mit hoher Wahrscheinlichkeit.
+	# Two carriers of a recessive trait pass it on with high probability.
 	var hits := 0
 	for i in 400:
 		var kid := DragonFlight.cross_alleles({"riesenwuchs": "rr"}, {"riesenwuchs": "rr"}, 0.0)
@@ -879,7 +878,7 @@ func _flight_genetics() -> void:
 			hits += 1
 	t.equal(hits, 400, "Zwei rezessive Träger vererben es immer")
 
-	# Nur ein Träger: das Kind darf es nie zeigen.
+	# A single carrier: the child may never show it.
 	var leaked := 0
 	for i in 400:
 		var kid2 := DragonFlight.cross_alleles({"riesenwuchs": "rr"}, {"riesenwuchs": "RR"}, 0.0)
@@ -887,7 +886,7 @@ func _flight_genetics() -> void:
 			leaked += 1
 	t.equal(leaked, 0, "Ein Träger allein vererbt das rezessive Merkmal nicht")
 
-	# Inzucht kostet Lebenskraft, Kreuzung mit fremden Linien nicht.
+	# Inbreeding costs vigour, crossing with foreign lines does not.
 	var parent_a := DragonFlight.random_dragon(1, ["ember"])
 	var parent_b := DragonFlight.random_dragon(2, ["ember"])
 	parent_b["alleles"] = DragonFlight.random_genome()
@@ -903,7 +902,7 @@ func _flight_genetics() -> void:
 
 func _flight_forecast() -> void:
 	t.suite("Drachenflug — Zuchtvorhersage")
-	# Allele-Weitergabe: die beiden Wahrscheinlichkeiten ergaenzen sich zu 1.
+	# Allele pass-on: the two probabilities add up to 1.
 	var both := DragonFlight.allele_pass_probabilities({"feueratem": "FF"}, "feueratem")
 	t.almost(float(both["passes_dominant"]) + float(both["passes_recessive"]), 1.0, 0.0001, "FF gibt immer dominant weiter")
 	t.almost(float(both["passes_dominant"]), 1.0, 0.0001, "FF reicht Fehleratem sicher weiter")
@@ -914,7 +913,7 @@ func _flight_forecast() -> void:
 	t.equal(DragonFlight.allele_pass_probabilities({}, "feueratem")["passes_dominant"], 0.5, "Ohne Allele gilt 50/50")
 	t.almost(DragonFlight.allele_pass_probabilities({"feueratem": "FF"}, "gibtsnicht")["passes_dominant"], 0.5, 0.0001, "Unbekanntes Merkmal ist neutral")
 
-	# Ein dominantes Merkmal braucht ein dominantes Allel — ein Träger reicht.
+	# A dominant trait needs a dominant allele — one carrier is enough.
 	var carrier := {"alleles": {"feueratem": "Fa"}}
 	var homozygous := {"alleles": {"feueratem": "FF"}}
 	var clean := {"alleles": {"feueratem": "aa"}}
@@ -922,9 +921,9 @@ func _flight_forecast() -> void:
 	t.almost(DragonFlight.trait_probability(homozygous, clean, "feueratem"), 1.0, 0.0001, "FF x aa ist sicher")
 	t.almost(DragonFlight.trait_probability(clean, clean, "feueratem"), 0.0, 0.0001, "aa x aa ist nie dominant")
 
-	# Ein rezessives Merkmal dreht sich um: genau dann, wenn beide weitergeben.
-	# Wichtig: beide Elternteile müssen das Merkmal auch tragen, sonst greift der
-	# Neutralwert von 50 % — "nicht vorhanden" heisst "unbekannt", nicht "nicht".
+	# A recessive trait inverts: exactly when both pass it on. Both parents must
+	# carry the trait, otherwise the 50 % neutral value applies — "absent" means
+	# "unknown", not "no".
 	var rec_a := {"alleles": {"riesenwuchs": "rr"}}
 	var rec_b := {"alleles": {"riesenwuchs": "rr"}}
 	var rec_dom := {"alleles": {"riesenwuchs": "RR"}}
@@ -934,7 +933,7 @@ func _flight_forecast() -> void:
 	var half := {"alleles": {"riesenwuchs": "Rr"}}
 	t.almost(DragonFlight.trait_probability(half, half, "riesenwuchs"), 0.25, 0.0001, "Rr x Rr ergibt 25 %")
 
-	# Die Vorhersage deckt alle Merkmale ab und ist absteigend sortiert.
+	# The forecast covers every trait and is sorted descending.
 	var forecast := DragonFlight.breeding_forecast(carrier, clean)
 	t.equal(forecast.size(), DragonFlight.TRAITS.size(), "Die Vorhersage nennt jedes Merkmal")
 	var previous := 2.0
@@ -943,14 +942,14 @@ func _flight_forecast() -> void:
 		t.check(chance >= 0.0 and chance <= 1.0, "Wahrscheinlichkeit liegt zwischen 0 und 1")
 		t.check(chance <= previous + 0.0001, "Die Vorhersage ist absteigend sortiert")
 		previous = chance
-	# Die Merkmale der Eltern tauchen mit 100 % auf.
+	# The parents' traits show up with 100 %.
 	var names: Array[String] = []
 	for entry in forecast:
 		names.append(str(entry["name"]))
 	t.check("Feueratem" in names, "Feueratem steht in der Vorhersage")
 	t.equal(DragonFlight.breeding_forecast({}, {})[0].size(), 6, "Auch leere Eltern ergeben einen Eintrag")
 
-	# Ahnenlinie: Wurzeln haben keine Eltern, ein Kind schon.
+	# Ancestry: roots have no parents, a child does.
 	var root := DragonFlight.random_dragon(1, ["ember"])
 	t.equal(DragonFlight.parent_uids(root).size(), 0, "Ein Stammlinien-Drache hat keine Eltern")
 	t.equal(DragonFlight.ancestors({}, int(root["uid"])).size(), 0, "Ohne Profil gibt es keine Ahnen")
@@ -978,7 +977,7 @@ func _flight_elements() -> void:
 	t.suite("Drachenflug — Elemente")
 	t.check(not DragonFlight.element_name("fire").is_empty(), "Feuer hat einen Namen")
 	t.check(DragonFlight.element_name("fire") != DragonFlight.element_name("ice"), "Feuer und Frost heißen verschieden")
-	# Widerstand mindert, Anfälligkeit verstaerkt, beides mit Grenzen.
+	# Resistance reduces, vulnerability amplifies, both with limits.
 	t.almost(DragonFlight.element_multiplier("fire", {}), 1.0, 0.0001, "Ohne Widerstand gilt 1,0")
 	t.almost(DragonFlight.element_multiplier("fire", {"fire": 0.5}), 0.5, 0.0001, "Feuerfest halbiert den Schaden")
 	t.almost(DragonFlight.element_multiplier("fire", {"fire": -0.5}), 1.5, 0.0001, "Feueranfällig verstärkt ihn")
@@ -986,20 +985,20 @@ func _flight_elements() -> void:
 	t.check(DragonFlight.element_multiplier("fire", {"fire": -5.0}) <= 2.0, "Der Multiplikator hat eine Obergrenze")
 	t.almost(DragonFlight.element_multiplier("ice", {"fire": 0.5}), 1.0, 0.0001, "Frost zahlt nicht für Feuerwiderstand")
 
-	# Jeder Gegner hat Widerstaende, und die Level-Briefing fasst sie zusammen.
+	# Every enemy has resistances, and the level briefing summarises them.
 	for enemy in DragonFlight.ENEMIES:
 		t.check(enemy.has("resist"), "Gegner '%s' nennt seinen Widerstand" % str(enemy["id"]))
 		t.check((enemy["resist"] as Dictionary).size() > 0, "Gegner '%s' hat mindestens einen Widerstand" % str(enemy["id"]))
 	for breed in DragonFlight.BREEDS:
 		t.check(not str(breed.get("element", "")).is_empty(), "Rasse '%s' hat ein Element" % str(breed["id"]))
-	# Der Steindrache ist feuerfest, der Giftdrache nicht.
+	# The stone dragon is fireproof, the poison one is not.
 	t.check(float(DragonFlight.enemy_by_id("golem")["resist"]["fire"]) > 0.0, "Der Golem ist feuerfest")
 	t.check(float(DragonFlight.enemy_by_id("ballista")["resist"]["fire"]) < 0.0, "Die Ballista ist feueranfällig")
 
 	var summary := DragonFlight.level_resist_summary(DragonFlight.level(1))
 	t.check(not summary.is_empty(), "Das Briefing nennt die Widerstände")
 	t.check(summary.contains("Feuer"), "Das Briefing nennt Feuer")
-	# Das Element steckt in den aufgelösten Werten.
+	# The element is in the resolved stats.
 	var stats := DragonFlight.resolve_stats({"breed": "stone", "alleles": {}, "gen": 1})
 	t.equal(str(stats["element"]), "earth", "Die aufgelösten Werte kennen das Element")
 	t.suite_done()
@@ -1013,7 +1012,7 @@ func _flight_stats() -> void:
 	t.almost(float(base["max_hp"]), float(breed["hp"]), 0.01, "Ohne Merkmale gilt der Rassenwert")
 	t.check(DragonFlight.visual_scale(plain) > 0.0, "Ein Drache hat eine Größe")
 
-	# Feueratem muss den Schaden heben, Schnellfeuer die Feuerrate senken.
+	# Fire breath has to raise the damage, quick fire lower the fire rate.
 	var fire := DragonFlight.resolve_stats({"breed": "ember", "alleles": {"feueratem": "FF"}, "gen": 1})
 	t.check(float(fire["damage"]) > float(base["damage"]), "Feueratem erhöht den Schaden")
 	var haste := DragonFlight.resolve_stats(plain, {"haste": 4})
@@ -1023,20 +1022,20 @@ func _flight_stats() -> void:
 	t.check(float(tank["max_hp"]) > float(base["max_hp"]), "Zähigkeit erhöht die TP")
 	t.check(float(tank["armor"]) >= 0.0 and float(tank["armor"]) <= 0.72, "Rüstung bleibt im Rahmen")
 
-	# Riesenwuchs macht sichtbar größer.
+	# Giant growth makes it visibly bigger.
 	var big := DragonFlight.resolve_stats({"breed": "ember", "alleles": {"riesenwuchs": "rr"}, "gen": 1})
 	t.check(DragonFlight.visual_scale({"breed": "ember", "alleles": {"riesenwuchs": "rr"}, "gen": 1}) > DragonFlight.visual_scale(plain),
 		"Riesenwuchs macht den Drachen größer")
 	t.check(float(big["max_hp"]) > float(base["max_hp"]), "Riesenwuchs gibt mehr TP")
 	t.check(float(big["speed"]) < float(base["speed"]), "Riesenwuchs kostet Tempo")
 
-	# Die Generation schrumpft nie unter die Rassengröße.
+	# Generations never shrink below the breed size.
 	t.check(DragonFlight.visual_scale({"breed": "ember", "alleles": {}, "gen": 40}) >= float(breed["size"]) * 0.99,
 		"Generation macht höchstens größer")
 	t.check(DragonFlight.visual_scale({"breed": "ember", "alleles": {}, "gen": 1, "vitality": 0.7}) > 0.5,
 		"Eine geschwächte Linie bleibt sichtbar")
 
-	# Schaden und Rüstung.
+	# Damage and armour.
 	var shot := DragonFlight.roll_shot(base, 1.0)
 	t.check(float(shot["damage"]) >= 1.0, "Ein Schuss richtet mindestens 1 Schaden an")
 	t.check(DragonFlight.roll_shot(base, 2.0)["damage"] >= shot["damage"] * 0.5, "Der Level multipliziert den Schaden")
@@ -1048,7 +1047,7 @@ func _flight_stats() -> void:
 
 func _flight_profile() -> void:
 	t.suite("Drachenflug — Profil & Zucht")
-	# Eigene Datei, damit der Testlauf den Spielerstand nicht überschreibt.
+	# Its own file, so the test run does not overwrite the player's save.
 	var real_path := DragonFlight.save_path
 	DragonFlight.save_path = "user://dragonflight_test.json"
 	DragonFlight.reset_profile()
@@ -1066,7 +1065,7 @@ func _flight_profile() -> void:
 	t.equal(DragonFlight.buy_upgrade("firepower", profile), -1, "Über maxe Stufen kann man nicht kaufen")
 	profile["upgrades"] = {}
 
-	# Rassen kaufen.
+	# Buying breeds.
 	profile["gold"] = 50000
 	var starter := DragonFlight.buy_breed(profile, "ember")
 	t.check(not starter.is_empty(), "Der Starter ist kaufbar")
@@ -1079,7 +1078,7 @@ func _flight_profile() -> void:
 	profile["gold"] = 100000
 	var owned_before := DragonFlight.dragons_of(profile).size()
 
-	# Eier legen und ausbrüten.
+	# Laying and hatching eggs.
 	var egg := DragonFlight.lay_egg(profile, "ember", 60.0)
 	t.check(egg.get("egg", null) != null, "Das gelegte Ei ist ein Ei")
 	t.equal(DragonFlight.eggs_of(profile).size(), 1, "Das Ei liegt im Nest")
@@ -1096,7 +1095,7 @@ func _flight_profile() -> void:
 	t.equal(DragonFlight.hatch(hatched).size(), 0, "Ein schon geschlüpfter Drache schlüpft nicht erneut")
 	t.check(DragonFlight.incubation_seconds("void") > DragonFlight.incubation_seconds("ember"), "Seltene Rassen brauchen länger")
 
-	# Zucht: zwei Drachen paaren.
+	# Breeding: pairing two dragons.
 	var parent_a := DragonFlight.dragon_by_uid(profile, int(starter["uid"]))
 	var parent_b := DragonFlight.dragon_by_uid(profile, int(frost["uid"]))
 	var cost := DragonFlight.pairing_cost(parent_a, parent_b)
@@ -1181,15 +1180,14 @@ func _siedler_map() -> void:
 	t.equal(sig_a, sig_b, "Gleicher Seed, gleiche Insel")
 	t.check(sig_a != sig_c, "Anderer Seed, andere Insel")
 
-	# Land, Wasser und jede Lagerstätte, die die Wirtschaft braucht.
+	# Land, water and every deposit the economy needs.
 	var counts: Dictionary = {}
 	for cell in a.cells:
 		counts[str(cell["res"])] = int(counts.get(str(cell["res"]), 0)) + 1
 	for res in ["grass", "water", "forest", "stone", "coal", "iron", "gold"]:
 		t.check(int(counts.get(res, 0)) > 0, "Es gibt '%s'" % res)
 
-	# Offenes Wasser trägt einen Fischgrund, sonst könnte keine Fischerhütte
-	# arbeiten.
+	# Open water carries a fishing ground, otherwise no fisher's hut could work.
 	var water := 0
 	for cell in a.cells:
 		if str(cell["res"]) == "water" and int(cell["amount"]) > 0:
@@ -1197,7 +1195,7 @@ func _siedler_map() -> void:
 	t.check(water > 0, "Wasser hat einen abbaubaren Fischbestand")
 	t.equal(int(counts.get("water", 0)), water, "Jedes Wasserfeld ist fischbar")
 
-	# Genau eine Spielerburg, dazu Rivalen.
+	# Exactly one player castle, plus rivals.
 	var siedler := _siedler()
 	var castles := 0
 	var rival_castles := 0
@@ -1217,18 +1215,18 @@ func _siedler_map() -> void:
 func _siedler_chains() -> void:
 	t.suite("Siedler — Produktionsketten")
 
-	# Welches Gebäude erzeugt welche Ware?
+	# Which building produces which good?
 	var producers: Dictionary = {}
 	for kind in Siedler.buildable_kinds():
 		var spec := Siedler.spec_of(kind)
 		for good in (spec["outputs"] as Dictionary):
 			if int(spec["outputs"][good]) > 0:
 				producers[good] = true
-	# Die Schlosserei macht alle neun Werkzeuge.
+	# The smithy makes all nine tools.
 	for tool in Siedler.TOOLS:
 		producers[tool] = true
 
-	# Jede verbrauchte Ware hat einen Erzeuger — keine Kette darf ins Leere laufen.
+	# Every consumed good has a producer — no chain may dead-end.
 	var orphans: Array[String] = []
 	for kind in Siedler.buildable_kinds():
 		for good in (Siedler.spec_of(kind)["inputs"] as Dictionary):
@@ -1236,7 +1234,7 @@ func _siedler_chains() -> void:
 				orphans.append("%s <- %s" % [kind, good])
 	t.equal(orphans.size(), 0, "Jede verbrauchte Ware hat einen Erzeuger")
 
-	# Die dokumentierten Ketten aus Siedler 1.
+	# The documented chains from Settlers 1.
 	t.equal(Siedler.spec_of("sawmill")["inputs"], {"logs": 2}, "Schreiner verbraucht Stämme")
 	t.equal(Siedler.spec_of("windmill")["inputs"], {"grain": 2}, "Mühle verbraucht Korn")
 	t.equal(Siedler.spec_of("bakery")["inputs"], {"flour": 2}, "Bäckerei verbraucht Mehl")
@@ -1247,8 +1245,8 @@ func _siedler_chains() -> void:
 	t.equal(Siedler.spec_of("goldsmith")["inputs"], {"goldOre": 1, "coal": 1}, "Goldschmiede braucht Gold und Kohle")
 	t.equal(Siedler.TOOLS.size(), 9, "Neun Werkzeuge wie im Original")
 
-	# Acht Werkzeuge trägt ein Arbeitsplatz; die Schaufel gehört dem Planierer,
-	# der vor dem Bauen eine Fläche ebnet.
+	# A workplace carries eight tools; the shovel belongs to the leveller, who
+	# levels a patch before building.
 	var users: Dictionary = {}
 	for kind in Siedler.buildable_kinds():
 		var tool := str(Siedler.spec_of(kind)["tool"])
@@ -1260,14 +1258,14 @@ func _siedler_chains() -> void:
 		t.check(users.has(tool), "Werkzeug '%s' wird benutzt" % tool)
 	t.check(not users.has("shovel"), "Die Schaufel gehört dem Planierer, keinem Arbeitsplatz")
 
-	# Nahrungsmittel und Werkzeuge sind sauber getrennt.
+	# Foods and tools are cleanly separated.
 	for food in Siedler.FOODS:
 		t.check(Siedler.is_food_good(food), "'%s' ist Nahrung" % food)
 	for tool in Siedler.TOOLS:
 		t.check(Siedler.is_tool_good(tool), "'%s' ist ein Werkzeug" % tool)
 	t.check(not Siedler.is_food_good("logs"), "Stämme sind keine Nahrung")
 
-	# Jedes Gebäude hat Namen, Beschreibung und Zyklus.
+	# Every building has a name, a description and a cycle.
 	for kind in Siedler.KINDS:
 		var spec := Siedler.spec_of(kind)
 		t.check(not str(spec["name"]).is_empty(), "%s hat einen Namen" % kind)
@@ -1280,15 +1278,15 @@ func _siedler_chains() -> void:
 func _siedler_roads() -> void:
 	t.suite("Siedler — Fahnen und Straßen")
 
-	# Fahnen wachsen mit der Länge — die Regel des Originals.
+	# Flags grow with the length — the original's rule.
 	t.equal(Siedler.flags_for(1.0), 2, "Ein Feld braucht zwei Fahnen")
 	t.equal(Siedler.flags_for(float(Siedler.FLAG_SPACING)), 2, "Am Flaggenabstand zwei Fahnen")
 	t.check(Siedler.flags_for(float(Siedler.FLAG_SPACING) + 1.0) > 2, "Darüber kommt eine dritte Fahne dazu")
 	t.check(Siedler.flags_for(float(Siedler.FLAG_SPACING) * 3.0) > Siedler.flags_for(float(Siedler.FLAG_SPACING)),
 		"Längere Straßen brauchen mehr Fahnen")
 
-	# Eine Straße verbindet Burg und Ziel und setzt Fahnen. Das Ziel liegt
-	# bewusst weit weg, damit mehrere Fahne-zu-Fahne-Abschnitte entstehen.
+	# A road connects castle and destination and sets flags. The destination is
+	# deliberately far away so several flag-to-flag sections arise.
 	var siedler := _siedler()
 	var castle_cell: int = siedler.buildings[siedler.castle_id]["cell"]
 	var target := _cell_near(siedler, "grass", 4)
@@ -1302,7 +1300,7 @@ func _siedler_roads() -> void:
 	t.check(flags >= 1, "Die Straße hat mindestens eine Fahne")
 	t.check(int(result["flags"]) >= 1, "Die Meldung zählt die gesetzten Fahnen mit")
 
-	# Eine ausgedehnte Straße über mehrere Felder.
+	# A road extended over several tiles.
 	var far_cell := -1
 	var far_reach := 0
 	for i in siedler.cells.size():
@@ -1320,8 +1318,7 @@ func _siedler_roads() -> void:
 		t.check(bool(long_result["ok"]), "Eine lange Straße lässt sich bauen")
 		t.check(int(long_result["flags"]) >= 3, "Eine lange Straße bekommt mehrere Fahnen")
 
-	# Jedes Straßensegment trägt mindestens einen, höchstens die Höchstzahl an
-	# Trägern.
+	# Every road segment carries at least one, at most the maximum of carriers.
 	var road_edges := 0
 	for edge in siedler.edges:
 		if str(edge["kind"]) != "road":
@@ -1332,7 +1329,7 @@ func _siedler_roads() -> void:
 		t.check(count <= Siedler.MAX_CARRIERS_PER_ROAD, "Trägerzahl bleibt im Rahmen")
 	t.check(road_edges > 0, "Es gibt Straßensegmente")
 
-	# Eine zusätzliche Fahne erhöht den Durchsatz.
+	# One more flag raises the throughput.
 	var before := 0
 	for edge in siedler.edges:
 		if str(edge["kind"]) == "road":
@@ -1366,8 +1363,7 @@ func _siedler_roads() -> void:
 			after += (edge["carriers"] as Array).size()
 	t.check(after > before, "Die Extra-Fahne erhöht die Trägerzahl")
 
-	# Wasser blockiert, ausser es ist das Ziel — eine Fischerhütte liegt ja im
-	# See.
+	# Water blocks unless it is the destination — a fisher's hut sits in the lake.
 	var water_cell := -1
 	var land_cell := -1
 	for i in siedler.cells.size():
@@ -1385,7 +1381,7 @@ func _siedler_roads() -> void:
 			t.check(not bool(blocked["ok"]), "Wasser blockiert den direkten Weg")
 			t.check(not str(blocked["reason"]).is_empty(), "Der Grund steht im Weg-Meldung")
 
-	# Die Priorität verteilt die Träger neu.
+	# The priority redistributes the carriers.
 	var first_road := {}
 	for edge in siedler.edges:
 		if str(edge["kind"]) == "road":
@@ -1408,9 +1404,8 @@ func _siedler_roads() -> void:
 func _siedler_economy() -> void:
 	t.suite("Siedler — Wirtschaft")
 
-	# Das Startpaket muss den klassischen-Zyklus brechen: Minen essen, die
-	# Nahrungskette braucht eine Sense, eine Sense braucht Eisen, und Eisen
-	# braucht eine abgebaute Lagerstätte.
+	# The starting kit has to break the classic cycle: mines eat, the food chain
+	# needs a scythe, a scythe needs iron, and iron needs a mined deposit.
 	var siedler := _siedler()
 	t.check(int(siedler.store.get("pickaxe", 0)) > 0,
 		"Ohne Spitzhacke ginge keine Mine auf, und damit kein Eisen")
@@ -1418,12 +1413,12 @@ func _siedler_economy() -> void:
 	t.check(int(siedler.store.get("axe", 0)) > 0, "Es gibt eine Axt für den ersten Holzfäller")
 	t.check(siedler.food_pieces() > 0, "Die Vorratskammer ist nicht leer")
 
-	# Siedler werden bis zur Obergrenze ausgebildet, nicht darüber.
+	# Settlers are trained up to the cap, not beyond.
 	_run(siedler, 6.0)
 	t.equal(siedler.current_serfs(), Siedler.CASTLE_SERFS, "Die Burg stellt zehn Siedler an")
 	t.equal(siedler.serf_quota(), Siedler.CASTLE_SERFS, "Ohne Lager bleibt die Grenze bei zehn")
 
-	# Ein Lager hebt die Grenze.
+	# A warehouse raises the cap.
 	siedler.store["planks"] = 200
 	var plot := _cell_near(siedler, "grass", 4)
 	if plot >= 0 and siedler.place_building("warehouse", plot):
@@ -1433,9 +1428,9 @@ func _siedler_economy() -> void:
 			"Ein Lager erlaubt sechs weitere Siedler")
 		t.check(siedler.current_serfs() > Siedler.CASTLE_SERFS, "Die Burg bildet daraufhin nach")
 
-	# Das Werkzeug entscheidet über die Arbeit. Die Axt muss verschwunden
-	# sein, *bevor* der Holzfäller bezogen wird — ein Siedler, der sie schon
-	# hält, behält sie (Werkzeug ist persönliche Ausrüstung, kein Verbrauch).
+	# The tool decides whether work happens. The axe has to be gone *before* the
+	# woodcutter is staffed — a settler who already holds it keeps it (a tool is
+	# personal equipment, not a consumable).
 	var tool_state := _siedler()
 	tool_state.store["axe"] = 0
 	var forest := _cell_near(tool_state, "forest", 4)
@@ -1452,7 +1447,7 @@ func _siedler_economy() -> void:
 			_run(tool_state, 16.0)
 			t.check(str(cutter["status"]) != "noTool", "Mit Axt arbeitet er wieder")
 
-	# Ein Siedler behält sein Werkzeug, es wird nicht verbraucht.
+	# A settler keeps their tool; it is not consumed.
 	var keep := _siedler()
 	var stand := _cell_near(keep, "grass", 4)
 	if stand >= 0:
@@ -1467,7 +1462,7 @@ func _siedler_economy() -> void:
 		_run(keep, 30.0)
 		t.equal(int(keep.store.get("hammer", 0)), hammers, "Kein Hammer verschwindet pro Zyklus")
 
-	# Eine vollständige Siedlung: Waren fließen wirklich über die Straßen.
+	# A complete settlement: goods really flow over the roads.
 	var run_state := _siedler(21, 44)
 	run_state.store["planks"] = 200
 	run_state.store["stone"] = 200
@@ -1489,7 +1484,7 @@ func _siedler_economy() -> void:
 	t.check(run_state.produced_total > 0, "Es wurde Ware produziert")
 	t.check(run_state.score() > before_score, "Die Punktzahl steigt")
 
-	# Ware ohne Abnehmer wird gemeldet statt still zu verschwinden.
+	# A good without a consumer is reported instead of quietly vanishing.
 	var orphan_state := _siedler()
 	var lone := _cell_near(orphan_state, "forest", 4)
 	if lone >= 0:
@@ -1499,7 +1494,7 @@ func _siedler_economy() -> void:
 		t.check(orphans.has("logs"), "Stämme ohne Schreiner werden als 'kein Abnehmer' gemeldet")
 		t.check(orphans.has("grain"), "Korn ohne Mühle wird gemeldet")
 
-	# Der Förster macht einen leeren Wald wieder auf.
+	# The forester replants an empty forest.
 	var forest_state := _siedler()
 	var target_forest := _cell_near(forest_state, "forest", 4)
 	if target_forest >= 0:
@@ -1527,7 +1522,7 @@ func _siedler_economy() -> void:
 			_run(forest_state, 60.0)
 			t.check(int(forest_state.cells[target_forest]["amount"]) > 0, "Der Förster pflanzt nach")
 
-	# Territorium wächst nur über einen besetzten Wachturm.
+	# Territory grows only through an occupied watchtower.
 	var military := _siedler()
 	for building in military.buildings:
 		if str(building["kind"]) == "watchtower":
@@ -1540,7 +1535,7 @@ func _siedler_economy() -> void:
 	military.refresh_territory()
 	t.check(military.territory_share() >= without, "Ein besetzter Wachturm erweitert das Territorium")
 
-	# Ein zugestelltes Schwert und Schild wird zum Ritter.
+	# A donated sword and shield make a knight.
 	var armed := _siedler()
 	armed.store["sword"] = 1
 	armed.store["shield"] = 1
@@ -1549,14 +1544,14 @@ func _siedler_economy() -> void:
 	t.equal(armed.knights, knights_before + 1, "Schwert und Schild werden zu einem Ritter")
 	t.equal(int(armed.store.get("sword", 0)), 0, "Das Schwert wird verbraucht")
 
-	# Die Angriffsmoral steigt mit Gold, ist aber gedeckelt.
+	# Attack morale rises with gold, but is capped.
 	var rich := _siedler()
 	var plain := rich.attack_morale()
 	rich.store["goldBar"] = 500
 	t.check(rich.attack_morale() > plain, "Gold hebt die Moral")
 	t.check(rich.attack_morale() <= 1.8, "Die Moral ist gedeckelt")
 
-	# tick bleibt stabil.
+	# The tick stays stable.
 	var stable := _siedler(21, 40)
 	stable.tick(1.0)
 	var first := stable.time

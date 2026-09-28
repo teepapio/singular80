@@ -1,14 +1,10 @@
 class_name TestMetroScreens
 extends RefCounted
-## Integration tests for "Metropol 3D": the real screen inside a real scene
-## tree, so the autoloads, the router, the imported meshes and the 3D nodes are
-## all exercised.
-##
-## The screen script is loaded **by path** instead of being referenced as
-## `MetroScreen`. A static reference would pull `metro_screen.gd` into the
-## compile chain of `run_tests.gd`, which happens before the engine registers
-## the autoloads, and every autoload reference inside the screen would then fail
-## to resolve. `test_screens.gd` avoids the same trap the same way.
+## Integration tests for "Metropol 3D": the real screen inside a real scene tree,
+## so the autoloads, the router, the imported meshes and the 3D nodes all run.
+## The screen is loaded **by path**, never as a static `MetroScreen` — that would
+## pull it into the compile chain of `run_tests.gd`, which runs before the
+## autoloads are registered.
 
 var t: TestKit
 ## Autoloads are not registered in `--script` mode, so they are fetched by path.

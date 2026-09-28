@@ -1,17 +1,17 @@
 extends SceneTree
-## Parst export_presets.cfg mit Godots eigenem ConfigFile-Parser.
+## Parses export_presets.cfg with Godot's own ConfigFile parser — the only
+## reliable check for the Play preset.
 ##
-## Das ist die einzige verlässliche Prüfung für das Play-Preset: ConfigFile
-## behandelt `#` nur dann als Kommentar, wenn die Zeile kein `=` enthält —
-## sonst bricht der Export mit "Unexpected identifier" ab und das Preset ist
-## unsichtbar, ohne dass der Editor deutlich warnt.
+## ConfigFile only treats `#` as a comment when the line contains no `=`;
+## otherwise the export aborts with "Unexpected identifier" and the preset is
+## invisible without a clear warning from the editor.
 ##
-## Wird von googleplay/scripts/install-export-preset.mjs nach godot/ kopiert
-## (Präfix `_` → von jedem Build ausgeschlossen).
+## Copied into godot/ by googleplay/scripts/install-export-preset.mjs under a
+## `_` prefix, so every build excludes it.
 ##
-##   godot --headless --path godot --script res://_cfgtest.gd -- export_presets.cfg [preset-name]
+##   godot --headless --path godot --script res://_cfgtest.gd -- export_presets.cfg [preset]
 ##
-## Exit 0 = Parse-OK, 1 = Parse-ERROR/MISSING, 2 = Aufruf falsch.
+## Exit 0 = PARSE-OK, 1 = PARSE-ERROR/MISSING, 2 = bad invocation.
 
 func _init() -> void:
 	var args := OS.get_cmdline_user_args()

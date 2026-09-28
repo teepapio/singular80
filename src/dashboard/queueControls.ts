@@ -8,10 +8,10 @@ import type {
 } from '../shared/types';
 
 /**
- * Pure formatting for the run panel: pause state, policy line, retry and
- * timeout badges, scope warnings. Kept out of `main.ts` because these are the
- * strings an operator reads while deciding whether to intervene — they deserve
- * a test more than they deserve a template literal.
+ * Pure formatting for the run panel: pause state, policy line, retry and timeout
+ * badges, scope warnings. Out of `main.ts` because these are the strings an
+ * operator reads while deciding whether to intervene — they deserve a test more
+ * than a template literal.
  */
 
 export interface QueueSummary {
@@ -84,12 +84,11 @@ export function describeQueue(state: QueueState, now: number): QueueSummary {
 }
 
 /**
- * Scope ids that name a kind of work rather than a place, and that the server
- * hands to a run *in addition* to the specific scope. Two lanes may therefore
- * both have been pointed at the same one — the scheduler allows it (otherwise the
- * queue stays serial), so the panel has to say it out loud instead of leaving
- * the operator to find it in a scope audit hours later. Mirrors `BROAD_SCOPES`
- * in `server/scopes.ts`.
+ * Scope ids naming a kind of work rather than a place, which the server hands to
+ * a run *in addition* to the specific scope. Two lanes can therefore both be
+ * pointed at the same one — the scheduler allows that, or the queue stays
+ * serial — so the panel says it out loud. Mirrors `BROAD_SCOPES` in
+ * `server/scopes.ts`.
  */
 export const BROAD_SCOPE_IDS = new Set(['core', 'content']);
 
@@ -100,10 +99,7 @@ export interface LaneRisk {
   lanes: number[];
 }
 
-/**
- * Pairs of busy lanes that share a broad scope, so the operator can see the one
- * collision the parallel queue deliberately allows.
- */
+/** Pairs of busy lanes sharing a broad scope: the one collision the queue allows. */
 export function laneRisks(runs: readonly RunRecord[]): LaneRisk[] {
   const out: LaneRisk[] = [];
   for (let i = 0; i < runs.length; i += 1) {
@@ -141,9 +137,9 @@ export interface RunBadge {
 }
 
 /**
- * Why a run ended. The note is written by the runner and is the authoritative
- * reason — the agent's own summary can say anything, and a hung agent that said
- * something before it hung must still read as a timeout.
+ * Why a run ended. The runner's note is authoritative: the agent's own summary
+ * can say anything, and an agent that said something before hanging must still
+ * read as a timeout.
  */
 export function outcomeBadge(run: RunRecord): RunBadge | null {
   const timedOut = run.note?.startsWith('Zeitüberschreitung') ?? false;

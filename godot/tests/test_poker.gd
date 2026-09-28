@@ -1,12 +1,9 @@
 class_name TestPoker
 extends RefCounted
-## Regeltests für Texas Hold'em.
-##
-## Eigene Datei neben `holdem.gd`, damit die Abdeckung dieses Spiels mit dem
-## Spiel wandert. Die gemeinsame Suite in `test_logic.gd` prüft weiterhin Deck,
-## Handbewertung und den Rundenablauf; hier steht alles um die
-## Gegner-Persönlichkeiten, weil nur die eine Frage beantworten müssen:
-## Zeigt der Tisch den Typ an, und spielt der Typ auch so?
+## Rule tests for Texas Hold'em, split off from `test_logic.gd` so the coverage
+## travels with the game. `test_logic.gd` keeps deck, hand ranking and round
+## flow; here only the opponent personalities — the one question that matters:
+## does the seat label tell the truth about how that seat plays?
 
 var t: TestKit
 
@@ -28,9 +25,9 @@ func _suite(body: Callable) -> void:
 
 # --- helpers ----------------------------------------------------------------
 
-## Spielt `hands` Hände und zählt, wie oft jeder KI-Sitz gefaltet, erhöht und
-## gerufen hat. Der menschliche Sitz callt stumpf, damit die Gegner wirklich
-## bis zum Showdown spielen. Der Rückgabe-Wert ist nach Sitz indexiert.
+## Plays `hands` hands and tallies how often each AI seat folded, raised and
+## called. Seat 0 calls flat so the opponents actually reach a showdown.
+## Returned counts are indexed by seat.
 func _play_hands(hands: int) -> Dictionary:
 	var game := Holdem.HoldemGame.new({"playerCount": 4, "startingChips": 4000})
 	var counts: Dictionary = {}
@@ -66,8 +63,8 @@ func _play_hands(hands: int) -> Dictionary:
 func _poker_profiles() -> void:
 	t.suite("Poker — Persönlichkeiten")
 
-	# Genau drei Typen, und jeder ist vollständig beschrieben — die Anzeige liest
-	# dieselben Felder, die `choose_ai_action` rechnet.
+	# The seat label reads the same fields `choose_ai_action` computes, so a
+	# half-filled profile would show up here as a missing key.
 	t.equal(Holdem.STYLE_SEATS.size(), 3, "Drei Gegner-Typen am Tisch")
 	t.equal(Holdem.STYLES.size(), 3, "Jeder Typ hat ein Profil")
 	for style in Holdem.STYLE_SEATS:
@@ -84,7 +81,7 @@ func _poker_profiles() -> void:
 	t.equal(Holdem.style_label(""), "", "Der menschliche Sitz bekommt keine Anzeige")
 	t.equal(Holdem.style_for_seat(0), "", "Sitz 0 ist der Mensch")
 
-	# Die Sitzreihenfolge ist fest, damit man die Gesichter zuordnen lernt.
+	# Seat order is fixed so a player can learn the faces.
 	t.equal(Holdem.style_for_seat(1), Holdem.STYLE_TIGHT, "Sitz 1 ist der Stein")
 	t.equal(Holdem.style_for_seat(2), Holdem.STYLE_LOOSE, "Sitz 2 spielt wild")
 	t.equal(Holdem.style_for_seat(3), Holdem.STYLE_BLUFF, "Sitz 3 blufft")
@@ -94,15 +91,14 @@ func _poker_profiles() -> void:
 	t.equal(Holdem.style_label("quatsch"), "", "Ein unbekannter Typ wird nicht angezeigt")
 	t.equal(Holdem.style_profile("quatsch"), Holdem.style_profile(Holdem.STYLE_TIGHT), "Unbekannt heißt: so spielt der Stein")
 
-	# Die Legende nennt jeden Typ mit Namen — sie entsteht aus denselben Feldern
-	# wie die Anzeige am Sitz, kann also nicht veralten.
+	# The legend is built from the same fields as the seat label, so it cannot
+	# drift out of date.
 	var legend := Holdem.legend()
 	for style in Holdem.STYLE_SEATS:
 		t.check(legend.contains(Holdem.style_label(str(style))), "Legende nennt %s" % style)
 
-	# Ein Spiel weist jedem KI-Sitz seinen Typ zu, und `styles` darf ihn
-	# überschreiben, ohne dass der Konstruktor auf einem Tippfehler abbricht.
-	# Der Eintrag an Stelle 0 bleibt ungenutzt — dort sitzt der Mensch.
+	# A game assigns every AI seat a style; `styles` may override it, and a typo
+	# must fall back instead of aborting the constructor. Index 0 stays unused.
 	var game := Holdem.HoldemGame.new({
 		"playerCount": 4,
 		"styles": ["", Holdem.STYLE_BLUFF, "quatsch", ""],
@@ -112,7 +108,7 @@ func _poker_profiles() -> void:
 	t.equal((game.players[2] as Holdem.Player).style, Holdem.style_for_seat(2), "Ein Unsinnstyp fällt auf die Sitzreihenfolge zurück")
 	t.equal((game.players[3] as Holdem.Player).style, Holdem.style_for_seat(3), "Sitz 3 bekommt seinen Typ")
 
-	# Der Typ überlebt jede Hand — eine Persönlichkeit wechselt nicht.
+	# A personality never switches mid-session.
 	game.start_hand()
 	t.equal((game.players[1] as Holdem.Player).style, Holdem.STYLE_BLUFF, "Der Typ bleibt über die Hand erhalten")
 	game.reset()
@@ -133,8 +129,8 @@ func _poker_reading() -> void:
 		t.check(Holdem.fold_threshold(Holdem.STYLE_LOOSE, to_call, pot) <= 1.0, "Die Fold-Schwelle des Wilden bleibt eine Wahrscheinlichkeit")
 		t.check(Holdem.fold_threshold(Holdem.STYLE_TIGHT, to_call, pot) <= 1.0, "Die Fold-Schwelle des Steins bleibt eine Wahrscheinlichkeit")
 
-	# Kein Preis verlangt keine Stärke: mit Blind und Passivität hält der Stein
-	# durch, der Wilde sowieso.
+	# No price asked means no strength needed: with just a blind to call, even
+	# the rock holds.
 	t.almost(Holdem.fold_threshold(Holdem.STYLE_TIGHT, 0, 300), 0.5, 0.001, "Der Stein checkt preislos")
 	t.check(Holdem.fold_threshold(Holdem.STYLE_LOOSE, 0, 300) < 0.2, "Der Wilde checkt fast immer")
 
@@ -157,8 +153,8 @@ func _poker_reading() -> void:
 	# Der Stein setzt auch kleiner als der Wilde.
 	t.check(Holdem.raise_size(Holdem.STYLE_TIGHT, 0.85) < Holdem.raise_size(Holdem.STYLE_LOOSE, 0.85), "Der Stein setzt kleiner")
 
-	# Und das zeigt sich in der Praxis: über viele Hände hinweg ist der Stein der
-	# am häufigsten faltende Sitz, der Bluff-Typ der raisende.
+	# Over many hands the rock folds most and the bluffer raises most: the
+	# profile numbers above have to survive the real engine.
 	seed(20260926)
 	var counts := _play_hands(60)
 	var tight: Dictionary = counts[1]
@@ -173,8 +169,7 @@ func _poker_reading() -> void:
 	t.check(int(bluffer["raises"]) > int(tight["raises"]),
 		"Der Bluff-Typ raiset am meisten (%d zu %d)" % [int(bluffer["raises"]), int(tight["raises"])])
 
-	# Auch ein Dreier-Tisch startet und endet, und der menschliche Sitz bleibt
-	# ahnungslos: er ist kein Typ.
+	# Three-handed table still terminates, and the human seat stays unlabelled.
 	var plain := Holdem.HoldemGame.new({"playerCount": 3})
 	plain.start_hand()
 	var guard := 0
@@ -198,9 +193,8 @@ func _poker_tallies() -> void:
 
 	var game := Holdem.HoldemGame.new({"playerCount": 4})
 	game.start_hand()
-	# Wer am Zug ist, entscheidet. Der Test hängt sich an den Zug und nicht an
-	# eine feste Platznummer, damit die Reihenfolge des Motors hier nichts
-	# zu bedeuten hat.
+	# Assert on whoever holds the turn, not on a fixed seat number: the engine's
+	# dealing order is not part of this contract.
 	var seat := game.active_index
 	var player: Holdem.Player = game.players[seat]
 	t.check(not player.style.is_empty(), "Der aktive Sitz hat einen Typen")
@@ -214,8 +208,8 @@ func _poker_tallies() -> void:
 	t.equal(str(read["hint"]), Holdem.style_hint(player.style), "Die Bilanz nennt dessen Kurzbeschreibung")
 	t.equal(str(read["color"]), Holdem.style_color(player.style), "Die Bilanz trägt dessen Farbe")
 
-	# Ein frischer Sitz hat noch nichts beobachtet, die Quote ist 0 — die
-	# Anzeige zeigt dann das Versprechen des Typs statt einer erfundenen Zahl.
+	# An unplayed seat has no rate, so the UI must show the profile's promise
+	# instead of an invented 0.0.
 	var other := 1 if seat != 1 else 2
 	t.equal(int(game.style_read(other)["seen"]), 0, "Ein ungespielter Sitz hat keine Bilanz")
 	t.almost(float(game.style_read(other)["fold_rate"]), 0.0, 0.001, "Ohne Beobachtung keine Quote")

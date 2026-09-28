@@ -50,6 +50,7 @@ interface SuggestionRow {
   created_at: number;
   updated_at: number;
   discord_message_id: string | null;
+  telegram_message_id: string | null;
   run_id: string | null;
   parent_id: number | null;
   client_key: string | null;
@@ -207,23 +208,21 @@ export interface CreateSuggestionResult {
   created: boolean;
 }
 
-/** Obergrenze für `clientKey` — Teil des Vertrags mit der Warteschlange im Spiel. */
+/** Upper bound for `clientKey` — part of the contract with the in-game queue. */
 export const CLIENT_KEY_MAX = 64;
 
 /**
- * Macht den `clientKey` eines Vorschlag-Requests benutzbar — oder `null` für
- * „kein Schlüssel".
+ * Makes a request's `clientKey` usable, or `null` for "no key".
  *
- * Der Schlüssel bleibt dabei opak; der Server speichert ihn nur und erkennt
- * daran einen Retry. Alles, was keine brauchbare Zeichenkette ist, zählt als
- * *kein* Schlüssel: ein kaputter Request verhält sich damit exakt wie ein
- * älterer Client, der das Feld gar nicht kennt — kein 500, kein 400, einfach
- * ein normaler neuer Vorschlag.
+ * The key stays opaque; the server only stores it and recognizes a retry by it.
+ * Anything that is not a usable string counts as *no* key, so a broken request
+ * behaves exactly like an older client that does not know the field — no 500, no
+ * 400, just an ordinary new suggestion.
  *
- * Ein zu langer Schlüssel wird bewusst verworfen und nicht gekürzt. Zwei
- * verschiedene Schlüssel mit denselben ersten 64 Zeichen landeten sonst in
- * derselben Zeile, und ein Retry bekäme den Vorschlag eines Fremden zu sehen —
- * eine doppelte Zeile ist das alte Verhalten und das kleinere Problem.
+ * An over-long key is deliberately dropped, not truncated: two different keys
+ * with the same first 64 characters would land in the same row, and a retry
+ * would see someone else's suggestion. A duplicate row is the old behaviour and
+ * the smaller problem.
  */
 export function normalizeClientKey(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
@@ -261,6 +260,7 @@ export class Store {
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         discord_message_id TEXT,
+        telegram_message_id TEXT,
         run_id TEXT,
         parent_id INTEGER
       );
@@ -347,6 +347,14 @@ export class Store {
     } catch (err) {
       if (!/duplicate column name/i.test((err as Error).message)) throw err;
     }
+    // The Telegram message carrying this suggestion, so the outcome is written
+    // *into* that message instead of appended as another one. The chat then
+    // holds one line per task instead of growing with every status change.
+    try {
+      this.db.exec('ALTER TABLE suggestions ADD COLUMN telegram_message_id TEXT');
+    } catch (err) {
+      if (!/duplicate column name/i.test((err as Error).message)) throw err;
+    }
     // The index is the actual idempotency enforcement: it also holds when two
     // retries arrive at the same moment, or when a second process writes to the
     // same file — a read-then-write in the route cannot promise that. Partial on
@@ -388,18 +396,16 @@ export class Store {
   }
 
   /**
-   * Legt einen Vorschlag an — oder liefert den, den es zu `clientKey` schon
-   * gibt.
+   * Creates a suggestion, or returns the one that already exists for `clientKey`.
    *
-   * Die Idempotenz sitzt hier und nicht in der Route: ein „erst lesen, dann
-   * schreiben" im Request erkennt zwei *gleichzeitig* eingetroffene Retrys
-   * nicht, weil beide noch nichts sehen. Der partielle UNIQUE-Index entscheidet
-   * stattdessen, welcher Versuch gewinnt; der Verlierer fängt die Verletzung und
-   * liest die Gewinnerzeile zurück. Damit ist auch der Fall abgedeckt, in dem
-   * ein zweiter Prozess auf derselben Datei schneller war.
+   * The idempotency lives here and not in the route: a read-then-write in the
+   * request misses two retries that arrive *simultaneously*, because neither sees
+   * anything yet. The partial unique index decides the winner instead; the loser
+   * catches the violation and reads the winning row back. That also covers the
+   * case where a second process was faster on the same file.
    *
-   * `created` ist die Antwort auf die einzige Frage, die die Route stellen muss:
-   * darf ich Discord informieren und ein `suggestion:new` senden?
+   * `created` answers the only question the route has to ask: may I notify Discord
+   * and emit a `suggestion:new`?
    */
   createSuggestionOnce(input: CreateSuggestionInput): CreateSuggestionResult {
     const clientKey = normalizeClientKey(input.clientKey);
@@ -423,9 +429,8 @@ export class Store {
       );
       return { suggestion: this.getSuggestion(Number(result.lastInsertRowid))!, created: true };
     } catch (err) {
-      // Nur eine Eindeutigkeitsverletzung auf dem Schlüssel ist ein Retry.
-      // Alles andere — eine kaputte Datenbank, eine fehlende Spalte — muss
-      // unverändert nach außen durch.
+      // Only a uniqueness violation on the key is a retry. Anything else — a
+      // broken database, a missing column — has to pass through unchanged.
       if (!clientKey || !isUniqueViolation(err)) throw err;
       const existing = this.getSuggestionByClientKey(clientKey);
       if (!existing) throw err;
@@ -460,17 +465,16 @@ export class Store {
   }
 
   /**
-   * Löscht einen Vorschlag samt seiner Spuren: Stimmen und Läufe gehören zu
-   * ihm, ohne sie blieben Zeilen zurück, deren Vorschlag es nicht mehr gibt.
+   * Deletes a suggestion and its traces: votes and runs belong to it, and without
+   * this they would leave rows whose suggestion no longer exists.
    *
-   * Zwei Dinge werden **nicht** mitgelöscht, weil sie eigene Arbeit sind:
-   * Kinder aus einer Aufteilung (`parent_id`) und die übrigen Mitglieder eines
-   * Clusters. Die Kinder werden auf `NULL` gehängt und der Cluster bekommt ein
-   * neues Leitsuggestion — sonst zeigte das Dashboard nach dem Löschen
-   * Einträge, deren Nummer niemandem mehr gezeigt wurde.
+   * Two things are **not** deleted, because they are work of their own: children
+   * from a split (`parent_id`) and the remaining members of a cluster. Children
+   * are reparented to `NULL` and the cluster gets a new leading suggestion —
+   * otherwise the dashboard would show entries whose number nobody ever saw.
    *
-   * Gibt `false` zurück, wenn es den Vorschlag nicht gibt, damit die Route
-   * 404 und nicht 500 antwortet.
+   * Returns `false` if the suggestion does not exist, so the route answers 404
+   * instead of 500.
    */
   deleteSuggestion(id: number): boolean {
     const target = this.getSuggestion(id);
@@ -491,6 +495,28 @@ export class Store {
     }
     this.db.prepare('DELETE FROM suggestions WHERE id = ?').run(id);
     return true;
+  }
+
+  /**
+   * The Telegram message that carries a suggestion, so the outcome can be written
+   * into that message instead of appended as another one.
+   *
+   * Kept out of the shared `Suggestion` type on purpose: it is a detail of this
+   * machine's chat, not a property of the idea, and `src/shared/` is not ours to
+   * change. The repository backup therefore does not carry it either, and a
+   * suggestion re-announced on another machine gets a new message.
+   */
+  getSuggestionTelegramMessage(id: number): string | null {
+    const row = this.db.prepare('SELECT telegram_message_id FROM suggestions WHERE id = ?').get(id) as
+      | { telegram_message_id: string | null }
+      | undefined;
+    return row?.telegram_message_id ?? null;
+  }
+
+  setSuggestionTelegramMessage(id: number, messageId: string | null) {
+    this.db
+      .prepare('UPDATE suggestions SET telegram_message_id = ?, updated_at = ? WHERE id = ?')
+      .run(messageId, Date.now(), id);
   }
 
   setSuggestionDiscordMessage(id: number, messageId: string | null) {
@@ -873,10 +899,9 @@ export class Store {
 }
 
 /**
- * SQLite meldet einen verletzten UNIQUE-Index als SQLITE_CONSTRAINT_UNIQUE (2067)
- * und einen doppelten Primärschlüssel als SQLITE_CONSTRAINT_PRIMARYKEY (1555) —
- * beide mit derselben Meldung. `runs.id` ist ein Text-Primärschlüssel, also
- * braucht der Import beide Fälle.
+ * SQLite reports a violated UNIQUE index as SQLITE_CONSTRAINT_UNIQUE (2067) and a
+ * duplicate primary key as SQLITE_CONSTRAINT_PRIMARYKEY (1555) — with the same
+ * message. `runs.id` is a text primary key, so the import needs both cases.
  */
 function isUniqueViolation(err: unknown): boolean {
   const sqlite = err as { errcode?: number; message?: string } | null;

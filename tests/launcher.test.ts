@@ -1,10 +1,8 @@
 /**
- * The desktop launcher: what a double-click on the symbol is allowed to do.
- *
- * These are cheap assertions about a shell script, and each one guards a
- * mistake that is invisible until somebody sits in front of the machine: a
- * terminal that never closes, a landing page in front of the dashboard, a
- * second browser tab nobody asked for.
+ * The desktop launcher: what a double-click on the symbol is allowed to do. Cheap
+ * assertions about a shell script, each guarding a mistake that is invisible until
+ * somebody sits in front of the machine: a terminal that never closes, a second
+ * browser tab nobody asked for.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -24,30 +22,29 @@ describe('start.sh', () => {
   });
 
   it('lässt kein Terminal offen, indem es den Server in eine eigene Sitzung hängt', () => {
-    // Ohne `setsid` stirbt der Dev-Server mit dem Terminal, in dem der Starter
-    // lief — und mit einem Terminal, das nicht stirbt, bleibt eines sichtbar.
+    // Without `setsid` the dev server dies with the terminal the starter ran in, and
+    // a terminal that does not die stays visible.
     expect(start).toContain('setsid nohup npm run dev');
-    // Die Ausgabe landet in einer Datei, nicht auf dem Bildschirm.
+    // Output goes to a file, not to the screen.
     expect(start).toMatch(/> "\$LOG_FILE" 2>&1 < \/dev\/null &/);
   });
 
   it('druckt keine Startvorschrift', () => {
-    // Der alte Block mit "SINGULAR 80 startet …" war der Vorspann.
+    // The old "SINGULAR 80 startet …" block was the intro screen.
     expect(start).not.toContain('startet …');
     expect(start).not.toContain('Dashboard:  http');
   });
 
   it('öffnet die Hauptseite und genau ein Fenster', () => {
     expect(start).toContain('DASHBOARD_URL="http://localhost:5173/"');
-    // Genau ein `xdg-open`: zwei Tabs (Spiel + Dashboard) waren der Grund, dass
-    // sich der Start wie ein Bildschirm mit einem Vorspann anfühlt.
+    // Exactly one `xdg-open`: two tabs (game + dashboard) made the start feel like a
+    // screen with an intro.
     expect(start.match(/xdg-open/g) ?? []).toHaveLength(1);
   });
 
   it('wartet auf die Seite, statt blind zu schlafen', () => {
-    // Der alte Ablauf war `( sleep 4; xdg-open … )`. Auf einem langsamen Rechner
-    // öffnete sich der Browser vor dem Server und zeigte dann für immer eine
-    // Fehlerseite — also wird die Seite abgefragt, bis sie antwortet.
+    // The old flow was `( sleep 4; xdg-open … )`: on a slow machine the browser beat
+    // the server and showed an error page forever. Hence the poll.
     expect(start).not.toMatch(/\(\s*\n?\s*sleep \d+;\s*xdg-open/);
     expect(start).toContain('while [ "$waited" -lt 60 ]');
     expect(start).toContain('curl -fsS -o /dev/null "$DASHBOARD_URL"');
@@ -55,8 +52,7 @@ describe('start.sh', () => {
 
   it('kann den Server wieder beenden, weil es kein Terminal zum Strg+C gibt', () => {
     expect(start).toContain('stop)');
-    // Die Prozessgruppe, nicht nur `npm`: sonst bleibt der Vite-Server als
-    // Waiszeug auf Port 5173 liegen.
+    // The process group, not just `npm`, or the Vite server stays behind on 5173.
     expect(start).toContain('ps -o pgid=');
   });
 
@@ -82,9 +78,8 @@ describe('Desktop-Verknüpfung', () => {
 
 describe('Hauptseite', () => {
   it('ist das Dashboard selbst, ohne Vorspann', () => {
-    // Die alte Landingpage war eine Spieleliste mit einem Knopf zum Dashboard.
-    // Geprüft wird an *ihrer* Markup-Struktur, nicht an Worten, die in einem
-    // Kommentar über sie stehen.
+    // The old landing page was a game list with a button to the dashboard. Asserted
+    // on its markup, not on words that might appear in a comment about it.
     expect(index).toContain('OpenCode Runs');
     expect(index).toContain('id="task-form"');
     expect(index).not.toContain('<h1>SINGULAR 80</h1>');
@@ -93,16 +88,15 @@ describe('Hauptseite', () => {
   });
 
   it('trägt die Zustandsanzeige des Servers', () => {
-    // Ohne diese Leiste bleibt ein Serverausfall nur an einem roten Punkt
-    // erkennbar, und die Seite meldet sich alle acht Sekunden mit demselben
-    // Fehler.
+    // Without this bar an outage shows up as a red dot only, and the page reports the
+    // same error every eight seconds.
     expect(index).toContain('id="api-state"');
   });
 
   it('leitet alte /dashboard.html-Links weiter, statt 404 zu geben', () => {
     expect(redirect).toContain("location.replace('/')");
-    // Kein `<link rel="canonical" href="/">`: Vite löst die URL beim Bau als
-    // Asset auf, und `/` ist ein Verzeichnis — der Build bricht dann ab.
+    // No `<link rel="canonical" href="/">`: Vite resolves that URL as an asset at
+    // build time and `/` is a directory, so the build breaks.
     expect(redirect).not.toContain('rel="canonical"');
   });
 });

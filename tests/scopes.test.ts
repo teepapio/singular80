@@ -34,11 +34,9 @@ describe('Manifest-Brücke', () => {
   /**
    * The manifest's own self-check, run as a test.
    *
-   * `node scripts/scopes.mjs list` reports these problems and exits 1, but
-   * nothing in `npm test` called it — so six new suites and one unloaded test
-   * file sat in the tree with a green test run. The failure this guards is
-   * quiet by nature: a suite nobody registered simply does not run in a scoped
-   * run, and the agent that wrote it believes it is covered.
+   * `node scripts/scopes.mjs list` reports these problems and exits 1, but nothing in
+   * `npm test` called it — so unregistered suites sat in the tree through a green run.
+   * The failure is quiet by nature: a suite nobody registered simply does not run.
    */
   it('ist konsistent — jede Suite hängt an einem Scope, jede Testdatei am Runner', () => {
     const manifest = scopeManifest();
@@ -54,15 +52,15 @@ describe('Manifest-Brücke', () => {
     expect(byId.get('tetris')?.agent).toBe('game');
     expect(byId.get('meshes')?.agent).toBe('meshes');
     expect(byId.get('dashboard')?.agent).toBe('dashboard');
-    // Der Spiel-Scope besitzt sein Verzeichnis exklusiv.
+    // The game scope owns its directory exclusively.
     expect(byId.get('tetris')?.own).toContain('godot/src/game/tetris/**');
     expect(byId.get('meshes')?.own).toContain('godot/assets/meshes/**');
     expect(byId.get('dashboard')?.own).toContain('server/**');
   });
 
   it('reicht Manifest-Problemchen an den Betreiber durch', () => {
-    // Der Inhalt ist Sache des Manifests, nicht dieses Moduls: es wird nur
-    // weitergereicht, damit das Dashboard einen roten Zustand zeigen kann.
+    // The content is the manifest's business, not this module's: it is only passed
+    // on so the dashboard can show a red state.
     expect(Array.isArray(scopeManifest().problems)).toBe(true);
   });
 

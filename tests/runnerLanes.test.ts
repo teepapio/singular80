@@ -1,12 +1,8 @@
 /**
- * Parallel lanes: how many opencode sessions run at once, and which queued run
- * gets a free one.
- *
- * The tests drive a fake `opencode` binary through `OPENCODE_BIN` in "hang" mode,
- * so a run stays `running` for as long as the test needs and never calls a model.
- * Scope ids come from the real `scripts/scopes.mjs` manifest, because the whole
- * admission rule is "may these two runs touch the same files" — a made-up scope
- * list would test the mock instead of the manifest.
+ * Parallel lanes: how many opencode sessions run at once, and which queued run gets
+ * a free one. A fake `opencode` binary via `OPENCODE_BIN` in "hang" mode keeps a run
+ * `running` as long as the test needs. Scope ids come from the real
+ * `scripts/scopes.mjs` manifest — a made-up list would test the mock, not the manifest.
  */
 import { spawn } from 'node:child_process';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -66,8 +62,8 @@ function harness(settings: Partial<Settings> = {}): Harness {
   const store = new Store(dataDir);
   store.saveSettings({ runTimeoutMinutes: 0, retryLimit: 0, retryBackoffSeconds: 0, ...settings });
   const runner = new Runner(store, {
-    // The runner only needs the project root to look for the binary and for
-    // `log/`; no git operations happen while a run hangs.
+    // The root is only used to find the binary and for `log/`; no git runs while a
+    // run hangs.
     projectRoot: root,
     dataDir,
     contentDir: join(root, 'content'),
@@ -117,9 +113,8 @@ describe('scopesConflict', () => {
   });
 
   it('lässt zwei Spiele laufen, die beide nur die breite Kategorie ergänzt bekommen', () => {
-    // Der dokumentierte Restfall: `core`/`content` sind Supplement, nicht Besitz.
-    // Würde man die komplette Scope-Liste vergleichen, wäre die Queue wieder
-    // seriell — genau das, was die Spuren abschaffen sollen.
+    // The documented leftover: `core`/`content` are supplement, not ownership. Comparing
+    // the full scope list would put the queue back to serial.
     expect(scopesConflict(run('a', ['tetris', 'core']), run('b', ['pang', 'core']))).toBe(false);
     expect(sharedBroadScopes(run('a', ['tetris', 'core']), run('b', ['pang', 'core']))).toEqual(['core']);
   });
@@ -137,7 +132,7 @@ describe('scopesConflict', () => {
   });
 
   it('behandelt einen Run ohne bekannten Scope als Konflikt zu allem', () => {
-    // Nichts weiß darüber, wohin er schreibt — das darf keine Zufallserlaubnis sein.
+    // Nothing is known about where it writes — that must not be a free pass.
     expect(scopesConflict(run('a', []), run('b', ['pang']))).toBe(true);
     expect(scopesConflict(run('a', ['tetris']), run('b', []))).toBe(true);
   });
@@ -176,7 +171,7 @@ describe('Parallele Spuren', () => {
     h.enqueue('Tetris: mehr Bälle am Stück');
     await waitFor(() => h.running().length === 1, 8000, 'erster Run');
     h.enqueue('Tetris: noch ein Feld mehr');
-    // Der zweite Tetris-Run darf nicht starten, egal wie viele Spuren frei sind.
+    // The second Tetris run must not start, however many lanes are free.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(h.running().length).toBe(1);
     const state = h.runner.queueState();
@@ -196,7 +191,7 @@ describe('Parallele Spuren', () => {
     await waitFor(() => h.running().length === 1 && h.running()[0].suggestionId !== first.suggestionId, 8000, 'Nachfolge-Run');
     const started = h.running()[0];
     expect(started.status).toBe('running');
-    // Die frei gewordene Spur wird neu vergeben, nicht einfach weitergezählt.
+    // The freed lane is handed out again, not merely counted on.
     expect(started.lane).toBe(1);
   });
 
@@ -218,7 +213,7 @@ describe('Parallele Spuren', () => {
     await waitFor(() => h.running().length === 2, 8000, 'zwei laufende Runs');
     const state = h.runner.queueState();
     expect(state.activeRuns.length).toBe(2);
-    // Das älteste laufende Run bleibt `activeRun` — die Alt-API kennt nur eins.
+    // The oldest running run stays `activeRun` — the old API knows of only one.
     expect(state.activeRun?.id).toBe(state.activeRuns[0].id);
     expect(state.policy.maxParallelRuns).toBe(2);
   });

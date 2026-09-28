@@ -1,11 +1,9 @@
 class_name TestArena
 extends RefCounted
-## Rule tests the arena owns.
-##
-## They live in this file rather than in the shared `test_improvements.gd`, so
-## a second agent improving another game never has to touch the same file. The
-## suite names are registered in `SCOPE_SUITES` of `scripts/scopes.mjs`; a suite
-## that is not registered there would only ever run in the full sweep.
+## Rule tests the arena owns. They live here rather than in the shared
+## `test_improvements.gd`, so a second agent improving another game never has to
+## touch the same file. The suite names must stay in `SCOPE_SUITES` of
+## `scripts/scopes.mjs`, or a scoped run would skip them.
 
 var t: TestKit
 
@@ -26,10 +24,9 @@ func _suite(body: Callable) -> void:
 
 # --- dash --------------------------------------------------------------------
 
-## The dash is the only way out of a swarm, and on a phone it has to be a
-## button. These tests pin the promise that button makes: it presses exactly
-## the action the dash mechanic listens to, and the ring it draws is the
-## mechanic's own cooldown instead of a second number nobody maintains.
+## The dash is the only way out of a swarm and on a phone it has to be a button.
+## The button must press the action the dash mechanic listens to, and the ring it
+## draws must be the mechanic's own cooldown, not a second number nobody keeps.
 func _dash() -> void:
 	t.suite("Arena — Dash")
 
@@ -76,11 +73,10 @@ func _dash() -> void:
 
 # --- level offers ------------------------------------------------------------
 
-## The level-up is the only choice the arena ever asks for, and it used to be a
-## blind weighted draw: two of three cards could raise the same number and none
-## of them said what that was worth. These tests pin the three things the
-## improvement promises — three different directions, the numbers on the card,
-## and one card that is honestly named as the strongest.
+## The level-up is the only choice the arena asks for, and it used to be a blind
+## weighted draw: two of three cards could raise the same number and none said
+## what that was worth. Three promises are pinned here — three different
+## directions, the numbers on the card, and one card honestly named as strongest.
 func _draft() -> void:
 	t.suite("Arena — Level-Angebote")
 
@@ -270,10 +266,9 @@ func _draft() -> void:
 	for entry in offers:
 		t.check(ArenaRuns.effect_value(entry, full) >= 0.0, "Keine Karte ist schädlich")
 
-	# Content drift is the real enemy here: a new upgrade without a stat the
-	# draft knows would quietly print an empty card — and an upgrade whose
-	# stat name the stat block does not know would be a card that does nothing
-	# at all. Both are checked against the pack the game actually ships.
+	# Content drift is the real enemy here: an upgrade whose stat name the stat
+	# block does not know is a card that does nothing at all, and one without an
+	# axis would print an empty card. Both are checked against the shipped pack.
 	var upgrades := _content_upgrades()
 	t.check(upgrades.size() > 0, "Das Upgrade-Paket ist lesbar")
 	for upgrade in upgrades:

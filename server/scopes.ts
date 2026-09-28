@@ -6,10 +6,9 @@
  * never re-implements the globs, otherwise the dashboard would show a second,
  * drifting version of the ownership rules.
  *
- * Three jobs:
- *  1. expose the layout to the operator (which agent owns what),
- *  2. map a suggestion to the scope(s) its run will work on, and
- *  3. audit the files a finished run actually touched against that scope.
+ * Three jobs: expose the layout to the operator, map a suggestion to the
+ * scope(s) its run will work on, and audit the files a finished run touched
+ * against that scope.
  */
 import { createRequire } from 'node:module';
 import { join, relative, resolve, sep } from 'node:path';
@@ -353,18 +352,17 @@ const BROAD_SCOPES = new Set<string>(Object.values(CATEGORY_SCOPES));
  *
  * So the unit of the claim is the **primary** scope, the most specific one:
  *
- *  - equal primaries → one owner, no parallelism. This is the case the
+ *  - equal primaries → one owner, no parallelism. The case the
  *    exclusive-ownership rule in `scripts/scopes.mjs` exists for.
- *  - a broad primary (`core`, `content`) → the tree to itself. Those scopes own
- *    the files that everybody else may also have to touch, and a run whose whole
- *    job *is* that shared file set cannot safely stand next to anybody.
- *  - an unknown primary (no scopes, unreadable manifest, a scope id the manifest
- *    does not know) → the tree to itself as well. Guessing "probably fine" for a
- *    run nobody can place is how a half-finished registry line ends up in a
- *    stranger's commit.
- *  - otherwise → parallel. The manifest gives exclusive ownership of every
- *    concrete file to exactly one scope, so two different games cannot both own
- *    the same file.
+ *  - a broad primary (`core`, `content`) → the tree to itself. Those own the
+ *    files everybody else may also have to touch, and a run whose whole job *is*
+ *    that shared file set cannot stand next to anybody.
+ *  - an unknown primary (no scopes, unreadable manifest, an id the manifest does
+ *    not know) → the tree to itself too. Guessing "probably fine" for a run
+ *    nobody can place is how a half-finished registry line lands in a stranger's
+ *    commit.
+ *  - otherwise → parallel. Exclusive ownership of every concrete file goes to
+ *    exactly one scope, so two different games cannot both own the same file.
  *
  * What this leaves open, and does not hide: two runs on *different* games may
  * still both have been pointed at `content/` or `core/` by their category and
