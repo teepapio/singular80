@@ -137,6 +137,47 @@
   }
   footer{margin-top:52px;padding-top:16px;border-top:1px solid var(--line);color:var(--ink-faint);font-size:12px}
   code.path{color:#a5b4fc}
+
+  /* ---------- live ---------- */
+  .livebar{
+    position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; gap:8px 22px;
+    align-items:center; padding:11px 16px; margin-bottom:26px;
+    background:rgba(11,15,22,.92); backdrop-filter:blur(6px);
+    border:1px solid var(--line); border-radius:10px;
+  }
+  .livebar .stat{display:flex;align-items:baseline;gap:7px;font-size:13px;color:var(--ink-dim)}
+  .livebar .stat b{font-size:19px;color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums}
+  .livebar .spacer{flex:1}
+  .livebar .src{font-size:11.5px;color:var(--ink-faint);display:flex;align-items:center;gap:7px}
+  .pulse{width:8px;height:8px;border-radius:50%;background:var(--ink-faint);flex:none}
+  .pulse.on{background:#4ade80;animation:beat 1.6s ease-in-out infinite}
+  .pulse.off{background:#ef4444}
+  @keyframes beat{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(74,222,128,.55)}50%{opacity:.65;box-shadow:0 0 0 5px rgba(74,222,128,0)}}
+
+  .live-badge{
+    margin-left:auto; font-size:11px; color:var(--ink-faint);
+    border:1px solid var(--line); border-radius:999px; padding:1px 8px; white-space:nowrap;
+  }
+  .live-badge.busy{color:#0b0f16;background:#4ade80;border-color:#4ade80;font-weight:700}
+  .card.busy{border-color:#3f5c48;box-shadow:0 0 0 1px rgba(74,222,128,.18)}
+
+  .live-rows{margin:0;padding:0;list-style:none}
+  .live-rows li{
+    display:grid; grid-template-columns:104px 1fr auto; gap:12px; align-items:baseline;
+    padding:7px 0; border-bottom:1px solid var(--line); font-size:12.5px;
+  }
+  .live-rows li:last-child{border-bottom:0}
+  .live-rows .ag{font-weight:700;font-size:12px}
+  .live-rows .what{color:var(--ink-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .live-rows .ago{color:var(--ink-faint);font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .outcome{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;border-radius:4px;padding:1px 6px}
+  .outcome.succeeded{color:#86efac;background:#0f2a1c;border:1px solid #1d4d33}
+  .outcome.interrupted{color:#fcd34d;background:#2a2310;border:1px solid #4d3f1d}
+  .outcome.error{color:#fca5a5;background:#2a1414;border:1px solid #4d1d1d}
+  .empty{color:var(--ink-faint);font-size:12.5px;padding:8px 0}
+  .ghost{color:var(--ink-dim);font-size:12.5px;max-width:110ch}
+  .ghost b{color:var(--ink)}
+  .ghost code{color:#a5b4fc}
 </style>
 </head>
 <body>
@@ -151,6 +192,15 @@
 </header>
 
 <div class="wrap">
+
+  <div class="livebar" id="livebar">
+    <div class="stat"><b id="s-active">–</b><span>arbeiten gerade</span></div>
+    <div class="stat"><b id="s-spawned">–</b><span>Subagenten gespawnt</span></div>
+    <div class="stat"><b id="s-mains">–</b><span>Sitzungen insgesamt</span></div>
+    <div class="stat"><b id="s-server">–</b><span>Server nennt „laufend" (inkl. Leichen)</span></div>
+    <div class="spacer"></div>
+    <div class="src"><span class="pulse" id="s-dot"></span><span id="s-src">verbinde…</span></div>
+  </div>
 
   <div class="tree">
     <ul>
@@ -276,6 +326,41 @@
   </div>
 
   <section>
+    <h2><span class="bar"></span>Gerade aktiv</h2>
+    <p class="sub note" style="margin-bottom:14px">
+      Aus dem Live-Ereignisstrom des opencode-Dienstes (<code class="path">GET /api/event</code>).
+      Eine Sitzung gilt als arbeitend, wenn sie in den letzten 15 Sekunden ein Ereignis gesendet hat —
+      die Datenbank kann das nicht beantworten, weil <code class="path">time_updated</code> erst beim
+      Ende eines Zugs geschrieben wird.
+    </p>
+    <div class="card" style="max-width:none;padding:6px 16px">
+      <ul class="live-rows" id="live-working"><li class="empty">verbinde…</li></ul>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="bar"></span>Zuletzt abgeschlossen</h2>
+    <p class="sub note" style="margin-bottom:14px">
+      Jede beendete Subagenten-Sitzung aus <code class="path">opencode.db</code> mit ihrem Ergebnis
+      (<code class="path">succeeded</code>, <code class="path">interrupted</code>) und ihrer Laufzeit.
+    </p>
+    <div class="card" style="max-width:none;padding:6px 16px">
+      <ul class="live-rows" id="live-recent"><li class="empty">verbinde…</li></ul>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="bar"></span>Agenten in der Historie, die keine Definition haben</h2>
+    <p class="sub note" style="margin-bottom:14px">
+      Die Übersicht stellt beide Seiten gegenüber: wie viele Subagenten welcher Agent tatsächlich
+      bekommen hat, und welche Definitionen bisher nie gelaufen sind.
+    </p>
+    <div class="card" style="max-width:none;padding:14px 16px">
+      <p class="ghost" id="live-ghost">verbinde…</p>
+    </div>
+  </section>
+
+  <section>
     <h2><span class="bar"></span>Querverbindungen — wer wen braucht</h2>
     <p class="note">Die Pfeile im Baum sind Delegation. Diese Übergaben laufen quer und sind der Grund, warum das Manifest Dateien an genau einen Agenten hängt.</p>
     <div class="card" style="max-width:none">
@@ -284,7 +369,7 @@
         <div class="why">Braucht ein neues Mesh, fragt es <span class="mono">meshes</span> und hält an — ein selbst gebautes Mesh ohne Registry-Key ist der Fehler, der hier schon zweimal Zeit gekostet hat.</div>
 
         <div class="pair"><span class="chip" style="color:var(--game)">game</span> → <span class="chip" style="color:var(--merge)">merge</span></div>
-        <div class="why">Registry-Zeile, Router-Eintrag oder <span class="mono">package.json</span> fehlen: anhalten und melden, das ist Sache des Merge-Schritts.</div>
+        <div class="why">Registry-Zeile, Router-Eintrag oder <span class="mono">package.json</span> fehlen: anhalten und melden. Das Gate <span class="mono">npm run gate</span> ist der einzige Weg auf <span class="mono">main</span>.</div>
 
         <div class="pair"><span class="chip" style="color:var(--game)">game</span> → <span class="chip" style="color:var(--apk)">apk</span></div>
         <div class="why">Änderung ist gebaut und committet; <span class="mono">apk</span> macht daraus <span class="mono">build/singular80.apk</span> und installiert sie.</div>
@@ -303,6 +388,9 @@
 
         <div class="pair"><span class="chip" style="color:var(--merge)">merge</span> → <span class="chip">Besitzer</span></div>
         <div class="why">Der Merge ist das Tor: ein voller grüner Lauf, oder ein Bericht an den Menschen. Kein Agent mergt auf grünem Teilgebiet, wenn der Gesamtlauf rot ist.</div>
+
+        <div class="pair"><span class="chip" style="color:var(--ink-faint)">alle</span> → <span class="chip" style="color:var(--ink-faint)">Gate <span class="mono">scripts/merge-gate.mjs</span></span></div>
+        <div class="why">Niemand committet direkt auf <span class="mono">main</span>. Das Gate macht einen Wegwerf-Worktree, merged die Agent-Zweige, erzeugt die abgeleiteten Dateien neu, prüft <span class="mono">typecheck</span> + <span class="mono">npm test</span> + voller Spieltestlauf und fast-forwardet erst danach. Ein roter Lauf kostet einen Worktree, nicht den Branch eines Spielers.</div>
       </div>
     </div>
   </section>
@@ -328,7 +416,8 @@
           <tr><td class="mono">scripts/scopes.mjs · locale.mjs<br>changelog.ts · project.godot<br>export_presets.cfg · adb-device.sh</td><td><span class="swatch" style="background:var(--merge)"></span>merge (Scope <span class="mono">tooling</span>)</td><td>Werkzeuge, die selbst die Regeln tragen. Kein Spielagent darf daran, außer er registriert dort seine Suite.</td></tr>
           <tr><td class="mono">locale/** · godot/assets/locale/**<br>godot/src/core/ui/** · loc.gd</td><td><span class="swatch" style="background:var(--ink-faint)"></span>Scope <span class="mono">core</span></td><td>Gehört laut Manifest dem Build-Scope — siehe die Lücke unten.</td></tr>
           <tr><td class="mono">CHANGELOG.md</td><td><span class="swatch" style="background:var(--ink-faint)"></span>changelog.ts</td><td>Schreibt die Zeile, committet nur diese Datei. Ein <span class="mono">git add -A</span> hier würde fremde halbfertige Arbeit mitnehmen.</td></tr>
-          <tr><td class="mono">.opencode/**</td><td><span class="swatch" style="background:var(--ink-faint)"></span>niemand</td><td>Ein Agent kann nicht die Datei besitzen, die seinen eigenen Auftrag enthält.</td></tr>
+          <tr><td class="mono">.opencode/**</td><td><span class="swatch" style="background:var(--ink-faint)"></span>niemand</td><td>Ein Agent kann nicht die Datei besitzen, die seinen eigenen Auftrag enthält. Hier liegen auch Organigramm und Monitor.</td></tr>
+          <tr><td class="mono">~/.local/share/singular80/worktrees/**</td><td><span class="swatch" style="background:var(--ink-faint)"></span>git</td><td>Die Worktrees liegen absichtlich <b>außerhalb</b> des Repositorys, damit sie in keinem <span class="mono">git status</span> auftauchen und kein <span class="mono">git clean</span> sie erwischt.</td></tr>
         </tbody>
       </table>
     </div>
@@ -381,11 +470,13 @@
         <div class="arrow">→</div>
         <div class="step">Freie Spur?<br><span class="mono" style="color:var(--ink-faint)">scopesConflict</span></div>
         <div class="arrow">→</div>
+        <div class="step">Eigener Worktree<br><span class="mono" style="color:var(--ink-faint)">agent/&lt;name&gt; · optional</span></div>
+        <div class="arrow">→</div>
         <div class="step">Agent arbeitet<br><span class="mono" style="color:var(--ink-faint)">eigener Git-Index</span></div>
         <div class="arrow">→</div>
-        <div class="step">Merge-Gate<br><span class="mono" style="color:var(--ink-faint)">voller Lauf</span></div>
+        <div class="step">Gate prüft und merged<br><span class="mono" style="color:var(--ink-faint)">npm run gate</span></div>
         <div class="arrow">→</div>
-        <div class="step">Changelog-Zeile, eigener Commit, Push<br><span class="mono" style="color:var(--ink-faint)">changelog.ts</span></div>
+        <div class="step">Fast-Forward auf main, Push, Changelog-Zeile<br><span class="mono" style="color:var(--ink-faint)">changelog.ts</span></div>
       </div>
     </div>
   </section>
@@ -407,7 +498,122 @@
   <footer>
     Erzeugt aus dem Stand des Arbeitsbaums · 6 Agentendefinitionen in <code>.opencode/agents/</code> · 26 Scopes ·
     Farben sind die aus den <code>color:</code>-Feldern der Frontmatter übernommen.
+    Die Live-Zahlen liefert <code>.opencode/monitor/live.mjs</code>; als Datei geöffnet ist diese Seite eine Momentaufnahme.
   </footer>
+
+  <script>
+  // Live-Zustand. Ohne den Monitor (Datei direkt geöffnet) bleibt die Seite
+  // statisch, statt einen leeren Rahmen zu zeigen.
+  (function () {
+    var DEFS = ['game', 'meshes', 'dashboard', 'merge', 'apk', 'device-debug']
+    var CARDS = {}
+    DEFS.forEach(function (name) {
+      CARDS[name] = document.querySelector('.card.a-' + (name === 'device-debug' ? 'device' : name))
+    })
+
+    function txt(id, value) {
+      var el = document.getElementById(id)
+      if (el) el.textContent = value
+    }
+    function ago(ms) {
+      var s = Math.max(0, Math.round((Date.now() - ms) / 1000))
+      if (s < 60) return s + ' s her'
+      if (s < 3600) return Math.round(s / 60) + ' min her'
+      return Math.round(s / 3600) + ' h her'
+    }
+    function dur(ms) {
+      var m = Math.round(ms / 60000)
+      if (m < 1) return Math.round(ms / 1000) + ' s'
+      if (m < 60) return m + ' min'
+      return Math.floor(m / 60) + ' h ' + (m % 60) + ' min'
+    }
+    function color(agent) {
+      var c = document.querySelector('.card.a-' + (agent === 'device-debug' ? 'device' : agent))
+      if (!c) return 'var(--ink-faint)'
+      var t = getComputedStyle(c).borderTopColor
+      return t
+    }
+    function badge(agent, spawned, busy) {
+      var card = CARDS[agent]
+      if (!card) return
+      var old = card.querySelector('.live-badge')
+      if (old) old.remove()
+      var b = document.createElement('span')
+      b.className = 'live-badge' + (busy ? ' busy' : '')
+      b.textContent = busy ? busy + ' aktiv · ' + spawned + ' gespawnt' : spawned + ' gespawnt'
+      card.querySelector('.name').appendChild(b)
+      card.classList.toggle('busy', busy > 0)
+    }
+
+    function render(s) {
+      var busyBy = {}
+      s.working.forEach(function (w) {
+        busyBy[w.agent] = (busyBy[w.agent] || 0) + 1
+      })
+
+      txt('s-active', s.working.length)
+      txt('s-spawned', s.totals.spawned)
+      txt('s-mains', s.totals.sessions)
+      txt('s-server', s.serverActive == null ? '–' : s.serverActive)
+      txt('s-src', 'Live · ' + s.eventsSeen + ' Ereignisse · ' + new Date(s.generatedAt).toLocaleTimeString('de-DE'))
+      var dot = document.getElementById('s-dot')
+      if (dot) dot.className = 'pulse ' + (s.connected ? 'on' : 'off')
+
+      DEFS.forEach(function (name) { badge(name, s.perAgent[name] || 0, busyBy[name] || 0) })
+
+      var w = document.getElementById('live-working')
+      w.innerHTML = ''
+      if (!s.working.length) {
+        w.innerHTML = '<li class="empty">gerade arbeitet keine Sitzung</li>'
+      } else {
+        s.working.forEach(function (x) {
+          var li = document.createElement('li')
+          li.innerHTML =
+            '<span class="ag" style="color:' + color(x.agent) + '">' + x.agent + (x.child ? '' : ' · Leitung') + '</span>' +
+            '<span class="what">' + (x.title || '') + ' — ' + x.label + '</span>' +
+            '<span class="ago">' + ago(x.since) + '</span>'
+          w.appendChild(li)
+        })
+      }
+
+      var r = document.getElementById('live-recent')
+      r.innerHTML = ''
+      s.recent.forEach(function (x) {
+        var li = document.createElement('li')
+        li.innerHTML =
+          '<span class="ag" style="color:' + color(x.agent) + '">' + x.agent + '</span>' +
+          '<span class="what">' + (x.title || '(ohne Titel)') + '</span>' +
+          '<span><span class="outcome ' + x.outcome + '">' + x.outcome + '</span> ' +
+          '<span class="ago">' + dur(x.ms) + '</span></span>'
+        r.appendChild(li)
+      })
+
+      var ghosts = Object.keys(s.perAgent).filter(function (a) { return DEFS.indexOf(a) < 0 })
+      var unused = DEFS.filter(function (a) { return !s.perAgent[a] })
+      var g = document.getElementById('live-ghost')
+      g.innerHTML =
+        '<b>' + ghosts.length + ' Agenten mit Aktivität, aber ohne Datei unter <code>.opencode/agents/</code>:</b> ' +
+        ghosts.map(function (a) { return '<code>' + a + '</code> (' + s.perAgent[a] + '×)' }).join(', ') +
+        ' — das sind feste Bestandteile der OpenCode-Werkzeugkette oder Agenten aus früheren Sitzungen.<br><br>' +
+        '<b>' + unused.length + ' Definitionen, die in diesem Projekt noch nie gelaufen sind:</b> ' +
+        unused.map(function (a) { return '<code>' + a + '</code>' }).join(', ') +
+        ' — sie existieren, aber kein Vorschlag hat sie bisher beansprucht.'
+    }
+
+    function tick() {
+      fetch('/api/state', { cache: 'no-store' })
+        .then(function (r) { return r.json() })
+        .then(render)
+        .catch(function () {
+          txt('s-src', 'statisch — Monitor nicht gestartet')
+          var dot = document.getElementById('s-dot')
+          if (dot) dot.className = 'pulse off'
+        })
+    }
+    tick()
+    setInterval(tick, 2000)
+  })()
+  </script>
 </div>
 </body>
 </html>
