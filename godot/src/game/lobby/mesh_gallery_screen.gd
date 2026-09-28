@@ -521,6 +521,7 @@ func _refresh_info() -> void:
 	var key := active_key()
 	if key == "":
 		_info_name.text = Loc.f("Walk along the hall", [])
+		_info_name.add_theme_color_override("font_color", UiTheme.TEXT)
 		_info_meta.text = MeshGallery.tier_caption(tier)
 		_info_hint.text = Loc.f("The meshes stand to the left and to the right", [])
 		return
