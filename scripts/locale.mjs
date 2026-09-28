@@ -229,6 +229,12 @@ export function isDisplayText(value, kind) {
   // Only format characters: "%s · %s" is a pattern, not a sentence.
   const stripped = value.replace(/%[-+ #0-9.]*[sdfx%]/g, '').replace(/[{}]/g, '').trim();
   if (stripped === '') return false;
+  // A numbered variant name: "3D Adventures", "2D-Platformer". It begins with a
+  // digit, so the rule below reads it as an id and drops it — which is how
+  // "3D-Abenteuer" survived the switch to an English source as the one German
+  // word left in the lobby. No asset key has this shape: they are lowercase
+  // words or `candy/bonbon`, and the only one with a digit is `crystal1`.
+  if (/^\d+[A-Za-z]+[-–]/.test(value)) return true;
   // A word with neither a space nor a vowel is usually a proper noun ("Tetris",
   // "2048", "Railgun") — nobody translates those, and a wrong one is visible.
   const isWord = /\s/.test(value) || ACCENTED.test(value);
