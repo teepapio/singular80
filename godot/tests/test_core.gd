@@ -1,29 +1,29 @@
 class_name TestCore
 extends RefCounted
-## Tests for the offline suggestion queue: the client's half of an idea that was
-## written in a tunnel.
-##
-## Everything that can be decided without a server lives in `SuggestionQueue` and
-## is tested directly: the `clientKey`, the JSON in `user://`, the cap and the
-## backoff. The transport is exercised twice for real — against a closed port for
-## the failure case, and against a tiny HTTP responder built from `TCPServer` for
-## the retry, which is where "the same key arrives a second time" is proven
-## instead of assumed.
+## Tests for the offline suggestion queue: the client's half of an idea that
+## was written in a tunnel. Everything decidable without a server lives in
+## `SuggestionQueue` and is tested directly: the `clientKey`, the JSON in
+## `user://`, the cap and the backoff. The transport is exercised twice for real
+## — against a closed port for the failure case, and against a tiny HTTP
+## responder built from `TCPServer` for the retry, which is where "the same key
+## arrives a second time" is proven instead of assumed.
 
-## By path, not by class name: `--script` mode does not refresh the global class
-## cache, so a class added today would not resolve before the next import.
+## By path, not by class name: `--script` mode does not refresh the global
+## class cache, so a class added today would not resolve before the next
+## import. Every preload below follows that rule.
 const QueueClass := preload("res://src/core/logic/suggestion_queue.gd")
 
-## Second reason: the same `--script` caveat applies to the legal module. It
-## carries `class_name AppLegal`, which `suggest_dialog.gd` uses by name, so it
-## is already part of every screen's load path.
+## The legal module carries `class_name AppLegal`, which `suggest_dialog.gd`
+## uses by name, so it is already part of every screen's load path.
 const LegalClass := preload("res://src/core/logic/app_legal.gd")
 
-## By path, like every other module here: `--script` mode does not refresh the
-## global class cache, so a `class_name` added today would not resolve.
 const ServerDialogClass := preload("res://src/core/ui/server_dialog.gd")
 
-## A private file, so the suite never touches the queue a real run would use.
+## The suggestion flow composes the label and the player's text before the
+## entry is born.
+const SuggestionContextClass := preload("res://src/core/logic/suggestion_context.gd")
+
+## A private file, so the suite never touches the queue a real run uses.
 const TEST_PATH := "user://test_suggestions.json"
 
 var t: TestKit
@@ -33,6 +33,7 @@ var tree: SceneTree
 func run(kit: TestKit, scene_tree: SceneTree) -> void:
 	t = kit
 	tree = scene_tree
+	await _flow()
 	_queueing()
 	_close()
 	_persistence()
@@ -51,7 +52,83 @@ func _close() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_PATH))
 
 
-# --- Einpflegen -------------------------------------------------------------
+# --- End-to-end -------------------------------------------------------------
+
+## The whole path a player idea takes, in one pass: the screen label is put in
+## front of the text, the entry is born with its `clientKey`, it reaches the
+## disk before any send is attempted, and the server confirms it — after which
+## the queue is empty and the success signal carries the server's id.
+func _flow() -> void:
+	t.suite("Auftragsweg")
+	var api: Node = tree.root.get_node_or_null("/root/Api")
+	var game: Node = tree.root.get_node_or_null("/root/Game")
+	if api == null or game == null:
+		t.fail("Die Autoloads Api und Game fehlen")
+		t.suite_done()
+		return
+
+	var sent_events: Array = []
+	var on_sent := func(id: int, cluster: int) -> void: sent_events.append([id, cluster])
+	api.suggestion_sent.connect(on_sent)
+	api._queue.clear()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(QueueClass.PATH))
+
+	# 1. The screen label goes in front of the player's text, so the dashboard
+	#    can group ideas without the author having to say where it came from.
+	var context := SuggestionContextClass.for_screen("tetris")
+	t.equal(context, "Tetris", "Die Screen-ID wird zum Spielnamen")
+	var composed := SuggestionContextClass.compose(context, "Füge einen Boss hinzu")
+	t.equal(composed, "Tetris: Füge einen Boss hinzu", "Der Text wird mit dem Präfix versehen")
+	t.check(SuggestionContextClass.compose(context, composed) == composed,
+		"Die Komposition ist idempotent")
+
+	# 2. The entry is born with its key and lands on the disk before any send.
+	game.set_server_url("http://127.0.0.1:%d" % _closed_port())
+	var offline_view: Dictionary = await api.submit_suggestion("Füge einen Boss hinzu", "Spieler", "tetris")
+	t.check(offline_view.is_empty(), "Ohne Server bleibt der Vorschlag in der Warteschlange")
+	t.equal(api.pending_count(), 1, "Der Vorschlag liegt in der Warteschlange")
+
+	# 3. The network comes back — the same path an app-resume takes.
+	var server := FakeServer.new()
+	tree.root.add_child(server)
+	game.set_server_url("http://127.0.0.1:%d" % server.port)
+	api.wake()
+	var delivered := await _wait_until(func() -> bool: return api.pending_count() == 0, 15.0)
+	t.check(delivered, "Der Server bestätigt den Vorschlag")
+	t.equal(api.pending_hint(), "", "Kein Wartender, keine Anzeige")
+	t.equal(sent_events.size(), 1, "suggestion_sent feuert genau einmal")
+	t.equal(sent_events[0][0], 7, "…mit der Id aus der Antwort")
+
+	# 4. What the server received: the composed text, the author, the source
+	#    and the clientKey — the contract in one request.
+	var posts := server.with_path("/api/suggestions")
+	t.equal(posts.size(), 1, "Genau ein Vorschlag kam an")
+	if posts.size() == 1:
+		var body: Dictionary = posts[0]
+		t.equal(str(body.get("text", "")), composed, "Der Text trägt das Präfix")
+		t.equal(str(body.get("author", "")), "Spieler", "Der Autor wird übergeben")
+		t.equal(str(body.get("source", "")), "game", "Die Quelle ist 'game'")
+		t.check(str(body.get("clientKey", "")).begins_with("s80_"),
+			"Der clientKey folgt dem Schema")
+
+	# 5. The idea was on the disk before the send, not after — a crash between
+	#    the two costs a retry, not the idea. After the delivery the file is
+	#    rewritten with an empty list, so the next start finds nothing pending.
+	var stored: Variant = JSON.parse_string(FileAccess.get_file_as_string(str(QueueClass.PATH)))
+	t.check(stored is Dictionary, "Nach der Zustellung ist die Datei ein JSON-Objekt")
+	if stored is Dictionary:
+		t.equal(((stored as Dictionary).get("items", []) as Array).size(), 0,
+			"…mit einer leeren Liste")
+
+	api.suggestion_sent.disconnect(on_sent)
+	server.queue_free()
+	game.set_server_url("")
+	api._queue.clear()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(QueueClass.PATH))
+	t.suite_done()
+
+
+# --- Insert -----------------------------------------------------------------
 
 func _queueing() -> void:
 	t.suite("Vorschlags-Warteschlange")
@@ -94,7 +171,7 @@ func _queueing() -> void:
 	t.suite_done()
 
 
-# --- Ablage -----------------------------------------------------------------
+# --- Storage ----------------------------------------------------------------
 
 func _persistence() -> void:
 	t.suite("Vorschlags-Warteschlange — Ablage")
@@ -148,7 +225,7 @@ func _backoff() -> void:
 	t.suite_done()
 
 
-# --- Obergrenze -------------------------------------------------------------
+# --- Cap ---------------------------------------------------------------------
 
 func _cap() -> void:
 	t.suite("Vorschlags-Warteschlange — Obergrenze")
@@ -166,7 +243,7 @@ func _cap() -> void:
 	t.check(warning.contains("3"), "Die Warnung nennt die Grenze")
 	t.check(warning.contains("erste"), "…und den verlorenen Vorschlag")
 
-	# A lower cap has to bite immediately, nicht erst beim nächsten Start.
+	# A lower cap has to bite immediately, not only on the next start.
 	var kept: Dictionary = _add(items, "fünfte", "S", 1)["dropped"]
 	t.equal(items.size(), 1, "Auch nach dem Laden gilt die Grenze")
 	t.equal(str(items[0].get("text", "")), "fünfte", "…und das Neueste gewinnt")
@@ -174,7 +251,7 @@ func _cap() -> void:
 	t.suite_done()
 
 
-# --- Zustellung -------------------------------------------------------------
+# --- Delivery ----------------------------------------------------------------
 
 func _delivery() -> void:
 	t.suite("Vorschlags-Warteschlange — Zustellung")
@@ -205,7 +282,7 @@ func _delivery() -> void:
 	t.equal(api.pending_count(), 1, "Der Vorschlag bleibt trotzdem in der Warteschlange")
 	t.equal(api.pending_hint(), "1 Vorschlag wartet auf Netz", "Der Spieler sieht, dass es wartet")
 	t.equal(pending_events.size(), 1, "Der Wartestand wird genau einmal gemeldet")
-	t.check(failed_events.size() == 1 and "lokal gespeichert" in str(failed_events[0]),
+	t.check(failed_events.size() == 1 and "saved locally" in str(failed_events[0]),
 		"Der Spieler wird gewarnt, statt eine Löschung zu melden")
 	t.equal(sent_events.size(), 0, "Ohne Server wird kein Erfolg gemeldet")
 	var key := str(api._queue[0].get("clientKey", ""))
@@ -247,7 +324,7 @@ func _delivery() -> void:
 	t.suite_done()
 
 
-# --- Kram -------------------------------------------------------------------
+# --- Helpers ----------------------------------------------------------------
 
 ## A queue of its own, on a file nobody else uses.
 func _file() -> Array[Dictionary]:
@@ -255,8 +332,8 @@ func _file() -> Array[Dictionary]:
 	return []
 
 
-## Nimmt einen Vorschlag auf und schreibt sofort — dieselbe Reihenfolge wie der
-## Autoload: erst aufnehmen, dann die Platte. Liefert `{"item": …, "dropped": …}`.
+## Adds a suggestion and writes at once — the same order as the autoload:
+## first take, then the disk. Returns `{"item": …, "dropped": …}`.
 func _add(items: Array[Dictionary], text: String, author: String, limit: int = QueueClass.MAX_ITEMS) -> Dictionary:
 	var dropped := QueueClass.push(items, QueueClass.make_item(text, author), limit)
 	QueueClass.persist(TEST_PATH, items)
@@ -348,35 +425,34 @@ class FakeServer extends Node:
 		_conn = null
 
 
-# --- Rechtliches & Melden ---------------------------------------------------
+# --- Legal & Reporting -------------------------------------------------------
 
-## Die Melde- und Zustimmungswege, die Google Play für nutzergenerierten Inhalt
-## verlangt. Reine Logik, also ohne Fenster prüfbar — und das Modul ist genau
-## deshalb renderer-frei.
+## The reporting and consent paths Google Play requires for user-generated
+## content. Pure logic, so testable without a window — and the module is
+## renderer-free for exactly that reason.
 func _legal() -> void:
 	t.suite("Rechtliches & Melden")
 
-	# Die Gründe sind eine Pflichtangabe der Plattform: der Spieler muss sagen
-	# können, *woran* es liegt, und ein leerer Grund wäre wieder nur "gefaellt
-	# mir nicht".
+	# The reasons are a mandatory field of the platform: the player must be
+	# able to say *what* is wrong, and an empty reason would again just be
+	# "dislike".
 	t.check(LegalClass.REASONS.size() >= 3, "Es gibt mehrere Meldegruende zur Auswahl")
 	var reasons_filled := true
 	for reason in LegalClass.REASONS:
 		reasons_filled = reasons_filled and not str(reason).strip_edges().is_empty()
 	t.check(reasons_filled, "Kein Meldegrund ist leer")
 
-	# `is_configured` und `missing` muessen dasselbe sagen. Sie pruefen an
-	# verschiedenen Stellen, ob die Adressen noch Platzhalter sind — driftet
-	# eine der beiden, wuerde der Dialog entweder eine erfundene Adresse
-	# verschicken oder eine echte Adresse verweigern.
+	# `is_configured` and `missing` must agree. They check in different
+	# places whether the addresses are still placeholders — if one drifts,
+	# the dialog would either send a made-up address or refuse a real one.
 	t.equal(not LegalClass.is_configured(), not LegalClass.missing().is_empty(),
 		"is_configured und missing urteilen gleich")
 	if not LegalClass.is_configured():
 		t.check(LegalClass.missing().has("MODERATION_MAIL"),
 			"Die fehlende Meldeadresse wird auch beim Namen genannt")
 
-	# Das Zitat ist das, was die Meldung im Postfach laesst lesen — also muss
-	# es zeilenumbruchfrei bleiben und darf nicht ungekuerzt in den Betreff.
+	# The quote is what makes the report readable in the mailbox — so it must
+	# stay line-break-free and must not land in the subject untruncated.
 	var flat := LegalClass.quote("erste Zeile\r\nzweite Zeile")
 	t.check(not flat.contains("\n") and not flat.contains("\r"),
 		"Ein Zitat bricht keine Zeile um")
@@ -386,8 +462,8 @@ func _legal() -> void:
 		"Ein Zitat bleibt kuerzer als %d Zeichen" % LegalClass.MAX_QUOTE)
 	t.equal(LegalClass.quote("  rand  "), "rand", "Rand Leerzeichen fallen weg")
 
-	# Betreff und Rumpf muessen die Nummer tragen, sonst laesst sich im
-	# Postfach nicht zurueckfinden, was gemeldet wurde.
+	# Subject and body must carry the number, otherwise the mailbox cannot
+	# tell what was reported.
 	t.check(str(LegalClass.report_subject(7)).contains("7"),
 		"Der Betreff nennt die Nummer des Vorschlags")
 	var body := LegalClass.report_body(7, "Beleidigung", str(LegalClass.REASONS[0]), "  ")
@@ -401,43 +477,40 @@ func _legal() -> void:
 			str(LegalClass.REASONS[LegalClass.REASONS.size() - 1])),
 		"Ohne gewaehlten Grund greift der letzte, statt ein leerer zu bleiben")
 
-	# `mailto:` bricht an Zeilenumbruechen und Nicht-ASCII ab, deshalb wird
-	# alles kodiert. Ohne das waere die Meldung bei Umlauten nur ein Betreff
-	# ohne Text.
+	# `mailto:` breaks on line breaks and non-ASCII, so everything is encoded.
+	# Without that, a report with umlauts would arrive as a subject without
+	# text.
 	var mailto := str(LegalClass.report_mailto(7, "Beleidigung für alle", "Grund", "Notiz"))
 	t.check(mailto.begins_with("mailto:"), "Die Meldung ist eine mailto-Adresse")
 	t.check(not mailto.contains(" "), "Kein Leerzeichen bricht die URL")
 	t.check(mailto.contains("subject=") and mailto.contains("body="),
 		"Betreff und Text stehen in der Adresse")
-	# Ein Umlaut muss prozentkodiert sein. Bricht er die `mailto:`-Adresse,
-	# kommt auf manchen Geraeten nur der Betreff ohne Text an — die Meldung
-	# waere dann leer, ohne dass irgendwo ein Fehler stuende.
+	# An umlaut must be percent-encoded. If it broke the `mailto:` address,
+	# some devices would receive only the subject without text — the report
+	# would be empty with no error anywhere.
 	t.check(not mailto.contains("ü"), "Der Umlaut ist prozentkodiert")
 	t.equal(LegalClass.report_message(7, "Beleidigung", "Grund", "n"),
 		LegalClass.report_body(7, "Beleidigung", "Grund", "n"),
 		"Zwischenablage und Mail tragen denselben Text")
 	t.suite_done()
 
-# --- Server-Adresse ----------------------------------------------------------
 
-## Der Dialog, ueber den die Adresse des Backends eingetragen wird.
-##
-## Er lag vorher fest im Menue des Arena-Spiels und war damit von jedem anderen
-## Bildschirm aus unerreichbar. Wer auf dem Hauptbildschirm einen Vorschlag
-## abschickte, ohne die Adresse je eingetragen zu haben, sah die Idee in
-## `user://` liegen und bekam nichts zu sehen — sie war "gespeichert" und kam
-## trotzdem nie an. Diese Suite sichert beide Haelften: dass die Adresse von
-## ueberall erreichbar beschriftet wird und dass sie eine wartende Schlange
-## sofort anstoesst.
+# --- Server address ---------------------------------------------------------
+
+## The dialog through which the backend address is entered. It used to live fixed
+## in the arena game's menu, so it was unreachable from every other screen: an
+## idea submitted from the main screen without an address sat in `user://` looking
+## saved and never arrived. This suite secures both halves — that the address is
+## reachable from everywhere, and that it wakes a waiting queue immediately.
 func _server_address() -> void:
 	t.suite("Server-Adresse")
 
-	# Ohne Adresse sagt der Knopf das auch. Ein Knopf, der "Server: offline"
-	# anzeigt, braucht keine weitere Erklaerung — er *ist* die Erklaerung.
+	# Without an address the button says so. A button showing "Server:
+	# offline" needs no further explanation — it *is* the explanation.
 	t.equal(ServerDialogClass.label(), "Server: offline",
 		"Ohne Adresse steht 'offline' im Knopf")
 
-	# Eine wartende Schlange, wie sie nach einem Offline-Vorschlag aussieht.
+	# A waiting queue as it looks after an offline suggestion.
 	var pending: Array[Dictionary] = []
 	QueueClass.push(pending, {
 		"text": "Der Knopf des Siedlers ist auf dem Tablet verdeckt.",
@@ -447,15 +520,15 @@ func _server_address() -> void:
 	Api._queue = pending
 	t.equal(Api.pending_count(), 1, "Der Vorschlag liegt in der Warteschlange")
 
-	# Der teuerste Fall: der Zaehler ist so weit gelaufen, dass die Backoff-Zeit
-	# am Deckel klebt. Genau hier wartet eine Idee fuenf Minuten, obwohl der
-	# Spieler die Adresse jederzeit eintragen koennte.
+	# The expensive case: the counter has run so far that the backoff time
+	# sits at the cap. Exactly here an idea waits five minutes although the
+	# player could enter the address at any time.
 	Api._attempt = 8
 	Api._arm(8)
 	t.check(Api._timer.wait_time >= 290.0,
 		"Ohne Adresse wartet die Schlange die maximale Backoff-Zeit")
 
-	# Und jetzt die Adresse — der Moment, in dem die Idee raus muss.
+	# And now the address — the moment the idea has to go out.
 	ServerDialogClass.apply("http://127.0.0.1:8787")
 	t.equal(Game.server_url, "http://127.0.0.1:8787", "Die Adresse ist gesetzt")
 	t.check(ServerDialogClass.label().ends_with("http://127.0.0.1:8787"),
@@ -464,7 +537,7 @@ func _server_address() -> void:
 	t.check(Api._timer.wait_time <= 1.0,
 		"Die Schlange wird sofort wieder angestoßen, nicht in fuenf Minuten")
 
-	# Aufraeumen: die restlichen Suiten und Screens gehen von "ohne Server" aus.
+	# Cleanup: the remaining suites and screens assume "no server".
 	ServerDialogClass.apply("")
 	Api._queue.clear()
 	Api._attempt = 0

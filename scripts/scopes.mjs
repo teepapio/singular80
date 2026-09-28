@@ -2,19 +2,15 @@
 /**
  * Scope manifest and pre-commit guard for parallel agents.
  *
- * The whole point: every file an agent is allowed to touch belongs to exactly
- * one scope. The runner starts a second agent in the same tree, so without an
- * exclusive ownership rule `git add -A` sweeps up a stranger's work and a
- * generated asset can be committed by whoever commits first.
+ * The runner starts a second agent in the same tree, so every file must belong
+ * to exactly one scope — otherwise `git add -A` sweeps up a stranger's work.
  *
  *   node scripts/scopes.mjs list
  *   node scripts/scopes.mjs check tetris            # staged files vs scope
  *   node scripts/scopes.mjs check tetris,pang --staged
  *   node scripts/scopes.mjs explain godot/src/core/logic/asset_registry.gd
  *
- * A scope may claim `own` (private to it) and `shared` (files every agent
- * touches). Shared files are allowed but reported loudly, because they are the
- * places two agents genuinely collide.
+ * `own` is private to the scope, `shared` is a file every agent touches.
  */
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
@@ -24,12 +20,9 @@ import { execFileSync } from 'node:child_process';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * Every game agent touches these. Listing them keeps the guard honest.
- *
- * The central test files are here rather than in a game's `own`: a game agent
- * does write rules tests, and hiding that would make the manifest wrong rather
- * than make the collision go away. It gets its own `godot/tests/test_<id>.gd`
- * instead, which nobody else claims.
+ * Files every game agent touches. The central test files sit here rather than
+ * in a game's `own`; a game gets its own `godot/tests/test_<id>.gd` instead,
+ * which nobody else claims.
  */
 export const SHARED_FILES = [
   'godot/src/core/logic/asset_registry.gd',
@@ -47,8 +40,8 @@ export const SHARED_FILES = [
 ];
 
 /**
- * Logic modules a game owns outright. Games without an entry either share a
- * generic module (cards, checkers, twenty48) or keep their rules in the screen.
+ * Logic modules a game owns outright. A game without an entry shares a generic
+ * module (cards, checkers, twenty48) or keeps its rules in the screen.
  */
 const GAME_LOGIC = {
   arena: ['godot/src/core/logic/arena_runs.gd'],
@@ -58,8 +51,8 @@ const GAME_LOGIC = {
   dame: ['godot/src/core/logic/checkers.gd'],
   '2048': ['godot/src/core/logic/twenty48.gd'],
   crystal3d: ['godot/src/core/logic/crystal_tower.gd'],
-  // Die Logikdatei hängt am Basis-Scope: `buildScopes` liest `GAME_LOGIC[base]`,
-  // ein Eintrag unter einem Varianten-Key würde nie gelesen.
+  // The logic file hangs off the base scope: `buildScopes` reads
+  // `GAME_LOGIC[base]`, so an entry under a variant key would never be read.
   merge3d: ['godot/src/core/logic/merge3d.gd'],
   dragonrpg: ['godot/src/core/logic/dragon_rpg.gd'],
   dragonflight: ['godot/src/core/logic/dragon_flight.gd'],
@@ -71,9 +64,8 @@ const GAME_LOGIC = {
 };
 
 /**
- * Registry entries that reuse another game's screen and logic module. They are
- * lobby entries and content themes, not separate code bases, so they resolve to
- * the base scope instead of claiming ownership a second time.
+ * Entries that reuse another game's screen and logic: lobby entries and content
+ * themes, so they resolve to the base scope instead of claiming it twice.
  */
 const VARIANT_BASE = {
   'crystal3d-christmas': 'crystal3d',
@@ -83,10 +75,8 @@ const VARIANT_BASE = {
 };
 
 /**
- * The test suites each scope owns. This is what lets a game agent verify only
- * its own game: `npm run test:game -- --scope tetris` resolves to exactly the
- * suites listed here, and `validate()` fails if a name no longer exists in the
- * test files, so the mapping cannot rot silently.
+ * The test suites each scope owns: `npm run test:game -- --scope tetris`
+ * resolves to exactly these. `validate()` fails if a name no longer exists.
  *
  * The `Screens` sweep is driven separately, by `screens` below.
  */
@@ -140,10 +130,13 @@ const SCOPE_SUITES = {
   meshes: ['Asset-Registry', 'Mesh-Galerie', 'Mesh — Detailstufen', 'Mesh-Galerie — Anordnung',
     'Mesh-Galerie — Merkliste'],
   lobby: ['Lobby-Geometrie', 'Vorschlagsdialog'],
-  core: ['Mechaniken', 'Inventar', 'Vorschlag — Herkunft', 'Server-Adresse',
+  core: ['Mechaniken', 'Inventar', 'Vorschlag — Herkunft', 'Auftragsweg', 'Server-Adresse',
     'Vorschlags-Warteschlange', 'Vorschlags-Warteschlange — Ablage',
     'Vorschlags-Warteschlange — Backoff', 'Vorschlags-Warteschlange — Obergrenze',
-    'Vorschlags-Warteschlange — Zustellung', 'Rechtliches & Melden'],
+    'Vorschlags-Warteschlange — Zustellung', 'Rechtliches & Melden',
+    'Sprachen — Kataloge', 'Sprachen — Auflösung', 'Sprachen — Platzhalter',
+    'Sprachen — Plural', 'Sprachen — Zahlen', 'Sprachen — Wechsel',
+    'Sprachen — Oberfläche'],
   content: ['Content', 'Content-Integrität', 'Content-Synchronisation'],
   dashboard: [],
   tests: ['Farm-Audit — freier Knopf', 'Farm-Audit — zugedeckter Knopf',
@@ -158,8 +151,8 @@ const SCOPE_SCREENS = {
   freecell: ['freecell'],
   dame: ['dame'],
   crystal3d: ['crystal3d', 'crystal3d_christmas', 'crystal3d_halloween'],
-  // Die Screen-Liste hängt am Basis-Scope: die Varianten erben sie, eine Liste
-  // unter einem Varianten-Key würde nie gelesen.
+  // The screen list hangs off the base scope: variants inherit it, so a list
+  // under a variant key would never be read.
   merge3d: ['merge3d_christmas', 'merge3d_halloween'],
   horserunner: ['horserunner'],
   dragonrpg: ['dragonrpg'],
@@ -217,17 +210,15 @@ const staticScopes = {
     agent: 'merge',
     label: 'Werkzeuge & Manifest',
     // Every game agent has to touch `scopes.mjs` to register its new suites,
-    // and without an owner the guard reported that to every one of them as a
-    // scope violation — a manifest that flags the step it requires is worse
-    // than no manifest.
+    // so an unowned manifest would flag the step it requires.
     //
-    // Named rather than `scripts/**`: a broad glob would overlap the meshes
-    // scope, which owns `scripts/blender/**`. The manifest has no way to
-    // subtract, so the entries are spelled out.
+    // Spelled out rather than `scripts/**`: a broad glob would overlap the
+    // meshes scope, and the manifest has no way to subtract.
     own: [
       'scripts/scopes.mjs',
       'scripts/test-game.mjs',
       'scripts/sync-content.mjs',
+      'scripts/locale.mjs',
       'scripts/install-guard.sh',
       'scripts/install-android-template.mjs',
       'scripts/smoke.ts',
@@ -262,9 +253,8 @@ const staticScopes = {
   tests: {
     agent: 'build',
     label: 'Test-Harness',
-    // Only the harness itself. `godot/tests/test_<spiel>.gd` belongs to the
-    // game of that name, so a game agent can add regression tests without two
-    // games ever appending to the same file.
+    // Only the harness itself. `godot/tests/test_<spiel>.gd` belongs to the game
+    // of that name, so two games never append to the same file.
     own: ['godot/tests/test_kit.gd', 'vitest.config.ts', 'tsconfig.json', 'tests/**'],
     shared: ['package.json', 'godot/tests/run_tests.gd', 'godot/tests/test_logic.gd',
       'godot/tests/test_screens.gd', 'godot/tests/test_improvements.gd'],
@@ -276,22 +266,48 @@ const staticScopes = {
       'godot/src/core/logic/mechanics/**',
       'godot/src/core/logic/player_stats.gd',
       'godot/src/core/logic/item_inventory.gd',
+      // Die Sprachschicht. `loc.gd` trägt die Kataloge, `loc.gd.uid` gehört dazu,
+      // damit ein neues Skript nicht ohne die Datei liegen bleibt, die das Repo
+      // sonst überall mitführt.
+      'godot/src/core/logic/loc.gd',
+      'godot/src/core/logic/loc.gd.uid',
       'godot/src/core/logic/suggestion_context.gd',
-      // Die Logikmodule bringen ihre .uid-Datei mit, sonst bliebe ein neues
-      // Skript ohne die Datei liegen, die das Repo sonst überall mitführt.
+      // Each logic module brings its `.uid` sibling: the repo versions 61 of
+      // them under `godot/src/`, so a new logic file that leaves its `.uid`
+      // untracked is an inconsistency, not a detail.
       'godot/src/core/logic/suggestion_queue.gd',
       'godot/src/core/logic/suggestion_queue.gd.uid',
+      // Die Kataloge liegen im Repo und sind ins Godot-Projekt gespiegelt, genau
+      // wie `content/*.json` — beide Wege prüft `npm test` gegeneinander.
+      'locale/**',
+      'godot/assets/locale/**',
       'godot/src/core/ui/**',
       'godot/src/core/autoload/input_setup.gd',
       'godot/src/core/autoload/api_client.gd',
       'godot/src/core/autoload/content_store.gd',
       'godot/src/core/autoload/audio_service.gd',
-      // Eigene Testdatei, wie bei den Spielen: so schreibt niemand in
-      // `test_logic.gd` hinein.
+      // Its own test file, as the games have: so nobody writes into
+      // `test_logic.gd`.
       'godot/tests/test_core.gd',
       'godot/tests/test_core.gd.uid',
+      'godot/tests/test_loc.gd',
+      'godot/tests/test_loc.gd.uid',
     ],
     shared: ['godot/src/core/autoload/game_state.gd', 'godot/src/core/logic/game_registry.gd'],
+    suites: [
+      'Mechaniken',
+      'Inventar',
+      'Vorschlag — Herkunft',
+      'Auftragsweg',
+      'Server-Adresse',
+      'Vorschlags-Warteschlange',
+      'Vorschlags-Warteschlange — Ablage',
+      'Vorschlags-Warteschlange — Backoff',
+      'Vorschlags-Warteschlange — Obergrenze',
+      'Vorschlags-Warteschlange — Zustellung',
+      'Rechtliches & Melden',
+    ],
+    screens: [],
   },
   content: {
     agent: 'game',
@@ -310,8 +326,8 @@ export function buildScopes() {
   const dirs = gameDirs();
   const scopes = new Map();
 
-  // Basis-Spiele zuerst: jede Variante braucht ihren Basis-Scope, und
-  // `merge3d` existiert nur als Variante, nie als Registry-Eintrag.
+  // Base games first: every variant needs its base scope, and `merge3d` exists
+  // only as a variant, never as a registry entry.
   const bases = new Set([...dirs.keys()].filter((id) => !VARIANT_BASE[id]));
   for (const base of Object.values(VARIANT_BASE)) bases.add(base);
 
@@ -319,14 +335,10 @@ export function buildScopes() {
     const dir = dirs.get(base) ?? [...dirs.values()].find((d) => d === base.replace('-', ''))
       ?? [...dirs.values()].find((d) => d.startsWith(base.split('-')[0]));
     if (!dir) continue;
-    // A game agent also gets a private test file of its own. That is where new
-    // regression tests go, so two games never append to the same suite file.
-    // The trailing `*` also claims Godot's `test_<id>.gd.uid`, which is
-    // committed like every other script and would otherwise be unownable.
-    //
-    // Each logic module brings its `.uid` sibling: the repo versions 61 of them
-    // under `godot/src/`, so a new logic file that leaves its `.uid` untracked
-    // is an inconsistency, not a detail.
+    // A game agent also gets a private test file, so two games never append to
+    // the same suite file. The trailing `*` also claims Godot's
+    // `test_<id>.gd.uid`, which is committed like every other script and would
+    // otherwise be unownable.
     const logic = GAME_LOGIC[base] ?? GAME_LOGIC[dir] ?? [];
     const own = [
       `godot/src/game/${dir}/**`,
@@ -417,8 +429,8 @@ export function validate(scopes = buildScopes()) {
       }
     }
   }
-  // Exklusivität: keine Datei darf zwei Scopes gehören. Varianten sind
-  // ausgenommen — sie spiegeln bewusst den Basis-Scope.
+  // Exclusivity: no file may belong to two scopes. Variants are exempt — they
+  // deliberately mirror the base scope.
   const seen = new Map();
   for (const [name, scope] of scopes) {
     if (scope.aliasOf) continue;
@@ -437,9 +449,8 @@ export function validate(scopes = buildScopes()) {
       }
     }
   }
-  // Jede Suite muss genau einem Scope gehören. Ohne diese Prüfung landet eine
-  // Suite in keinem Scope und läuft nur im Volllauf mit — der zuständige Agent
-  // merkt seine Regression erst beim Merge.
+  // Every suite must belong to exactly one scope. Unclaimed, a suite runs only
+  // in the full run and the responsible agent sees the regression at merge time.
   const suites = allSuites();
   const claimed = new Map();
   for (const [name, scope] of scopes) {
@@ -458,32 +469,28 @@ export function validate(scopes = buildScopes()) {
     }
   }
 
-  // Jedes Registry-Spiel braucht einen Scope.
+  // Every registry game needs a scope.
   for (const id of gameIds()) if (!scopes.has(id)) problems.push(`Spiel '${id}' hat keinen Scope`);
 
-  // Suite-Zuordnung: jeder Name muss real existieren, sonst testet der Scope
-  // still nichts und der Agent glaubt, er sei grün.
+  // Every name must really exist, or the scope silently tests nothing and the
+  // agent believes it is green.
   for (const [name, scope] of scopes) {
     for (const suite of scope.suites ?? []) {
       if (!suites.has(suite)) problems.push(`Scope '${name}': Suite '${suite}' existiert nicht in den Tests`);
     }
   }
 
-  // Und umgekehrt: eine Suite-Datei, die der Runner nie aufruft, wird nie
-  // ausgeführt — der grüne Lauf prüft dann weniger, als das Repo enthält.
+  // And the reverse: a suite file the runner never loads never runs, so a green
+  // run checks less than the repo contains.
   //
-  // Eine automatische-discovery im Runner wäre die bessere Lösung, aber GDScript
-  // kann das nicht: die Suites haben unterschiedliche Parameterzahl, und eine
-  // asynchrone `run()` lässt sich per `call()` nicht aufrufen ("Trying to call an
-  // async function without await"). Der Runner bleibt deshalb handgepflegt, und
-  // dieser Check macht das Handpflegen überprüfbar.
+  // The runner stays hand-kept: the suites take different parameters, and an
+  // async `run()` cannot be invoked via `call()` ("Trying to call an async
+  // function without await"). This check makes the hand-keeping verifiable.
   const runner = readFileSync(join(root, 'godot/tests/run_tests.gd'), 'utf8');
   for (const file of suiteFiles()) {
-    // Accept either reference form: by path (`load("res://tests/test_x.gd")`) or
-    // by `class_name` (`TestX.new()`). The class-name form only resolves if the
-    // global class cache was built, which is why the per-game suites all moved
-    // to the path form — but the two original suites still use it, and they do
-    // run.
+    // Either reference form counts: by path (`load("res://tests/test_x.gd")`) or
+    // by `class_name` (`TestX.new()`). The class-name form needs a built global
+    // class cache, which is why the per-game suites use the path form.
     const base = file.split('/').pop();
     const className = (readFileSync(join(root, file), 'utf8').match(/class_name\s+(\w+)/) ?? [])[1];
     if (!runner.includes(base) && !(className && runner.includes(className))) {
