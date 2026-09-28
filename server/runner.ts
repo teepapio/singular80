@@ -18,6 +18,7 @@ import type {
   SuggestionView,
 } from '../src/shared/types';
 import type { Store } from './db';
+import { appendChangelog } from './changelog';
 import { auditScope, freeLane, scopeForSuggestion, scopesConflict } from './scopes';
 
 export interface RunnerCallbacks {
@@ -1135,6 +1136,12 @@ export class Runner {
       kind: 'done',
       text: note ?? (record.status === 'succeeded' ? 'Erfolgreich abgeschlossen' : `Fehlgeschlagen (Exit ${exitCode})`),
     });
+    // The changelog is appended here, and only for a run that actually
+    // succeeded. It is best-effort: a changelog that misses a line must never
+    // turn a good run into a failed one, so the return value is not inspected.
+    if (record.status === 'succeeded' && suggestion) {
+      appendChangelog(this.options.projectRoot, suggestion, record);
+    }
     // The lane is freed *before* the retry is queued. A retry repeats this very
     // scope, and the finished run still claims it — ordering these two the other
     // way round would make the retry block on the ghost of its own predecessor

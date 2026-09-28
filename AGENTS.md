@@ -60,6 +60,54 @@ So liegt die Arbeit auf GitHub, `main` bleibt grün, und sie ist später greifba
 Vorher `npm run typecheck` laufen lassen — halbfertige Arbeit bricht erfahrungsgemäß
 genau dort, und ein geparkter Branch ist der richtige Ort dafür, nicht `main`.
 
+## Sprache im Code
+
+**Kommentare auf Englisch.** Der Besitzer liest den Code nicht, aber er
+bezahlt für ihn, und ein deutscher Kommentar in einer englischen Codebasis
+sieht nach einer zweiten Sprache aus, die niemand mehr pflegt. Doc-Kommentare
+(`## …`) und `//`-Zeilen auf Englisch, im Tonfall der vorhandenen englischen
+Kommentare. **Die Oberfläche des Spiels bleibt deutsch** — das ist etwas
+anderes: `Ui.label("Server: %s")`, `toast('Run gestartet')` und alle
+Meldungstexte gehören dem Spieler, nicht dem Code.
+
+Ausnahmen, in denen Deutsch im Kommentar richtig ist: ein Zitat aus dem
+Spiel, ein deutscher Terminus technicus, oder ein Kommentar, der eine
+deutsche Bedienoberfläche erklärt.
+
+## Changelog
+
+`CHANGELOG.md` bekommt **einen Eintrag mit ein bis zwei Zeilen pro
+umgesetztem Vorschlag** — im Spiel, im Dashboard, in Telegram. Kein
+Absatz, keine Liste von Dateien; die Zeile sagt, was sich für den Spieler
+geändert hat, und der Commit-Hash dahinter sagt, wo.
+
+Geschrieben wird die Datei **vom Runner**, nicht vom Agenten, der den
+Vorschlag umgesetzt hat (`server/changelog.ts`, aufgerufen in `runner.ts` bei
+`status === 'succeeded'`). Grund: nur der Runner weiß mit Sicherheit, dass
+der Lauf erfolgreich war. Ein Agent, der sich selbst in die Changelog
+lobt, kann das ebenso für einen Lauf tun, der fehlgeschlagen ist.
+
+Der Commit **rührt nur `CHANGELOG.md` an**, mit ausdrücklichem Pfad
+(`git commit -- CHANGELOG.md`) und wird gepusht. Ein `git add -A` hier würde
+die halbfertige Arbeit einer fremden Sitzung mitnehmen — siehe oben. Ein
+Fehlschlag ist eine fehlende Zeile, **kein** Anlass, einen guten Lauf als
+fehlgeschlagen zu melden.
+
+## Kurze Abschlussberichte
+
+**Der Bericht am Ende einer Aufgabe ist kurz.** Höchstens fünf Stichpunkte,
+und nur was eine Entscheidung ändert oder verlangt:
+
+- Was geändert wurde — in einem Satz, nicht in einer Aufzählung von Dateien.
+- Was der Besitzer tun muss, mit dem konkreten Befehl oder der Reihenfolge.
+- Was **nicht** fertig ist oder warum etwas nicht ging.
+- Ein Sicherheits- oder Datenverlustrisiko, wenn es eines gibt.
+
+Kein "Ich habe X geprüft", kein "die Tests laufen durch", keine Wiederholung
+desselben Punkts in zwei Formulierungen. Wer eine Datei oder Zeile braucht,
+schaut in den Commit. Ein Bericht, den niemand liest, ist genauso wertlos
+wie ein Changelog, das keiner pflegt.
+
 ## Vor der ersten Änderung
 
 Drei Sekunden, die in dieser Sitzung einen halben Tag ersetzt haben:
