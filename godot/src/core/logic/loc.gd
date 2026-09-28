@@ -2,12 +2,12 @@ class_name Loc
 extends RefCounted
 ## Language, translation lookup, locale-aware number formatting.
 ## Two key kinds, in order: `keys` (ids like `ui.back_to_lobby`) and `text` (the
-## German source string as its own key, which is what `Ui.label` & co. pass to
+## German source string as its own key, which is what `Ui.label` passes to
 ## `resolve()` — so existing labels translate without rewriting 650 call sites).
 ## Invariant: `resolve()` is idempotent, because `_values` holds every string a
 ## catalogue emits. A missing translation falls back active -> `de` -> the key.
-## Number separators come from the catalogue (`1.234` de, `1,234` en).
-## No `ConfigFile` here: persistence goes through `Game.set_language`.
+## Separators come from the catalogue (`1.234` de, `1,234` en). Persistence goes
+## through `Game.set_language`, not a `ConfigFile` here.
 
 const DIR := "res://assets/locale"
 ## Mirrored from `locale/identical.json`; read, never treated as a language.
@@ -99,9 +99,17 @@ static func _load_identical() -> void:
 	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(file))
 	if not (parsed is Dictionary):
 		return
-	for section in ["keys", "text"]:
-		for key in (parsed as Dictionary).get(section, []):
-			_identical[str(key)] = true
+	# One entry per language: "Bonbonland" is the French name of the Candy world
+	# while the English one says "Candy Land", so a single shared list would have
+	# to call one of them untranslated.
+	for code in (parsed as Dictionary).keys():
+		var entry: Variant = (parsed as Dictionary)[code]
+		if not (entry is Dictionary):
+			continue
+		_identical[code] = {}
+		for section in ["keys", "text"]:
+			for key in (entry as Dictionary).get(section, []):
+				_identical[code][str(key)] = true
 
 
 static func _load_catalogue(file: String, dir: DirAccess) -> void:
@@ -197,6 +205,11 @@ static func _checked(code: String, section: Variant, named: bool) -> Dictionary:
 
 
 ## What a text has to keep intact to be substitutable.
+## The equal-on-purpose entries of one language.
+static func _locked(code: String) -> Dictionary:
+	return _identical.get(code, {})
+
+
 static func _signature(text: String, named: bool) -> String:
 	if named:
 		return ",".join(_placeholders(text))
@@ -523,7 +536,7 @@ static func coverage(code: String) -> float:
 		var want: Dictionary = source.get(section, {})
 		var have: Dictionary = catalogue.get(section, {})
 		for key in want:
-			if _identical.has(key):
+			if _locked(code).has(key):
 				continue
 			total += 1
 			if str(have.get(key, "")) != str(want[key]) and str(have.get(key, "")) != "":
@@ -542,7 +555,7 @@ static func missing(code: String) -> PackedStringArray:
 		var want: Dictionary = source.get(section, {})
 		var have: Dictionary = catalogue.get(section, {})
 		for key in want:
-			if _identical.has(key):
+			if _locked(code).has(key):
 				continue
 			var translated := str(have.get(key, ""))
 			if translated == "" or translated == str(want[key]):

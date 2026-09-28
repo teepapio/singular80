@@ -339,7 +339,11 @@ function readIdentical() {
 /** The set for one language, in the shape `coverage` wants. */
 export function identicalSet(all, code) {
   const entry = readIdentical()[code] ?? {};
-  return new Set([...(entry.keys ?? []), ...(entry.text ?? [])]);
+  if (typeof entry !== 'object' || entry === null) return new Set();
+  return new Set([
+    ...(Array.isArray(entry.keys) ? entry.keys : []),
+    ...(Array.isArray(entry.text) ? entry.text : []),
+  ]);
 }
 
 function readExcludes() {
@@ -614,8 +618,13 @@ function check() {
     }
   }
   for (const [code, locked] of Object.entries(identical)) {
+    if (code.startsWith('_')) continue;                 // `_comment` is prose, not a language
     if (!all.has(code)) problems.push(`identical.json kennt die Sprache '${code}', für die es keinen Katalog gibt`);
-    for (const key of new Set([...(locked.keys ?? []), ...(locked.text ?? [])])) {
+    const keys = new Set([
+      ...(Array.isArray(locked?.keys) ? locked.keys : []),
+      ...(Array.isArray(locked?.text) ? locked.text : []),
+    ]);
+    for (const key of keys) {
       if (!(key in source.keys) && !(key in source.text)) {
         problems.push(`identical.json nennt '${key}', das es in ${SOURCE}.json nicht gibt`);
       }
