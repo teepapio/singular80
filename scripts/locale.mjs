@@ -29,10 +29,22 @@ const mirrorDir = join(godotRoot, 'assets', 'locale');
 const excludeFile = join(sourceDir, 'exclude.json');
 const content = join(root, 'content');
 
-/** The language the source is written in. Every other catalogue translates it. */
-export const SOURCE = 'de';
+/**
+ * The language the source is written in — and it is the language of the *code*,
+ * not the language of the game. `godot/src` holds English literals, `sync`
+ * derives `en.json` from them, and `de.json` and `fr.json` translate that.
+ *
+ * The direction is deliberate. A gettext catalogue is a list of msgids that
+ * everyone on the project can read, and a msgid nobody can read is one nobody
+ * can fix. German was the wrong pivot for a codebase whose comments, its
+ * identifiers and its git history are English: a translator working from a
+ * German key had to guess what the sentence meant before they could translate
+ * it, and the source of truth was a file the rest of the repository cannot
+ * read.
+ */
+export const SOURCE = 'en';
 /** Catalogues `sync` creates when a translation does not exist yet. */
-const TARGETS = ['en', 'fr'];
+const TARGETS = ['de', 'fr'];
 
 /**
  * Call sites whose string literal a player reads.
@@ -281,6 +293,172 @@ export function collect() {
   return { keys, text, locF };
 }
 
+// --- the format lint --------------------------------------------------------
+
+/** `Loc.f("…", [ … ])`: a literal template with an argument list right behind it. */
+const LOC_F_SITE = /Loc\.f\(\s*("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')\s*,/g;
+
+const BRACKET_OPEN = new Map([['(', ')'], ['[', ']'], ['{', '}']]);
+const BRACKET_CLOSE = new Set([')', ']', '}']);
+const IDENT_CHAR = /[A-Za-z_]/;
+/** What may sit between the comma after a template and the list behind it. */
+const BLANK = ' \t\n\r';
+/** The flags and conversions of `Loc._count_specifiers`, in that order. */
+const SPECIFIER_FLAGS = '-+#0123456789.*';
+const SPECIFIER_CONVERSIONS = 'sdfxXo';
+/** Templates are quoted in full in a problem message until they get silly. */
+const LONG_TEMPLATE = 60;
+
+/**
+ * How many `%` placeholders a template has — `%%` does not count as one.
+ *
+ * A copy of `Loc._count_specifiers`, quirks included: a space is not a flag,
+ * because `+12 % Feuerrate` is a percent sign in a sentence and not a format
+ * string. Two counters that disagree about that would call a template and its
+ * own arguments incompatible over nothing but the case of one letter.
+ */
+function countSpecifiers(text) {
+  let count = 0;
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] !== '%') {
+      i += 1;
+      continue;
+    }
+    if (text[i + 1] === '%') {
+      i += 2;
+      continue;
+    }
+    let j = i + 1;
+    while (j < text.length && SPECIFIER_FLAGS.includes(text[j])) j += 1;
+    if (j < text.length && SPECIFIER_CONVERSIONS.includes(text[j])) count += 1;
+    i = j + 1;
+  }
+  return count;
+}
+
+/** The index of the quote that closes the literal at `start`, or -1. */
+function closingQuote(text, start) {
+  const quote = text[start];
+  for (let i = start + 1; i < text.length; i += 1) {
+    if (text[i] === '\\') {
+      i += 1;
+      continue;
+    }
+    if (text[i] === '\n') return -1;                     // unterminated
+    if (text[i] === quote) return i;
+  }
+  return -1;
+}
+
+/**
+ * The elements of the bracket list that opens at `open`, plus the identifiers
+ * that stand on its own level.
+ *
+ * `null` for anything that cannot be counted with certainty: an unbalanced
+ * bracket, a `"""` block, a comment that could be hiding a comma. Reporting a
+ * site out of doubt costs more than the mistake it was meant to catch, because
+ * the false alarm is the one somebody has to go and read.
+ */
+function listElements(text, open) {
+  if (text[open] !== '[') return null;                   // a variable, a call, no list
+  const stack = [];
+  const parts = [];
+  const words = new Set();
+  let start = open + 1;
+  let word = '';
+  const flush = () => {
+    if (word !== '') words.add(word);
+    word = '';
+  };
+  for (let i = open + 1; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === '#') return null;                          // a comment may hold a comma
+    if (c === '"' || c === "'") {
+      if (text.slice(i, i + 3) === c.repeat(3)) return null;
+      flush();
+      const end = closingQuote(text, i);
+      if (end < 0) return null;
+      i = end;
+    } else if (BRACKET_OPEN.has(c)) {
+      flush();
+      stack.push(BRACKET_OPEN.get(c));
+    } else if (c === ']' && stack.length === 0) {
+      parts.push(text.slice(start, i));
+      return { parts, words };
+    } else if (BRACKET_CLOSE.has(c)) {
+      flush();
+      if (stack.pop() !== c) return null;
+    } else if (c === ',' && stack.length === 0) {
+      flush();
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    } else if (IDENT_CHAR.test(c)) {
+      word += c;
+    } else {
+      flush();
+    }
+  }
+  return null;
+}
+
+/**
+ * The `Loc.f` call sites whose placeholders and values disagree.
+ *
+ * The mistake this exists for is silent. In `"TEMP" % n if n > 0 else "OTHER"`
+ * the `%` binds tighter than the conditional, so a migration that moves the `%`
+ * into the argument list hands a string to a `%d` and Godot answers at runtime
+ * with `String formatting error: a number is required` — in a level, in
+ * whichever language the player picked. A file that parses is not a file that
+ * formats.
+ */
+export function formatMismatches(text, file) {
+  const problems = [];
+  LOC_F_SITE.lastIndex = 0;
+  for (let m = LOC_F_SITE.exec(text); m; m = LOC_F_SITE.exec(text)) {
+    // A commented-out call is not a call. GDScript comments run to the end of
+    // the line, so the marker only has to be looked for on the site's own line.
+    const lineStart = text.lastIndexOf('\n', m.index - 1) + 1;
+    if (text.slice(lineStart, m.index).includes('#')) continue;
+    const template = m[1].slice(1, -1).replace(/\\(.)/g, (_, c) => unescape(c));
+    // `m[0]` ends on the comma; the list may start a line further down.
+    let open = m.index + m[0].length;
+    while (BLANK.includes(text[open])) open += 1;
+    const list = listElements(text, open);
+    if (!list) continue;                                // not countable with certainty
+    // A conditional on the top level may feed a different shape per branch,
+    // and which branch runs is not a question a linter can answer.
+    //
+    // This is also where the mistake the check was written for used to hide:
+    // `Loc.f("· %d Sterne benötigt", [need if need > 0 else "· Level %d zuerst"
+    // % (n - 1)])` has one placeholder and one value, so no count disagrees —
+    // what is wrong there is the *type* of one branch, and only the type can
+    // say so. A counting lint is blind there on purpose; see the note in
+    // `tests/locale.test.ts` before turning this skip into a report.
+    if (list.words.has('if')) continue;
+    const values = list.parts.filter((part) => part.trim() !== '').length;
+    const want = countSpecifiers(template);
+    if (want === values) continue;
+    const shown = template.length > LONG_TEMPLATE
+      ? `${template.slice(0, LONG_TEMPLATE)}…`
+      : template;
+    const line = text.slice(0, m.index).split('\n').length;
+    problems.push(`Loc.f("${shown}") in ${file}:${line} hat ${want} `
+      + `${want === 1 ? 'Platzhalter' : 'Platzhaltern'}, bekommt aber ${values} `
+      + `${values === 1 ? 'Wert' : 'Werte'}`);
+  }
+  return problems;
+}
+
+/** Every `Loc.f` mismatch in the game code, phrased the way `check` wants it. */
+export function formatMismatchesInProject() {
+  const problems = [];
+  for (const file of sourceFiles()) {
+    problems.push(...formatMismatches(readFileSync(file, 'utf8'), file.slice(root.length + 1)));
+  }
+  return problems;
+}
+
 // --- catalogues --------------------------------------------------------------
 
 function readCatalogue(code) {
@@ -355,7 +533,7 @@ function readExcludes() {
 /** A catalogue in the order it is written out. */
 function serialise(catalogue) {
   const sorted = (obj) => Object.fromEntries(
-    Object.entries(obj).sort(([a], [b]) => a.localeCompare(b, 'de')),
+    Object.entries(obj).sort(([a], [b]) => a.localeCompare(b, 'en')),
   );
   const out = {
     code: catalogue.code,
@@ -426,7 +604,7 @@ function sync() {
     if (!found.keys.has(key)) console.warn(`[locale] ${key} steht in ${SOURCE}.json, wird aber nicht mehr benutzt`);
   }
   // `text` is generated: the code is the truth, the catalogue file the mirror.
-  source.text = Object.fromEntries([...found.text.entries()].sort(([a], [b]) => a.localeCompare(b, 'de')));
+  source.text = Object.fromEntries([...found.text.entries()].sort(([a], [b]) => a.localeCompare(b, 'en')));
 
   if (!existsSync(sourceDir)) mkdirSync(sourceDir, { recursive: true });
   writeFileSync(join(sourceDir, `${SOURCE}.json`), serialise(source));
@@ -499,7 +677,7 @@ function lock() {
       for (const [key, value] of Object.entries(catalogue[section] ?? {})) {
         if (JSON.stringify(value) === JSON.stringify(source[section][key])) entry[section].push(key);
       }
-      entry[section].sort((a, b) => a.localeCompare(b, 'de'));
+      entry[section].sort((a, b) => a.localeCompare(b, 'en'));
     }
     out[code] = entry;
     console.log(`[locale] ${code}: ${entry.keys.length} Kennungen und ${entry.text.length} Quellstrings bleiben gleich`);
@@ -635,6 +813,10 @@ function check() {
   for (const { value, rel } of found.locF) {
     problems.push(`Loc.f("${value}") in ${rel} sieht nach einer Kennung aus — dafür ist Loc.t zuständig`);
   }
+  // 7. `Loc.f` counts placeholders and arguments apart, and nothing compares
+  //    the two while the file compiles: a `%d` that receives a string is a
+  //    runtime error in the middle of a run, not a warning on the build.
+  problems.push(...formatMismatchesInProject());
   for (const problem of problems) console.error(`[locale] ${problem}`);
   if (problems.length) {
     console.error(`[locale] ${problems.length} Problem(e).`);

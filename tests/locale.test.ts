@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
+import type { LocaleCatalogue } from '../scripts/locale.mjs';
 import { join } from 'node:path';
 import {
   isDisplayText, collect, readAll, coverage, identicalSet, SOURCE,
+  formatMismatches, formatMismatchesInProject,
 } from '../scripts/locale.mjs';
 
 /**
@@ -176,8 +178,12 @@ describe('Ableitung aus dem Code', () => {
 
   it('findet deutschen Quelltext an beiden Sorten von Aufrufstelle', () => {
     // One from each kind of place: a `Ui.title` argument, a `Loc.t` key that is
-    // also a German sentence, a `name` in a data table, a `Loc.f` template.
-    for (const value of ['Vorschlag einreichen', '◀ Lobby', 'Brettspiele', 'Axt', '%s   ·   %s Dreiecke']) {
+    // also a sentence, a `name` in a data table, a `Loc.f` template, a value out
+    // of `content/*.json`. English, because the source language is the language
+    // of the code.
+    for (const value of [
+      'Submit a suggestion', '◀ Lobby', 'Board games', 'Axe', '%s   ·   %s triangles', 'Railgun',
+    ]) {
       expect(found.text.has(value), value).toBe(true);
     }
   });
@@ -193,12 +199,93 @@ describe('Ableitung aus dem Code', () => {
   it('meldet keine Vorlage, die eine Kennung sein will', () => {
     // `Loc.f` formats with `%`; a key has no placeholders. A hit here means
     // somebody reached for `Loc.f` where `Loc.t` was meant.
-    expect(found.locF.map((e) => e.value)).toEqual([]);
+    expect(found.locF.map((entry) => entry.value)).toEqual([]);
   });
 
   it('deckt den Quelltext aus dem Katalog vollständig ab', () => {
     for (const key of Object.keys(source.text)) {
       expect(found.text.has(key), `"${key}" steht im Katalog, kommt aber im Code nicht vor`).toBe(true);
     }
+  });
+});
+
+describe('Vorlagen-Lint', () => {
+  // The failure this guards has no compile-time symptom: `"TEMP" % n if n > 0`
+  // let `%` bind tighter than the conditional, and moving the `%` into the
+  // argument list handed a string to a `%d`. Godot only answers that at
+  // runtime, as a log line nobody reads before the run.
+  it('findet im Spielcode keinen Streit zwischen Platzhaltern und Werten', () => {
+    expect(formatMismatchesInProject()).toEqual([]);
+  });
+
+  it('meldet einen Platzhalter, dem mehr Werte übergeben werden', () => {
+    const problems = formatMismatches('var s := Loc.f("Best: %s", [a, b])\n', 'probe.gd');
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('Loc.f("Best: %s") in probe.gd:1');
+    expect(problems[0]).toContain('hat 1 Platzhalter, bekommt aber 2 Werte');
+  });
+
+  it('meldet Werte, für die es keinen Platzhalter gibt', () => {
+    const problems = formatMismatches('var s := Loc.f("%d/%d", [n])\n', 'probe.gd');
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('hat 2 Platzhaltern, bekommt aber 1 Wert');
+  });
+
+  it('lässt eine reine Zusammensetzung in Ruhe', () => {
+    // `"%s  %s"` is a pattern and not a sentence, so the catalogue leaves it
+    // untranslated on purpose. Two values for two placeholders is exactly
+    // right and must not be the thing this lint complains about.
+    expect(formatMismatches('notify(Loc.f("%s  %s", [glyph, text]), 2.4)\n', 'probe.gd')).toEqual([]);
+  });
+
+  it('zählt %% als escapes Prozentzeichen, nicht als Platzhalter', () => {
+    // `+%d%% Tempo` has one placeholder and one value; the `%%` is a written
+    // percent sign and would make a naive counter ask for a second value.
+    expect(formatMismatches('Loc.f("+%d%% Tempo", [speed])\nLoc.f("Rückstoß %s%%", [damp])\n', 'probe.gd'))
+      .toEqual([]);
+  });
+
+  it('hält ein Prozentzeichen mit Leerzeichen für Prosa', () => {
+    // `printf` would read `% F` as a conversion; this catalogue does not, and
+    // `+12 % Feuerrate` is a sentence. A value the template cannot use is
+    // still a mistake — here with no value, there is nothing to report.
+    expect(formatMismatches('Loc.f("+12 % Feuerrate", [])\n', 'probe.gd')).toEqual([]);
+    expect(formatMismatches('Loc.f("+12 % Feuerrate", [rate])\n', 'probe.gd')).toHaveLength(1);
+  });
+
+  it('übergeht eine Liste mit einem if auf oberster Ebene', () => {
+    // The conditional may hand a different shape per branch, and which branch
+    // runs is not a question this lint can answer.
+    expect(formatMismatches('var s := Loc.f("Ziel geschafft! %s", [note if done else fallback])\n', 'probe.gd'))
+      .toEqual([]);
+  });
+
+  it('ist an genau dieser Stelle blind — die echte Migration sah so aus', () => {
+    // The blind spot, written down so it is a decision and not a surprise.
+    // The migration once wrote this shape into `hangar_screen.gd`, and it is
+    // the one that answered with `String formatting error: a number is
+    // required` at runtime: one placeholder, one value, nothing for a count to
+    // disagree about. What is wrong is the *type* of the second branch, and
+    // only a check of conversions against types can say so. Until someone
+    // writes that one, this line is the guard's ceiling.
+    expect(formatMismatches('box.add_child(Ui.label(Loc.f("· %d Sterne benötigt",'
+      + ' [need if need > 0 else "· Level %d zuerst" % (n - 1)]), 12))\n', 'probe.gd')).toEqual([]);
+  });
+
+  it('zählt eine Liste über mehrere Zeilen, auch mit Schlusskomma', () => {
+    expect(formatMismatches('Loc.f("Boni: %d · %d · %d · %d", [a,\n\tb,\n\tc,\n\td,])\n', 'probe.gd'))
+      .toEqual([]);
+  });
+
+  it('lässt einen auskommentierten Aufruf in Ruhe', () => {
+    expect(formatMismatches('\t\t# Loc.f("Bestwert: %s", [best])\n', 'probe.gd')).toEqual([]);
+  });
+
+  it('lässt Aufrufe liegen, deren Liste es nicht zählen kann', () => {
+    // A variable instead of a list, a built template, a `"""` block: the count
+    // is not knowable here, and a guess is worse than silence.
+    expect(formatMismatches('Loc.f("Best: %s", values)\n', 'probe.gd')).toEqual([]);
+    expect(formatMismatches('Loc.f("Best: " + name, [a, b])\n', 'probe.gd')).toEqual([]);
+    expect(formatMismatches('Loc.f("""\nBest: %s\n""", [a, b])\n', 'probe.gd')).toEqual([]);
   });
 });

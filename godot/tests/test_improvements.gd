@@ -1,11 +1,9 @@
 class_name TestImprovements
 extends RefCounted
-## Rule tests for the five gameplay improvements added on top of the original
-## port: T-Spin scoring, queue preview and board danger, wave forecasting and
-## kill chains, and loot rarity.
-##
-## Kept in its own file so the feature work can be validated independently of
-## the rest of the suite.
+## Rule tests for the improvements layered on top of the original port: T-Spin
+## scoring, queue preview and board danger, wave forecasting and kill chains,
+## loot rarity. Kept in their own file so the feature work can be validated
+## independently of the rest of the suite.
 
 var t: TestKit
 
@@ -62,8 +60,8 @@ func _tetris_scoring() -> void:
 	# Level multiplier applies to everything.
 	t.equal(TetrisRules.score_clear(2, 3, 0, 0, "none")["points"], 900, "Level 3 verdreifacht die 300")
 
-	# T-Spins are worth more than the plain clear of the same size.
-	# Guideline values: a T-Spin pays 400 without a line, then 800/1200/1600.
+	# T-Spins beat the plain clear of the same size; guideline values are 400
+	# without a line, then 800/1200/1600.
 	t.equal(TetrisRules.score_clear(0, 1, 0, 0, "full")["points"], 400, "T-Spin ohne Zeile: 400")
 	t.equal(TetrisRules.score_clear(1, 1, 0, 0, "full")["points"], 800, "T-Spin Single: 800")
 	t.equal(TetrisRules.score_clear(2, 1, 0, 0, "full")["points"], 1200, "T-Spin Double: 1200")
@@ -149,11 +147,11 @@ func _perfect_clear_scoring() -> void:
 	t.check(str(TetrisRules.perfect_clear(2, 1, 0)["text"]).contains("DOUBLE"), "Die Meldung nennt die Größe")
 	t.equal(TetrisRules.perfect_clear(1, 4, 0)["points"], 3200, "Level 4 vervierfacht die 800")
 
-	# Ein Perfect Clear räumt mindestens eine Zeile, also kann er nicht nichts
-	# geben und trotzdem eine Kette öffnen.
+	# A perfect clear always clears at least one line, so it can never pay nothing
+	# and still open a chain.
 	t.equal(TetrisRules.perfect_clear(0, 1, 0)["points"], 800, "Eine leere Zeilenangabe zählt als Single")
 
-	# Der B2B Quad ist der teuerste Zug im Spiel.
+	# The B2B Quad is the most expensive move in the game.
 	var b2b := TetrisRules.perfect_clear(4, 1, 2)
 	t.equal(b2b["points"], TetrisRules.PC_B2B_QUAD, "Ein B2B Quad zahlt 3200")
 	t.equal(b2b["b2b_quad"], true, "Der zweite Quad in Folge ist ein B2B Quad")
@@ -163,13 +161,13 @@ func _perfect_clear_scoring() -> void:
 	t.equal(TetrisRules.perfect_clear(4, 1, 0)["b2b_quad"], false, "Der erste Quad ist noch kein B2B Quad")
 	t.equal(TetrisRules.perfect_clear(3, 1, 2)["points"], 1800, "Ein B2B Triple zahlt nicht den Quad-Bonus")
 
-	# Ein Perfect Clear ist immer eine schwierige Zeile: er beendet keine Kette,
-	# egal wie kurz die räumende Zeile war.
+	# A perfect clear is always a difficult clear: it never breaks a chain, no
+	# matter how few lines it actually cleared.
 	t.equal(TetrisRules.perfect_clear(1, 1, 5)["back_to_back"], 6, "Ein einzelner Perfect Clear verlängert die Kette")
 	t.equal(TetrisRules.perfect_clear(1, 1, 5)["b2b_quad"], false, "Ein einzelner Perfect Clear zahlt den Quad-Bonus nicht")
 
-	# Er ist mehr wert als derselbe Clear ohne den leeren Bonus — außer er
-	# schließt direkt an eine Kette an, dann ist er es deutlich mehr.
+	# Worth more than the same clear without the empty bonus — and much more when
+	# it extends an existing chain.
 	t.check(int(TetrisRules.perfect_clear(1, 1, 0)["points"]) > int(TetrisRules.score_clear(1, 1, 0, 0, "none")["points"]),
 		"Ein Perfect Clear zahlt mehr als ein Single")
 	t.check(int(TetrisRules.perfect_clear(4, 1, 1)["points"]) > int(TetrisRules.perfect_clear(4, 1, 0)["points"]),
@@ -465,16 +463,18 @@ func _loot_rarity() -> void:
 func _suggestion_context() -> void:
 	t.suite("Vorschlag — Herkunft")
 
-	# Jedes Spiel liefert seinen deutschen Namen, nicht seine technische ID.
+	# Every game supplies its German name, not its technical id.
 	t.equal(SuggestionContext.for_screen("arena"), "Singular 80", "Die Arena kennt ihren Namen")
 	t.equal(SuggestionContext.for_screen("tetris"), "Tetris", "Tetris kennt seinen Namen")
 	t.equal(SuggestionContext.for_screen("mesh_gallery"), "Mesh-Galerie", "Die Galerie hat einen eigenen Namen")
 	t.equal(SuggestionContext.for_screen("lobby"), "Lobby", "Die Lobby heißt Lobby")
 	t.equal(SuggestionContext.for_screen(""), "Spiel", "Ohne Bildschirm bleibt eine neutrale Angabe")
 	t.equal(SuggestionContext.for_screen("gibtesnicht"), "gibtesnicht", "Ein unbekannter Bildschirm zählt durch")
-	t.check(SuggestionContext.for_screen("dragonrpg").contains("Drachen"), "Das Drachen-RPG liefert seinen Namen")
+	# The label is the source-language game name now: the code says "Dragon RPG",
+	# and `for_screen` hands it to the server as a grouping key.
+	t.check(SuggestionContext.for_screen("dragonrpg").contains("Dragon"), "Das Drachen-RPG liefert seinen Namen")
 
-	# Eine Spiel-ID funktioniert genauso wie ein Bildschirm.
+	# A game id resolves just like a screen id.
 	t.equal(SuggestionContext.resolve("tetris"), "Tetris", "Eine Spiel-ID wird aufgelöst")
 	t.equal(SuggestionContext.resolve("Mesh-Galerie"), "Mesh-Galerie", "Ein freier Text bleibt stehen")
 	t.equal(SuggestionContext.resolve(""), "Spiel", "Leer bedeutet neutral")
@@ -482,7 +482,7 @@ func _suggestion_context() -> void:
 	t.check(SuggestionContext.resolve("x".repeat(200)).length() <= SuggestionContext.MAX_PREFIX,
 		"Ein zu langer Kontext wird gekürzt")
 
-	# Der Kontext landet vor dem Text, damit ihn niemand tippen muss.
+	# The context goes in front of the text, so nobody has to type it.
 	t.equal(SuggestionContext.compose("tetris", "Bitte T-Spins belohnen"),
 		"Tetris: Bitte T-Spins belohnen", "Der Spielname steht vor dem Vorschlag")
 	t.equal(SuggestionContext.compose("mesh_gallery", "Die Flügel sind zu eckig"),
@@ -492,12 +492,12 @@ func _suggestion_context() -> void:
 	t.equal(SuggestionContext.compose("", "Nur ein Gedanke"), "Nur ein Gedanke",
 		"Ohne Kontext wird der Text nicht verändert")
 
-	# Eine Offline-Warteschlange darf den Text nicht doppelt präfixen.
+	# The offline queue may not prefix the text twice.
 	var once := SuggestionContext.compose("tetris", "Held sauberer zeichnen")
 	t.equal(SuggestionContext.compose("tetris", once), once, "Der zweyte Durchlauf ändert nichts")
 	t.check(once.begins_with("Tetris: "), "Der Vorschlag behält seine Herkunft")
 
-	# Der Kontext darf dem 2000-Zeichen-Limit nicht zum Opfer fallen.
+	# The context must not eat into the 2000-character limit.
 	var long_text := "y".repeat(1900)
 	t.check(SuggestionContext.compose("lobby", long_text).length() < 2000,
 		"Ein langer Vorschlag bleibt unter der Grenze")
@@ -524,9 +524,9 @@ func _lod_tiers() -> void:
 	t.check(AssetRegistry.tier_path_of("rpg/knight", "").ends_with("rpg/knight.glb"),
 		"Eine leere Stufe zählt als Low")
 
-	# Jedes Mesh, das wirklich auf der Platte liegt, hat mindestens die Fassung,
-	# die die Spiele benutzen. (Der Registry-Test in `test_logic.gd` meldet sich,
-	# wenn ein Mesh im Verzeichnis fehlt — hier geht es nur um die Stufen.)
+	# Every mesh that really is on disk has at least the tier the games use. The
+	# registry test in `test_logic.gd` reports a missing mesh; here it is only
+	# about the tiers.
 	var present: Array[String] = []
 	for key in AssetRegistry.KEYS:
 		if AssetRegistry.tier_exists(key, "low"):
@@ -537,7 +537,7 @@ func _lod_tiers() -> void:
 	t.equal(AssetRegistry.tiers_missing("low").size(), 0, "Keine Low-Fassung fehlt")
 	t.equal(AssetRegistry.best_available("rpg/knight", "low"), "low", "Ohne Generator bleibt Low")
 
-	# Die gemessenen Dreieckzahlen sind da und liegen im Budget.
+	# The measured triangle counts are present and inside the budget.
 	var counts := AssetRegistry.tri_counts()
 	t.check(counts.size() > 0, "Die Dreieckzahlen wurden gemessen")
 	var checked := 0
@@ -571,7 +571,7 @@ func _gallery_layout() -> void:
 	t.equal(MeshGallery.key_at(["a"], 5), "", "Hinter dem Ende ist nichts")
 	t.equal(MeshGallery.key_at([], 0), "", "Eine leere Sammlung hat nichts")
 
-	# Der Ring muss geschlossen sein und darf keine zwei Sockel überlappen.
+	# The ring has to close, and no two pedestals may overlap.
 	var first := MeshGallery.pedestal_position(0)
 	var last := MeshGallery.pedestal_position(MeshGallery.ARC_SIZE - 1)
 	var gap := Vector2(first.x, first.z).distance_to(Vector2(last.x, last.z))
@@ -585,7 +585,7 @@ func _gallery_layout() -> void:
 			t.check(position.distance_to(MeshGallery.pedestal_position(j)) > 2.0,
 				"Sockel %d und %d überlappen nicht" % [i, j])
 
-	# „Welcher Sockel ist vor mir" hängt an der Nähe, nicht an der Reihenfolge.
+	# "Which pedestal is in front of me" hangs on distance, not on list order.
 	var keys: Array[String] = []
 	for i in MeshGallery.ARC_SIZE:
 		keys.append("k%d" % i)
@@ -598,7 +598,7 @@ func _gallery_layout() -> void:
 	t.equal(MeshGallery.nearest_pedestal([], MeshGallery.pedestal_position(0)), -1,
 		"Ohne Meshes gibt es keinen Sockel")
 
-	# Eine Seite fasst genau ARC_SIZE Meshes, der Rest kommt auf die nächste.
+	# A page holds exactly ARC_SIZE meshes, the rest spills onto the next.
 	t.equal(MeshGallery.page_size(5), 5, "Eine kleine Sammlung passt auf eine Seite")
 	t.equal(MeshGallery.page_size(MeshGallery.ARC_SIZE), MeshGallery.ARC_SIZE,
 		"Genau ein Ring passt auf eine Seite")
@@ -642,7 +642,7 @@ func _gallery_marks() -> void:
 	t.check(MeshGallery.draft(marks).contains(key), "Der Vorschlag nennt den Mesh-Schlüssel")
 	t.check(MeshGallery.draft(marks).contains("Kanten zu hart"), "Der Vorschlag enthält die Notiz")
 
-	# Ein zweites Vormerken ändert die Liste nicht.
+	# Marking the same mesh again does not add a second entry.
 	marks = MeshGallery.mark(marks, key, "Noch schärfer")
 	t.equal(MeshGallery.mark_count(marks), 1, "Doppelt vormerken zählt einmal")
 	t.equal(MeshGallery.mark_note(marks, key), "Noch schärfer", "Die zweite Notiz gewinnt")
@@ -651,7 +651,6 @@ func _gallery_marks() -> void:
 	t.equal(MeshGallery.mark_count(MeshGallery.mark(marks, "gibtesnicht")), 1, "Ein unbekannter Key wird ignoriert")
 	t.equal(MeshGallery.mark_count(MeshGallery.mark(marks, "")), 1, "Leere Keys werden ignoriert")
 
-	# An-/Aus-Schalten.
 	var on := MeshGallery.toggle(marks, AssetRegistry.KEYS[1])
 	t.equal(bool(on["marked"]), true, "Ein neues Mesh lässt sich vormerken")
 	t.equal(MeshGallery.mark_count(on["marks"]), 2, "Die Liste hat jetzt zwei Meshes")
@@ -660,7 +659,7 @@ func _gallery_marks() -> void:
 	t.equal(MeshGallery.mark_count(off["marks"]), 1, "Die Liste hat wieder ein Mesh")
 	t.equal(MeshGallery.mark_note(off["marks"], AssetRegistry.KEYS[1]), "", "Ein abgewähltes Mesh verliert die Notiz")
 
-	# Notizen und Stufen nur für vorgemerkte Meshes.
+	# Notes and tiers belong to marked meshes only.
 	marks = MeshGallery.set_note(marks, key, "Flügel fehlen")
 	t.equal(MeshGallery.mark_note(marks, key), "Flügel fehlen", "Eine Notiz lässt sich später ändern")
 	t.equal(MeshGallery.mark_note(MeshGallery.set_note(marks, "gibtesnicht", "x"), "gibtesnicht"), "",
@@ -674,13 +673,13 @@ func _gallery_marks() -> void:
 	t.equal(str((MeshGallery.set_tier(marks, key, "quatsch")["entries"] as Dictionary)[key]["tier"]), "low",
 		"Eine unbekannte Stufe fällt auf Low zurück")
 
-	# Der fertige Text nennt jede Stufe so, wie sie angeschaut wurde.
+	# The finished text names each tier the way the player looked at it.
 	var draft := MeshGallery.draft(marks)
 	t.check(draft.contains("Hoch"), "Der Vorschlag nennt die angeschaute Detailstufe")
 	t.check(draft.contains(AssetRegistry.display_name(key)), "Der Vorschlag nennt den deutschen Namen")
 
-	# Mehrere Meshes ergeben einen Block mit je einem Eintrag; ein Mesh mit
-	# Notiz braucht zwei Zeilen.
+	# Several meshes make a block with one entry each; a mesh with a note needs
+	# two lines.
 	marks = MeshGallery.mark(marks, AssetRegistry.KEYS[1], "zu dunkel")
 	var multi := MeshGallery.draft(marks)
 	t.check(multi.contains(AssetRegistry.KEYS[0]), "Der erste Eintrag steht im Text")
@@ -688,7 +687,7 @@ func _gallery_marks() -> void:
 	t.check(multi.contains("zu dunkel"), "Die zweite Notiz steht im Text")
 	t.equal(multi.count("\n"), 4, "Kopf, ein Mesh ohne und ein Mesh mit Notiz")
 
-	# Leeren klappt alles weg.
+	# Clearing empties everything.
 	t.equal(MeshGallery.mark_count(MeshGallery.clear_marks()), 0, "Leeren leert die Liste")
 	t.equal(MeshGallery.draft(MeshGallery.clear_marks()), "", "Nach dem Leeren gibt es keinen Text")
 
