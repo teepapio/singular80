@@ -79,15 +79,32 @@ static func expander() -> Control:
 	return node
 
 
+## `MOUSE_FILTER_IGNORE`, and that is the whole point of these two factories.
+##
+## `Control` defaults to `MOUSE_FILTER_STOP`, and Godot hands a click to the
+## topmost Control that stops it — later siblings first, children before parents,
+## with `z_index` **not** consulted. A box container has no `gui_input` of its
+## own, so it can never do anything with a click, yet a full-rect one silently
+## eats every click underneath it. An empty, invisible `Control` in `main.gd`
+## did exactly that to every 2D screen of the game.
+##
+## This is the rule Godot's own documentation gives under "User Interface nodes
+## and input": the event does not trigger if the control "is obstructed by
+## another Control on top, which doesn't have mouse_filter set to
+## MOUSE_FILTER_IGNORE". So `STOP` goes on what the player can actually press —
+## `Ui.button`, `Ui.backdrop` — and `IGNORE` on everything that only arranges
+## pixels. A real target sets it back to `STOP`.
 static func hbox(separation: int = 12) -> HBoxContainer:
 	var node := HBoxContainer.new()
 	node.add_theme_constant_override("separation", separation)
+	node.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return node
 
 
 static func vbox(separation: int = 12) -> VBoxContainer:
 	var node := VBoxContainer.new()
 	node.add_theme_constant_override("separation", separation)
+	node.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return node
 
 
