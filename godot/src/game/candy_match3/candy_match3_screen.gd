@@ -667,6 +667,10 @@ func _build_level_select() -> void:
 	_select_root = Control.new()
 	_select_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_select_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	# See `WorldScreen.modal()`: the `modal` meta is the base class's contract
+	# for "this overlay is meant to swallow clicks", and it is also what tells the
+	# screen test to leave a full-rect layer alone.
+	_select_root.set_meta("modal", true)
 	hud_root.add_child(_select_root)
 	_select_root.add_child(Ui.backdrop(0.82))
 

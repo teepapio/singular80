@@ -218,6 +218,12 @@ static func sanitise(entry: Variant) -> Dictionary:
 	out["text"] = text
 	out["author"] = author if author != "" else "Anonym"
 	out["source"] = str(source.get("source", "game")).strip_edges()
+	# The key has to come along. `sanitise` rebuilds the entry, and `ensure_key`
+	# mints a new one whenever the field is missing — so without this line every
+	# `persist` handed the same idea a different `clientKey`, the server's
+	# idempotency on it never fired, and a retry could not be recognised as the
+	# suggestion it already had.
+	out["clientKey"] = str(source.get("clientKey", ""))
 	ensure_key(out)
 	return out
 

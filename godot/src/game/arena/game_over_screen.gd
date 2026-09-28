@@ -19,6 +19,11 @@ func _ready_game() -> void:
 
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# A layout container has no `gui_input` of its own, but it defaults to
+	# `MOUSE_FILTER_STOP` and picking ignores `z_index` — so a full-rect
+	# container added after the top bar would swallow the ⚙, "◀ Lobby" and mute
+	# buttons underneath it. `CHROME_Z` only fixes the painting, not the click.
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content_layer().add_child(center)
 
 	var column := Ui.vbox(14)

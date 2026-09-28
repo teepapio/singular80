@@ -273,9 +273,13 @@ func _result_summary(tree: SceneTree) -> void:
 
 	var text := _collect_text(screen.hud_root)
 	t.check(_says(text, "Level geschafft!"), "Der Ergebnistitel steht da")
-	t.check(_says(text, "Points: %s" % Ui.format_number(int(screen.state["score"]))),
+	# The two numbers the player came for. Both labels are `Loc.f` templates, so
+	# the expectation is the *template* with the value substituted afterwards —
+	# `"Points: %s" % score` is a finished sentence that no catalogue entry can
+	# match, and in German the panel says "Punkte:"/"Züge:".
+	t.check(_says(text, Loc.f("Points: %s", [Ui.format_number(int(screen.state["score"]))])),
 		"Das Ergebnis nennt die Punkte")
-	t.check(_says(text, "Moves: %d" % (int(level["moves"]) - int(screen.state["movesLeft"]))),
+	t.check(_says(text, Loc.f("Moves: %d", [int(level["moves"]) - int(screen.state["movesLeft"])])),
 		"Das Ergebnis nennt die verbrauchten Züge")
 	t.check(text.contains("★☆"), "Zwei von drei Sternen sind sichtbar")
 	# The run summary: what the level was like and what is still missing.

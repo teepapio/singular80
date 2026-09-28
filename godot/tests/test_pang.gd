@@ -419,9 +419,11 @@ func _flank() -> void:
 	t.equal(Loc.resolve(Pang.wave_side_label(_left_wave([{"x": 0.0, "y": 15.0, "size": 3}]))), Loc.resolve("the middle"), "Eine mittige Welle braucht die dritte Form")
 
 	# The level card names the side, so a player can read a level's plan before
-	# the first ball drops. `wave_flanks_label` joins the same source words, and
-	# the test builds its expectation from the very labels the three bands above
-	# produced: no word is spelled out here in any language.
+	# the first ball drops. `wave_flanks_label` joins the very words
+	# `wave_side_label` answers with — in the source language, because the card
+	# composes them into a sentence of its own (see the report) — so the test
+	# takes its vocabulary from the three bands above rather than spelling a word
+	# out in any language.
 	t.equal(Pang.wave_flanks_label(1), "", "Ein Level ohne Wellen nennt keine Seite")
 	var first_wave_level := 0
 	for level in range(1, Pang.TOTAL_LEVELS + 1):
@@ -429,13 +431,14 @@ func _flank() -> void:
 			first_wave_level = level
 			break
 	t.check(first_wave_level >= Pang.WAVE_FIRST_LEVEL, "Der erste Level mit Welle liegt nicht vor dem Nachschub")
-	var left_word := Loc.resolve(Pang.wave_side_label(_left_wave()))
-	var right_word := Loc.resolve(Pang.wave_side_label(_left_wave([{"x": 10.0, "y": 15.0, "size": 3}])))
+	var left_word := Pang.wave_side_label(_left_wave())
+	var right_word := Pang.wave_side_label(_left_wave([{"x": 10.0, "y": 15.0, "size": 3}]))
 	t.check(Pang.wave_flanks_label(first_wave_level) in [left_word, right_word],
 		"Eine einzelne Welle nennt genau eine Seite")
 	var expected: Array[String] = []
 	for index in Pang.wave_count(Pang.TOTAL_LEVELS):
-		expected.append(left_word if Pang.wave_flank(Pang.TOTAL_LEVELS, index) < 0 else right_word)
+		expected.append(Loc.resolve(left_word) if Pang.wave_flank(Pang.TOTAL_LEVELS, index) < 0 \
+			else Loc.resolve(right_word))
 	# A joined list of two words is not a catalogue entry, so the words are
 	# resolved one by one — which is also how the level card has to read them.
 	var named: Array[String] = []

@@ -17,12 +17,18 @@ func _ready() -> void:
 
 	Content.reload()
 
-	var settings := Control.new()
-	settings.name = "Settings"
-	settings.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	settings.theme = UiTheme.shared()
-	add_child(settings)
-
+	# No full-rect Control may be added here. `Control` defaults to
+	# `MOUSE_FILTER_STOP`, and Godot hands a click to the topmost Control that
+	# stops it — so an invisible, empty, full-screen `Control` in the main scene
+	# swallows every mouse and touch event on **every 2D screen**: the top bar,
+	# the game cards of the list lobby, the footer buttons. It painted nothing,
+	# which is why it was invisible in every screenshot and in every test —
+	# the screen sweep switches screens and calls methods, it never clicks.
+	#
+	# The theme is already set on `Router.screen_host`, on every `Screen`, on
+	# `WorldScreen.hud_root` and on every dialog root, so this node carried
+	# nothing but the bug. 3D screens were unaffected: their HUD lives on a
+	# `CanvasLayer`, which is picked separately from the root canvas.
 	Router.go_to("lobby")
 
 	# Probe the backend off the critical path so startup stays instant.

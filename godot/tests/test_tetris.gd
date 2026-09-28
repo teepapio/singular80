@@ -289,7 +289,17 @@ func _tspin_drehen() -> void:
 	t.equal(int(preview["x"]), 2, "Das Stück landet in der Senke")
 	t.equal(int(preview["y"]), 5, "zwei Reihen tiefer, wo es zur Ruhe kommt")
 	t.equal(preview["matrix"], TetrisRules.rotate_matrix(T, true), "in der Lage, die der T-Spin braucht")
-	t.equal(str(preview["label"]), "T-Spin Double  ·  0→R  without a kick", "Der Hinweis nennt Turn, Kicker und Ertrag")
+	# The hint is composed with `Loc.f`, so it is read back the same way: the
+	# expectation is built from the very names the rules resolve, which makes the
+	# assertion true in German ("… ohne Kick"), in English and in French alike.
+	# The assertions above pin what the parts *are* — full spin, 0→R, no kick.
+	var kick: Vector2i = preview["kick"]
+	t.equal(str(preview["label"]), Loc.f("%s  ·  %s→%s  %s", [
+		TetrisRules.spin_name("full", int(preview["rows"])),
+		TetrisRules.state_name(int(preview["from_state"])),
+		TetrisRules.state_name(int(preview["state"])),
+		TetrisRules.kick_text(kick),
+	]), "Der Hinweis nennt Turn, Kicker und Ertrag")
 
 	# What the scoring table promises for that arrangement: 1200 instead of 300
 	# for a plain Double. The whole point of the feature.

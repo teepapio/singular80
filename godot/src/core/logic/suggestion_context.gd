@@ -15,7 +15,6 @@ const SCREEN_LOC_KEY := {
 	"main_menu": "ui.origin.main_menu",
 	"game_over": "ui.origin.game_over",
 	"mesh_gallery": "ui.origin.mesh_gallery",
-	"mesh_review": "ui.origin.mesh_review",
 	# The two dragon-flight screens below the hangar. The registry names
 	# `dragonflight` — the hangar — and the play screen and the hatchery are
 	# separate router screens with no registry entry of their own, so without
@@ -33,7 +32,6 @@ const SCREEN_LOC_KEYS: Array[String] = [
 	"ui.origin.main_menu",
 	"ui.origin.game_over",
 	"ui.origin.mesh_gallery",
-	"ui.origin.mesh_review",
 	"ui.origin.dragonflight_run",
 	"ui.origin.dragonflight_hatchery",
 	"ui.origin.unknown",

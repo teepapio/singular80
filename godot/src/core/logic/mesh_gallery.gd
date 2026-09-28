@@ -1,27 +1,39 @@
 class_name MeshGallery
 extends RefCounted
-## Layout and bookkeeping for the walk-in mesh gallery: pedestals in a ring, one
-## mesh each, and a wall of signs that opens at any time.
-## Everything deciding *where* something stands and *what* the final suggestion
-## says lives here, so it can be unit tested without a viewport.
+## Layout of the walk-in mesh gallery: one long hall with a row of pedestals on
+## the left and one on the right, every mesh of the registry standing in one of
+## them. The player walks straight ahead and looks at what passes on either
+## side — no collections, no pages, nothing to choose.
+##
+## Everything deciding *where* a pedestal stands and *what* the suggestion says
+## lives here, so it is unit tested without a viewport.
 
-# --- room -------------------------------------------------------------------
+# --- the hall ---------------------------------------------------------------
 
-## Radius of the pedestal ring, and how high a pedestal is.
-const RING_RADIUS := 13.0
+## How far a row stands from the middle line, and how much room one pedestal
+## needs between two neighbours.
+const ROW_OFFSET := 4.2
+const SLOT_SPACING := 4.6
 const PEDESTAL_HEIGHT := 0.55
 const PEDESTAL_RADIUS := 0.85
 
-## How many pedestals one arc of the ring holds.
-const ARC_SIZE := 12
+## Where the first pedestal stands. The hall grows towards **negative** z,
+## because the camera trails the player at `+z` and pushing the stick forward
+## walks into the screen.
+const FIRST_SLOT_Z := 5.0
 
-## The player's own position in the middle of the room.
-const CENTER := Vector3(0.0, 0.0, 0.0)
+## Distance at which a pedestal counts as "the one you stand in front of".
+##
+## Wider than `ROW_OFFSET`, so that walking down the middle of the lane is
+## already standing in front of a row — a player who never leaves the middle
+## would otherwise never look at a mesh at all. At the wall it is still narrow
+## enough that the pair of the next depth is clearly the farther one.
+const NEAR_DISTANCE := 5.2
 
-## Distance at which a pedestal counts as "the one in front of you".
-const NEAR_DISTANCE := 4.2
+## The gap the player keeps to a pedestal, so the knight does not walk into it.
+const PEDESTAL_GAP := 0.6
 
-# --- review list ------------------------------------------------------------
+# --- the suggestion ---------------------------------------------------------
 
 ## The context line that ends up in front of a submitted suggestion.
 ##
@@ -32,10 +44,7 @@ const NEAR_DISTANCE := 4.2
 ## German word for an English and a French player.
 const CONTEXT_LOC_KEY := "gallery.context"
 
-## The sentence the marked list is written into the draft under.
-const DRAFT_LOC_KEY := "gallery.draft"
-
-## Both keys above, in the array form the extractor recognises.
+## That key in the array form the extractor recognises.
 ##
 ## The extractor reads a `…_LOC_KEYS` list, a `…_LOC_KEY` dictionary and a
 ## `Loc.t("…")` literal — and nothing else. A lone `const X_LOC_KEY := "ui.…"`
@@ -45,186 +54,75 @@ const DRAFT_LOC_KEY := "gallery.draft"
 ## missing: `check` only reports the ones it can see in use.
 const MESH_GALLERY_LOC_KEYS: Array[String] = [
 	"gallery.context",
-	"gallery.draft",
 ]
 
-## The player's list of meshes to improve. It outlives the gallery screen,
-## because it is the input to the suggestion written afterwards.
-static var marks: Dictionary = {}
 
-
-## The key of the pedestal at `index`, or `""` past the end of the page.
+## The key of pedestal `index`, or `""` past the end of the hall.
 static func key_at(keys: Array[String], index: int) -> String:
 	if index < 0 or index >= keys.size():
 		return ""
 	return keys[index]
 
 
-## World position of pedestal `index`. The ring is walked clockwise from the
-## south, so the first pedestal is straight ahead when entering.
-static func pedestal_position(index: int) -> Vector3:
-	var angle := TAU * float(index) / float(ARC_SIZE)
-	return Vector3(cos(angle) * RING_RADIUS, PEDESTAL_HEIGHT * 0.5, sin(angle) * RING_RADIUS)
+## Which side of the hall a pedestal stands on: -1 is left, 1 is right.
+##
+## The rows alternate, so two neighbours are never both on the same side and a
+## mesh on the left is answered by one on the right.
+static func side_of(index: int) -> int:
+	return 1 if index % 2 == 1 else -1
+
+
+## World position of pedestal `index`. Two pedestals share a depth, one per side,
+## and the next pair stands one spacing further down the hall.
+static func slot_position(index: int) -> Vector3:
+	var pair := index / 2
+	return Vector3(
+		float(side_of(index)) * ROW_OFFSET,
+		PEDESTAL_HEIGHT * 0.5,
+		-(FIRST_SLOT_Z + float(pair) * SLOT_SPACING)
+	)
 
 
 ## Which pedestal is nearest `from`, or -1 when the player is too far from all.
-static func nearest_pedestal(keys: Array[String], from: Vector3) -> int:
+static func nearest_slot(keys: Array[String], from: Vector3) -> int:
 	var best := -1
 	var best_distance := NEAR_DISTANCE
 	for i in keys.size():
-		var distance := from.distance_to(pedestal_position(i))
+		var distance := from.distance_to(slot_position(i))
 		if distance < best_distance:
 			best_distance = distance
 			best = i
 	return best
 
 
-## How many keys one page holds.
-static func page_size(count: int) -> int:
-	return count if count <= ARC_SIZE else ARC_SIZE
+## How deep the hall is for `count` meshes: the z of the last pedestal.
+static func end_z(count: int) -> float:
+	return slot_position(maxi(count - 1, 0)).z
 
 
-## How many pages a list of keys needs.
-static func pages_for(count: int) -> int:
-	if count <= 0:
-		return 1
-	return int(ceil(float(count) / float(ARC_SIZE)))
+## Where the player may walk, as `(min z, max z)`. The entrance end gets a
+## little room behind the first pedestal, the far end stops one step short of
+## the last one.
+static func walk_bounds(count: int) -> Vector2:
+	return Vector2(end_z(count) - SLOT_SPACING * 0.5, FIRST_SLOT_Z + 2.5)
 
 
-## The keys of one page.
-static func page(keys: Array[String], index: int) -> Array[String]:
-	var out: Array[String] = []
-	if keys.is_empty():
-		return out
-	var per_page := page_size(keys.size())
-	for i in range(index * per_page, mini((index + 1) * per_page, keys.size())):
-		out.append(keys[i])
-	return out
-
-
-# --- review list ------------------------------------------------------------
-
-## A fresh, empty mark list.
-static func new_marks() -> Dictionary:
-	return {"entries": {}, "order": []}
-
-
-## The shared list, created on first use.
-static func shared_marks() -> Dictionary:
-	if marks.is_empty() or not marks.has("order"):
-		marks = new_marks()
-	return marks
-
-
-## Replaces the shared list.
-static func set_marks(value: Dictionary) -> void:
-	marks = value
-
-
-## Number of marked meshes.
-static func mark_count(marks: Dictionary) -> int:
-	return (marks.get("order", []) as Array).size()
-
-
-## True when the mesh is on the list.
-static func is_marked(marks: Dictionary, key: String) -> bool:
-	return (marks.get("entries", {}) as Dictionary).has(key)
-
-
-## The note stored for a mesh, empty when there is none.
-static func mark_note(marks: Dictionary, key: String) -> String:
-	return str((marks.get("entries", {}) as Dictionary).get(key, {}).get("note", ""))
-
-
-## Adds a mesh to the list, or updates its note. Returns the new state.
-static func mark(marks: Dictionary, key: String, note: String = "") -> Dictionary:
-	if key == "" or not AssetRegistry.exists(key):
-		return marks
-	var entries: Dictionary = (marks.get("entries", {}) as Dictionary).duplicate(true)
-	var order: Array = (marks.get("order", []) as Array).duplicate()
-	if not entries.has(key):
-		order.append(key)
-	entries[key] = {"note": note.strip_edges(), "tier": "low"}
-	return {"entries": entries, "order": order}
-
-
-## Takes a mesh off the list. Returns the new state.
-static func unmark(marks: Dictionary, key: String) -> Dictionary:
-	var entries: Dictionary = (marks.get("entries", {}) as Dictionary).duplicate(true)
-	var order: Array = (marks.get("order", []) as Array).duplicate()
-	entries.erase(key)
-	order.erase(key)
-	return {"entries": entries, "order": order}
-
-
-## Flips the mark and returns `{"marks": …, "marked": bool}`.
-static func toggle(marks: Dictionary, key: String, note: String = "") -> Dictionary:
-	if is_marked(marks, key):
-		return {"marks": unmark(marks, key), "marked": false}
-	return {"marks": mark(marks, key, note), "marked": true}
-
-
-## Stores the note of a marked mesh. Returns the new state.
-static func set_note(marks: Dictionary, key: String, note: String) -> Dictionary:
-	if not is_marked(marks, key):
-		return marks
-	var entries: Dictionary = (marks.get("entries", {}) as Dictionary).duplicate(true)
-	var entry: Dictionary = entries[key]
-	entry["note"] = note.strip_edges()
-	entries[key] = entry
-	return {"entries": entries, "order": (marks.get("order", []) as Array).duplicate()}
-
-
-## Remembers which detail level the player was looking at when marking it.
-static func set_tier(marks: Dictionary, key: String, tier: String) -> Dictionary:
-	if not is_marked(marks, key):
-		return marks
-	var entries: Dictionary = (marks.get("entries", {}) as Dictionary).duplicate(true)
-	var entry: Dictionary = entries[key]
-	entry["tier"] = tier if tier in AssetRegistry.TIERS else "low"
-	entries[key] = entry
-	return {"entries": entries, "order": (marks.get("order", []) as Array).duplicate()}
-
-
-## Removes every mark.
-static func clear_marks() -> Dictionary:
-	return new_marks()
+## The middle lane the player is kept in, as `(min x, max x)`.
+static func lane_bounds() -> Vector2:
+	var edge := ROW_OFFSET - PEDESTAL_RADIUS - PEDESTAL_GAP
+	return Vector2(-edge, edge)
 
 
 # --- the suggestion ---------------------------------------------------------
 
-## The pre-filled suggestion body for the marked meshes. The player wrote the
-## "what"; the gallery contributes the "which mesh, at which detail level, and
-## why", so nobody has to spell out `rpg/dragon_lord` by hand.
-static func draft(marks: Dictionary) -> String:
-	var order: Array = marks.get("order", [])
-	if order.is_empty():
-		return ""
-	var lines: Array[String] = []
-	for key in order:
-		var entry: Dictionary = (marks.get("entries", {}) as Dictionary).get(key, {})
-		var tier := str(entry.get("tier", "low"))
-	# The level the player was looking at is part of the complaint: a 10 000
-	# triangle version of a bad shape is a different problem than a 400 triangle one.
-		var head := Loc.f("%s — %s, level %s (%s triangles)", [
-			AssetRegistry.display_name(key), key,
-			AssetRegistry.tier_label(tier), AssetRegistry.tri_text(key, tier),
-		])
-		var note := str(entry.get("note", ""))
-		lines.append("– %s" % head if note == "" else "– %s\n  %s" % [head, note])
-	# The list is a whole sentence with the meshes in it, so it is one key with a
-	# `{meshes}` placeholder rather than `Loc.f`: `Loc.f` looks the template up
-	# in the `text` half of the catalogue, which is generated from the literals in
-	# the code, and this one was a hardcoded German sentence that was in neither
-	# half. `{name}` instead of `%s` because a translation may want the list
-	# before the sentence.
-	return Loc.t(DRAFT_LOC_KEY, {"meshes": "\n".join(lines)})
-
-
 ## The context the suggestion dialog shows for this screen, in the player's
-## language.
-static func context() -> String:
-	return Loc.t(CONTEXT_LOC_KEY)
+## language. With a mesh in front of the player the name rides along, so nobody
+## has to spell out `rpg/dragon_lord` in the text itself.
+static func context(key: String = "") -> String:
+	var label := Loc.t(CONTEXT_LOC_KEY)
+	if key == "":
+		return label
+	return "%s · %s" % [label, Loc.resolve(AssetRegistry.display_name(key))]
 
 
 ## How the gallery describes the detail levels, for the HUD.

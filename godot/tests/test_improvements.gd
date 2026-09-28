@@ -20,7 +20,6 @@ func run(kit: TestKit) -> void:
 	_suite(_suggestion_context)
 	_suite(_lod_tiers)
 	_suite(_gallery_layout)
-	_suite(_gallery_marks)
 
 
 ## Runs one suite and fails it if it returned before its own `t.suite_done()`,
@@ -541,7 +540,7 @@ func _lod_tiers() -> void:
 		"Beide Stufen haben einen Namen")
 	t.check(AssetRegistry.tier_label("med") != AssetRegistry.tier_label("high"),
 		"Die beiden Stufen heißen nicht gleich")
-	t.check(str(AssetRegistry.TIER_LOC_KEY).has("med") and str(AssetRegistry.TIER_LOC_KEY).has("high"),
+	t.check(AssetRegistry.TIER_LOC_KEY.has("med") and AssetRegistry.TIER_LOC_KEY.has("high"),
 		"Beide Stufen haben einen Katalogschlüssel")
 	t.equal(int(AssetRegistry.TIER_BUDGET["med"]), 1000, "Mittel zielt auf 1 000 Dreiecke")
 	t.equal(int(AssetRegistry.TIER_BUDGET["high"]), 10000, "Hoch zielt auf 10 000 Dreiecke")
@@ -596,135 +595,90 @@ func _lod_tiers() -> void:
 # --- Galerie: Anordnung -----------------------------------------------------
 
 func _gallery_layout() -> void:
-	t.suite("Mesh-Galerie — Anordnung")
+	t.suite("Mesh-Galerie — Halle")
 
 	t.equal(MeshGallery.key_at(["a", "b"], 0), "a", "Der erste Sockel trägt das erste Mesh")
 	t.equal(MeshGallery.key_at(["a", "b"], 1), "b", "Der zweite Sockel trägt das zweite Mesh")
 	t.equal(MeshGallery.key_at(["a"], 5), "", "Hinter dem Ende ist nichts")
 	t.equal(MeshGallery.key_at([], 0), "", "Eine leere Sammlung hat nichts")
 
-	# The ring has to close, and no two pedestals may overlap.
-	var first := MeshGallery.pedestal_position(0)
-	var last := MeshGallery.pedestal_position(MeshGallery.ARC_SIZE - 1)
-	var gap := Vector2(first.x, first.z).distance_to(Vector2(last.x, last.z))
-	t.almost(gap, MeshGallery.RING_RADIUS * 2.0 * sin(PI / float(MeshGallery.ARC_SIZE)), 0.001,
-		"Der erste und der letzte Sockel grenzen aneinander")
-	for i in MeshGallery.ARC_SIZE:
-		var position := MeshGallery.pedestal_position(i)
-		t.almost(Vector2(position.x, position.z).length(), MeshGallery.RING_RADIUS, 0.001,
-			"Sockel %d liegt auf dem Ring" % i)
+	# Two rows, and they alternate — a neighbour is never on the same side.
+	t.equal(MeshGallery.side_of(0), -1, "Der erste Sockel steht links")
+	t.equal(MeshGallery.side_of(1), 1, "Der zweite steht rechts")
+	t.equal(MeshGallery.side_of(2), -1, "Der dritte wieder links")
+	for i in 24:
+		var position := MeshGallery.slot_position(i)
+		t.almost(absf(position.x), MeshGallery.ROW_OFFSET, 0.001,
+			"Sockel %d steht in einer Reihe" % i)
+		# Two pedestals share a depth — one per side — and the next pair stands
+		# one spacing further down the hall. `slot_position` is `index / 2`, so
+		# the pair is the invariant and the step is between pairs.
+		if i % 2 == 1:
+			t.almost(MeshGallery.slot_position(i - 1).z, position.z, 0.001,
+				"Die Sockel %d und %d stehen auf gleicher Höhe" % [i - 1, i])
+		if i > 1:
+			t.almost(position.z, MeshGallery.slot_position(i - 2).z - MeshGallery.SLOT_SPACING, 0.001,
+				"Sockel %d steht eine Reihe weiter" % i)
 		for j in range(i):
-			t.check(position.distance_to(MeshGallery.pedestal_position(j)) > 2.0,
+			t.check(position.distance_to(MeshGallery.slot_position(j)) > 2.0,
 				"Sockel %d und %d überlappen nicht" % [i, j])
 
-	# "Which pedestal is in front of me" hangs on distance, not on list order.
+	# "Which mesh is in front of me" hangs on distance, not on list order. The
+	# lane is `ROW_OFFSET` from either row and `NEAR_DISTANCE` is wider than
+	# that, so a player who walks down the middle is already looking at a mesh.
 	var keys: Array[String] = []
-	for i in MeshGallery.ARC_SIZE:
+	for i in 12:
 		keys.append("k%d" % i)
-	t.equal(MeshGallery.nearest_pedestal(keys, MeshGallery.pedestal_position(0)), 0,
-		"Auf dem Sockel 0 ist Sockel 0 der nächste")
-	t.equal(MeshGallery.nearest_pedestal(keys, MeshGallery.pedestal_position(5)), 5,
-		"Auf dem Sockel 5 ist Sockel 5 der nächste")
-	t.equal(MeshGallery.nearest_pedestal(keys, MeshGallery.CENTER), -1,
-		"In der Mitte ist kein Sockel nah genug")
-	t.equal(MeshGallery.nearest_pedestal([], MeshGallery.pedestal_position(0)), -1,
+	t.equal(MeshGallery.nearest_slot(keys, MeshGallery.slot_position(0)), 0,
+		"Am Sockel 0 ist Sockel 0 der nächste")
+	t.equal(MeshGallery.nearest_slot(keys, MeshGallery.slot_position(5)), 5,
+		"Am Sockel 5 ist Sockel 5 der nächste")
+	# `NEAR_DISTANCE` is wider than `ROW_OFFSET`, so walking down the middle of
+	# the lane already stands in front of a row — a player who never leaves the
+	# middle still looks at a mesh.
+	t.equal(MeshGallery.nearest_slot(keys, Vector3(0, 0, MeshGallery.slot_position(6).z)), 6,
+		"In der Mitte zählt der Sockel auf gleicher Höhe")
+	t.equal(MeshGallery.nearest_slot(keys,
+		Vector3(MeshGallery.lane_bounds().y, 0, MeshGallery.slot_position(6).z)), 7,
+		"An der rechten Seite ist der rechte Sockel der nächste")
+	t.equal(MeshGallery.nearest_slot(keys, Vector3(0, 0, MeshGallery.FIRST_SLOT_Z + 20.0)), -1,
+		"Weit vor dem ersten Sockel ist keiner nah genug")
+	t.equal(MeshGallery.nearest_slot([], MeshGallery.slot_position(0)), -1,
 		"Ohne Meshes gibt es keinen Sockel")
 
-	# A page holds exactly ARC_SIZE meshes, the rest spills onto the next.
-	t.equal(MeshGallery.page_size(5), 5, "Eine kleine Sammlung passt auf eine Seite")
-	t.equal(MeshGallery.page_size(MeshGallery.ARC_SIZE), MeshGallery.ARC_SIZE,
-		"Genau ein Ring passt auf eine Seite")
-	t.equal(MeshGallery.page_size(MeshGallery.ARC_SIZE + 1), MeshGallery.ARC_SIZE,
-		"Ein Mesh zu viel wandert auf die nächste Seite")
-	t.equal(MeshGallery.pages_for(0), 1, "Eine leere Sammlung hat trotzdem eine Seite")
-	t.equal(MeshGallery.pages_for(5), 1, "Fünf Meshes passen auf eine Seite")
-	t.equal(MeshGallery.pages_for(MeshGallery.ARC_SIZE), 1, "Ein Ring ist eine Seite")
-	t.equal(MeshGallery.pages_for(MeshGallery.ARC_SIZE + 1), 2, "Ein Ring plus eins sind zwei Seiten")
-	t.equal(MeshGallery.pages_for(MeshGallery.ARC_SIZE * 3), 3, "Drei Ringe sind drei Seiten")
+	# The hall reaches exactly as far as its last mesh, and the player may not
+	# walk past it or through the rows.
+	t.almost(MeshGallery.end_z(0), -MeshGallery.FIRST_SLOT_Z, 0.001,
+		"Eine leere Halle hat kein weiteres Ende")
+	t.almost(MeshGallery.end_z(1), -MeshGallery.FIRST_SLOT_Z, 0.001,
+		"Ein einzelnes Mesh steht am Eingang")
+	t.almost(MeshGallery.end_z(12), MeshGallery.slot_position(11).z, 0.001,
+		"Das Ende der Halle ist der letzte Sockel")
+	var walk := MeshGallery.walk_bounds(12)
+	t.check(walk.x < MeshGallery.slot_position(11).z, "Der Spieler kommt nicht hinter dem letzten Mesh vorbei")
+	t.check(walk.y > MeshGallery.slot_position(0).z, "Hinter dem ersten Mesh ist noch Platz")
+	var lane := MeshGallery.lane_bounds()
+	t.check(lane.x < 0.0 and lane.y > 0.0, "Die Gasse ist mittig")
+	t.check(absf(lane.x) < MeshGallery.ROW_OFFSET - MeshGallery.PEDESTAL_RADIUS,
+		"Die Gasse bleibt neben den Sockeln")
 
-	var many: Array[String] = []
-	for i in MeshGallery.ARC_SIZE * 2 + 5:
-		many.append("k%d" % i)
-	t.equal(MeshGallery.page(many, 0).size(), MeshGallery.ARC_SIZE, "Die erste Seite ist voll")
-	t.equal(MeshGallery.page(many, 1).size(), MeshGallery.ARC_SIZE, "Die zweite Seite ist voll")
-	t.equal(MeshGallery.page(many, 2).size(), 5, "Die letzte Seite trägt den Rest")
-	t.equal(MeshGallery.page(many, 0)[0], "k0", "Die Seiten sind lückenlos")
-	t.equal(MeshGallery.page(many, 1)[0], "k%d" % MeshGallery.ARC_SIZE, "Die zweite Seite schließt an")
-	t.equal(MeshGallery.page(many, 5).size(), 0, "Hinter der letzten Seite ist nichts")
-	t.equal(MeshGallery.page([], 0).size(), 0, "Eine leere Sammlung hat keine Seite")
-	t.equal(MeshGallery.page(["a", "b"], 0).size(), 2, "Eine kleine Sammlung zeigt alles")
-	t.suite_done()
+	# The point of the hall: no collection, no page, no ring — every mesh of the
+	# registry has a pedestal of its own.
+	t.almost(MeshGallery.end_z(AssetRegistry.KEYS.size()),
+		MeshGallery.slot_position(AssetRegistry.KEYS.size() - 1).z, 0.001,
+		"Das letzte Registry-Mesh hat einen Sockel")
+	t.check(AssetRegistry.KEYS.size() > 12,
+		"Die Halle trägt mehr Meshes als ein Ring")
 
+	# The suggestion names the mesh the player stands in front of, so nobody has
+	# to spell out `rpg/dragon_lord` by hand.
+	t.equal(MeshGallery.context(), Loc.t("gallery.context"),
+		"Die Galerie nennt sich selbst als Herkunft")
+	var named := MeshGallery.context("rpg/dragon_lord")
+	t.check(named.contains(Loc.resolve(AssetRegistry.display_name("rpg/dragon_lord"))),
+		"Der Vorschlag nennt das Mesh davor")
+	t.check(named.contains(MeshGallery.context()), "Der Name steht hinter der Galerie")
 
-# --- Galerie: Merkliste und Vorschlag ---------------------------------------
-
-func _gallery_marks() -> void:
-	t.suite("Mesh-Galerie — Merkliste")
-
-	var marks := MeshGallery.new_marks()
-	t.equal(MeshGallery.mark_count(marks), 0, "Die Liste startet leer")
-	t.equal(MeshGallery.draft(marks), "", "Ohne Marken gibt es keinen Vorschlagstext")
-	t.equal(MeshGallery.mark_count(MeshGallery.shared_marks()), MeshGallery.mark_count(MeshGallery.shared_marks()),
-		"Die geteilte Liste ist stabil")
-
-	var key := AssetRegistry.KEYS[0]
-	marks = MeshGallery.mark(marks, key, "Kanten zu hart")
-	t.equal(MeshGallery.mark_count(marks), 1, "Ein Mesh kommt auf die Liste")
-	t.check(MeshGallery.is_marked(marks, key), "Das Mesh gilt als vorgemerkt")
-	t.equal(MeshGallery.mark_note(marks, key), "Kanten zu hart", "Die Notiz bleibt erhalten")
-	t.check(MeshGallery.draft(marks).contains(key), "Der Vorschlag nennt den Mesh-Schlüssel")
-	t.check(MeshGallery.draft(marks).contains("Kanten zu hart"), "Der Vorschlag enthält die Notiz")
-
-	# Marking the same mesh again does not add a second entry.
-	marks = MeshGallery.mark(marks, key, "Noch schärfer")
-	t.equal(MeshGallery.mark_count(marks), 1, "Doppelt vormerken zählt einmal")
-	t.equal(MeshGallery.mark_note(marks, key), "Noch schärfer", "Die zweite Notiz gewinnt")
-
-	t.check(not MeshGallery.is_marked(marks, "gibtesnicht"), "Fremde Keys gelten nie als vorgemerkt")
-	t.equal(MeshGallery.mark_count(MeshGallery.mark(marks, "gibtesnicht")), 1, "Ein unbekannter Key wird ignoriert")
-	t.equal(MeshGallery.mark_count(MeshGallery.mark(marks, "")), 1, "Leere Keys werden ignoriert")
-
-	var on := MeshGallery.toggle(marks, AssetRegistry.KEYS[1])
-	t.equal(bool(on["marked"]), true, "Ein neues Mesh lässt sich vormerken")
-	t.equal(MeshGallery.mark_count(on["marks"]), 2, "Die Liste hat jetzt zwei Meshes")
-	var off := MeshGallery.toggle(on["marks"], AssetRegistry.KEYS[1])
-	t.equal(bool(off["marked"]), false, "Ein vorgemerktes Mesh lässt sich wieder abwählen")
-	t.equal(MeshGallery.mark_count(off["marks"]), 1, "Die Liste hat wieder ein Mesh")
-	t.equal(MeshGallery.mark_note(off["marks"], AssetRegistry.KEYS[1]), "", "Ein abgewähltes Mesh verliert die Notiz")
-
-	# Notes and tiers belong to marked meshes only.
-	marks = MeshGallery.set_note(marks, key, "Flügel fehlen")
-	t.equal(MeshGallery.mark_note(marks, key), "Flügel fehlen", "Eine Notiz lässt sich später ändern")
-	t.equal(MeshGallery.mark_note(MeshGallery.set_note(marks, "gibtesnicht", "x"), "gibtesnicht"), "",
-		"Fremde Keys bekommen keine Notiz")
-	t.equal(MeshGallery.mark_count(MeshGallery.set_note(marks, "gibtesnicht", "x")), 1, "Die Liste bleibt klein")
-
-	marks = MeshGallery.set_tier(marks, key, "high")
-	t.equal(str((marks["entries"] as Dictionary)[key]["tier"]), "high", "Die Detailstufe wird gemerkt")
-	t.equal(MeshGallery.mark_count(MeshGallery.set_tier(marks, "gibtesnicht", "high")), 1,
-		"Die Stufe gilt nur für vorgemerkte Meshes")
-	t.equal(str((MeshGallery.set_tier(marks, key, "quatsch")["entries"] as Dictionary)[key]["tier"]), "low",
-		"Eine unbekannte Stufe fällt auf Low zurück")
-
-	# The finished text names each tier the way the player looked at it.
-	var draft := MeshGallery.draft(marks)
-	t.check(draft.contains("Hoch"), "Der Vorschlag nennt die angeschaute Detailstufe")
-	t.check(draft.contains(AssetRegistry.display_name(key)), "Der Vorschlag nennt den deutschen Namen")
-
-	# Several meshes make a block with one entry each; a mesh with a note needs
-	# two lines.
-	marks = MeshGallery.mark(marks, AssetRegistry.KEYS[1], "zu dunkel")
-	var multi := MeshGallery.draft(marks)
-	t.check(multi.contains(AssetRegistry.KEYS[0]), "Der erste Eintrag steht im Text")
-	t.check(multi.contains(AssetRegistry.KEYS[1]), "Der zweite Eintrag steht im Text")
-	t.check(multi.contains("zu dunkel"), "Die zweite Notiz steht im Text")
-	t.equal(multi.count("\n"), 4, "Kopf, ein Mesh ohne und ein Mesh mit Notiz")
-
-	# Clearing empties everything.
-	t.equal(MeshGallery.mark_count(MeshGallery.clear_marks()), 0, "Leeren leert die Liste")
-	t.equal(MeshGallery.draft(MeshGallery.clear_marks()), "", "Nach dem Leeren gibt es keinen Text")
-
-	t.equal(MeshGallery.context(), "Mesh-Galerie", "Die Galerie nennt sich selbst als Herkunft")
 	t.check(MeshGallery.tier_caption("low").contains("Low Poly"), "Die Low-Stufe wird erklärt")
 	t.check(MeshGallery.tier_caption("med").contains("1.000"), "Das Ziel der mittleren Stufe steht dabei")
 	t.check(MeshGallery.tier_caption("high").contains("10.000"), "Das Ziel der hohen Stufe steht dabei")

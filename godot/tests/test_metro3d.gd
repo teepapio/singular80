@@ -43,6 +43,18 @@ func _names(sentence: String, kind: int) -> bool:
 	return text.contains(Loc.resolve(source)) or text.contains(source)
 
 
+## One world step *and* the HUD refresh that goes with it.
+##
+## `MetroScreen` rebuilds its text at 10 Hz while a headless step lasts 0.05 s, so
+## a test that rigs the city and then reads a label would otherwise be looking at
+## the line of the state *before* the rig — which is how a HUD assertion came up
+## empty although the logic had the answer ready. The logic is stepped first, so
+## the label is written from the very state that step produced.
+func _step(screen) -> void:
+	screen._update_world(0.05)
+	screen._refresh_hud()
+
+
 ## Three starting stations with fixed types, so the assertions do not depend on
 ## the seed of the city.
 func _demo(kinds: Array[int]) -> Metro:
@@ -236,7 +248,19 @@ func _berufsverkehr() -> void:
 	metro.extend_line(line, 1)
 	metro.finish_line(line)
 	t.check(bool((metro.peak_demand()[0] as Dictionary)["route"]), "Mit der Linie ist der Verkehr abgedeckt")
-	t.equal(metro.peak_text(), "08:00 abgedeckt", "Die Prognose meldet Erfolg")
+	# The line the forecast asked for turns the warning off, so the caption
+	# collapses to the hour and a verdict — no destination any more. Which verdict
+	# that is belongs to the catalogue, and the caption is built with `%` rather
+	# than `Loc.f` (see the report), so the test pins what holds in every
+	# language: the hour, a word after it, and no open destination left in the line.
+	var covered := metro.peak_text()
+	t.check(covered.begins_with("08:00"), "Die abgedeckte Prognose nennt die Stunde")
+	t.check(not covered.substr(5).strip_edges().is_empty(),
+		"Und sagt, dass die Stunde abgedeckt ist")
+	var names_a_gap := false
+	for kind in Metro.Kind.size():
+		names_a_gap = names_a_gap or _names(covered, kind)
+	t.check(not names_a_gap, "Und nennt kein offenes Ziel mehr")
 
 	# The forecast follows the calendar, not a fixed list.
 	metro.day = 5
@@ -285,24 +309,31 @@ func _anschluss_marker(tree: SceneTree) -> void:
 	metro.finish_line(away)
 	for i in Metro.STRANDED_MIN:
 		(metro.stations[0]["waiting"] as Array).append(metro._alloc_passenger(Metro.Kind.SPORTS))
-	screen._update_world(0.05)
+	_step(screen)
 
 	var marker: Label3D = screen._station_nodes[0].get_node("Demand")
 	t.check(marker.visible, "Der Marker steht über dem festgefahrenen Bahnhof")
 	t.check(marker.text.contains("P"), "Er nennt den gesuchten Zielort")
 	var quiet: Label3D = screen._station_nodes[1].get_node("Demand")
 	t.check(not quiet.visible, "Der bediente Bahnhof bleibt ohne Marker")
-	# The HUD and the notify line are the two places the player reads this. Both
-	# name the destination the city is missing, and both reach the screen through
-	# `Loc` — so the expectation is the destination's own name rather than the
-	# German word "ohne Anschluss", which the source no longer produces and which
-	# the assertion therefore never actually checked. Both spellings are accepted:
-	# a caption assembled with `%` before it reaches `Loc` still carries the source
+	# The HUD line and the notify line are the two places the player reads this,
+	# and both reach the screen through `Loc` — so the expectation is never a
+	# word out of one language, but the destination's own name in whichever
+	# spelling the line was built in. Both spellings are accepted: a caption
+	# assembled with `%` before it reaches `Loc` still carries the source
 	# spelling, and one assembled by `Loc.f` carries the translated one.
 	t.equal(screen._demand_label.text, metro.demand_text(),
 		"Das HUD zeigt genau den Text der Logik")
-	t.check(not metro.demand_text().is_empty() and _names(screen._demand_label.text, Metro.Kind.SPORTS),
-		"Und nennt den Zielort, für den es keine Linie gibt")
+	# This city reaches the stadium *somewhere* — the away line stops there — so
+	# the gap is local and `demand_text()` answers with its second form: it counts
+	# the stuck commuters instead of naming a destination ("3 passengers
+	# stranded", "3 Fahrgäste stranden"). The number is the part of that sentence
+	# that reads the same in every language; the destination is named by the
+	# marker above the station and by the notify line, both asserted here.
+	t.check(not screen._demand_label.text.is_empty()
+			and screen._demand_label.text.contains(str(metro.stranded_total))
+			and metro.stranded_total >= Metro.STRANDED_MIN,
+		"Und nennt, wie viele Fahrgäste feststecken")
 	t.check(screen._peak_label.text.contains(":"), "Die Berufsverkehrs-Prognose steht im HUD")
 	t.check(screen._notify_label != null and not screen._notify_label.text.is_empty() \
 			and _names(screen._notify_label.text, Metro.Kind.SPORTS),
@@ -310,7 +341,7 @@ func _anschluss_marker(tree: SceneTree) -> void:
 
 	# Building the line the forecast asked for clears the station.
 	metro.extend_line(home, 2)
-	screen._update_world(0.05)
+	_step(screen)
 	t.check(not marker.visible, "Mit der passenden Linie verschwindet der Marker")
 	t.equal(metro.stranded_total, 0, "Und niemand steht mehr ohne Anschluss da")
 	t.equal(metro.demand_text(), "", "Das HUD hat nichts mehr zu melden")

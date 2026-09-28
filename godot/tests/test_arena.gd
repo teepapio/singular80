@@ -134,9 +134,21 @@ func _draft() -> void:
 	t.equal(ArenaRuns.weighted_draft(candidates, 5, PackedFloat32Array([0.1, 0.1, 0.1])).size(), 3,
 		"Mehr Karten als im Angebot gibt es nicht")
 	t.equal(ArenaRuns.weighted_draft([], 3, PackedFloat32Array([0.5])).size(), 0, "Ohne Angebot wird nichts gezogen")
-	var unweighted: Array = [{"id": "x", "stat": "armor", "amount": 1.0, "rarity": "mystery"}]
-	t.equal(ArenaRuns.weighted_draft(unweighted, 3, PackedFloat32Array([0.1])).size(), 0,
-		"Eine Karte ohne Seltenheit wiegt nichts und wird nicht gezogen")
+	# A card whose rarity the ladder does not know is drawn like a common one, not
+	# dropped: weight 0.0 would remove it from the draft without a word, which is
+	# what a legendary card used to do before the ladder learned all five rungs. So
+	# the single such card is drawable, it is the only one offered, and it comes
+	# with the common weight rather than with none.
+	var unknown: Array = [{"id": "x", "stat": "armor", "amount": 1.0, "rarity": "mystery"}]
+	t.equal(ArenaRuns.weighted_draft(unknown, 3, PackedFloat32Array([0.1])).size(), 1,
+		"Eine Karte mit unbekannter Seltenheit wird wie eine gewöhnliche gezogen")
+	t.equal(str(ArenaRuns.weighted_draft(unknown, 3, PackedFloat32Array([0.1]))[0]["id"]), "x",
+		"Und sie ist die Karte, die gezogen wurde")
+	t.equal(ArenaRuns.weighted_draft([
+			{"id": "x", "rarity": "mystery"},
+			{"id": "y", "rarity": "common"},
+		], 2, PackedFloat32Array([0.99, 0.99])).size(), 2,
+		"Eine unbekannte Seltenheit macht eine gewöhnliche Karte nicht unziehbar")
 	t.equal(ArenaRuns.RARITY_WEIGHT.get("common", 0.0), 10.0, "Gewöhnlich wiegt am schwersten")
 	t.check(ArenaRuns.RARITY_WEIGHT.get("common", 0.0) > ArenaRuns.RARITY_WEIGHT.get("epic", 0.0),
 		"Eine gewöhnliche Karte ist häufiger als eine epische")

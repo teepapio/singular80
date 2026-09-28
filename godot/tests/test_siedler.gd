@@ -113,6 +113,29 @@ func _branch(template: String) -> String:
 	return head.strip_edges()
 
 
+## The sentence `route_advice` owes this route, composed the way the report
+## composes it: four states — a stub between house and banner, a jam, a priority
+## that is too low, and a route that already runs — and the state decides.
+## Spelled out as production renders it, from the catalogue's templates and the
+## report's own numbers, so the comparison is the same in every language and does
+## not depend on a wording.
+func _advice_of(siedler: Siedler, entry: Dictionary) -> String:
+	if str(entry["kind"]) == "link":
+		return "Collector route between house and banner — one carrier, not divisible."
+	if bool(entry["jammed"]):
+		var hint := "Queue: %d goods are waiting on this route." % int(entry["waiting"])
+		if int(entry["cell"]) >= 0:
+			return Loc.f("%s An extra banner brings %d carriers.", [hint, int(entry["gain"])])
+		return hint
+	var good := str(entry["top"])
+	var want := siedler.priority_for(good)
+	if want > int(entry["priority"]):
+		return Loc.f("“%s” arrives here, but priority %d is too low.", [
+			Siedler.good_name(good), int(entry["priority"])])
+	return Loc.f("Running: %.0f tiles, %d carriers, priority %d.", [
+		float(entry["length"]), int(entry["carriers"]), int(entry["priority"])])
+
+
 ## The building the advisor compares everything else against: the one that needs
 ## the fewest planks. `Siedler._cheapest_build` is private, so the rule is
 ## re-derived here — one loop, and the test needs the *kind* to read its cost.
@@ -574,16 +597,28 @@ func _actions() -> void:
 		# so the sentence is composed here from the same template the advisor uses
 		# and the comparison is exact in every language.
 		var cheapest := _cheapest_kind()
-		var affordable_fix := "Fix the idle entries in this list first, then keep building."
-		var broke_fix := "Get logs to the carpenter first — only that becomes planks again."
+		var general_fix := "Fix the idle entries in this list first, then keep building."
+		var log_fix := "Get logs to the carpenter first — only that becomes planks again."
 		var cheap_cost: Dictionary = Siedler.spec_of(cheapest)["cost"]
+		# Which of the two advices the advisor ends with is read off the *list*:
+		# the log detour is only promised when a stall is actually missing logs.
+		# This board is short coal and ore, so the general advice is the honest one
+		# — and the log case is asserted below, on a board whose sawmill really does
+		# starve. Both sentences are the source strings and the template is
+		# resolved on both sides, so the comparison holds in every language.
+		var missing_logs := false
+		for stall in broke.bottlenecks():
+			if str(stall["code"]) == "noInput" and str(stall["good"]) == "logs":
+				missing_logs = true
+		t.check(not missing_logs,
+			"Kein Betriebsgebäude hungt an Bauholz — der Rat hat nichts Spezielles zu versprechen")
 		t.equal(str(wall["detail"]), Loc.f(
 			"The castle has %d planks and %d stone; the cheapest building, a “%s”, costs %d planks. %s",
 			[int(broke.store.get("planks", 0)), int(broke.store.get("stone", 0)),
-				str(Siedler.spec_of(cheapest)["name"]), int(cheap_cost["planks"]), broke_fix]),
+				str(Siedler.spec_of(cheapest)["name"]), int(cheap_cost["planks"]), general_fix]),
 			"Und nennt den leeren Bestand samt dem, was er kaufen würde")
-		t.check(not Loc.resolve(str(wall["detail"])).contains(Loc.resolve(affordable_fix)),
-			"Der Rat ist nicht der allgemeine, sondern der zu diesem Engpass")
+		t.check(not Loc.resolve(str(wall["detail"])).contains(Loc.resolve(log_fix)),
+			"Der Rat ist nicht der zu einer anderen Lage gehörige")
 
 	# Having build plots is not a bottleneck by itself — but a happy, poorer
 	# settlement still has none.
@@ -599,15 +634,14 @@ func _actions() -> void:
 		var top := poor.top_bottleneck()
 		t.equal(str(top["code"]), "noBuild",
 			"Sobald etwas klemmt, ist die tote Burg der erste Rat")
-		# The generic advice would be "fix the idle entries first", which sends the
-		# player in circles. With no logs at all the advisor has to name the good
-		# that has to come back, so the sentence is compared against the good name
-		# rather than against one language's word for it.
-		# The generic advice — "fix the idle entries first" — sends the player in
-		# circles here, because nothing is idle: no logs means no planks, and no
-		# planks means nothing gets built. The specific sentence names the good
-		# that has to come back instead, so that is what the report has to carry.
+		# This is the board the specific advice belongs to: the sawmill is the one
+		# thing in the list that is missing logs, so the advisor names the good
+		# that has to come back. The generic advice — "fix the idle entries
+		# first" — would send the player in circles here, because nothing is idle:
+		# no logs means no planks, and no planks means nothing gets built.
 		var carpenter := "Get logs to the carpenter first — only that becomes planks again."
+		t.check(str(_with_code(poor.bottlenecks(), "noInput").get("good", "")) == "logs",
+			"Die Liste nennt die fehlenden Stämme als den Grund")
 		t.check(Loc.resolve(str(top["detail"])).contains(Loc.resolve(carpenter)),
 			"Der Rat verweist auf den echten Engpass dahinter")
 		t.check(not Loc.resolve(str(top["detail"])).contains(
@@ -831,19 +865,15 @@ func _route_report() -> void:
 		t.suite_done()
 		return
 
-	# The advice names the next handle, not the state. Without a jam and with a
-	# fitting priority there is only the quiet sentence.
+	# The advice names the next handle, not the state. Every route is owed exactly
+	# one of four sentences, and which one is decided by the state of that route —
+	# so the test states the sentence the state calls for, composed from the
+	# catalogue, rather than recognising a wording in one language.
 	for entry in routes:
 		var advice := siedler.route_advice(entry)
 		t.check(not advice.is_empty(), "Jede Strecke bekommt einen Satz")
-		# Three sentences, one per state of the route: a jam, a priority that is
-		# too low, and a route that already runs. The third names no good, so the
-		# check is "it names the good, or it is one of the other two" — decided
-		# on the catalogue, not on German prose.
-		t.check(_mentions(advice, Siedler.good_name(str(entry["top"]))) \
-			or advice.begins_with(_branch("Queue: %d goods are waiting on this route.")) \
-			or advice.begins_with(_branch("Running: %.0f tiles, %d carriers, priority %d.")),
-			"Der Satz redet über die Ware dieser Strecke")
+		t.check(Loc.resolve(advice) == Loc.resolve(_advice_of(siedler, entry)),
+			"Der Satz beschreibt genau diese Strecke")
 		break
 
 	# The order is a promise to the player: jams first, because a jam is the only
@@ -862,12 +892,12 @@ func _route_report() -> void:
 	busy["jammed"] = true
 	busy["cell"] = 3
 	busy["gain"] = 4
-	# Each state gets its own sentence, and the three are told apart by the
-	# template they were built from. The advice quotes a number, so the test
-	# asserts the sentence differs between the states and matches its own
-	# numbers — the wording belongs to the catalogue.
+	# Each state gets its own sentence, and the states are told apart by the
+	# numbers they carry, not by their wording: the advice quotes a number, so
+	# every sentence is compared against the one this very state calls for —
+	# rendered from the catalogue, with the values from the report.
 	var jam_note := siedler.route_advice(busy)
-	t.check(jam_note.begins_with(_branch("Queue: %d goods are waiting on this route.")) \
+	t.check(Loc.resolve(jam_note) == Loc.resolve(_advice_of(siedler, busy))
 		and _mentions(jam_note, str(int(busy["waiting"]))),
 		"Bei Stau nennt der Bericht zuerst den Stau")
 	busy["jammed"] = false
@@ -879,15 +909,16 @@ func _route_report() -> void:
 	var low_note := siedler.route_advice(busy)
 	t.check(_mentions(low_note, Siedler.good_name("logs")),
 		"Ohne Stau nennt er die zu niedrige Priorität — samt der Ware")
-	# The number belongs to the sentence the player reads, so it is composed the
-	# way the report composes it: the template from the catalogue, the value from
-	# the report. A bare "1" would be found in any sentence that contains a one.
-	t.check(_mentions(low_note, "%s %d" % [_branch("priority %d"), 1]),
+	# The number belongs to the sentence the player reads, so it is compared the
+	# way the report composes it: the whole template from the catalogue, the value
+	# from the report. A bare "1" would be found in any sentence that contains a
+	# one, and a fragment of the template would be a word out of one language.
+	t.check(Loc.resolve(low_note) == Loc.resolve(_advice_of(siedler, busy)),
 		"Und nennt die Zahl, die zu niedrig ist")
 	busy["priority"] = 6
 	var fine_note := siedler.route_advice(busy)
-	t.check(fine_note.begins_with(_branch("Running: %.0f tiles, %d carriers, priority %d.")) \
-		and _mentions(fine_note, "%s %d" % [_branch("priority %d"), 6]),
+	t.check(Loc.resolve(fine_note) == Loc.resolve(_advice_of(siedler, busy)) \
+		and _mentions(fine_note, str(int(busy["priority"]))),
 		"Passt die Priorität, gibt es nichts zu tun — und er nennt die Strecke")
 	t.check(low_note != jam_note and fine_note != jam_note and fine_note != low_note,
 		"Die drei Zustände bekommen drei verschiedene Sätze")
@@ -1202,11 +1233,15 @@ func _depot() -> void:
 		t.check(_mentions(str(entry["detail"]), Siedler.good_name("logs")),
 			"Der Text nennt die abgewiesene Ware")
 		# …and the fill level, which is the number the player can do something
-		# about. It is composed from the report, so the comparison is exact.
-		t.check(Loc.resolve(str(entry["detail"])).contains(Loc.f(
-				"The castle no longer takes warehouse goods: %d of %d slots taken.",
-				[int(report["used"]), int(report["capacity"])])),
+		# about. It is in the **title**, not in the detail: the title is the
+		# storehouse sentence, the detail names the goods that were turned away.
+		# An earlier version cut the fill level out of the detail and could only
+		# ever have failed, because the detail carries the refusal list.
+		var title := Loc.resolve(str(entry["title"]))
+		t.check(title.contains(str(int(report["used"]))),
 			"Und nennt, wie voll die Kammer ist")
+		t.check(title.contains(str(int(report["capacity"]))),
+			"…samt der Größe, die sie hat")
 		# The lever is the sentence that promises what one more storehouse buys.
 		# It is the one line the player acts on, and it carries two numbers: the
 		# slots and the settlers. The expectation is the whole rendered sentence,

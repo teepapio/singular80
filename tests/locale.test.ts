@@ -198,7 +198,8 @@ describe('Ableitung aus dem Code', () => {
     // of `content/*.json`. English, because the source language is the language
     // of the code.
     for (const value of [
-      'Submit a suggestion', '◀ Lobby', 'Board games', 'Axe', '%s   ·   %s triangles', 'Railgun',
+      'Submit a suggestion', '◀ Lobby', 'Board games', 'Axe', '%s   ·   %s   ·   %s triangles',
+      'Railgun',
     ]) {
       expect(found.text.has(value), value).toBe(true);
     }

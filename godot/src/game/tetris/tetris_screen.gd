@@ -308,7 +308,10 @@ func _build_touch_controls() -> void:
 		_hold_piece()
 		_refresh()
 	)
-	_anchor(hold, Vector2(1.0, 1.0), Vector2(-184, -66))
+	# Clear of `rotate_ccw`, which ends 172 px from the right edge and is 72
+	# wide. At -184 this button's right end sat 60 px underneath the
+	# counter-clockwise one — the later sibling, so it swallowed every tap.
+	_anchor(hold, Vector2(1.0, 1.0), Vector2(-252, -66))
 	layer.add_child(hold)
 
 	var rotate := Ui.button("↻", Vector2(72, 58), UiTheme.PANEL_LIGHT, func() -> void:

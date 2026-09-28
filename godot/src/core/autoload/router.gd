@@ -8,7 +8,6 @@ signal screen_changed(screen_id: String)
 const SCREEN_SCRIPTS := {
 	"lobby": "res://src/game/lobby/lobby3d_screen.gd",
 	"mesh_gallery": "res://src/game/lobby/mesh_gallery_screen.gd",
-	"mesh_review": "res://src/game/lobby/mesh_review_screen.gd",
 	"lobby_list": "res://src/game/lobby/lobby_list_screen.gd",
 	"main_menu": "res://src/game/arena/main_menu_screen.gd",
 	"arena": "res://src/game/arena/arena_screen.gd",

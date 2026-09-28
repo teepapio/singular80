@@ -1121,6 +1121,10 @@ func _modal_root() -> Control:
 	_modal_layer = Control.new()
 	_modal_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_modal_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	# The `modal` meta is what `WorldScreen.close_modals()` and `has_modal()`
+	# look for, and what tells the screen test that an overlay is *meant* to
+	# swallow clicks. Without it this full-rect layer reads as a bug.
+	_modal_layer.set_meta("modal", true)
 	hud_root.add_child(_modal_layer)
 	return _modal_layer
 

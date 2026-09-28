@@ -1,16 +1,15 @@
 class_name MeshGalleryScreen
 extends WorldScreen
-## A round room with one pedestal per mesh. The player walks around, switches
-## between three detail levels, marks a mesh as "needs work" with a note, and
-## everything collected goes to the dashboard as one finished suggestion.
+## One long hall. A row of pedestals on the left, one on the right, every mesh
+## of the registry in walking order — walk straight ahead and they pass on
+## either side. Three detail levels can be switched, and in front of a mesh the
+## player presses E for the ordinary suggestion dialog, with that mesh named.
 ##
-## The geometry and the suggestion text live in `MeshGallery`, so they are
-## testable without a screen.
+## The geometry lives in `MeshGallery`, so it is testable without a screen.
 
 const MOVE_SPEED := 7.5
-const CAMERA_HEIGHT := 9.6
-const CAMERA_DISTANCE := 12.5
-const ROOM_RADIUS := 17.0
+const CAMERA_HEIGHT := 9.0
+const CAMERA_DISTANCE := 11.0
 const SPIN_SPEED := 0.9
 ## Fallback rate for the info caption when nothing flagged a change. The change
 ## flag is what normally drives it; this bounds the staleness if a flag is missed.
@@ -19,115 +18,118 @@ const INFO_INTERVAL := 0.1
 ## How tall a mesh appears on its pedestal, whatever its real size is.
 const MESH_ON_PEDESTAL := 1.75
 
-var group_id := "helden"
+# --- the hall ---------------------------------------------------------------
+
+## How far a row stands from the middle line, and the walls behind it.
+const HALL_HALF_WIDTH := 8.2
+const WALL_HEIGHT := 4.2
+
+## How far away a mesh may be before it goes into the scene — and how far it may
+## have walked on before it leaves it again. The hall is 800 m long; with every
+## mesh resident the high level alone would be over a million triangles, and
+## nobody would ever get past the first ten.
+const LOAD_DISTANCE := 48.0
+## Meshes taken into the scene per frame. One every 0.6 s of walking, so the
+## hitch stays a few milliseconds instead of a visible pause.
+const LOADS_PER_FRAME := 2
+## The window is rebuilt after the player has walked this far, not every frame.
+const SWEEP_STEP := 1.0
+
+## The far end of the hall has to disappear into something, and the fog does
+## the culling the eye expects.
+const VIEW_FAR := 170.0
+const FOG_COLOR := "060a14"
+const FOG_DENSITY := 0.02
+
 var tier := "low"
-var page_index := 0
 
-## The list of meshes to improve lives in `MeshGallery` so the review screen and
-## this screen always see the same one — a private copy would silently drop the
-## player's work when they walk over to the review.
+## Every key of the registry, in walking order. The two rows take them in turn.
+var keys: Array[String] = []
 
-var pos := Vector3(0, 0, 9)
+var pos := Vector3(0, 0, 0)
 var facing := PI
 var player: Node3D
-var pedestals: Array[Node3D] = []
 var slot_nodes: Array[Dictionary] = []
-var active_pedestal := -1
+var active_slot := -1
 var _interact_held := false
 
+## The pedestal index range that currently holds a mesh, and the z the range was
+## last computed for. Animation and streaming both walk only this window.
+var _low := 0
+var _high := -1
+var _sweep_z := 1.0e9
+var _reload := true
+
 var _stick: VirtualStick
-var _info_panel: Control
+var _tier_label: Label
+var _tier_buttons: Array[Button] = []
+var _counter_label: Label
 var _info_name: Label
 var _info_meta: Label
-var _info_note: Label
-var _group_label: Label
-var _tier_label: Label
-var _page_label: Label
-var _marks_label: Label
-var _mark_button: Button
-var _tier_buttons: Array[Button] = []
-var _group_buttons: Array[Button] = []
-## The ids behind `_group_buttons`, in the same order.
-var _group_ids: Array[String] = []
+var _info_hint: Label
 ## The info caption is rebuilt on a change flag or at 10 Hz, not every frame.
 var _info_dirty := true
 var _info_timer := 0.0
 
 
 func _ready_world() -> void:
-	# The lobby portal can open the gallery straight into a collection or a
-	# detail level; otherwise start with the first group that owns any mesh.
-	group_id = str(data.get("group", "")) if not AssetRegistry.keys_in_group(str(data.get("group", ""))).is_empty() else _first_group()
 	tier = str(data.get("tier", "low")) if str(data.get("tier", "")) in AssetRegistry.TIERS else "low"
-	_build_room()
+	keys = []
+	keys.assign(AssetRegistry.KEYS)
+	pos = Vector3(0, 0, MeshGallery.walk_bounds(keys.size()).y - 1.0)
+	_build_hall()
 	_build_slots()
 	_build_player()
-	MeshGallery.set_marks(MeshGallery.shared_marks())
 	_build_panels()
-	_refresh()
+	_refresh_panel()
+	_refresh_info()
 	hide_loading()
-
-
-## The first registry group that owns at least one mesh.
-func _first_group() -> String:
-	for group in AssetRegistry.GROUPS:
-		if not AssetRegistry.keys_in_group(str(group["id"])).is_empty():
-			return str(group["id"])
-	return "helden"
 
 
 # --- construction -----------------------------------------------------------
 
-## The room is built from primitives on purpose: it has to look deliberate, and
+## The hall is built from primitives on purpose: it has to look deliberate, and
 ## it must never depend on a bundled mesh being importable.
-func _build_room() -> void:
+func _build_hall() -> void:
+	var bounds := MeshGallery.walk_bounds(keys.size())
+	var length: float = absf(bounds.x) + absf(bounds.y) + 8.0
+	var middle: float = (bounds.x + bounds.y) * 0.5
+
+	camera.far = VIEW_FAR
+	set_fog(Color(FOG_COLOR), FOG_DENSITY)
+
 	var floor := MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(ROOM_RADIUS * 1.98, ROOM_RADIUS * 1.98)
+	var plane := BoxMesh.new()
+	plane.size = Vector3(HALL_HALF_WIDTH * 2.0, 0.2, length)
 	floor.mesh = plane
 	floor.material_override = WorldScreen.standard_material(Color("111827"), 0.85)
+	floor.position = Vector3(0, -0.1, middle)
 	add_child(floor)
 
-	var disc := MeshInstance3D.new()
-	var disc_mesh := CylinderMesh.new()
-	disc_mesh.top_radius = ROOM_RADIUS
-	disc_mesh.bottom_radius = ROOM_RADIUS
-	disc_mesh.height = 0.2
-	disc.mesh = disc_mesh
-	disc.material_override = WorldScreen.standard_material(Color("1b2438"), 0.7)
-	disc.position.y = 0.1
-	add_child(disc)
+	# A stripe down the middle makes the walk forward readable at a glance.
+	var runner := MeshInstance3D.new()
+	var stripe := BoxMesh.new()
+	stripe.size = Vector3(1.4, 0.02, length)
+	runner.mesh = stripe
+	runner.material_override = WorldScreen.standard_material(Color("1e3a5f"), 0.4)
+	runner.position = Vector3(0, 0.01, middle)
+	add_child(runner)
 
-	# A low wall closes the room, so the player cannot wander into the void.
-	var wall := MeshInstance3D.new()
-	var torus := TorusMesh.new()
-	torus.inner_radius = ROOM_RADIUS
-	torus.outer_radius = ROOM_RADIUS + 0.5
-	torus.rings = 48
-	torus.ring_segments = 6
-	wall.mesh = torus
-	wall.material_override = WorldScreen.standard_material(Color("334155"), 0.6)
-	wall.position.y = 0.5
-	add_child(wall)
-
-	# A pillar of light in the middle marks where the player starts.
-	var beacon := WorldScreen.mesh("rpg/crystal_cluster", Color("38bdf8"), 1.6, 0.8)
-	if beacon != null:
-		beacon.position = Vector3(0, 0.6, 0)
-		add_child(beacon)
-		var light := OmniLight3D.new()
-		light.light_color = Color("38bdf8")
-		light.light_energy = 12.0
-		light.omni_range = 14.0
-		light.position = Vector3(0, 2.4, 0)
-		add_child(light)
+	for side: float in [-1.0, 1.0]:
+		var wall := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(0.4, WALL_HEIGHT, length)
+		wall.mesh = box
+		wall.material_override = WorldScreen.standard_material(Color("1f2937"), 0.7)
+		wall.position = Vector3(side * HALL_HALF_WIDTH, WALL_HEIGHT * 0.5, middle)
+		add_child(wall)
 
 
-## One pedestal per slot of the current page, holding the mesh of that tier.
+## One pedestal per mesh, left and right alternating.
 func _build_slots() -> void:
-	for i in MeshGallery.ARC_SIZE:
+	for i in keys.size():
 		var root := Node3D.new()
-		root.position = MeshGallery.pedestal_position(i)
+		root.position = MeshGallery.slot_position(i)
 		add_child(root)
 
 		var column := MeshInstance3D.new()
@@ -161,11 +163,16 @@ func _build_slots() -> void:
 		sign.outline_size = 14
 		sign.outline_modulate = Color("020617")
 		sign.position = Vector3(0, 1.9, 0)
-		sign.text = ""
+		# A `Label3D` resolves nothing on its own, so the display name has to be
+		# translated where it is assigned.
+		sign.text = Loc.resolve(AssetRegistry.display_name(str(keys[i])))
+		sign.modulate = AssetRegistry.color_of(str(keys[i]))
 		holder.add_child(sign)
 
-		pedestals.append(root)
-		slot_nodes.append({"root": root, "holder": holder, "sign": sign, "ring": ring, "key": ""})
+		slot_nodes.append({
+			"root": root, "holder": holder, "sign": sign, "ring": ring,
+			"key": str(keys[i]), "mesh": null,
+		})
 
 
 func _build_player() -> void:
@@ -173,6 +180,13 @@ func _build_player() -> void:
 	var knight := WorldScreen.mesh("rpg/knight", Color("cbd5e1"), 1.0)
 	if knight != null:
 		player.add_child(knight)
+	# The light travels with the player: the hall is far too long to light.
+	var light := OmniLight3D.new()
+	light.light_color = Color("bae6fd")
+	light.light_energy = 9.0
+	light.omni_range = 22.0
+	light.position = Vector3(0, 2.6, 0)
+	player.add_child(light)
 	player.position = pos
 	add_child(player)
 
@@ -183,270 +197,238 @@ func _build_panels() -> void:
 	_stick = add_stick("bottom_left")
 	add_action_button("E", 70.0, "interact")
 
+	# Everything the player reads sits in one column at the top left, so the
+	# bottom of the screen belongs to the stick and the action button alone.
 	var left := VBoxContainer.new()
 	left.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	left.position = Vector2(16, HUD_HEIGHT + 10)
-	left.custom_minimum_size = Vector2(372, 0)
-	left.add_theme_constant_override("separation", 4)
+	left.custom_minimum_size = Vector2(392, 0)
+	left.add_theme_constant_override("separation", 6)
 	hud_root.add_child(left)
 
 	left.add_child(Ui.label("◈  MESH GALLERY", 24, UiTheme.ACCENT, true))
 	_tier_label = Ui.label("", 14, UiTheme.TEXT_DIM)
 	_tier_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_tier_label.custom_minimum_size = Vector2(360, 0)
+	_tier_label.custom_minimum_size = Vector2(380, 0)
 	left.add_child(_tier_label)
 
 	var tier_row := Ui.hbox(6)
 	left.add_child(tier_row)
 	for name in AssetRegistry.TIERS:
 		var tier_id: String = name
-		var button := Ui.button(AssetRegistry.tier_label(tier_id), Vector2(112, 40), UiTheme.PANEL_LIGHT, func() -> void:
+		var button := Ui.button(AssetRegistry.tier_label(tier_id), Vector2(124, 40), UiTheme.PANEL_LIGHT, func() -> void:
 			_set_tier(tier_id)
 		)
 		tier_row.add_child(button)
 		_tier_buttons.append(button)
 
-	var group_row := HFlowContainer.new()
-	group_row.custom_minimum_size = Vector2(348, 0)
-	group_row.add_theme_constant_override("h_separation", 4)
-	group_row.add_theme_constant_override("v_separation", 4)
-	left.add_child(group_row)
-	for group in AssetRegistry.GROUPS:
-		var group_id_value: String = str(group["id"])
-		# An empty collection would be a dead end, so it gets no button.
-		if AssetRegistry.keys_in_group(group_id_value).is_empty():
-			continue
-		var button := Ui.button(Loc.f("%s %s", [str(group["icon"]), str(group["name"])]), Vector2(112, 28), UiTheme.PANEL_LIGHT, func() -> void:
-			_set_group(group_id_value)
-		)
-		button.add_theme_font_size_override("font_size", 12)
-		group_row.add_child(button)
-		_group_buttons.append(button)
-		_group_ids.append(group_id_value)
-	_group_label = Ui.label("", 14, UiTheme.TEXT_DIM)
-	left.add_child(_group_label)
+	_counter_label = Ui.label("", 15, UiTheme.TEXT, true)
+	left.add_child(_counter_label)
 
-	var page_row := Ui.hbox(6)
-	left.add_child(page_row)
-	page_row.add_child(Ui.button("◀", Vector2(48, 38), UiTheme.PANEL_LIGHT, func() -> void: _turn_page(-1)))
-	_page_label = Ui.label("", 15, UiTheme.TEXT, true)
-	_page_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_page_label.custom_minimum_size = Vector2(180, 38)
-	_page_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	page_row.add_child(_page_label)
-	page_row.add_child(Ui.button("▶", Vector2(48, 38), UiTheme.PANEL_LIGHT, func() -> void: _turn_page(1)))
-
-	_marks_label = Ui.label("", 15, Color("facc15"), true)
-	left.add_child(_marks_label)
-
-	# The card that describes whatever the player is standing in front of.
-	_info_panel = Ui.panel(Color(0.043, 0.063, 0.110, 0.9))
-	_info_panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	_info_panel.offset_left = 16
-	_info_panel.offset_right = -16
-	_info_panel.offset_top = -206
-	_info_panel.offset_bottom = -16
-	hud_root.add_child(_info_panel)
-
-	var info_column := Ui.vbox(6)
-	info_column.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	info_column.offset_left = 16
-	info_column.offset_right = -16
-	info_column.offset_top = 12
-	info_column.offset_bottom = -12
-	_info_panel.add_child(info_column)
-
-	_info_name = Ui.label("", 24, UiTheme.TEXT, true)
-	info_column.add_child(_info_name)
-	_info_meta = Ui.label("", 14, UiTheme.TEXT_DIM)
-	info_column.add_child(_info_meta)
-
-	var note_row := Ui.hbox(8)
-	info_column.add_child(note_row)
-	_info_note = Ui.label("", 15, Color("cbd5e1"))
-	_info_note.custom_minimum_size = Vector2(0, 34)
-	_info_note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_info_note.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	note_row.add_child(_info_note)
-	_mark_button = Ui.button("Shortlist", Vector2(190, 34), UiTheme.ACCENT, _toggle_mark)
-	note_row.add_child(_mark_button)
-
-	var actions := Ui.hbox(8)
-	actions.alignment = BoxContainer.ALIGNMENT_END
-	info_column.add_child(actions)
-	actions.add_child(Ui.button("Write a note", Vector2(220, 40), UiTheme.PANEL_LIGHT, func() -> void:
-		Sfx.select()
-		Router.go_to("mesh_review")
-	))
-	actions.add_child(Ui.button("Submit a suggestion", Vector2(260, 40), UiTheme.ACCENT, func() -> void:
-		Sfx.select()
-		Router.go_to("mesh_review")
-	))
+	var info := Ui.panel(Color(0.043, 0.063, 0.110, 0.9))
+	info.custom_minimum_size = Vector2(380, 0)
+	left.add_child(info)
+	var column := Ui.vbox(4)
+	info.add_child(column)
+	_info_name = Ui.label("", 22, UiTheme.TEXT, true)
+	_info_name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_info_name.custom_minimum_size = Vector2(356, 0)
+	column.add_child(_info_name)
+	_info_meta = Ui.label("", 13, UiTheme.TEXT_DIM)
+	_info_meta.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_info_meta.custom_minimum_size = Vector2(356, 0)
+	column.add_child(_info_meta)
+	_info_hint = Ui.label("", 13, UiTheme.TEXT_MUTED)
+	_info_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_info_hint.custom_minimum_size = Vector2(356, 0)
+	column.add_child(_info_hint)
 
 
 # --- state ------------------------------------------------------------------
-
-func visible_keys() -> Array[String]:
-	return MeshGallery.page(AssetRegistry.keys_in_group(group_id), page_index)
-
-
-func page_count() -> int:
-	return MeshGallery.pages_for(AssetRegistry.keys_in_group(group_id).size())
-
 
 func _set_tier(next_tier: String) -> void:
 	if not (next_tier in AssetRegistry.TIERS) or next_tier == tier:
 		return
 	tier = next_tier
+	# Every resident mesh is on the wrong level now; the window reloads them.
+	_reload_stream()
 	_info_dirty = true
 	Sfx.select()
-	_refresh()
+	_refresh_panel()
 
 
-func _set_group(next_group: String) -> void:
-	if next_group == group_id:
-		return
-	group_id = next_group
-	page_index = 0
-	_info_dirty = true
+## The mesh the player is standing in front of, or `""`.
+func active_key() -> String:
+	return MeshGallery.key_at(keys, active_slot)
+
+
+## Opens the ordinary suggestion dialog, naming the mesh in front of the player.
+##
+## The same window the top bar opens — the gallery has no second one of its own
+## any more, and the context is the only thing that differs: it carries the
+## mesh, so the dashboard knows which one an idea is about.
+func open_suggestion() -> void:
 	Sfx.select()
-	_refresh()
-
-
-func _turn_page(step: int) -> void:
-	var count := page_count()
-	if count <= 1:
-		return
-	page_index = posmod(page_index + step, count)
-	_info_dirty = true
-	Sfx.select()
-	_refresh()
-
-
-## The list of meshes the player has marked, always the shared one.
-func _marks() -> Dictionary:
-	return MeshGallery.shared_marks()
-
-
-func _toggle_mark() -> void:
-	var key := MeshGallery.key_at(visible_keys(), active_pedestal)
-	if key == "":
-		return
-	var result := MeshGallery.toggle(_marks(), key)
-	MeshGallery.set_marks(result["marks"])
-	if bool(result["marked"]):
-		MeshGallery.set_marks(MeshGallery.set_tier(_marks(), key, tier))
-		Sfx.level_up()
-		notify(Loc.f("%s shortlisted", [AssetRegistry.display_name(key)]), 1.4)
-	else:
-		Sfx.select()
-		notify(Loc.f("%s removed again", [AssetRegistry.display_name(key)]), 1.2)
-	_info_dirty = true
-	_refresh()
+	SuggestDialog.open_world(self, MeshGallery.context(active_key()))
 
 
 # --- world ------------------------------------------------------------------
 
 func _update_world(delta: float) -> void:
+	_stream_step()
+	# The dialog lives in its own layer above the screen: while it is up the
+	# player stays where they stood, and the stick under their thumb does not
+	# walk them down the hall behind the panel.
+	if SuggestDialog.is_open():
+		return
+
 	var vector := VirtualStick.combined(_stick.value, &"move_left", &"move_right")
 	if vector.length() > 0.05:
 		pos.x += vector.x * MOVE_SPEED * delta
 		pos.z += vector.y * MOVE_SPEED * delta
 		facing = atan2(-vector.x, -vector.y)
-		# The room is a disc, not a plane.
-		var radius := Vector2(pos.x, pos.z).length()
-		if radius > ROOM_RADIUS - 1.0:
-			pos.x *= (ROOM_RADIUS - 1.0) / radius
-			pos.z *= (ROOM_RADIUS - 1.0) / radius
+		# The hall is a corridor: a lane in the middle, an entrance and an end.
+		var lane := MeshGallery.lane_bounds()
+		var walk := MeshGallery.walk_bounds(keys.size())
+		pos.x = clampf(pos.x, lane.x, lane.y)
+		pos.z = clampf(pos.z, walk.x, walk.y)
 
 	player.position = Vector3(pos.x, sin(elapsed * 3.0) * 0.04, pos.z)
 	player.rotation.y = facing
 	follow_camera(player.position, CAMERA_HEIGHT, CAMERA_DISTANCE, 7.0, delta)
 
-	var nearest := MeshGallery.nearest_pedestal(visible_keys(), pos)
-	if nearest != active_pedestal:
-		active_pedestal = nearest
+	var nearest := MeshGallery.nearest_slot(keys, _ground())
+	if nearest != active_slot:
+		active_slot = nearest
 		_info_dirty = true
 	var pressed := Input.is_action_pressed("interact")
-	if pressed and not _interact_held and active_pedestal >= 0:
-		_toggle_mark()
+	if pressed and not _interact_held and active_slot >= 0:
+		open_suggestion()
 	_interact_held = pressed
 
 	_animate_slots(delta)
 	_info_timer -= delta
-	# Six `Loc.f` calls, two `to_upper()` and a join per frame for a caption that
-	# only changes when the player walks to another pedestal. The animation above
-	# still runs every frame; the text waits for the change or the 10 Hz tick.
+	# Four `Loc.f` calls and a join for a caption that only changes when the
+	# player walks to another pedestal. The animation above still runs every
+	# frame; the text waits for the change or the 10 Hz tick.
 	if _info_dirty or _info_timer <= 0.0:
 		_info_dirty = false
 		_info_timer = INFO_INTERVAL
 		_refresh_info()
 
 
-## Spins every mesh on its pedestal and makes the nearest one glow.
+## The player on the floor, without the bob `player.position` carries.
+func _ground() -> Vector3:
+	return Vector3(pos.x, 0.0, pos.z)
+
+
+## Spins every resident mesh on its pedestal and makes the nearest one glow.
 func _animate_slots(delta: float) -> void:
-	for i in slot_nodes.size():
-		var slot: Dictionary = slot_nodes[i]
-		var holder: Node3D = slot["holder"]
-		if str(slot["key"]) == "":
+	for i in range(_low, _high + 1):
+		if i < 0 or i >= slot_nodes.size():
 			continue
+		var slot: Dictionary = slot_nodes[i]
+		if slot["mesh"] == null:
+			continue
+		var holder: Node3D = slot["holder"]
 		holder.rotation.y += delta * SPIN_SPEED
 		# The pedestal the player stands at lifts, so the eye finds it instantly.
 		var bob := sin(elapsed * 2.0 + float(i)) * 0.09
-		var wanted := MeshGallery.PEDESTAL_HEIGHT + bob + (0.6 if i == active_pedestal else 0.0)
+		var wanted := MeshGallery.PEDESTAL_HEIGHT + bob + (0.6 if i == active_slot else 0.0)
 		holder.position.y = lerpf(holder.position.y, wanted, 0.14)
 		var ring: MeshInstance3D = slot["ring"]
 		var ring_material := ring.material_override as StandardMaterial3D
 		if ring_material == null:
 			continue
-		var ring_color := Color("facc15") if i == active_pedestal else Color("64748b")
-		if MeshGallery.is_marked(_marks(), str(slot["key"])):
-			ring_color = Color("34d399")
+		var ring_color := Color("facc15") if i == active_slot else Color("64748b")
 		ring_material.albedo_color = ring_material.albedo_color.lerp(ring_color, 0.12)
 
 
-# --- refresh ----------------------------------------------------------------
+# --- streaming --------------------------------------------------------------
 
-func _refresh() -> void:
-	_rebuild_meshes()
-	_refresh_panel()
-
-
-func _rebuild_meshes() -> void:
-	var keys := visible_keys()
-	for i in slot_nodes.size():
-		var slot: Dictionary = slot_nodes[i]
-		var key := MeshGallery.key_at(keys, i)
-		slot["key"] = key
-		var holder: Node3D = slot["holder"]
-		var sign: Label3D = slot["sign"]
-		for child in holder.get_children():
-			if child is MeshInstance3D:
-				child.queue_free()
-		if key == "":
-			sign.text = ""
+## Fills the window for the player's current position and loads what is missing,
+## at most `LOADS_PER_FRAME` meshes. Called every frame; the window itself is
+## only recomputed once the player has walked a step.
+func _stream_step() -> void:
+	if _reload or absf(pos.z - _sweep_z) >= SWEEP_STEP:
+		_sweep()
+	var budget := LOADS_PER_FRAME
+	for i in range(_low, _high + 1):
+		if budget <= 0:
+			return
+		if i < 0 or i >= slot_nodes.size():
 			continue
-		# A `Label3D` resolves nothing on its own, so the display name has to be
-		# translated where it is assigned.
-		sign.text = Loc.resolve(AssetRegistry.display_name(key))
-		sign.modulate = AssetRegistry.color_of(key)
-		# If this one mesh misses the chosen level, fall back to the finest that
-		# exists — otherwise a low-poly mesh stands under the label "Hoch".
-		var use_tier := AssetRegistry.best_available(key, tier)
-		var node := WorldScreen.mesh(AssetRegistry.tier_path_of(key, use_tier), AssetRegistry.color_of(key))
-		if node == null:
-			node = WorldScreen.mesh(key, AssetRegistry.color_of(key))
-		if node != null:
-			_fitted(node)
-			holder.add_child(node)
-		else:
-			var box := MeshInstance3D.new()
-			var box_mesh := BoxMesh.new()
-			box_mesh.size = Vector3(0.6, 0.6, 0.6)
-			box.mesh = box_mesh
-			box.material_override = WorldScreen.standard_material(AssetRegistry.color_of(key))
-			holder.add_child(box)
+		var slot: Dictionary = slot_nodes[i]
+		if slot["mesh"] != null:
+			continue
+		_load_slot(i)
+		budget -= 1
 
+
+## Recomputes the resident window around the player and frees what fell out of
+## it. The set of pedestals in range is contiguous, so first and last are
+## enough to describe it.
+func _sweep() -> void:
+	_reload = false
+	_sweep_z = pos.z
+	var here := _ground()
+	var low := -1
+	var high := -1
+	for i in slot_nodes.size():
+		if here.distance_to(MeshGallery.slot_position(i)) <= LOAD_DISTANCE:
+			if low < 0:
+				low = i
+			high = i
+	_low = maxi(low, 0)
+	_high = high
+	for i in slot_nodes.size():
+		if i < _low or i > _high:
+			_unload_slot(i)
+
+
+## Forces the window to be rebuilt and every resident mesh loaded again — what
+## switching the detail level does, since a mesh on the pedestal is the one
+## level the player asked for.
+func _reload_stream() -> void:
+	for i in range(_low, maxi(_high, -1) + 1):
+		_unload_slot(i)
+	_reload = true
+
+
+func _load_slot(index: int) -> void:
+	var slot: Dictionary = slot_nodes[index]
+	if slot["mesh"] != null:
+		return
+	var key := str(slot["key"])
+	# If this one mesh misses the chosen level, fall back to the finest that
+	# exists — otherwise a low-poly mesh stands under the label "High".
+	var use_tier := AssetRegistry.best_available(key, tier)
+	var node := WorldScreen.mesh(AssetRegistry.tier_path_of(key, use_tier), AssetRegistry.color_of(key))
+	if node == null:
+		node = WorldScreen.mesh(key, AssetRegistry.color_of(key))
+	if node == null:
+		var box := MeshInstance3D.new()
+		var box_mesh := BoxMesh.new()
+		box_mesh.size = Vector3(0.6, 0.6, 0.6)
+		box.mesh = box_mesh
+		box.material_override = WorldScreen.standard_material(AssetRegistry.color_of(key))
+		node = box
+	_fitted(node)
+	var holder: Node3D = slot["holder"]
+	holder.add_child(node)
+	slot["mesh"] = node
+
+
+func _unload_slot(index: int) -> void:
+	var slot: Dictionary = slot_nodes[index]
+	var node: Node = slot["mesh"]
+	if node == null:
+		return
+	slot["mesh"] = null
+	node.queue_free()
+
+
+# --- mesh fitting -----------------------------------------------------------
 
 ## Scales a mesh so every object in the gallery reads at the same size,
 ## whatever its original dimensions were, and floats it over the pedestal.
@@ -494,71 +476,63 @@ static func _placed(box: AABB, xform: Transform3D) -> AABB:
 	return out
 
 
-## True when at least one mesh of the current collection actually ships this
-## detail level. In the full build that is every level; in a build without
-## `med/` and `high/` (the slim APK) it is only `low` — and a level that is not
-## there must not be offered, because the gallery would then show the low-poly
-## mesh under the heading „Mittel“.
-func _tier_in_collection(tier_id: String) -> bool:
-	for key in visible_keys():
-		if AssetRegistry.tier_exists(key, tier_id):
-			return true
-	return false
+# --- refresh ----------------------------------------------------------------
+
+## True when at least one mesh actually ships this detail level. In the full
+## build that is every level; in a build without `med/` and `high/` (the slim
+## APK) it is only `low` — and a level that is not there must not be offered,
+## because the gallery would then show the low-poly mesh under the heading
+## "Medium".
+func _tier_in_hall(tier_id: String) -> bool:
+	return AssetRegistry.tiers_missing(tier_id).is_empty()
 
 
 func _refresh_panel() -> void:
-	var keys := visible_keys()
 	# A level this build does not have at all falls back to the finest that
 	# exists — otherwise the gallery shows low meshes under another label.
-	if not _tier_in_collection(tier):
+	if not _tier_in_hall(tier):
 		for candidate in AssetRegistry.TIERS:
 			if AssetRegistry.TIERS.find(candidate) > AssetRegistry.TIERS.find(tier):
-				if _tier_in_collection(candidate):
+				if _tier_in_hall(candidate):
 					tier = candidate
 					break
-	if _page_label != null:
-		_page_label.text = Loc.f("Page %d / %d", [page_index + 1, maxi(1, page_count())])
 	if _tier_label != null:
 		_tier_label.text = MeshGallery.tier_caption(tier)
-	if _group_label != null:
-		_group_label.text = Loc.f("%d meshes in this collection", [AssetRegistry.keys_in_group(group_id).size()])
-	if _marks_label != null:
-		var count := MeshGallery.mark_count(_marks())
-		_marks_label.text = Loc.f("Marked: %d", [count])
 	for i in _tier_buttons.size():
 		var tier_id: String = AssetRegistry.TIERS[i]
-		var enabled := tier_id == tier
-		Ui.with_disabled(_tier_buttons[i], not enabled)
-	for i in _group_buttons.size():
-		if i < _group_ids.size():
-			Ui.with_disabled(_group_buttons[i], _group_ids[i] != group_id)
+		Ui.with_disabled(_tier_buttons[i], tier_id != tier)
+
+
+## Where in the hall the player is. The counter is the answer to "how many of
+## these do I still have to walk past" in a hall that is 800 m long.
+func _refresh_counter() -> void:
+	if _counter_label == null:
+		return
+	if active_slot >= 0:
+		_counter_label.text = Loc.f("Mesh %d / %d", [active_slot + 1, keys.size()])
+	else:
+		_counter_label.text = Loc.f("%d meshes in the hall", [keys.size()])
 
 
 func _refresh_info() -> void:
 	if _info_name == null:
 		return
-	var keys := visible_keys()
-	var key := MeshGallery.key_at(keys, active_pedestal)
+	_refresh_counter()
+	var key := active_key()
 	if key == "":
-		_info_name.text = Loc.f("Walk to a pedestal to look at a mesh", [])
-		_info_meta.text = Loc.f("The collection shows %d meshes · Detail level %s", [
-			AssetRegistry.keys_in_group(group_id).size(), AssetRegistry.tier_label(tier),
-		])
-		_info_note.text = ""
-		_mark_button.disabled = true
+		_info_name.text = Loc.f("Walk along the hall", [])
+		_info_meta.text = MeshGallery.tier_caption(tier)
+		_info_hint.text = Loc.f("The meshes stand to the left and to the right", [])
 		return
-	_mark_button.disabled = false
-	_info_name.text = Loc.f("%s  %s", [AssetRegistry.group_of(key).substr(0, 1).to_upper(), AssetRegistry.display_name(key)])
+	_info_name.text = Loc.resolve(AssetRegistry.display_name(key))
+	_info_name.add_theme_color_override("font_color", AssetRegistry.color_of(key))
 	# Label and triangle count must match the level that actually stands there,
 	# or a slim build claims "1.000 triangles" over a 200-triangle mesh.
 	var shown := AssetRegistry.best_available(key, tier)
 	var shown_label := AssetRegistry.tier_label(shown)
 	if shown != tier:
 		shown_label = Loc.f("%s (instead of %s)", [shown_label, AssetRegistry.tier_label(tier)])
-	_info_meta.text = Loc.f("%s   ·   %s   ·   %s triangles   ·   %s", [
+	_info_meta.text = Loc.f("%s   ·   %s   ·   %s triangles", [
 		key, shown_label, AssetRegistry.tri_text(key, shown),
-		Loc.f("Marked", []) if MeshGallery.is_marked(_marks(), key) else Loc.f("not marked", []),
 	])
-	var note := MeshGallery.mark_note(_marks(), key)
-	_info_note.text = Loc.f("Note: %s", [note]) if note != "" else Loc.f("No note — use “Mark” to add it to the list", [])
-	_mark_button.text = Loc.f("Mark ✓", []) if MeshGallery.is_marked(_marks(), key) else Loc.f("Mark", [])
+	_info_hint.text = Loc.f("E — write a suggestion about this mesh", [])

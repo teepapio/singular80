@@ -183,7 +183,12 @@ func _game_card(game: Dictionary, height: float) -> Control:
 	row.add_child(text)
 
 	var name_label := Ui.label(str(game["name"]), 15, UiTheme.TEXT, true)
-	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# One line, trimmed with an ellipsis. `height` is only a *minimum* for a
+	# container: an autowrapped name ("Weihnachts-Merge 3D") grew the card past
+	# it, the column overflowed the row, and the last tile of a category ended up
+	# underneath the footer — painted over and, since the footer is the later
+	# sibling, unclickable.
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	name_label.custom_minimum_size = Vector2(0, 22)
 	text.add_child(name_label)
 

@@ -80,7 +80,15 @@ func _flow() -> void:
 	# 3. Reading it the way a new process would: only the file, nothing from memory.
 	var reloaded: Array[Dictionary] = QueueClass.restore(TEST_PATH)
 	t.equal(reloaded.size(), 1, "Ein neuer Prozess findet die Idee wieder")
-	t.equal(str(reloaded[0].get("clientKey", "")), str(item.get("clientKey", "")),
+	# The key is not a value the test can predict: it is drawn from the system
+	# entropy, so nothing here may spell one out or derive one. What is asserted
+	# is the property — the entry that comes back off the disk carries the very
+	# key that went onto it, and that key is one the server contract accepts.
+	var restored_key := str(reloaded[0].get("clientKey", ""))
+	t.check(restored_key.begins_with("s80_"), "Der clientKey von der Platte folgt dem Schema")
+	t.check(restored_key.length() > 0 and restored_key.length() <= QueueClass.CLIENT_KEY_MAX,
+		"Und passt in das 64-Zeichen-Limit")
+	t.equal(restored_key, str(item.get("clientKey", "")),
 		"Der clientKey überlebt den Neustart")
 	t.equal(str(reloaded[0].get("text", "")), composed, "…und der Text auch")
 
@@ -93,8 +101,11 @@ func _flow() -> void:
 	t.check(str(body.get("clientKey", "")).begins_with("s80_"),
 		"Der clientKey folgt dem Schema")
 
-	# 5. After the server confirms, the entry leaves the queue and the file.
-	t.check(QueueClass.remove(reloaded, str(item.get("clientKey", ""))),
+	# 5. After the server confirms, the entry leaves the queue and the file — and
+	# it is removed by the key the queue itself holds and just sent, which is the
+	# one that came back off the disk. A key the test cannot predict must never be
+	# the reason a delivered idea stays in the queue for good.
+	t.check(QueueClass.remove(reloaded, str(body.get("clientKey", ""))),
 		"Ein zugestellter Vorschlag verschwindet auch von der Platte")
 	QueueClass.persist(TEST_PATH, reloaded)
 	var third: Array[Dictionary] = QueueClass.restore(TEST_PATH)
@@ -160,15 +171,23 @@ func _persistence() -> void:
 	# Reading it the way a new process would: only the file, nothing from memory.
 	var reloaded := QueueClass.restore(TEST_PATH)
 	t.equal(reloaded.size(), 2, "Ein neuer Prozess findet beide Ideen wieder")
-	t.equal(str(reloaded[0].get("clientKey", "")), key, "Der clientKey überlebt den Neustart")
+	# The key is drawn from the system entropy, so the test never spells one out:
+	# the property is that the entry comes back with the key it went onto the disk
+	# with, and that the retry sends that very key again.
+	var on_disk := str(reloaded[0].get("clientKey", ""))
+	t.check(on_disk.begins_with("s80_") and on_disk.length() <= QueueClass.CLIENT_KEY_MAX,
+		"Der clientKey von der Platte ist ein gültiger Schlüssel")
+	t.equal(on_disk, key, "Der clientKey überlebt den Neustart")
 	t.equal(str(reloaded[1].get("text", "")), "Drache mit Feueratem", "…und der Text auch")
 
 	# A retry after the restart has to send the very same key again.
 	var retry: Dictionary = QueueClass.request_body(reloaded[0])
 	t.equal(str(retry.get("clientKey", "")), key, "Der Wiederholungsversuch nutzt denselben clientKey")
 
-	# Removing is a file operation too — otherwise a crash would resurrect it.
-	t.check(QueueClass.remove(reloaded, key), "Ein zugestellter Vorschlag verschwindet auch von der Platte")
+	# Removing is a file operation too — otherwise a crash would resurrect it. It
+	# happens by the key the queue holds, which is the one the body just carried.
+	t.check(QueueClass.remove(reloaded, str(retry.get("clientKey", ""))),
+		"Ein zugestellter Vorschlag verschwindet auch von der Platte")
 	QueueClass.persist(TEST_PATH, reloaded)
 	var third := QueueClass.restore(TEST_PATH)
 	t.equal(third.size(), 1, "Nach dem Neuladen ist nur der zweite Vorschlag da")
@@ -249,6 +268,12 @@ func _delivery() -> void:
 	api.pending_changed.connect(on_pending)
 	api._queue.clear()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(QueueClass.PATH))
+	# `Api` writes nothing to disk in a `--script` run, exactly like `Loc` and
+	# `Game` — the guard exists so a headless suite cannot rewrite the player's
+	# real save. This suite is about the other half of that promise: that an idea
+	# really does reach the disk before the attempt, so persistence has to be on
+	# for the duration, and off again at the end.
+	api._persist = true
 
 	# 1. A server address is configured but nothing is listening. This is the
 	#    case in which the old code dropped the text on the floor.
@@ -298,6 +323,7 @@ func _delivery() -> void:
 	api.suggestion_sent.disconnect(on_sent)
 	api.suggestion_failed.disconnect(on_failed)
 	api.pending_changed.disconnect(on_pending)
+	api._persist = false
 	server.queue_free()
 	game.set_server_url("")
 	api._queue.clear()
@@ -486,8 +512,12 @@ func _legal() -> void:
 func _server_address() -> void:
 	t.suite("Server-Adresse")
 
-	# Without an address the button says so. A button showing "Server:
-	# offline" needs no further explanation — it *is* the explanation.
+	# The offline case has to be arranged, not assumed. An earlier suite in this
+	# file points the autoload at a real port and clears it again at its end; if
+	# that cleanup ever stops happening — or a new suite is added before this one
+	# and forgets — the first assertion below would be asserting the state it did
+	# not set up.
+	Game.set_server_url("")
 	t.equal(ServerDialogClass.label(), "Server: offline",
 		"Ohne Adresse steht 'offline' im Knopf")
 

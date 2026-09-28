@@ -42,6 +42,10 @@ func _ready_game() -> void:
 func _build_hangar() -> void:
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Full-rect layout container, so it defaults to `MOUSE_FILTER_STOP` and
+	# covers the top bar's buttons. Picking ignores `z_index`, so raising the bar
+	# (`Screen.CHROME_Z`) only keeps it visible — the clicks would still be eaten.
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.add_theme_constant_override("margin_left", 18)
 	margin.add_theme_constant_override("margin_right", 18)
 	margin.add_theme_constant_override("margin_top", 64)

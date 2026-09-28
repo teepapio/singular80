@@ -36,8 +36,8 @@ func run(kit: TestKit, scene_tree: SceneTree, screens: String = "") -> void:
 	await _every_screen_opens()
 	t.close_suite()
 	# Everything below opens a screen the scope did not ask for, or mutates global
-	# state that belongs to another game — the MeshGallery mark list and
-	# `api._queue`. `TestKit.suite()` only deactivates the *assertions* of a suite
+	# state that belongs to another game — `api._queue` and the suggestion
+	# dialog. `TestKit.suite()` only deactivates the *assertions* of a suite
 	# that was filtered out; its body still runs, and these bodies cost seconds
 	# and leave the tree in a state the next suite then measures. So they gate
 	# themselves on `is_selected()`, which is the contract `test_kit.gd` documents
@@ -73,9 +73,9 @@ func _autoload(name: String) -> Node:
 ## `TestKit.suite()` deactivates the assertions of a filtered-out suite but still
 ## runs its body, and these bodies are exactly the ones that must not run in a
 ## scoped sweep: they open a foreign screen, they clear `api._queue`, and the
-## gallery flow empties the shared mark list that the mesh gallery itself keeps.
-## The gate turns "counted nowhere" into "did not happen", which is what
-## `test_kit.gd` has always documented for an integration suite.
+## gallery flow builds a hall of 170 pedestals. The gate turns "counted
+## nowhere" into "did not happen", which is what `test_kit.gd` has always
+## documented for an integration suite.
 func _gated(name: String) -> bool:
 	return t.is_selected(name)
 
@@ -111,6 +111,10 @@ func _every_screen_opens() -> void:
 		var arrived := await _goto(str(screen_id))
 		t.check(arrived and router.current_id == str(screen_id), "Screen '%s' wird geöffnet" % screen_id)
 		t.check(router.current_screen != null and is_instance_valid(router.current_screen), "Screen '%s' existiert" % screen_id)
+		# Every screen is measured here, because this is the one pass that opens
+		# all of them; see `_unreachable_controls()` for what that measures.
+		for dead in _unreachable_controls(router.current_screen):
+			t.check(false, "'%s': %s" % [screen_id, dead])
 	# Every registry entry must lead to a working screen.
 	for game in GameRegistry.GAMES:
 		if not _wants(str(game["screen"])):
@@ -119,6 +123,8 @@ func _every_screen_opens() -> void:
 		var game_id := str(game["id"])
 		await _goto(str(game["screen"]))
 		t.check(router.current_screen != null, "Spiel '%s' startet" % game_id)
+		for dead in _unreachable_controls(router.current_screen):
+			t.check(false, "'%s': %s" % [game_id, dead])
 	if checked == 0:
 		# Never report success for a sweep that opened nothing — that is how a
 		# mis-typed scope would look green.
@@ -134,6 +140,105 @@ func _wants(screen_id: String) -> bool:
 	if _wanted_screens.is_empty():
 		return true
 	return _wanted_screens.has(screen_id)
+
+
+## Every control on the screen a click can no longer reach.
+##
+## Godot decides where a pointer event goes by walking the tree: later siblings
+## first, children before parents, skipping invisible nodes and everything
+## marked `MOUSE_FILTER_IGNORE`. `z_index` is **not** part of that walk — a
+## control can paint on top of another and still lose every click to it.
+##
+## That is why this needed a test and not a look at a screenshot. `main.gd` held
+## an empty, full-rect `Control` with the default `MOUSE_FILTER_STOP`, added
+## after the router's screen host: it painted nothing and swallowed every mouse
+## and touch event of every 2D screen, top bar and game card alike. A headless
+## run cannot click, and this suite only ever switched screens and called
+## methods, so the entire game could be button-dead and still be green.
+func _unreachable_controls(screen: Node) -> Array[String]:
+	var dead: Array[String] = []
+	if screen == null or not is_instance_valid(screen):
+		return dead
+	_collect_unreachable(screen, dead)
+	return dead
+
+
+func _collect_unreachable(node: Node, dead: Array[String]) -> void:
+	if node is Control:
+		var control := node as Control
+		if _is_interactive(control) and control.is_visible_in_tree() \
+				and control.size.x > 0.0 and control.size.y > 0.0:
+			var blocker := _picks(tree.root, control.get_global_rect().get_center())
+			# A modal overlay is *meant* to swallow clicks, so it is no defect.
+			if blocker != null and _under_modal(blocker):
+				return
+			# The event travels from the picked node up the parent chain, never
+			# down, so only the control itself or one of its own children can
+			# deliver it to this button.
+			if blocker == null or not _is_self_or_ancestor(blocker, control):
+				dead.append("%s '%s' ist von %s verdeckt" % [
+					control.get_class(), _caption(control),
+					str(blocker.get_path()) if blocker != null else "nichts",
+				])
+	for child in node.get_children():
+		_collect_unreachable(child, dead)
+
+
+## A `Button`, or a `Control` that handles `gui_input` itself — the two ways this
+## codebase makes something tappable.
+func _is_interactive(control: Control) -> bool:
+	if control is Button:
+		return true
+	return control.mouse_filter != Control.MOUSE_FILTER_IGNORE \
+		and control.has_signal("gui_input") \
+		and not control.gui_input.get_connections().is_empty()
+
+
+func _caption(control: Control) -> String:
+	return (control as Button).text if control is Button else ""
+
+
+func _is_self_or_ancestor(node: Node, target: Node) -> bool:
+	var current: Node = node
+	while current != null:
+		if current == target:
+			return true
+		current = current.get_parent()
+	return false
+
+
+func _under_modal(node: Node) -> bool:
+	var current: Node = node
+	while current != null:
+		if current.has_meta("modal"):
+			return true
+		current = current.get_parent()
+	return false
+
+
+## The node Godot would hand a click at `point` to; `null` when it hits nothing.
+func _picks(node: Node, point: Vector2) -> Control:
+	if not (node is Control):
+		# `Node`, `Node3D` and `CanvasLayer` are not clickable themselves, but
+		# their children are — a 3D screen's whole HUD hangs off its `CanvasLayer`.
+		return _picks_children(node, point)
+	var control := node as Control
+	if not control.is_visible_in_tree():
+		return null
+	var hit := _picks_children(control, point)
+	if hit != null:
+		return hit
+	if control.mouse_filter != Control.MOUSE_FILTER_IGNORE and control.get_global_rect().has_point(point):
+		return control
+	return null
+
+
+func _picks_children(node: Node, point: Vector2) -> Control:
+	for index in range(node.get_child_count() - 1, -1, -1):
+		var hit := _picks(node.get_child(index), point)
+		if hit != null:
+			return hit
+	return null
 
 
 ## Switches to a screen and waits only as long as the switch actually takes.
@@ -177,7 +282,7 @@ func _arena_actually_plays() -> void:
 		screen._spawn_enemy(enemy, content.enemy_by_id("slime"), Vector2(640, 360), 1.0, 1.0, 1.0)
 		screen._kill_enemy(enemy)
 		t.equal(screen.kills, kills_before + 1, "Ein Tod zählt als Kill")
-		t.check(not bool(enemy.def), "Und der Slot ist wieder frei")
+		t.check(enemy.def.is_empty(), "Und der Slot ist wieder frei")
 		# The counter has to keep running, not latch at one — the arena reads it
 		# for the run summary and for the chain bonus.
 		var second = screen._free_enemy()
@@ -243,22 +348,22 @@ func _card_games_accept_input() -> void:
 	# asked the question once and skipped the whole block when the answer was no —
 	# which is how a tautology survived. The wait is bounded, and a human that
 	# never gets a turn is a failure, not a skipped assertion.
-	var seat: Dictionary = poker.table.players[0]
+	var seat = poker.table.players[0]
 	var deadline := Time.get_ticks_msec() + 5000
 	while (poker.busy or poker.table.active_index != 0 or poker.table.hand_over \
-			or bool(seat["folded"]) or bool(seat["all_in"])) \
+			or seat.get("folded") or seat.get("all_in")) \
 			and Time.get_ticks_msec() < deadline:
 		await tree.create_timer(0.1).timeout
 	t.check(not poker.busy and poker.table.active_index == 0 and not poker.table.hand_over,
 		"Der Bildschirm lässt den Menschen ziehen, nicht die Computer")
 	if not poker.busy and poker.table.active_index == 0 and not poker.table.hand_over \
-			and not bool(seat["folded"]) and not bool(seat["all_in"]):
+			and not seat.get("folded") and not seat.get("all_in"):
 		var chips_before: int = int(seat["chips"])
 		var pot_before: int = poker.table.pot
 		var owed: int = int((poker.table.legal_actions(0) as Dictionary)["callAmount"])
 		poker._human_action()
 		await tree.create_timer(0.3).timeout
-		t.check(bool(seat["has_acted"]) or poker.table.hand_over,
+		t.check(seat.get("has_acted") or poker.table.hand_over,
 			"Der menschliche Zug wurde auf dem Platz vermerkt")
 		# A check pays nothing and a call pays exactly what was owed — the
 		# accounting the showdown and the side pots are built on.
@@ -485,93 +590,88 @@ func _content_values() -> void:
 	t.suite_done()
 
 
-## Walks the whole gallery loop the way a player does: mark a mesh, write a
-## note, land on the review screen with a finished draft, and submit it offline.
+## Walks the hall the way a player does: walk forward until a mesh is in front
+## of you, look at it, and press E for the ordinary suggestion dialog.
 func _mesh_gallery_flow() -> void:
 	if not _gated("Mesh-Galerie"):
 		return
 	t.suite("Mesh-Galerie")
-	MeshGallery.set_marks(MeshGallery.clear_marks())
 
 	await _goto("mesh_gallery")
 	var gallery = router.current_screen
 	t.check(gallery != null, "Die Galerie öffnet")
 	if gallery == null:
 		return
-	var group_ids: Array[String] = []
-	for group in AssetRegistry.GROUPS:
-		group_ids.append(str(group["id"]))
-	t.check(str(gallery.group_id) in group_ids, "Die Galerie startet in einer bekannten Sammlung")
-	t.check(AssetRegistry.keys_in_group(str(gallery.group_id)).size() > 0,
-		"Die Startsammlung hat Meshes")
+	# The whole registry stands in the hall — that is what the collections and
+	# the pages used to hide.
+	t.equal((gallery.keys as Array).size(), AssetRegistry.KEYS.size(),
+		"Jedes Mesh der Registry hat einen Sockel")
+	t.equal((gallery.slot_nodes as Array).size(), AssetRegistry.KEYS.size(),
+		"Jeder Sockel ist gebaut")
 	t.equal(str(gallery.tier), "low", "Die Galerie startet in der Fassung, die die Spiele benutzen")
-	t.equal(MeshGallery.mark_count(MeshGallery.shared_marks()), 0, "Die Merkliste startet leer")
 
-	# Every tier loads and every pedestal on the first page is filled.
+	# Every level loads.
 	for tier_id in AssetRegistry.TIERS:
 		gallery._set_tier(tier_id)
 		t.equal(str(gallery.tier), tier_id, "Stufe '%s' lässt sich einschalten" % tier_id)
-		t.check(gallery.visible_keys().size() > 0, "Stufe '%s' zeigt Meshes" % tier_id)
 	gallery._set_tier("low")
 
-	var keys: Array = gallery.visible_keys()
-	t.equal(keys.size(), mini(MeshGallery.ARC_SIZE, AssetRegistry.keys_in_group(str(gallery.group_id)).size()),
-		"Die erste Seite ist gefüllt")
-	for key in keys:
-		t.check(AssetRegistry.exists(str(key)), "Sockel '%s' zeigt ein gebündeltes Mesh" % str(key))
+	# Walk forward until a pedestal is close enough to look at. The pedestals
+	# stand `ROW_OFFSET` to either side of the lane and `ROW_OFFSET` is larger
+	# than `NEAR_DISTANCE`, so the player has to stand in the row, not in the
+	# middle of the hall — standing at x = 0 finds nothing, however far forward.
+	var here := MeshGallery.slot_position(4)
+	gallery.pos = Vector3(here.x, 0, here.z)
+	gallery._update_world(0.016)
+	await tree.create_timer(0.5).timeout
+	t.check(gallery.active_slot >= 0, "Vor einem Sockel steht ein Mesh im Vordergrund")
+	var key := str(gallery.active_key())
+	t.check(AssetRegistry.exists(key), "Sockel '%s' zeigt ein gebündeltes Mesh" % key)
+	t.check((gallery.slot_nodes[int(gallery.active_slot)]["mesh"] as Node) != null,
+		"Das Mesh ist in die Szene geladen")
 
-	# Marking like a player does: stand at a pedestal and press E.
-	gallery.active_pedestal = 0
-	gallery._toggle_mark()
-	t.check(MeshGallery.is_marked(MeshGallery.shared_marks(), str(gallery.visible_keys()[0])),
-		"Das Mesh steht in der geteilten Merkliste")
-	t.equal(MeshGallery.mark_count(MeshGallery.shared_marks()), 1, "Das erste Mesh ist vorgemerkt")
-	gallery._toggle_mark()
-	t.equal(MeshGallery.mark_count(MeshGallery.shared_marks()), 0, "Und wieder abgewählt")
-	gallery.active_pedestal = 0
-	gallery._toggle_mark()
+	# The card names it, with the level that really stands there.
+	gallery._refresh_info()
+	t.check(str(gallery._info_name.text) == Loc.resolve(AssetRegistry.display_name(key)),
+		"Die Infokarte nennt das Mesh")
+	t.check(str(gallery._info_meta.text).contains(key), "Die Infokarte nennt den Schlüssel")
+	# The triangle count, not a German noun: the label word is a translation and
+	# is free to change, the number is the claim.
+	var counts := AssetRegistry.tri_count(key, str(gallery.tier))
+	t.check(counts < 0 or str(gallery._info_meta.text).contains(str(counts)),
+		"Die Infokarte nennt die Dreieckzahl")
 
-	# The note lands in the mark list …
-	gallery._refresh()
-	t.check(not str(gallery._info_name.text).is_empty(), "Die Infokarte nennt das Mesh")
-	t.check(not str(gallery._info_meta.text).is_empty(), "Die Infokarte nennt Stufe und Dreieckzahl")
+	# E opens the ordinary suggestion dialog, and the mesh rides along in its
+	# origin — the gallery has no second form of its own.
+	t.check(_suggest_script().is_open() == false, "Der Dialog startet geschlossen")
+	gallery.open_suggestion()
+	await tree.create_timer(0.3).timeout
+	t.check(_suggest_script().is_open(), "E öffnet das Vorschlagsfenster")
+	t.check(_suggest_text().contains(Loc.resolve(AssetRegistry.display_name(key))),
+		"Der Vorschlag nennt das Mesh davor")
+	_suggest_script().close()
+	await tree.create_timer(0.2).timeout
+	t.check(not _suggest_script().is_open(), "Der Dialog schließt wieder")
 
-	# … and the review screen turns it into a finished text.
-	await _goto("mesh_review")
-	var review = router.current_screen
-	t.check(review != null, "Die Review-Seite öffnet")
-	if review == null:
-		return
-	t.check(not str(review._draft.text).is_empty(), "Der Vorschlag ist vorausgefüllt")
-	t.check(str(review._draft.text).contains(str(keys[0])), "Der Vorschlag nennt das Mesh")
-	t.check(review._submit_button.disabled == false, "Absenden ist möglich")
-
-	# A note flows into the text.
-	var before := str(review._draft.text)
-	MeshGallery.set_marks(MeshGallery.set_note(MeshGallery.shared_marks(), str(keys[0]), "Flügel zu kantig"))
-	review._rebuild()
-	t.check(str(review._draft.text).contains("Flügel zu kantig"), "Die Notiz steht im Vorschlag")
-	t.check(str(review._draft.text) != before, "Der Vorschlag hat sich geändert")
-
-	# Submitting without a server lands in the offline queue.
-	api._queue.clear()
-	review._submit()
-	await tree.create_timer(0.4).timeout
-	t.equal(api._queue.size(), 1, "Der Vorschlag ist in der Offline-Warteschlange")
-	if api._queue.size() == 1:
-		t.check(str((api._queue[0] as Dictionary)["text"]).contains("Mesh-Galerie"),
-			"Der Vorschlag trägt seine Herkunft mit sich")
-	api._queue.clear()
-	# Offline only queues it: the list stays, so the player can still copy the text.
-	t.equal(MeshGallery.mark_count(MeshGallery.shared_marks()), 1,
-		"Nach dem Offline-Senden bleibt die Liste erhalten")
-	MeshGallery.set_marks(MeshGallery.clear_marks())
-	t.equal(MeshGallery.mark_count(MeshGallery.shared_marks()), 0, "„Liste leeren“ leert sie")
-
-	await tree.create_timer(0.6).timeout
-	MeshGallery.set_marks(MeshGallery.clear_marks())
 	await _goto("lobby")
 	t.suite_done()
+
+
+## Everything the open dialog has to say, as one string.
+func _suggest_text() -> String:
+	var layer := _suggest_layer()
+	if layer == null:
+		return ""
+	var out: Array[String] = []
+	_collect_text(layer, out)
+	return "\n".join(out)
+
+
+func _collect_text(node: Node, out: Array[String]) -> void:
+	for child in node.get_children():
+		if child is Label:
+			out.append(str((child as Label).text))
+		_collect_text(child, out)
 
 
 ## The app ships its own copy of the content pack (Godot cannot read files from

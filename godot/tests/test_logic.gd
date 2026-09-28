@@ -1044,9 +1044,27 @@ func _flight_elements() -> void:
 	t.check(float(DragonFlight.enemy_by_id("golem")["resist"]["fire"]) > 0.0, "Der Golem ist feuerfest")
 	t.check(float(DragonFlight.enemy_by_id("ballista")["resist"]["fire"]) < 0.0, "Die Ballista ist feueranfällig")
 
-	var summary := DragonFlight.level_resist_summary(DragonFlight.level(1))
+	var level_one := DragonFlight.level(1)
+	var summary := DragonFlight.level_resist_summary(level_one)
 	t.check(not summary.is_empty(), "Das Briefing nennt die Widerstände")
-	t.check(summary.contains("Feuer"), "Das Briefing nennt Feuer")
+	# The element names are the ones `DragonFlight` answers with, in whatever
+	# language it answers them: the summary is assembled with `%` out of several
+	# names and reaches the screen as one finished sentence, which no catalogue
+	# entry can rename (see the report).
+	t.check(summary.contains(DragonFlight.element_name("fire")), "Das Briefing nennt Feuer")
+	# …and with the share the level really has, one entry per resistance the
+	# briefing covers — a line whose numbers cannot be read off it is decoration.
+	var named := 0
+	var entries := 0
+	for entry in level_one.get("pool", []):
+		var kind := DragonFlight.enemy_by_id(str((entry as Array)[0]))
+		var resist: Dictionary = kind.get("resist", {})
+		entries += resist.size()
+		for element in resist:
+			var share := float(resist[element]) * float((entry as Array)[1]) * 100.0
+			if summary.contains(DragonFlight.element_name(str(element))) and summary.contains("%+.0f %%" % share):
+				named += 1
+	t.equal(named, entries, "Und jede Widerstandsart steht mit ihrem Anteil darin")
 	# The element is in the resolved stats.
 	var stats := DragonFlight.resolve_stats({"breed": "stone", "alleles": {}, "gen": 1})
 	t.equal(str(stats["element"]), "earth", "Die aufgelösten Werte kennen das Element")

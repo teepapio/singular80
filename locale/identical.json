@@ -100,13 +100,13 @@
       "Level %d · %s",
       "Lobby",
       "Magnet %.0fs",
+      "Mesh %d / %d",
       "Metropol 3D",
       "Mini-Slime",
       "Museum",
       "Nanobots",
       "Normal",
       "One extra life.",
-      "One move and one extra",
       "Orbiter",
       "Pang 3D",
       "PANG 3D",
@@ -165,8 +165,7 @@
       "%d wave",
       "%d× %s",
       "%d× %s → %d× %s  +%d",
-      "%s   ·   %s   ·   %s triangles   ·   %s",
-      "%s   ·   %s triangles",
+      "%s   ·   %s   ·   %s triangles",
       "%s  ·  %.1f s",
       "%s  ·  %s",
       "%s  ·  %s→%s  %s",
@@ -231,7 +230,6 @@
       "Nanobots",
       "Nature",
       "Normal",
-      "Page %d / %d",
       "Pang 3D",
       "PANG 3D",
       "Pause",
@@ -258,7 +256,6 @@
       "XP %d / %d"
     ],
     "_allow": [
-      "%s   ·   %s   ·   %s triangles   ·   %s",
       "Crystal Jumper — Halloween"
     ]
   }
