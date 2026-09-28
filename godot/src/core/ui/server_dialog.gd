@@ -7,8 +7,19 @@ extends RefCounted
 ## Saving also wakes the suggestion queue; otherwise it idles out its backoff
 ## even though the address is now right.
 
+## The one open window. It is a child of the settings layer and used to be left
+## behind: every settings → server cycle added another hidden `AcceptDialog`.
+static var _dialog: AcceptDialog = null
+
+
+static func is_open() -> bool:
+	return _dialog != null and is_instance_valid(_dialog)
+
+
 ## Opens the dialog on `host` and applies the new address on confirm.
 static func open(host: Node) -> void:
+	if is_open():
+		return
 	var dialog := AcceptDialog.new()
 	# `AcceptDialog`'s own buttons take their captions from `TranslationServer`;
 	# `Loc` does not register our catalogues under Godot's `ok`/`cancel` keys.
@@ -29,9 +40,26 @@ static func open(host: Node) -> void:
 	dialog.add_child(row)
 	dialog.confirmed.connect(func() -> void:
 		apply(edit.text)
+		close()
 	)
+	# ESC, the close button and the platform's back gesture all end in
+	# `canceled` / `close_requested`; without them the window hides and stays.
+	dialog.canceled.connect(close)
+	dialog.close_requested.connect(close)
 	host.add_child(dialog)
+	_dialog = dialog
 	dialog.popup_centered()
+
+
+## Frees the window. Safe to call twice — `AcceptDialog` reports both a
+## cancel and a close request for one dismissal.
+static func close() -> void:
+	if _dialog != null and is_instance_valid(_dialog):
+		# Hide before freeing: a window removed while still visible leaves the
+		# embedded subwindow of the settings dialog one frame behind.
+		_dialog.hide()
+		_dialog.queue_free()
+	_dialog = null
 
 
 ## Sets the address and everything that has to follow it.

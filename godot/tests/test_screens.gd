@@ -35,6 +35,14 @@ func run(kit: TestKit, scene_tree: SceneTree, screens: String = "") -> void:
 	t.close_suite()
 	await _every_screen_opens()
 	t.close_suite()
+	# Everything below opens a screen the scope did not ask for, or mutates global
+	# state that belongs to another game — the MeshGallery mark list and
+	# `api._queue`. `TestKit.suite()` only deactivates the *assertions* of a suite
+	# that was filtered out; its body still runs, and these bodies cost seconds
+	# and leave the tree in a state the next suite then measures. So they gate
+	# themselves on `is_selected()`, which is the contract `test_kit.gd` documents
+	# for integration suites. The sweep above is the exception and is allowed
+	# explicitly by the runner, so it needs no gate of its own.
 	await _arena_actually_plays()
 	t.close_suite()
 	await _card_games_accept_input()
@@ -58,6 +66,18 @@ func run(kit: TestKit, scene_tree: SceneTree, screens: String = "") -> void:
 func _autoload(name: String) -> Node:
 	var node := tree.root.get_node_or_null("/root/" + name)
 	return node
+
+
+## May this integration suite run at all?
+##
+## `TestKit.suite()` deactivates the assertions of a filtered-out suite but still
+## runs its body, and these bodies are exactly the ones that must not run in a
+## scoped sweep: they open a foreign screen, they clear `api._queue`, and the
+## gallery flow empties the shared mark list that the mesh gallery itself keeps.
+## The gate turns "counted nowhere" into "did not happen", which is what
+## `test_kit.gd` has always documented for an integration suite.
+func _gated(name: String) -> bool:
+	return t.is_selected(name)
 
 
 func _boot_content() -> void:
@@ -128,6 +148,8 @@ func _goto(screen_id: String, data: Dictionary = {}, cap := 2.0) -> bool:
 
 
 func _arena_actually_plays() -> void:
+	if not _gated("Arena — Spielablauf"):
+		return
 	t.suite("Arena — Spielablauf")
 	await _goto("arena", {"weaponId": "pistol", "modeId": "classic"})
 	var screen = router.current_screen
@@ -153,10 +175,17 @@ func _arena_actually_plays() -> void:
 	t.check(enemy != null, "Freier Gegenslot vorhanden")
 	if enemy != null:
 		screen._spawn_enemy(enemy, content.enemy_by_id("slime"), Vector2(640, 360), 1.0, 1.0, 1.0)
-		screen.kills = 0
 		screen._kill_enemy(enemy)
-		t.equal(screen.kills, 1, "Ein Tod zählt als Kill")
-		t.check(screen.kills > kills_before or true, "Kill-Zähler läuft")
+		t.equal(screen.kills, kills_before + 1, "Ein Tod zählt als Kill")
+		t.check(not bool(enemy.def), "Und der Slot ist wieder frei")
+		# The counter has to keep running, not latch at one — the arena reads it
+		# for the run summary and for the chain bonus.
+		var second = screen._free_enemy()
+		t.check(second != null, "Auch ein zweiter Slot ist frei")
+		if second != null:
+			screen._spawn_enemy(second, content.enemy_by_id("slime"), Vector2(600, 360), 1.0, 1.0, 1.0)
+			screen._kill_enemy(second)
+			t.equal(screen.kills, kills_before + 2, "Der Kill-Zähler läuft weiter")
 
 	# XP pickup and levelling.
 	screen.stats.xp = 0.0
@@ -184,6 +213,8 @@ func _arena_actually_plays() -> void:
 
 
 func _card_games_accept_input() -> void:
+	if not _gated("Kartenspiele — Eingabe"):
+		return
 	t.suite("Kartenspiele — Eingabe")
 	await _goto("freecell")
 	var free_cell = router.current_screen
@@ -201,16 +232,50 @@ func _card_games_accept_input() -> void:
 	var poker = router.current_screen
 	t.check(poker.table.players.size() == 4, "Vier Poker-Spieler")
 	t.check(poker.table.pot > 0, "Blinds gesetzt")
-	# The human may call/check whenever it is their turn.
-	if poker.table.active_index == 0 and not poker.table.hand_over:
+	# The human may call/check whenever it is their turn — and the move has to
+	# land on the table: the seat commits chips, is marked as having acted, and
+	# the chips arrive in the pot. `t.check(true, …)` proved none of that; it only
+	# proved the call returned.
+	#
+	# `_start_hand` hands the first decision to the computer seats and spaces their
+	# turns out over `AI_DELAY`, so "it is the human's turn" is a moment in the
+	# future, not a state the screen is in when the router arrives. The old test
+	# asked the question once and skipped the whole block when the answer was no —
+	# which is how a tautology survived. The wait is bounded, and a human that
+	# never gets a turn is a failure, not a skipped assertion.
+	var seat: Dictionary = poker.table.players[0]
+	var deadline := Time.get_ticks_msec() + 5000
+	while (poker.busy or poker.table.active_index != 0 or poker.table.hand_over \
+			or bool(seat["folded"]) or bool(seat["all_in"])) \
+			and Time.get_ticks_msec() < deadline:
+		await tree.create_timer(0.1).timeout
+	t.check(not poker.busy and poker.table.active_index == 0 and not poker.table.hand_over,
+		"Der Bildschirm lässt den Menschen ziehen, nicht die Computer")
+	if not poker.busy and poker.table.active_index == 0 and not poker.table.hand_over \
+			and not bool(seat["folded"]) and not bool(seat["all_in"]):
+		var chips_before: int = int(seat["chips"])
+		var pot_before: int = poker.table.pot
+		var owed: int = int((poker.table.legal_actions(0) as Dictionary)["callAmount"])
 		poker._human_action()
 		await tree.create_timer(0.3).timeout
-		t.check(true, "Menschlicher Zug läuft durch")
+		t.check(bool(seat["has_acted"]) or poker.table.hand_over,
+			"Der menschliche Zug wurde auf dem Platz vermerkt")
+		# A check pays nothing and a call pays exactly what was owed — the
+		# accounting the showdown and the side pots are built on.
+		var paid: int = chips_before - int(seat["chips"])
+		t.equal(paid, owed, "Der Mensch hat genau den geforderten Betrag gesetzt (schuldet %d)" % owed)
+		t.equal(int(poker.table.pot) - pot_before, paid,
+			"Der Topf ist um genau so viel gewachsen, wie der Mensch gesetzt hat")
+		t.check(int(seat["bet"]) >= paid, "Und der Einsatz steht auf seinem Platz")
+	else:
+		t.fail("Der Menschen kam nie an die Reihe — der Zug wurde gar nicht geprüft")
 	await _goto("lobby")
 	t.suite_done()
 
 
 func _tetris_accepts_moves() -> void:
+	if not _gated("Tetris — Eingabe"):
+		return
 	t.suite("Tetris — Eingabe")
 	await _goto("tetris")
 	var screen = router.current_screen
@@ -266,6 +331,8 @@ func _tetris_accepts_moves() -> void:
 ## costs a move, the cascade plays out, undo takes it back and the palette
 ## switch repaints the board.
 func _candy_match3_plays() -> void:
+	if not _gated("Candy Crush — Spielablauf"):
+		return
 	t.suite("Candy Crush — Spielablauf")
 	await _goto("candy3d")
 	var screen = router.current_screen
@@ -336,6 +403,8 @@ func _suggest_layer() -> Node:
 
 
 func _suggest_dialog_posts() -> void:
+	if not _gated("Vorschlagsdialog"):
+		return
 	t.suite("Vorschlagsdialog")
 	await _goto("lobby_list")
 	var host = router.current_screen
@@ -356,6 +425,11 @@ func _suggest_dialog_posts() -> void:
 
 
 func _suggest_dialog_closes() -> void:
+	# The second half of the dialog suite: it continues the state the first one
+	# left behind, so it is gated under its own name — which is the name it was
+	# already counted under, since `t.suite()` is not called again here.
+	if not t.is_selected("Vorschlagsdialog"):
+		return
 	_suggest_script().close()
 	t.check(not _suggest_script().is_open(), "Dialog schließt sofort")
 	await tree.create_timer(0.2).timeout
@@ -385,9 +459,25 @@ func _content_values() -> void:
 	for def in content.upgrades:
 		t.check(not str(def.get("stat", "")).is_empty(), "Upgrade '%s' hat ein Stat" % str(def.get("id", "?")))
 		t.check(str(def.get("rarity", "")) in ["common", "uncommon", "rare", "epic"], "Upgrade '%s' hat eine gültige Seltenheit" % str(def.get("id", "?")))
+		# "Anwendbar" means the stat block *changed*. `t.check(true, …)` called an
+		# upgrade applicable whether the number moved or the card was silently
+		# dropped — which is exactly what happens when the pack writes `maxHp`
+		# and the block knows `max_hp`, so the amount is compared before and after
+		# on the form the game actually hands over.
 		var stats := PlayerStats.new()
-		stats.apply_upgrade(def)
-		t.check(true, "Upgrade '%s' ist anwendbar" % str(def.get("id", "?")))
+		var applied := ArenaRuns.applied_form(def)
+		var field := str(applied["stat"])
+		var before: float = float(stats.get(field))
+		stats.apply_upgrade(applied)
+		t.check(float(stats.get(field)) != before,
+			"Upgrade '%s' ist anwendbar — '%s' ging von %s auf %s"
+			% [str(def.get("id", "?")), field, before, float(stats.get(field))])
+		# …and the caps the rules promise still hold after a hundred copies.
+		var spammed := PlayerStats.new()
+		for i in 100:
+			spammed.apply_upgrade(applied)
+		t.check(spammed.crit_chance <= 0.9 and spammed.fire_rate <= 8.0,
+			"Upgrade '%s' hält die Obergrenzen der Regeln ein" % str(def.get("id", "?")))
 	for def in content.modes:
 		t.check(float(def.get("duration", 0.0)) >= 0.0, "Modus '%s' hat eine gültige Dauer (0 = endlos)" % str(def.get("id", "?")))
 		for key in ["enemyHpMult", "enemySpeedMult", "spawnRateMult"]:
@@ -398,6 +488,8 @@ func _content_values() -> void:
 ## Walks the whole gallery loop the way a player does: mark a mesh, write a
 ## note, land on the review screen with a finished draft, and submit it offline.
 func _mesh_gallery_flow() -> void:
+	if not _gated("Mesh-Galerie"):
+		return
 	t.suite("Mesh-Galerie")
 	MeshGallery.set_marks(MeshGallery.clear_marks())
 

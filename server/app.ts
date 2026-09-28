@@ -1,11 +1,12 @@
 import { EventEmitter } from 'node:events';
+import { timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import type { BusEvent, RunRecord, Suggestion, SuggestionStatus, SuggestionView } from '../src/shared/types';
 import { OPERATOR_SOURCE } from '../src/shared/types';
-import { classify, decorate, findCanonical, scoreSuggestion, sortSuggestions, type SortMode } from '../src/shared/sorting';
+import { classify, countsTowardsCluster, decorate, decorateAll, findCanonical, scoreSuggestion, sortSuggestions, type SortMode } from '../src/shared/sorting';
 import { ContentStore } from './content';
 import { Store } from './db';
 import * as discord from './discord';
@@ -25,7 +26,7 @@ import {
 import { CheckRunner } from './checkrunner';
 import { CHECKS_BY_ID, CHECK_SPECS } from './checks/catalogue';
 import { scopeForSuggestion, scopeManifest } from './scopes';
-import { normalizeTasks, splitIntoTasks } from './split';
+import { normalizeTasks, planSplit, splitIntoTasks, splitRepeatError } from './split';
 
 export interface AppOptions {
   dataDir: string;
@@ -45,8 +46,71 @@ export interface AppOptions {
 // The main page is the dashboard; `/dashboard.html` only redirects there.
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:5173/';
 
+/** Header carrying the shared secret of `SINGULAR80_TOKEN`. */
+const TOKEN_HEADER = 'x-singular80-token';
+
+/**
+ * Routes that stay reachable without a token, and the only ones.
+ *
+ * They are the two a player's device talks to. The game knows a server address
+ * and nothing else — it cannot send a header nobody ever told it about — so a
+ * guard here would not secure anything, it would only turn every suggestion into
+ * one that never arrives. Everything that starts an agent, changes settings or
+ * deletes history is behind the token.
+ */
+const PUBLIC_POST_ROUTES = [/^\/api\/suggestions$/, /^\/api\/suggestions\/\d+\/vote$/];
+
+/** The shared secret, or `''` for a server that runs open. Read per request so
+ * a test can set it after the app was built. */
+function apiToken(): string {
+  return (process.env.SINGULAR80_TOKEN ?? '').trim();
+}
+
+/** The path without the query string — route patterns must not see the search. */
+function pathOf(req: FastifyRequest): string {
+  return req.url.split('?')[0];
+}
+
+/** Constant-time comparison, and false on a length mismatch (which `timingSafeEqual`
+ * treats as an error rather than as a mismatch). */
+function hasToken(req: FastifyRequest): boolean {
+  const expected = apiToken();
+  if (!expected) return true;
+  const header = req.headers[TOKEN_HEADER];
+  const provided = Array.isArray(header) ? (header[0] ?? '') : (header ?? '');
+  const a = Buffer.from(provided, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+/**
+ * The `Access-Control-Allow-Origin` to send, or nothing.
+ *
+ * Without a token the API is what it always was and the answer is `*`. With a
+ * token it is no longer a public read surface, so a browser only gets the grant
+ * when it actually presented the token — a dashboard on another device then gets
+ * no CORS answer at all instead of the whole history.
+ */
+function corsOrigin(req: FastifyRequest): string | null {
+  if (!apiToken()) return '*';
+  if (!hasToken(req)) return null;
+  const origin = req.headers.origin;
+  return (Array.isArray(origin) ? origin[0] : origin) ?? '*';
+}
+
+let openServerWarned = false;
+
 export function createApp(options: AppOptions): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: 1024 * 256 });
+  if (!apiToken() && !openServerWarned) {
+    openServerWarned = true;
+    // Once per process, not once per app: a test builds a dozen apps, and the
+    // operator needs to read this exactly once.
+    console.warn(
+      '[security] SINGULAR80_TOKEN ist nicht gesetzt — jede schreibende /api-Route ist ohne Anmeldung offen. Auf einem Netzbinding (HOST=0.0.0.0) kann damit jedes Gerät Aufträge starten, die committet und pusht werden.',
+    );
+  }
   const store = new Store(options.dataDir);
   const content = new ContentStore(options.contentDir);
   const bus = new EventEmitter();
@@ -89,7 +153,12 @@ export function createApp(options: AppOptions): FastifyInstance {
             if (view) emit({ type: 'suggestion:updated', suggestion: view });
             const webhook = store.getSettings().discordWebhook || process.env.DISCORD_WEBHOOK_URL || '';
             if (suggestion && webhook) {
-              void discord.notifyRunResult(suggestion, run, webhook, dashboardUrl);
+              // Fire-and-forget, so it needs a rejection handler of its own:
+              // Node 22 aborts the process on an unhandled rejection, and one
+              // broken webhook address would take the server with it.
+              void discord.notifyRunResult(suggestion, run, webhook, dashboardUrl).catch((err) => {
+                console.warn('[discord] Laufergebnis nicht zugestellt:', (err as Error).message);
+              });
             }
             // The outcome is written **into** the task's own message instead of
             // as a new one. That is what keeps the chat short: one message per
@@ -99,11 +168,13 @@ export function createApp(options: AppOptions): FastifyInstance {
             if (suggestion && telegram.isConfigured()) {
               const text = telegram.runResultText(suggestion.id, run.status === 'succeeded');
               const messageId = store.getSuggestionTelegramMessage(suggestion.id);
-              void (messageId ? telegram.editMessageText(messageId, text) : telegram.sendMessage(text)).then(
-                (sent) => {
+              void (messageId ? telegram.editMessageText(messageId, text) : telegram.sendMessage(text))
+                .then((sent) => {
                   if (!sent.ok) console.warn('[telegram] Ergebnis nicht zugestellt:', sent.error);
-                },
-              );
+                })
+                .catch((err) => {
+                  console.warn('[telegram] Ergebnis nicht zugestellt:', (err as Error).message);
+                });
             }
           },
         },
@@ -118,6 +189,10 @@ export function createApp(options: AppOptions): FastifyInstance {
   const checkRunner = new CheckRunner({
     projectRoot: options.projectRoot,
     store,
+    // A static scan reads the whole repository; running it inline would block
+    // the event loop for every SSE client, every agent control and /api/health
+    // for the duration. Answer first, scan on the next tick.
+    deferWork: true,
     callbacks: {
       onStarted: (check) => emit({ type: 'check:started', check }),
       onFinished: (check) => emit({ type: 'check:finished', check }),
@@ -125,10 +200,22 @@ export function createApp(options: AppOptions): FastifyInstance {
     },
   });
 
-  app.addHook('onSend', async (_req, reply, payload) => {
-    reply.header('Access-Control-Allow-Origin', '*');
-    reply.header('Access-Control-Allow-Headers', 'Content-Type');
-    reply.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,OPTIONS');
+  app.addHook('preHandler', async (req, reply) => {
+    if (!apiToken()) return;
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
+    if (!req.url.startsWith('/api/')) return;
+    if (PUBLIC_POST_ROUTES.some((route) => route.test(pathOf(req)))) return;
+    if (hasToken(req)) return;
+    return reply.code(401).send({
+      error: `Ungültiges oder fehlendes Token — der Header ${TOKEN_HEADER} wird für diese Anfrage verlangt.`,
+    });
+  });
+
+  app.addHook('onSend', async (req, reply, payload) => {
+    const origin = corsOrigin(req);
+    if (origin) reply.header('Access-Control-Allow-Origin', origin);
+    reply.header('Access-Control-Allow-Headers', `Content-Type, ${TOKEN_HEADER}`);
+    reply.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
     return payload;
   });
 
@@ -150,8 +237,12 @@ export function createApp(options: AppOptions): FastifyInstance {
   app.get('/api/suggestions', async (req) => {
     const query = req.query as { status?: string; category?: string; sort?: string; q?: string };
     const all = store.listSuggestions();
-    let views = all.map((s) => {
-      const v = decorate(s, all, Date.now());
+    // One pass over the whole list: `decorate` per row would rebuild the cluster
+    // index per row, which is quadratic on a table this route polls every few
+    // seconds.
+    const decorated = decorateAll(all, Date.now());
+    let views = all.map((s, i) => {
+      const v = decorated[i];
       if (s.runId) v.run = store.getRun(s.runId);
       return v;
     });
@@ -172,7 +263,8 @@ export function createApp(options: AppOptions): FastifyInstance {
   });
 
   app.get('/api/suggestions/:id', async (req, reply) => {
-    const id = Number((req.params as { id: string }).id);
+    const id = intParam(req);
+    if (id === null) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
     const view = viewOf(id);
     if (!view) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
     const runs = runner?.listSuggestionRuns(id) ?? store.listRuns(200).filter((r) => r.suggestionId === id);
@@ -188,7 +280,9 @@ export function createApp(options: AppOptions): FastifyInstance {
     const author = (body.author ?? '').trim().slice(0, 60) || 'Anonym';
     const source = body.source === 'dashboard' ? 'dashboard' : 'game';
     const existing = store.listSuggestions();
-    const candidates = existing.filter((s) => s.status !== 'rejected');
+    // The same membership rule the dashboard's cluster size uses, so the score
+    // the gate evaluated is the score the operator sees.
+    const candidates = existing.filter(countsTowardsCluster);
     const canon = findCanonical(text, candidates);
     const category = classify(text);
     const settings = store.getSettings();
@@ -241,19 +335,23 @@ export function createApp(options: AppOptions): FastifyInstance {
   });
 
   app.post('/api/suggestions/:id/vote', async (req, reply) => {
-    const id = Number((req.params as { id: string }).id);
+    const id = intParam(req);
     const body = (req.body ?? {}) as { voterId?: string };
     const voterId = (body.voterId ?? '').trim();
-    if (!store.getSuggestion(id)) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
+    if (id === null || !store.getSuggestion(id)) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
     if (voterId.length < 6) return reply.code(400).send({ error: 'voterId fehlt' });
-    store.addVote(id, voterId.slice(0, 64));
+    // The store decides `changed`: a second vote from the same device is ignored
+    // by the primary key, and the route used to answer `changed: true` for it
+    // anyway — the dashboard then re-animated a vote that never counted.
+    const vote = store.addVote(id, voterId.slice(0, 64));
     const view = viewOf(id)!;
     emit({ type: 'suggestion:vote', suggestion: view });
-    return { votes: view.votes, changed: true };
+    return { votes: view.votes, changed: vote.changed };
   });
 
   app.patch('/api/suggestions/:id', async (req, reply) => {
-    const id = Number((req.params as { id: string }).id);
+    const id = intParam(req);
+    if (id === null) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
     const body = (req.body ?? {}) as { status?: SuggestionStatus };
     const allowed: SuggestionStatus[] = ['new', 'approved', 'rejected', 'implementing', 'implemented', 'failed'];
     if (!body.status || !allowed.includes(body.status)) {
@@ -276,7 +374,8 @@ export function createApp(options: AppOptions): FastifyInstance {
    * a suggestion that no longer exists. 409 beats silent data loss.
    */
   app.delete('/api/suggestions/:id', async (req, reply) => {
-    const id = Number((req.params as { id: string }).id);
+    const id = intParam(req);
+    if (id === null) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
     const suggestion = store.getSuggestion(id);
     if (!suggestion) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
     if (runner?.isBusyForSuggestion(suggestion)) {
@@ -381,7 +480,9 @@ export function createApp(options: AppOptions): FastifyInstance {
     const view = viewOf(id)!;
     const webhook = store.getSettings().discordWebhook || process.env.DISCORD_WEBHOOK_URL || '';
     if (webhook && view.discordMessageId) {
-      void discord.updateSuggestionMessage(view, webhook, dashboardUrl);
+      void discord.updateSuggestionMessage(view, webhook, dashboardUrl).catch((err) => {
+        console.warn('[discord] Nachricht nicht aktualisiert:', (err as Error).message);
+      });
     }
     // Only a decision the owner made is worth a message. `implementing`,
     // `implemented` and `failed` arrive on their own as a rewritten task message,
@@ -389,9 +490,13 @@ export function createApp(options: AppOptions): FastifyInstance {
     // — the noise this is meant to remove.
     if (telegram.isConfigured() && (status === 'approved' || status === 'rejected')) {
       const sent = telegram.sendMessage(`Aufruf ${id} ${status === 'approved' ? 'freigegeben' : 'abgelehnt'}`);
-      void sent.then((r) => {
-        if (!r.ok) console.warn('[telegram] Statuswechsel nicht zugestellt:', r.error);
-      });
+      void sent
+        .then((r) => {
+          if (!r.ok) console.warn('[telegram] Statuswechsel nicht zugestellt:', r.error);
+        })
+        .catch((err) => {
+          console.warn('[telegram] Statuswechsel nicht zugestellt:', (err as Error).message);
+        });
     }
     emit({ type: 'suggestion:updated', suggestion: view });
     return { ok: true };
@@ -399,7 +504,8 @@ export function createApp(options: AppOptions): FastifyInstance {
 
   app.post('/api/suggestions/:id/implement', async (req, reply) => {
     if (!runner) return reply.code(503).send({ error: 'Runner ist deaktiviert' });
-    const id = Number((req.params as { id: string }).id);
+    const id = intParam(req);
+    if (id === null) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
     const body = (req.body ?? {}) as { extraInstructions?: string };
     const started = startRun(id, body.extraInstructions ?? '');
     if (!started.ok) {
@@ -439,7 +545,8 @@ export function createApp(options: AppOptions): FastifyInstance {
 
   // Preview: which sub-tasks would an automatic split produce?
   app.get('/api/suggestions/:id/split', async (req, reply) => {
-    const id = Number((req.params as { id: string }).id);
+    const id = intParam(req);
+    if (id === null) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
     const suggestion = store.getSuggestion(id);
     if (!suggestion) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
     return { suggestion: viewOf(id)!, tasks: splitIntoTasks(suggestion.text) };
@@ -448,7 +555,8 @@ export function createApp(options: AppOptions): FastifyInstance {
   // Turn one suggestion into several independent sub-tasks so each one can be
   // implemented (and run) separately.
   app.post('/api/suggestions/:id/split', async (req, reply) => {
-    const id = Number((req.params as { id: string }).id);
+    const id = intParam(req);
+    if (id === null) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
     const suggestion = store.getSuggestion(id);
     if (!suggestion) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
     if (runner?.isBusyForSuggestion(suggestion)) {
@@ -470,9 +578,21 @@ export function createApp(options: AppOptions): FastifyInstance {
         error: 'Es wurden keine sinnvollen Einzelaufträge erkannt — bitte den Vorschlag manuell aufteilen.',
       });
     }
+    // Splitting is not idempotent by itself: the same parent split twice would
+    // create a second copy of every child and therefore a second copy of the
+    // work. Children that already exist are reported instead of recreated, so a
+    // double-click adds nothing.
+    const existingChildren = store
+      .listSuggestions()
+      .filter((s) => s.parentId === suggestion.id)
+      .map((s) => s.text);
+    const plan = planSplit(existingChildren, tasks);
+    if (plan.repeated) {
+      return reply.code(409).send({ error: splitRepeatError(plan) });
+    }
     const status: SuggestionStatus =
       suggestion.status === 'approved' || suggestion.status === 'implementing' ? 'approved' : 'new';
-    const created = tasks.map((task) =>
+    const created = plan.fresh.map((task) =>
       store.createSuggestion({
         text: task,
         author: suggestion.author,
@@ -485,7 +605,7 @@ export function createApp(options: AppOptions): FastifyInstance {
     );
     const views = created.map((c) => viewOf(c.id)!);
     for (const view of views) emit({ type: 'suggestion:new', suggestion: view });
-    return { parent: viewOf(id)!, created: views };
+    return { parent: viewOf(id)!, created: views, existing: plan.existing.length };
   });
 
   app.post('/api/runs/:id/cancel', async (req, reply) => {
@@ -622,7 +742,8 @@ export function createApp(options: AppOptions): FastifyInstance {
     const result = checkRunner.enqueue(body.specId.trim());
     if (result.error) return reply.code(400).send({ error: result.error });
     emit({ type: 'check:queue', state: checkRunner.queueState() });
-    return { check: result.check };
+    // 202, not 200: the record is queued, the scan has not run yet.
+    return reply.code(202).send({ check: result.check });
   });
 
   app.get('/api/checks/:id', async (req, reply) => {
@@ -685,7 +806,8 @@ export function createApp(options: AppOptions): FastifyInstance {
 
   // Which scope(s) a suggestion maps to, before anything is started.
   app.get('/api/suggestions/:id/scope', async (req, reply) => {
-    const id = Number((req.params as { id: string }).id);
+    const id = intParam(req);
+    if (id === null) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
     const suggestion = store.getSuggestion(id);
     if (!suggestion) return reply.code(404).send({ error: 'Vorschlag nicht gefunden' });
     const all = store.listSuggestions();
@@ -738,10 +860,22 @@ export function createApp(options: AppOptions): FastifyInstance {
     };
   });
 
-  app.put('/api/settings', async (req) => {
+  app.put('/api/settings', async (req, reply) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const patch: Record<string, string | boolean | number> = {};
-    if (typeof body.discordWebhook === 'string') patch.discordWebhook = body.discordWebhook.trim();
+    if (typeof body.discordWebhook === 'string') {
+      const webhook = body.discordWebhook.trim();
+      // Checked here and not only when the webhook is used: a stored webhook is
+      // a URL this server posts to on every new suggestion. An empty string
+      // still means "clear it", everything else has to be a Discord host —
+      // through the very same helper `postWebhook` uses, so nothing can be saved
+      // that would be refused later and nothing outside Discord can be stored.
+      if (webhook !== '') {
+        const check = discord.checkWebhook(webhook);
+        if (!check.ok) return reply.code(400).send({ error: check.error });
+      }
+      patch.discordWebhook = webhook;
+    }
     if (typeof body.model === 'string') patch.model = body.model.trim();
     if (typeof body.extraInstructions === 'string') patch.extraInstructions = body.extraInstructions;
     if (typeof body.autoApprove === 'boolean') patch.autoApprove = body.autoApprove;
@@ -767,6 +901,12 @@ export function createApp(options: AppOptions): FastifyInstance {
     const body = (req.body ?? {}) as { webhook?: string };
     const webhook = (body.webhook ?? '').trim() || store.getSettings().discordWebhook || process.env.DISCORD_WEBHOOK_URL || '';
     if (!webhook) return reply.code(400).send({ error: 'Kein Webhook konfiguriert' });
+    // The address comes from the request body, so it is refused here for what it
+    // is — a bad URL is the caller's mistake (400), not Discord's answer (502).
+    // `postWebhook` checks the same thing again; two checks on purpose, one
+    // readable error for the dashboard and no way around the gate in between.
+    const check = discord.checkWebhook(webhook);
+    if (!check.ok) return reply.code(400).send({ error: check.error });
     const result = await discord.sendTest(webhook, dashboardUrl);
     if (!result.ok) return reply.code(502).send({ error: result.error });
     return { ok: true };
@@ -796,18 +936,22 @@ export function createApp(options: AppOptions): FastifyInstance {
 
   app.get('/api/stats', async () => {
     const all = store.listSuggestions();
-    const views = all.map((s) => decorate(s, all, Date.now()));
+    const views = decorateAll(all, Date.now());
     return { stats: statsOf(views), runs: store.listRuns(5) };
   });
 
   app.get('/api/events', (req, reply) => {
-    reply.raw.writeHead(200, {
+    // The same CORS decision as the `onSend` hook, which this route bypasses: it
+    // writes its own head and therefore never passes through it.
+    const origin = corsOrigin(req);
+    const headers: Record<string, string> = {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
       'X-Accel-Buffering': 'no',
-    });
+    };
+    if (origin) headers['Access-Control-Allow-Origin'] = origin;
+    reply.raw.writeHead(200, headers);
     reply.raw.write(': connected\n\n');
     const listener = (event: BusEvent) => {
       reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -871,6 +1015,21 @@ function statsOf(views: SuggestionView[]) {
     clusters: new Set(views.map((v) => v.canonicalId ?? v.id)).size,
     byStatus,
   };
+}
+
+/**
+ * A route parameter as a suggestion number, or `null`.
+ *
+ * `Number('abc')` is `NaN`, and a `NaN` used as a key never matches a row: the
+ * request therefore fell through to a 404 whose text mentioned `NaN` on some
+ * routes and to a German error about a missing suggestion on others. Digits
+ * only, so anything else is simply "no such suggestion".
+ */
+function intParam(req: FastifyRequest, key = 'id'): number | null {
+  const raw = (req.params as Record<string, string | undefined>)[key] ?? '';
+  if (!/^\d+$/.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 function maskWebhook(url: string): string {

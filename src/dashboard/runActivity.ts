@@ -30,15 +30,26 @@ export function lastEventTimestamp(events: readonly RunEvent[]): number | null {
   return latest;
 }
 
-/** Compact German duration, e.g. `12s`, `3 min 5s`, `1 h 12 min`. */
-export function formatDuration(ms: number): string {
+/**
+ * One German duration in the two spellings the panel uses. A countdown reads
+ * better with a space before the unit ("in 25 s"), a "last output" line without
+ * one ("vor 25s") — the two used to be two copies of the same function, and they
+ * had already drifted into "1 min 5 s" next to "1 min 5s" on the same screen.
+ */
+export function germanDuration(ms: number, spaced: boolean): string {
   const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds}s`;
+  const sec = (n: number): string => (spaced ? `${n} s` : `${n}s`);
+  if (seconds < 60) return sec(seconds);
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
-  if (minutes < 60) return rest > 0 ? `${minutes} min ${rest}s` : `${minutes} min`;
+  if (minutes < 60) return rest > 0 ? `${minutes} min ${sec(rest)}` : `${minutes} min`;
   const hours = Math.floor(minutes / 60);
   return `${hours} h ${minutes % 60} min`;
+}
+
+/** Compact German duration, e.g. `12s`, `3 min 5s`, `1 h 12 min`. */
+export function formatDuration(ms: number): string {
+  return germanDuration(ms, false);
 }
 
 /**

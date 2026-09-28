@@ -161,6 +161,12 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 		# "Anonym" is a backend value, not screen text: it shows next to other
 		# suggestions on the dashboard.
 		var view := await Api.submit_suggestion(text, author if author != "" else "Anonym", source)
+		# The backdrop closes the dialog on any tap and `close()` frees the
+		# layer, so a tap outside the panel during the request (up to four
+		# seconds) leaves these labels dangling. The same guard the warning hook
+		# uses at its own write.
+		if not is_instance_valid(status):
+			return
 		if view.is_empty():
 			status.add_theme_color_override("font_color", UiTheme.WARNING)
 			# A concrete reason from the queue beats the generic "stored" sentence.

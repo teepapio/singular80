@@ -20,8 +20,14 @@
         </div>
       </div>
       <div class="topbar-actions">
-        <span id="connection" class="connection offline"><span class="dot"></span> getrennt</span>
-        <span id="api-state" class="connection api-down" hidden></span>
+        <!--
+          Beide Chips sind Statusanzeigen: sie wechseln den Text, nicht die
+          Struktur, und ein Screenreader soll sie ansagen. `role="status"` ist
+          genau das (aria-live=polite, atomar) — vorher war der einzige Hinweis
+          auf einen abgebrochenen Datenstrom ein farbiger Punkt.
+        -->
+        <span id="connection" class="connection offline" role="status"><span class="dot"></span> getrennt</span>
+        <span id="api-state" class="connection api-down" role="status" hidden></span>
         <button id="reload-content" class="ghost" title="Content-Dateien neu einlesen">⟳ Content</button>
         <button id="open-settings" class="ghost">⚙ Einstellungen</button>
         <a class="ghost" href="/api/health" target="_blank" rel="noreferrer">⟳ API-Status</a>
@@ -31,32 +37,38 @@
     <section class="stats" id="stats"></section>
 
     <section class="toolbar">
-      <nav class="tabs" id="tabs">
-        <button data-tab="queue" class="active">🚀 Queue</button>
-        <button data-tab="new">🆕 Neu</button>
-        <button data-tab="top">🏆 Top</button>
-        <button data-tab="cluster">🧩 Cluster</button>
-        <button data-tab="done">✅ Erledigt</button>
+      <nav class="tabs" id="tabs" role="tablist" aria-label="Vorschlagslisten">
+        <button data-tab="queue" class="active" role="tab" aria-selected="true" aria-controls="list">🚀 Queue</button>
+        <button data-tab="new" role="tab" aria-selected="false" aria-controls="list">🆕 Neu</button>
+        <button data-tab="top" role="tab" aria-selected="false" aria-controls="list">🏆 Top</button>
+        <button data-tab="cluster" role="tab" aria-selected="false" aria-controls="list">🧩 Cluster</button>
+        <button data-tab="done" role="tab" aria-selected="false" aria-controls="list">✅ Erledigt</button>
       </nav>
       <div class="filters">
-        <input id="search" type="search" placeholder="Suchen …" />
-        <div class="chips" id="categories"></div>
+        <label class="sr-only" for="search">Vorschläge durchsuchen</label>
+        <input id="search" type="search" placeholder="Suchen …" autocomplete="off" />
+        <div class="chips" id="categories" role="group" aria-label="Kategorie"></div>
       </div>
     </section>
 
     <main class="layout">
-      <section class="list-panel">
-        <div id="list" class="list"></div>
+      <section class="list-panel" aria-label="Vorschläge">
+        <div id="list" class="list" role="tabpanel" tabindex="-1" aria-label="Vorschläge"></div>
         <div id="empty" class="empty" hidden>Keine Vorschläge in dieser Ansicht.</div>
       </section>
 
-      <aside class="run-panel">
+      <aside class="run-panel" aria-label="OpenCode Runs">
         <div class="panel-header">
           <h2>OpenCode Runs</h2>
+          <!--
+            Die drei Knöpfe tragen nur ein Symbol. `title` ist ein Tooltip für
+            die Maus — für Tastatur und Screenreader zählt er nicht, also tragen
+            sie zusätzlich ein `aria-label` mit dem Wort, das der Besitzer sucht.
+          -->
           <div class="panel-header-actions">
-            <button id="toggle-pause" class="ghost small" title="Warteschlange anhalten bzw. fortsetzen">⏸</button>
-            <button id="cleanup-runs" class="ghost small" title="Runs aufräumen, deren Prozess nicht mehr läuft">🧹</button>
-            <button id="refresh-runs" class="ghost small" title="Aktualisieren">⟳</button>
+            <button id="toggle-pause" class="ghost small" title="Warteschlange anhalten bzw. fortsetzen" aria-label="Warteschlange anhalten bzw. fortsetzen">⏸</button>
+            <button id="cleanup-runs" class="ghost small" title="Runs aufräumen, deren Prozess nicht mehr läuft" aria-label="Verwaiste Runs aufräumen">🧹</button>
+            <button id="refresh-runs" class="ghost small" title="Aktualisieren" aria-label="Alles aktualisieren">⟳</button>
           </div>
         </div>
         <div id="queue-state" class="queue-state"></div>
@@ -69,12 +81,12 @@
             placeholder="z. B. „Der Siedler-Knopf zum Zurücksetzen ist auf dem Tablet verdeckt — mach ihn größer“"
           ></textarea>
           <div class="task-row">
-            <small id="task-hint" class="run-sub">Der Auftrag landet sofort in der Warteschlange, ohne Abstimmung.</small>
+            <small class="run-sub">Der Auftrag landet sofort in der Warteschlange, ohne Abstimmung.</small>
             <button type="submit" id="task-send" class="primary">🚀 Auftrag starten</button>
           </div>
         </form>
-        <div id="active-run" class="active-run"></div>
-        <div id="run-history" class="run-history"></div>
+        <section id="active-run" class="active-run" aria-label="Laufende Runs"></section>
+        <section id="run-history" class="run-history" aria-label="Run-Verlauf"></section>
         <details id="backup-panel" class="scope-panel">
           <summary>Backup im Repository</summary>
           <p id="backup-headline" class="run-sub">Backup-Status wird geladen …</p>
@@ -169,7 +181,13 @@
       </form>
     </dialog>
 
-    <div id="toasts" class="toasts"></div>
+    <!--
+      Die Toasts sind die *einzige* Rückmeldung, die das Dashboard hat: eine
+      Abstimmung, ein gelöschter Vorschlag, ein fehlgeschlagener Run. Für einen
+      Screenreader war dieser Kanal bisher unsichtbar. `polite` statt `assertive`,
+      weil ein Fehler in einer Warteschlangenlage keine Unterbrechung braucht.
+    -->
+    <div id="toasts" class="toasts" role="log" aria-live="polite" aria-relevant="additions"></div>
     <script type="module" src="/src/dashboard/main.ts"></script>
   </body>
 </html>

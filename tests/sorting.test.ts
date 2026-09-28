@@ -5,7 +5,7 @@ import {
   decorate,
   diceTrigram,
   findCanonical,
-  jaccard,
+  overlapCoefficient,
   qualityScore,
   scoreSuggestion,
   similarity,
@@ -66,7 +66,10 @@ describe('Ähnlichkeit & Cluster', () => {
   it('berechnet Jaccard und Trigram-Dice', () => {
     const a = tokenize('Füge einen Slime Gegner hinzu');
     const b = tokenize('Neuer Gegner: Slime');
-    expect(jaccard(a, b)).toBeGreaterThan(0.3);
+    // `jaccard` was removed: it was exported and tested but `similarity` never
+    // called it, and blending it in would push the duplicate-detection case
+    // below the clustering threshold. Dice still carries this test.
+    expect(overlapCoefficient(a, b)).toBeGreaterThan(0.3);
     expect(diceTrigram('Füge einen Slime Gegner hinzu', 'Neuer Gegner: Slime')).toBeGreaterThan(0.4);
   });
 

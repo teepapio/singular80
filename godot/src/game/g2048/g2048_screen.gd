@@ -48,6 +48,10 @@ var _next_view: NextView
 var _score_label: Label
 var _highscore_label: Label
 var _best_label: Label
+## The last values written to the three labels; see `_refresh`.
+var _shown_score := -1
+var _shown_highscore := -1
+var _shown_best := -1
 var _drag_start := Vector2.ZERO
 var _dragging := false
 var _rng := RandomNumberGenerator.new()
@@ -82,9 +86,9 @@ func _build_ui() -> void:
 	panel.size = Vector2(420, BOARD_SIZE + 20.0)
 	layer.add_child(panel)
 
-	_score_label = _stat(layer, Vector2(860, 168), "PUNKTE", "0")
+	_score_label = _stat(layer, Vector2(860, 168), "POINTS", "0")
 	_highscore_label = _stat(layer, Vector2(1090, 168), "HIGHSCORE", "0")
-	_best_label = _stat(layer, Vector2(975, 268), "GRÖSSTE KACHEL", "2")
+	_best_label = _stat(layer, Vector2(975, 268), "BIGGEST TILE", "2")
 	# The ghost tile is drawn by the board view; these are its labels.
 	var next_caption := Ui.label("NEXT TILE", 14, UiTheme.TEXT_DIM)
 	next_caption.position = NEXT_CENTER + Vector2(-100, -80)
@@ -111,8 +115,8 @@ func _build_ui() -> void:
 	controls.size = Vector2(560, 46)
 	layer.add_child(controls)
 
-	_place(layer, "Neu starten", Vector2(970, 512), func() -> void: reset_game())
-	_place(layer, "Rückgängig", Vector2(970, 570), func() -> void: undo())
+	_place(layer, Loc.resolve("New game"), Vector2(970, 512), func() -> void: reset_game())
+	_place(layer, "Undo", Vector2(970, 570), func() -> void: undo())
 	_place(layer, "◀  Lobby", Vector2(970, 628), func() -> void: Router.to_lobby())
 
 
@@ -274,15 +278,23 @@ func _toggle_pause() -> void:
 	column.add_child(Ui.button("Lobby", Vector2(360, 56), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))
 
 
+## The board redraws whenever `_refresh` runs — the tiles animate — but the three
+## numbers only change when a move lands, so they are compared before they are
+## formatted and assigned. Three `String` allocations per frame bought nothing.
 func _refresh() -> void:
 	_view.queue_redraw()
 	if _next_view != null:
 		_next_view.queue_redraw()
 	if _score_label == null:
 		return
+	if score == _shown_score and highscore == _shown_highscore and best == _shown_best:
+		return
+	_shown_score = score
+	_shown_highscore = highscore
+	_shown_best = best
 	_score_label.text = Ui.format_number(score)
 	_highscore_label.text = Ui.format_number(highscore)
-	_best_label.text = str(best)
+	_best_label.text = Loc.number(best)
 
 
 func _on_view_input(event: InputEvent) -> void:

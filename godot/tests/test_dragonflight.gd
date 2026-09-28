@@ -10,12 +10,21 @@ extends RefCounted
 var t: TestKit
 
 
+## Entry point used by `run_tests.gd`.
+##
+## Every suite is followed by `t.close_suite()`: a GDScript runtime error unwinds
+## the suite function without raising, so an aborted suite would look like one
+## that simply stopped asserting.
 func run(kit: TestKit) -> void:
 	t = kit
 	_alleles()
+	t.close_suite()
 	_states()
+	t.close_suite()
 	_candidates()
+	t.close_suite()
 	_best_pair()
+	t.close_suite()
 	_egg_readout()
 	t.close_suite()
 
@@ -52,6 +61,7 @@ func _alleles() -> void:
 	t.equal(DragonFlight.recessive_allele_count({"riesenwuchs": "rR"}, "riesenwuchs"), 1, "rR zählt genauso")
 	t.equal(DragonFlight.recessive_allele_count({"riesenwuchs": "rr"}, "riesenwuchs"), 2, "rr zeigt es")
 	t.equal(DragonFlight.recessive_allele_count({}, "riesenwuchs"), 0, "Ohne Gen ist nichts da")
+	t.suite_done()
 
 
 # --- gene states ------------------------------------------------------------
@@ -108,6 +118,7 @@ func _states() -> void:
 	t.equal(DragonFlight.carried_traits({"riesenwuchs": "rr", "nachtfuchs": "NN"}).size(), 0,
 		"Ein gezeigtes Merkmal ist kein verdeckter Träger")
 	t.equal(DragonFlight.carried_traits({}).size(), 0, "Ohne Allele gibt es keine Träger")
+	t.suite_done()
 
 
 # --- breeding goal ----------------------------------------------------------
@@ -151,6 +162,7 @@ func _candidates() -> void:
 	t.equal(DragonFlight.goal_carriers(hopeless, "riesenwuchs"), 0,
 		"Ein reiner Bestand bringt kein rezessives Ziel")
 	t.equal(DragonFlight.goal_carriers(_profile_with([]), "riesenwuchs"), 0, "Ein leerer Stall bringt nichts")
+	t.suite_done()
 
 
 # --- best pair --------------------------------------------------------------
@@ -199,6 +211,7 @@ func _best_pair() -> void:
 	t.check(DragonFlight.best_pair(_profile_with([_dragon(1, {"riesenwuchs": "rr"})]), "riesenwuchs").is_empty(),
 		"Mit einem Drachen gibt es keine Paarung")
 	t.check(DragonFlight.best_pair(_profile_with([]), "riesenwuchs").is_empty(), "Ein leerer Stall hat keine beste Paarung")
+	t.suite_done()
 
 
 # --- egg readout ------------------------------------------------------------

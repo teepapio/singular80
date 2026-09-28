@@ -42,8 +42,44 @@ static func create(weapon: Dictionary) -> PlayerStats:
 	return stats
 
 
+## The level curve of every game that levels a hero. Two entries, because the
+## arena and the dragon RPG are two different games with two different
+## progressions — but they are one table and one formula, so a third game cannot
+## spell a third copy of "a level costs more than the last" and drift away from
+## both.
+##
+## `per_level` counts from the *previous* level, so the RPG's `8 + 6l + 1.5l²`
+## reads as `base 14 + 6 per level + 1.5 per level squared`.
+const XP_CURVES := {
+	"arena": {"base": 6.0, "per_level": 5.0, "exponent": 1.75},
+	"rpg": {"base": 14.0, "per_level": 6.0, "quadratic": 1.5},
+}
+
+
+## The raw curve value for `level` under the named curve, unrounded: the two
+## games round differently (the arena floors, the RPG rounds), and that rounding
+## is part of what each one shows the player.
+static func xp_with_curve(level: int, curve: String) -> float:
+	var spec: Dictionary = XP_CURVES.get(curve, {})
+	var l: int = maxi(1, level)
+	var total := float(spec.get("base", 0.0)) + float(l - 1) * float(spec.get("per_level", 0.0))
+	if spec.has("exponent"):
+		total += pow(float(l), float(spec["exponent"]))
+	total += float(l) * float(l) * float(spec.get("quadratic", 0.0))
+	return total
+
+
 static func xp_for_level(level: int) -> float:
-	return floor(6.0 + (level - 1) * 5.0 + pow(float(level), 1.75))
+	return floor(xp_with_curve(level, "arena"))
+
+
+## The hard caps of the shooting rules. They used to be typed in twice — once
+## here, once in `ArenaRuns`, which previews the same numbers for the level-up
+## cards — so the card could promise a fire rate the stat block refused to keep.
+const MAX_FIRE_RATE := 8.0
+const MAX_CRIT_CHANCE := 0.9
+## No weapon draws faster than this, whatever the fire rate says.
+const MIN_COOLDOWN_MS := 70.0
 
 
 ## Applies one upgrade definition. Unknown stats are ignored, `max_hp` heals and
@@ -62,8 +98,8 @@ func apply_upgrade(upgrade: Dictionary) -> void:
 		set(stat, float(get(stat)) + amount)
 	if stat == "projectile_count":
 		spread = maxf(spread, 0.12)
-	crit_chance = minf(crit_chance, 0.9)
-	fire_rate = minf(fire_rate, 8.0)
+	crit_chance = minf(crit_chance, MAX_CRIT_CHANCE)
+	fire_rate = minf(fire_rate, MAX_FIRE_RATE)
 
 
 func effective_move_speed() -> float:
@@ -75,4 +111,4 @@ func effective_damage() -> float:
 
 
 func effective_cooldown(weapon: Dictionary) -> float:
-	return maxf(70.0, float(weapon.get("cooldown", 500)) / (1.0 + fire_rate))
+	return maxf(MIN_COOLDOWN_MS, float(weapon.get("cooldown", 500)) / (1.0 + fire_rate))

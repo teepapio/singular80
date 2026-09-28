@@ -309,7 +309,7 @@ func _crystal_tower() -> void:
 	t.equal(CrystalTower.tier_asset(1), "crystal1", "Stufe 1 nutzt ein eigenes Mesh")
 	t.equal(CrystalTower.tier_asset(99), "crystal5", "Stufen werden geklemmt")
 	t.equal(CrystalTower.crystal_tier_name(CrystalTower.THEMES.christmas, 1), "Tannenzapfen", "Weihnachtsname Stufe 1")
-	t.equal(CrystalTower.crystal_tier_name(CrystalTower.THEMES.halloween, 1), "Kürbiskern", "Halloweenname Stufe 1")
+	t.equal(CrystalTower.crystal_tier_name(CrystalTower.THEMES.halloween, 1), "Pumpkin seed", "Halloweenname Stufe 1")
 	t.equal(CrystalTower.crystal_tier_name(CrystalTower.THEMES.classic, 2), "Kristall", "Klassikname Stufe 2")
 	t.check(CrystalTower.THEMES.has("classic") and CrystalTower.THEMES.has("christmas") and CrystalTower.THEMES.has("halloween"), "Alle drei Themes vorhanden")
 
@@ -342,7 +342,7 @@ func _dragon_rpg() -> void:
 	t.suite("Drachen-RPG")
 	t.equal(DragonRpg.DRAGON_TYPES.size(), 12, "Zwölf Drachenarten")
 	t.equal(DragonRpg.BOSS_EVERY, 5, "Alle fünf Wellen ein Boss")
-	t.equal(DragonRpg.dragon_by_id("dragon_lord")["name"], "Drachenfürst", "Bossname")
+	t.equal(DragonRpg.dragon_by_id("dragon_lord")["name"], "Dragon Lord", "Bossname")
 	t.equal(str(DragonRpg.dragon_by_id("does_not_exist")["id"]), "dragon_hatchling", "Unbekannte Art fällt zurück")
 
 	var wave := DragonRpg.wave_config(1)
@@ -707,8 +707,15 @@ func _asset_registry() -> void:
 		t.check(not keys.is_empty(), "Sektion '%s' ist nicht leer" % str(group["id"]))
 		total += keys.size()
 	t.equal(total, AssetRegistry.KEYS.size(), "Jeder Key gehört genau einer Sektion")
-	for key in AssetRegistry.KEYS:
-		t.check(str(AssetRegistry.GROUPS[0].keys()) != "" or true, "Sektionen sind benannt")
+	# A section without a name has no label on the gallery shelf, and one without
+	# an icon has no glyph — the player navigates by both. Checking it on the
+	# first group once per key proved nothing at all.
+	var groups_named := 0
+	for group in AssetRegistry.GROUPS:
+		if not str(group.get("id", "")).is_empty() and not str(group.get("name", "")).is_empty() \
+				and not str(group.get("icon", "")).is_empty():
+			groups_named += 1
+	t.equal(groups_named, AssetRegistry.GROUPS.size(), "Jede Sektion ist benannt und hat ein Symbol")
 
 	# The game themes only reference existing meshes.
 	for tier in AssetRegistry.MERGE_KEYS:
@@ -887,11 +894,53 @@ func _flight_genetics() -> void:
 	t.equal(leaked, 0, "Ein Träger allein vererbt das rezessive Merkmal nicht")
 
 	# Inbreeding costs vigour, crossing with foreign lines does not.
+	#
+	# The two bounds the old assertions checked (`<= 1.0` and `>= 0.7`) are the
+	# bounds of the formula, not of the behaviour: they hold for *every* pair of
+	# genomes, including two random unrelated ones, so they passed while the
+	# penalty was 1.0 for a clone as well. What the comment claims — and what
+	# decides the strategy — is the *order*: the more genomes two dragons share,
+	# the weaker their child. So that is what is asserted, on genomes built here
+	# instead of rolled, which makes the three cases exact.
+	#
+	## A genome where every gene carries the dominant allele.
+	var uniform := {}
+	for gene in DragonFlight.TRAITS:
+		uniform[str(gene["id"])] = str(gene["dom"]) + str(gene["dom"])
+	## A genome that shares nothing with `uniform` at any gene: every pair is the
+	## recessive one, and every dominant one is carried once.
+	var foreign := {}
+	var dom_allele := ""
+	var rec_allele := ""
+	for gene in DragonFlight.TRAITS:
+		dom_allele = str(gene["dom"])
+		rec_allele = dom_allele.to_lower()
+		foreign[str(gene["id"])] = rec_allele + dom_allele
+	var twin := {"uid": 1, "alleles": uniform}
+	var half := {"uid": 2, "alleles": uniform.duplicate()}
+	for gene in DragonFlight.TRAITS:
+		var id := str(gene["id"])
+		if id == str(DragonFlight.TRAITS[0]["id"]):
+			half["alleles"][id] = foreign[id]
+	var unrelated := {"uid": 3, "alleles": foreign}
+
+	var clone_penalty := DragonFlight.inbreeding_penalty(twin, twin)
+	var close_penalty := DragonFlight.inbreeding_penalty(twin, half)
+	var open_penalty := DragonFlight.inbreeding_penalty(twin, unrelated)
+	t.check(clone_penalty < close_penalty,
+		"Ein Klon wird stärker bestraft als ein Halbverwandter (%.3f < %.3f)"
+		% [clone_penalty, close_penalty])
+	t.check(close_penalty < open_penalty,
+		"Ein Halbverwandter stärker als eine Kreuzung mit fremder Linie (%.3f < %.3f)"
+		% [close_penalty, open_penalty])
+	t.almost(open_penalty, 1.0, 0.0001, "Fremde Linien zahlen keine Inzuchtpenalty")
+	t.check(clone_penalty < 1.0,
+		"Und ein Klon zahlt überhaupt eine (%.3f)" % clone_penalty)
+	t.check(clone_penalty >= 0.7, "…aber nie unter die Untergrenze")
+
 	var parent_a := DragonFlight.random_dragon(1, ["ember"])
 	var parent_b := DragonFlight.random_dragon(2, ["ember"])
 	parent_b["alleles"] = DragonFlight.random_genome()
-	t.check(DragonFlight.inbreeding_penalty(parent_a, parent_a) <= 1.0, "Inzuchtpenalty ist höchstens 1")
-	t.check(DragonFlight.inbreeding_penalty(parent_a, parent_b) >= 0.7, "Inzuchtpenalty hat eine Untergrenze")
 
 	var child_dragon := DragonFlight.breed_parents(parent_a, parent_b, 7)
 	t.equal(int(child_dragon["uid"]), 7, "Das Kind bekommt die UID")
@@ -946,7 +995,7 @@ func _flight_forecast() -> void:
 	var names: Array[String] = []
 	for entry in forecast:
 		names.append(str(entry["name"]))
-	t.check("Feueratem" in names, "Feueratem steht in der Vorhersage")
+	t.check("Fire Breath" in names, "Feueratem steht in der Vorhersage")
 	t.equal(DragonFlight.breeding_forecast({}, {})[0].size(), 6, "Auch leere Eltern ergeben einen Eintrag")
 
 	# Ancestry: roots have no parents, a child does.

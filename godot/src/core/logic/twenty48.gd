@@ -57,8 +57,13 @@ static func set_at(board: Array, row: int, col: int, value: int) -> void:
 
 
 ## Slide + merge every tile in the given direction and report the full move plan.
+## An unknown direction is a programming error, not a move: it used to fall back
+## to LEFT, which slid the board in a direction nobody asked for.
 static func slide(board: Array, dir: String) -> Dictionary:
-	var step: Vector2i = DIRS[dir] if DIRS.has(dir) else DIRS[LEFT]
+	if not DIRS.has(dir):
+		push_error("Twenty48.slide: unknown direction '%s'" % dir)
+		return {"values": clone_board(board), "moved": false, "gained": 0, "moves": [], "merges": []}
+	var step: Vector2i = DIRS[dir]
 	var working := empty_board()
 	var merged: Array = []
 	for r in SIZE:
@@ -180,7 +185,7 @@ static func add_random_tile(board: Array) -> Variant:
 	if empty.is_empty():
 		return null
 	var slot: Vector2i = empty[randi() % empty.size()]
-	var value := 2 if randf() < 0.9 else 4
+	var value := 4 if randf() < FOUR_CHANCE else 2
 	set_at(board, slot.x, slot.y, value)
 	return {"row": slot.x, "col": slot.y, "value": value}
 
@@ -217,13 +222,17 @@ static func opening(board: Array, rng: RandomNumberGenerator) -> Dictionary:
 ## The board as the player sees it: `board` with the ghost laid on top.
 ##
 ## A ghost that no longer fits (an out-of-date snapshot, a board that was
-## restored under it) is ignored rather than allowed to eat a real tile.
+## restored under it) is ignored rather than allowed to eat a real tile — and a
+## ghost whose cell is off the board counts as "no longer fits" too, so a
+## `row == 4` cannot index past the last row.
 static func stage_ghost(board: Array, pending: Dictionary) -> Array:
 	var staged := clone_board(board)
 	if pending.is_empty():
 		return staged
 	var row := int(pending["row"])
 	var col := int(pending["col"])
+	if row < 0 or row >= SIZE or col < 0 or col >= SIZE:
+		return staged
 	if at(staged, row, col) != 0:
 		return staged
 	set_at(staged, row, col, int(pending["value"]))

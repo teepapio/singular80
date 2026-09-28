@@ -11,7 +11,7 @@ const FLOW_WINDOW_MS := 3000.0
 const MAX_FLOW := 10
 ## Names for the chain, so the counter becomes a goal instead of a number.
 const FLOW_TITLES := [
-	"", "Zug", "Doppel", "Fluss", "Strom", "Kaskade", "Wirbel", "Sturm", "Furie", "Orkan", "Singular",
+	"", "Train", "Doppel", "Fluss", "Strom", "Kaskade", "Wirbel", "Sturm", "Furie", "Orkan", "Singular",
 ]
 
 const THEME_CLASSIC := "classic"
@@ -19,11 +19,11 @@ const THEME_CHRISTMAS := "christmas"
 const THEME_HALLOWEEN := "halloween"
 
 const CRYSTAL_TIERS := [
-	{"tier": 1, "name": "Shard", "color": Color("93c5fd"), "value": 1, "asset": "crystal1"},
-	{"tier": 2, "name": "Crystal", "color": Color("22d3ee"), "value": 3, "asset": "crystal2"},
-	{"tier": 3, "name": "Jewel", "color": Color("34d399"), "value": 9, "asset": "crystal3"},
-	{"tier": 4, "name": "Prism", "color": Color("fbbf24"), "value": 27, "asset": "crystal4"},
-	{"tier": 5, "name": "Starcore", "color": Color("f472b6"), "value": 81, "asset": "crystal5"},
+	{"tier": 1, "name": "Shard", "color": Color("93c5fd"), "asset": "crystal1"},
+	{"tier": 2, "name": "Crystal", "color": Color("22d3ee"), "asset": "crystal2"},
+	{"tier": 3, "name": "Jewel", "color": Color("34d399"), "asset": "crystal3"},
+	{"tier": 4, "name": "Prism", "color": Color("fbbf24"), "asset": "crystal4"},
+	{"tier": 5, "name": "Starcore", "color": Color("f472b6"), "asset": "crystal5"},
 ]
 
 const THEMES := {
@@ -77,7 +77,7 @@ const THEMES := {
 		"id": THEME_HALLOWEEN,
 		"title": "Crystal Jumper — Halloween",
 		"icon": "☠",
-		"tierNames": ["Kürbiskern", "Süßigkeit", "Mini-Kürbis", "Kürbis", "Geisterkürbis"],
+		"tierNames": ["Pumpkin seed", "Candy", "Mini pumpkin", "Pumpkin", "Ghost pumpkin"],
 		"tierColors": [Color("fef3c7"), Color("f472b6"), Color("fb923c"), Color("ea580c"), Color("a7f3d0")],
 		"tierAssets": ["halloween_seed", "halloween_candy", "halloween_mini_pumpkin", "halloween_pumpkin", "halloween_ghost_pumpkin"],
 		"background": Color("0b0616"),
@@ -127,9 +127,13 @@ static func crystal_tier_color(theme: Dictionary, tier: int) -> Color:
 	return (theme["tierColors"] as Array)[clampi(tier, 1, MAX_CRYSTAL_TIER) - 1]
 
 
-## Score value of one crystal of the given tier.
+## Score value of one crystal of the given tier. The ladder is `Merge3D`'s:
+## three of a kind per tier, so both games price a tier the same way and only
+## one of them has to be right.
 static func tier_value(tier: int) -> int:
-	return int(tier_info(tier)["value"])
+	if tier <= 0:
+		return 0
+	return Merge3D.TIER_VALUES[clampi(tier, 1, Merge3D.TIER_VALUES.size()) - 1]
 
 
 ## Tier a crystal found on the given floor (0 = base) gets. Higher = rarer.
@@ -226,7 +230,7 @@ static func flow_title(chain: int) -> String:
 static func format_flow(chain: int) -> String:
 	if chain < 2:
 		return ""
-	return "×%d %s" % [flow_multiplier(chain), flow_title(chain)]
+	return Loc.f("×%d %s", [flow_multiplier(chain), flow_title(chain)])
 
 
 ## Stat boost granted by equipping a crystal of the given tier.

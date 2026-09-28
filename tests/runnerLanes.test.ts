@@ -21,6 +21,14 @@ const runners: Runner[] = [];
 const children: ReturnType<typeof spawn>[] = [];
 let previousBin: string | undefined;
 
+/**
+ * Every case here spawns a real (fake) `opencode` and then waits for it, so the
+ * budget is the wait, not the global 20 s: a machine that is busy with another
+ * run's own test run needs more, and a bare `Test timed out` names neither the
+ * wait nor the run.
+ */
+const SLOW = 60_000;
+
 /** A stand-in for `opencode run` that never finishes on its own. */
 const FAKE_BIN = `#!/bin/sh
 exec sleep 600
@@ -61,10 +69,14 @@ function harness(settings: Partial<Settings> = {}): Harness {
   const dataDir = join(dir, 'data');
   const store = new Store(dataDir);
   store.saveSettings({ runTimeoutMinutes: 0, retryLimit: 0, retryBackoffSeconds: 0, ...settings });
+  // A throwaway project root, like `runnerPolicy.test.ts`. The real one is only
+  // used for `log/` — which `Runner` creates with `mkdirSync` on construction — so
+  // a test run used to write JSONL logs into the shared working tree, next to the
+  // files the owner's own runner is working on at that moment.
+  const projectRoot = mkdtempSync(join(tmpdir(), 'singular80-lanes-repo-'));
+  tempDirs.push(projectRoot);
   const runner = new Runner(store, {
-    // The root is only used to find the binary and for `log/`; no git runs while a
-    // run hangs.
-    projectRoot: root,
+    projectRoot,
     dataDir,
     contentDir: join(root, 'content'),
     callbacks: {},
@@ -106,40 +118,59 @@ describe('scopesConflict', () => {
 
   it('lässt zwei verschiedene Spiele nebeneinander laufen', () => {
     expect(scopesConflict(run('a', ['tetris']), run('b', ['pang']))).toBe(false);
-  });
+  }, SLOW);
 
   it('sperrt zwei Runs auf demselben Spiel', () => {
     expect(scopesConflict(run('a', ['tetris']), run('b', ['tetris']))).toBe(true);
-  });
+  }, SLOW);
 
   it('lässt zwei Spiele laufen, die beide nur die breite Kategorie ergänzt bekommen', () => {
     // The documented leftover: `core`/`content` are supplement, not ownership. Comparing
     // the full scope list would put the queue back to serial.
     expect(scopesConflict(run('a', ['tetris', 'core']), run('b', ['pang', 'core']))).toBe(false);
     expect(sharedBroadScopes(run('a', ['tetris', 'core']), run('b', ['pang', 'core']))).toEqual(['core']);
-  });
+  }, SLOW);
 
   it('gibt einem Run, dessen ganzer Job der breite Scope ist, den Baum allein', () => {
     expect(scopesConflict(run('a', ['core']), run('b', ['tetris']))).toBe(true);
     expect(scopesConflict(run('a', ['content']), run('b', ['pang', 'content']))).toBe(true);
     expect(sharedBroadScopes(run('a', ['tetris']), run('b', ['pang']))).toEqual([]);
-  });
+  }, SLOW);
 
   it('nimmt den spezifischsten Scope als Besitzer', () => {
     expect(primaryScope(['tetris', 'core'])).toBe('tetris');
     expect(primaryScope(['core'])).toBe('core');
     expect(primaryScope([])).toBeNull();
-  });
+  }, SLOW);
 
   it('behandelt einen Run ohne bekannten Scope als Konflikt zu allem', () => {
     // Nothing is known about where it writes — that must not be a free pass.
     expect(scopesConflict(run('a', []), run('b', ['pang']))).toBe(true);
     expect(scopesConflict(run('a', ['tetris']), run('b', []))).toBe(true);
-  });
+  }, SLOW);
 
   it('behandelt denselben Run als Konflikt', () => {
     expect(scopesConflict(run('a', ['tetris']), run('a', ['pang']))).toBe(true);
-  });
+  }, SLOW);
+
+  it('gibt einem Scope, den das Manifest nicht kennt, den Baum allein', () => {
+    // The name says nothing about the files. A run nobody can place is not a free
+    // pass — the comment above `scopesConflict` promises exactly this.
+    expect(scopesConflict(run('a', ['gibtsnicht']), run('b', ['pang']))).toBe(true);
+    expect(scopesConflict(run('a', ['tetris']), run('b', ['gibtsnicht']))).toBe(true);
+  }, SLOW);
+
+  it('sperrt zwei Varianten desselben Spiels, weil sie dieselben Dateien beanspruchen', () => {
+    // `scripts/scopes.mjs` builds a variant by copying its base scope, so
+    // `crystal3d`, `crystal3d-christmas` and `crystal3d-halloween` own byte-identical
+    // file sets. Comparing the ids finds nothing to complain about; comparing what
+    // they own does.
+    expect(scopesConflict(run('a', ['crystal3d-christmas']), run('b', ['crystal3d-halloween']))).toBe(true);
+    expect(scopesConflict(run('a', ['crystal3d-christmas']), run('b', ['crystal3d']))).toBe(true);
+    expect(scopesConflict(run('a', ['merge3d-christmas']), run('b', ['merge3d-halloween']))).toBe(true);
+    // And a variant next to a different game is still fine.
+    expect(scopesConflict(run('a', ['crystal3d-halloween']), run('b', ['tetris']))).toBe(false);
+  }, SLOW);
 });
 
 describe('freeLane', () => {
@@ -147,12 +178,12 @@ describe('freeLane', () => {
     expect(freeLane([], 3)).toBe(1);
     expect(freeLane([1], 3)).toBe(2);
     expect(freeLane([2, 1], 3)).toBe(3);
-  });
+  }, SLOW);
 
   it('sagt, wenn alle Spuren belegt sind', () => {
     expect(freeLane([1, 2, 3], 3)).toBeNull();
     expect(freeLane([9], 1)).toBe(1);
-  });
+  }, SLOW);
 });
 
 describe('Parallele Spuren', () => {
@@ -164,7 +195,7 @@ describe('Parallele Spuren', () => {
     await waitFor(() => h.running().length === 3, 8000, 'drei laufende Runs');
     const lanes = h.running().map((r) => r.lane).sort();
     expect(lanes).toEqual([1, 2, 3]);
-  });
+  }, SLOW);
 
   it('hält einen zweiten Run auf denselben Scope zurück', async () => {
     const h = harness({ maxParallelRuns: 3 });
@@ -177,7 +208,7 @@ describe('Parallele Spuren', () => {
     const state = h.runner.queueState();
     expect(state.queue.length).toBe(1);
     expect(state.blockedRunIds).toContain(state.queue[0].id);
-  });
+  }, SLOW);
 
   it('lässt einen wartenden Run starten, sobald seine Spur frei wird', async () => {
     const h = harness({ maxParallelRuns: 1 });
@@ -193,7 +224,7 @@ describe('Parallele Spuren', () => {
     expect(started.status).toBe('running');
     // The freed lane is handed out again, not merely counted on.
     expect(started.lane).toBe(1);
-  });
+  }, SLOW);
 
   it('behandelt eine Einstellung von einer Spur wie die alte serielle Queue', async () => {
     const h = harness({ maxParallelRuns: 1 });
@@ -204,7 +235,7 @@ describe('Parallele Spuren', () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(h.running().length).toBe(1);
     expect(h.runner.policy().maxParallelRuns).toBe(1);
-  });
+  }, SLOW);
 
   it('meldet belegte Spuren in der QueueState', async () => {
     const h = harness({ maxParallelRuns: 2 });
@@ -216,7 +247,7 @@ describe('Parallele Spuren', () => {
     // The oldest running run stays `activeRun` — the old API knows of only one.
     expect(state.activeRun?.id).toBe(state.activeRuns[0].id);
     expect(state.policy.maxParallelRuns).toBe(2);
-  });
+  }, SLOW);
 
   it('gibt die Spur wieder frei, wenn ein Run endet', async () => {
     const h = harness({ maxParallelRuns: 1 });
@@ -226,7 +257,7 @@ describe('Parallele Spuren', () => {
     await waitFor(() => h.running().length === 0, 8000, 'kein laufender Run');
     expect(h.runner.activeRuns()).toEqual([]);
     expect(h.store.getRun(first.id)!.status).toBe('cancelled');
-  });
+  }, SLOW);
 
   it('beendet bei einem Pausenwunsch nichts, was schon läuft', async () => {
     const h = harness({ maxParallelRuns: 2 });
@@ -237,5 +268,5 @@ describe('Parallele Spuren', () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(h.running().length).toBe(1);
     expect(h.store.listRuns(10).filter((r) => r.status === 'queued').length).toBe(1);
-  });
+  }, SLOW);
 });

@@ -9,17 +9,31 @@ extends RefCounted
 var t: TestKit
 
 
+## Entry point used by `run_tests.gd`.
+##
+## Every suite is followed by `t.close_suite()`: a GDScript runtime error unwinds
+## the suite function without raising, so an aborted suite would look like one
+## that simply stopped asserting.
 func run(kit: TestKit) -> void:
 	t = kit
 	_matching()
+	t.close_suite()
 	_swaps()
+	t.close_suite()
 	_specials()
+	t.close_suite()
 	_blockers()
+	t.close_suite()
 	_gravity_and_shuffle()
+	t.close_suite()
 	_generator()
+	t.close_suite()
 	_levels()
+	t.close_suite()
 	_daily()
+	t.close_suite()
 	_milestones()
+	t.close_suite()
 	_undo()
 	t.close_suite()
 
@@ -111,13 +125,21 @@ func _swaps() -> void:
 		CandyMatch3.mulberry32(42), 6)
 	t.check(not outcome.is_empty(), "Vertauschter Zug mit Reihe wird angenommen")
 	t.check(((outcome["step"] as Dictionary)["cleared"] as Array).size() >= 3, "Mindestens drei Bonbons fallen")
-	for cell in CandyMatch3.open_cells(setup):
-		t.check((setup["colors"] as Array)[cell] != CandyMatch3.NO_CANDY or true, "Brett gefüllt")
+	# The cascade has to leave a playable board behind: every open cell carries a
+	# candy again, so the next move exists at all. An `or true` here would pass
+	# on a board the refill never touched.
+	var open := CandyMatch3.open_cells(setup)
 	var empty := 0
-	for cell in CandyMatch3.open_cells(setup):
+	var filled := 0
+	for cell in open:
 		if (setup["colors"] as Array)[cell] == CandyMatch3.NO_CANDY:
 			empty += 1
+		else:
+			filled += 1
 	t.equal(empty, 0, "Nach dem Zug ist kein Feld leer")
+	t.equal(filled, open.size(), "Und jedes offene Feld trägt wieder ein Bonbon")
+	t.check(not CandyMatch3.find_valid_swaps(setup, 1).is_empty(),
+		"Das Brett ist danach wieder spielbar")
 
 	# Two specials may always be swapped, one special needs a match.
 	var specials_board := _pattern()

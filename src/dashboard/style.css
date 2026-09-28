@@ -17,6 +17,35 @@
   box-sizing: border-box;
 }
 
+/*
+ * The dashboard is keyboard-reachable — it is built from buttons and links — but
+ * it was invisible to keyboard navigation: the dark theme removed the default
+ * focus ring and nothing put one back. `:focus-visible` keeps it off mouse
+ * clicks.
+ */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* For a label that exists for a screen reader only. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 body {
   margin: 0;
   background: radial-gradient(circle at 20% -10%, #0f1c33 0%, var(--bg) 55%);
@@ -32,10 +61,27 @@ textarea {
   font-family: inherit;
 }
 
+/*
+ * A tap on a control must not also be interpreted as a double tap or a long
+ * press — the operator uses this page from a phone, and a 300 ms delay before a
+ * vote is a vote that does not happen. `manipulation` drops the delay and keeps
+ * panning and pinch-zoom.
+ */
+button,
+a,
+input,
+textarea,
+summary,
+button.chip {
+  touch-action: manipulation;
+}
+
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
   padding: 18px 26px;
   border-bottom: 1px solid var(--border);
   background: rgba(5, 7, 13, 0.75);
@@ -72,6 +118,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .connection {
@@ -255,9 +302,24 @@ textarea {
   }
 }
 
+/*
+ * One column below 1180 px — and then the *order* is the problem: the DOM puts
+ * the suggestion list first, so on a phone the operator had to scroll past the
+ * entire history to reach the queue state, the direct-order composer, the runs
+ * and the backup. The console comes first in the narrow case, the history last.
+ * The sticky/max-height combination is dropped with it: a sticky panel inside a
+ * single column is a scrolling panel inside a scrolling page.
+ */
 @media (max-width: 1180px) {
   .layout {
     grid-template-columns: 1fr;
+  }
+
+  .run-panel {
+    order: -1;
+    position: static;
+    max-height: none;
+    overflow: visible;
   }
 }
 
@@ -282,6 +344,10 @@ textarea {
 
 .card.highlight {
   animation: pulse 1.6s ease 2;
+  /* The static ring is the point of the highlight for anyone who asked for less
+     motion: the card the hash link points at stays marked either way. */
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 @keyframes pulse {
@@ -291,6 +357,25 @@ textarea {
   }
   50% {
     box-shadow: 0 0 0 6px rgba(56, 189, 248, 0.25);
+  }
+}
+
+/*
+ * Motion the page asks for on its own: the highlight ring, the activity dot and
+ * the toast slide-in. A user who asked for less motion gets none of it.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .card.highlight {
+    animation: none;
   }
 }
 
@@ -484,6 +569,20 @@ textarea {
 .card-actions button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* A run that reports files outside its scope — the promise `describeLaneRisks`
+   makes about two lanes sharing a broad scope. */
+.run-audit {
+  margin-top: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--amber);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.1);
+  color: #fcd34d;
+  font-size: 11.5px;
+  line-height: 1.45;
+  word-break: break-word;
 }
 
 .details {
@@ -989,6 +1088,47 @@ dialog::backdrop {
   gap: 10px;
   justify-content: flex-end;
   margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+/*
+ * Touch targets. Everything interactive was between 26 px and 33 px high — a
+ * card action at 7px/12px padding and 13px text is 30 px, and the guideline is
+ * 44. This block only applies where there is no mouse, so the desktop density is
+ * untouched, and the buttons grow to fill their row instead of leaving a gap
+ * next to a neighbour that is one pixel taller.
+ */
+@media (pointer: coarse) {
+  .card-actions button,
+  button.chip,
+  .tabs button,
+  .ghost,
+  .primary,
+  .run-warning button,
+  .panel-header-actions button,
+  .settings-actions button,
+  .task-row .primary {
+    min-height: 44px;
+  }
+
+  .card-actions button {
+    flex: 1 1 auto;
+    padding: 11px 14px;
+  }
+
+  button.chip,
+  .tabs button {
+    padding: 11px 14px;
+    font-size: 13px;
+  }
+
+  .ghost.small {
+    min-width: 44px;
+  }
+
+  .run-warning button {
+    padding: 12px 14px;
+  }
 }
 
 .toasts {
@@ -999,6 +1139,16 @@ dialog::backdrop {
   flex-direction: column;
   gap: 8px;
   z-index: 50;
+  /* A burst of stream events used to push the oldest toasts — which carry the
+     errors — off the top of the viewport, where nothing announced them. */
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: none;
+}
+
+.toasts .toast {
+  pointer-events: auto;
 }
 
 .toast {

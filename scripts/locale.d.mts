@@ -18,15 +18,15 @@ export interface LocaleCatalogue {
   native: string;
   note?: string;
   numbers: { decimal: string; group: string; percent?: string };
-  /** Hand-written identifiers, `ui.back_to_lobby` → German text. */
+  /** Hand-written identifiers, `ui.back_to_lobby` → English text. */
   keys: Record<string, string | Record<string, string>>;
-  /** The German source strings as their own keys. */
+  /** The English source strings as their own keys. */
   text: Record<string, string>;
 }
 
 /** What one half of a catalogue contributes to a coverage figure. */
 export interface CoveragePart {
-  /** Entries that differ from the German source. */
+  /** Entries that differ from the English source. */
   done: number;
   /** Entries that can be translated, i.e. excluding the equal-on-purpose ones. */
   total: number;

@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type {
@@ -231,6 +232,32 @@ export function normalizeClientKey(raw: unknown): string | null {
   return trimmed;
 }
 
+/**
+ * A voter id as it is stored: sha256, truncated to 16 hex characters.
+ *
+ * `voterId` identifies a device, and it travels straight into
+ * `backup/dashboard.json` — a file that belongs in a **public** repository. Read
+ * verbatim, that file answers a question nobody should be able to ask: which
+ * suggestions came from the same device. A hash keeps the two properties the
+ * column needs — equality and the (suggestion_id, voter_id) primary key — and
+ * gives up the part that makes it useful for correlation.
+ *
+ * Hashing happens here, once, at the edges: `addVote` and `importVotes` write
+ * the hashed form, and `listVotes` — the only way the backup gets a voter — hands
+ * it out. Live database and repository file therefore agree by construction.
+ *
+ * Already-hashed values pass through unchanged. That is what makes a merge of an
+ * older backup idempotent: a file written before this change still carries raw
+ * ids and gets hashed on the way in, and a file written after it carries hashes
+ * that must not be hashed a second time into a different string.
+ */
+export function hashVoterId(raw: string): string {
+  const value = (raw ?? '').trim();
+  if (value === '') return '';
+  if (/^[0-9a-f]{16}$/.test(value)) return value;
+  return createHash('sha256').update(value).digest('hex').slice(0, 16);
+}
+
 export class Store {
   readonly db: DatabaseSync;
   readonly dataDir: string;
@@ -244,6 +271,34 @@ export class Store {
     this.db = new DatabaseSync(file);
     this.db.exec('PRAGMA journal_mode = WAL;');
     this.migrate();
+  }
+
+  /**
+   * Runs `fn` in one transaction, and rolls it back if it throws.
+   *
+   * SQLite gives each statement atomicity on its own; what it does not give is
+   * atomicity *between* statements. A delete that first removes the votes and
+   * then fails on the run rows leaves a suggestion that says it has two votes and
+   * a row of one, and no way back short of a backup. Synchronous by design: this
+   * is `node:sqlite`, so there is nothing to await inside the callback.
+   */
+  tx<T>(fn: () => T): T {
+    this.db.exec('BEGIN IMMEDIATE');
+    let result: T;
+    try {
+      result = fn();
+    } catch (err) {
+      // A rollback can itself fail (a closed database, a nested transaction that
+      // was never committed). The original error is the one worth reporting.
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        /* the original error carries the news */
+      }
+      throw err;
+    }
+    this.db.exec('COMMIT');
+    return result;
   }
 
   private migrate() {
@@ -364,6 +419,12 @@ export class Store {
     this.db.exec(
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_suggestions_client_key ON suggestions(client_key) WHERE client_key IS NOT NULL',
     );
+    // Both columns are read on nearly every dashboard request: `canonical_id`
+    // groups the cluster for scoring, filtering and the scope preview, and
+    // `suggestion_id` is how a single suggestion's run history is fetched. Both
+    // were full table scans over every suggestion and every run ever written.
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_suggestions_canonical ON suggestions(canonical_id)');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_runs_suggestion ON runs(suggestion_id)');
     // Runner policy: retry attempts, hard timeout, scope bookkeeping. Every
     // column is additive and nullable/defaulted, so an old database keeps
     // working and old runs simply read back as "first attempt, no timeout".
@@ -477,24 +538,29 @@ export class Store {
    * instead of 500.
    */
   deleteSuggestion(id: number): boolean {
-    const target = this.getSuggestion(id);
-    if (!target) return false;
-    const canonical = target.canonicalId ?? id;
-    this.db.prepare('DELETE FROM votes WHERE suggestion_id = ?').run(id);
-    this.db.prepare('DELETE FROM runs WHERE suggestion_id = ?').run(id);
-    this.db.prepare('UPDATE suggestions SET parent_id = NULL WHERE parent_id = ?').run(id);
-    const siblings = this.db
-      .prepare('SELECT id FROM suggestions WHERE (canonical_id = ? OR id = ?) AND id != ? ORDER BY id')
-      .all(canonical, canonical, id) as { id: number }[];
-    if (siblings.length) {
-      const heir = siblings[0].id;
-      this.db.prepare('UPDATE suggestions SET canonical_id = ? WHERE id = ?').run(heir, heir);
-      this.db
-        .prepare('UPDATE suggestions SET canonical_id = ? WHERE canonical_id = ?')
-        .run(heir, canonical);
-    }
-    this.db.prepare('DELETE FROM suggestions WHERE id = ?').run(id);
-    return true;
+    // One transaction, read included: the read decides *what* is deleted, so it
+    // belongs to the same unit of work. Half of this used to be enough to leave
+    // a cluster pointing at a suggestion that is already gone.
+    return this.tx(() => {
+      const target = this.getSuggestion(id);
+      if (!target) return false;
+      const canonical = target.canonicalId ?? id;
+      this.db.prepare('DELETE FROM votes WHERE suggestion_id = ?').run(id);
+      this.db.prepare('DELETE FROM runs WHERE suggestion_id = ?').run(id);
+      this.db.prepare('UPDATE suggestions SET parent_id = NULL WHERE parent_id = ?').run(id);
+      const siblings = this.db
+        .prepare('SELECT id FROM suggestions WHERE (canonical_id = ? OR id = ?) AND id != ? ORDER BY id')
+        .all(canonical, canonical, id) as { id: number }[];
+      if (siblings.length) {
+        const heir = siblings[0].id;
+        this.db.prepare('UPDATE suggestions SET canonical_id = ? WHERE id = ?').run(heir, heir);
+        this.db
+          .prepare('UPDATE suggestions SET canonical_id = ? WHERE canonical_id = ?')
+          .run(heir, canonical);
+      }
+      this.db.prepare('DELETE FROM suggestions WHERE id = ?').run(id);
+      return true;
+    });
   }
 
   /**
@@ -531,29 +597,49 @@ export class Store {
       .run(runId, Date.now(), id);
   }
 
+  /**
+   * Counts one vote. `changed` is false for a repeat from the same voter — the
+   * primary key decides, and the counter follows the table instead of being
+   * incremented blindly.
+   *
+   * The insert and the counter update are one transaction: a failure between
+   * them would leave a vote in the table that the suggestion's counter does not
+   * know about, and the dashboard would show a number one too low forever.
+   */
   addVote(suggestionId: number, voterId: string): { votes: number; changed: boolean } {
-    const inserted = this.db
-      .prepare('INSERT OR IGNORE INTO votes (suggestion_id, voter_id, created_at) VALUES (?, ?, ?)')
-      .run(suggestionId, voterId, Date.now());
-    if (Number(inserted.changes) > 0) {
-      this.db
-        .prepare('UPDATE suggestions SET votes = votes + 1, updated_at = ? WHERE id = ?')
-        .run(Date.now(), suggestionId);
-    }
-    const row = this.db
-      .prepare('SELECT votes FROM suggestions WHERE id = ?')
-      .get(suggestionId) as { votes: number } | undefined;
-    return { votes: row?.votes ?? 0, changed: Number(inserted.changes) > 0 };
+    const voter = hashVoterId(voterId);
+    return this.tx(() => {
+      const inserted = this.db
+        .prepare('INSERT OR IGNORE INTO votes (suggestion_id, voter_id, created_at) VALUES (?, ?, ?)')
+        .run(suggestionId, voter, Date.now());
+      const changed = Number(inserted.changes) > 0;
+      if (changed) {
+        this.db
+          .prepare('UPDATE suggestions SET votes = votes + 1, updated_at = ? WHERE id = ?')
+          .run(Date.now(), suggestionId);
+      }
+      const row = this.db
+        .prepare('SELECT votes FROM suggestions WHERE id = ?')
+        .get(suggestionId) as { votes: number } | undefined;
+      return { votes: row?.votes ?? 0, changed };
+    });
   }
 
   /** Every vote, oldest first. The backup needs them: a vote count alone cannot
    * tell "nobody voted" from "the voters are lost", and only the second one is
-   * worth restoring. */
+   * worth restoring.
+   *
+   * The ids come out hashed (`hashVoterId`) even when the row still holds an old
+   * raw value, so a file written from an old database cannot leak one either. */
   listVotes(): { suggestionId: number; voterId: string; createdAt: number }[] {
     const rows = this.db
       .prepare('SELECT suggestion_id, voter_id, created_at FROM votes ORDER BY suggestion_id ASC, voter_id ASC')
       .all() as unknown as { suggestion_id: number; voter_id: string; created_at: number }[];
-    return rows.map((r) => ({ suggestionId: r.suggestion_id, voterId: r.voter_id, createdAt: r.created_at }));
+    return rows.map((r) => ({
+      suggestionId: r.suggestion_id,
+      voterId: hashVoterId(r.voter_id),
+      createdAt: r.created_at,
+    }));
   }
 
   /**
@@ -614,7 +700,10 @@ export class Store {
       );
   }
 
-  /** Inserts votes, ignoring the ones already present. Returns how many were new. */
+  /** Inserts votes, ignoring the ones already present. Returns how many were new.
+   *
+   * Ids from a file written before hashing existed are hashed here, so a merge
+   * never mixes a raw id and its hashed twin for the same device. */
   importVotes(votes: readonly { suggestionId: number; voterId: string; createdAt: number }[]): number {
     const stmt = this.db.prepare(
       'INSERT OR IGNORE INTO votes (suggestion_id, voter_id, created_at) VALUES (?, ?, ?)',
@@ -624,7 +713,7 @@ export class Store {
       // A vote for a suggestion this database does not have would be invisible
       // and would distort the count if the suggestion arrives later.
       if (!this.getSuggestion(vote.suggestionId)) continue;
-      const result = stmt.run(vote.suggestionId, vote.voterId, vote.createdAt);
+      const result = stmt.run(vote.suggestionId, hashVoterId(vote.voterId), vote.createdAt);
       added += Number(result.changes) > 0 ? 1 : 0;
     }
     return added;
@@ -883,18 +972,23 @@ export class Store {
   }
 
   saveSettings(patch: Partial<Settings>): Settings {
-    const stmt = this.db.prepare(
-      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-    );
-    for (const [key, value] of Object.entries(patch)) {
-      if (value === undefined) continue;
-      // Policy numbers are clamped on the way in: one bad request must not be
-      // able to disable the timeout or create an endless retry loop.
-      const bounds = SETTINGS_BOUNDS[key as PolicyKey];
-      const stored = bounds && typeof value === 'number' ? clamp(value, bounds.min, bounds.max) : value;
-      stmt.run(key, String(stored));
-    }
-    return this.getSettings();
+    // One transaction: a policy number that was written while the string next to
+    // it was not would leave a half-applied settings page, and `getSettings`
+    // reads the table back with no way to tell that apart from a deliberate mix.
+    return this.tx(() => {
+      const stmt = this.db.prepare(
+        'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      );
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined) continue;
+        // Policy numbers are clamped on the way in: one bad request must not be
+        // able to disable the timeout or create an endless retry loop.
+        const bounds = SETTINGS_BOUNDS[key as PolicyKey];
+        const stored = bounds && typeof value === 'number' ? clamp(value, bounds.min, bounds.max) : value;
+        stmt.run(key, String(stored));
+      }
+      return this.getSettings();
+    });
   }
 }
 

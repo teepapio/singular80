@@ -61,7 +61,7 @@ var _advisor_key := ""
 var _advisor_top: Dictionary = {}
 ## Cell the advisor currently points at, -1 if none.
 var _advisor_cell := -1
-## The "Handelswege" card: which road carries which good. A dialog and not a
+## The "Trade routes" card: which road carries which good. A dialog and not a
 ## permanent panel, because it changes every second and nobody reads a list
 ## that keeps jumping.
 var _routes_body: VBoxContainer = null
@@ -215,9 +215,9 @@ func _build_panels() -> void:
 	tool_row.position = Vector2(14, -62)
 	hud_root.add_child(tool_row)
 	var entries := [
-		[Tool.SELECT, "◎", "Auswählen und inspizieren"],
-		[Tool.ROAD, "⇢", "Straße bauen: erst Start-, dann Zielfeld antippen"],
-		[Tool.FLAG, "⚑", "Extra-Fahne neben einer Straße: mehr Träger, mehr Durchsatz"],
+		[Tool.SELECT, "◎", "Select and inspect"],
+		[Tool.ROAD, "⇢", "Build a road: tap the start tile, then the target"],
+		[Tool.FLAG, "⚑", "Extra banner beside a road: more carriers, more throughput"],
 	]
 	for entry in entries:
 		var mode: int = entry[0]
@@ -297,11 +297,11 @@ func _open_build_sheet() -> void:
 	column.add_child(Ui.title("Build buildings", 26, UiTheme.ACCENT))
 
 	var groups := [
-		["Material", ["woodcutter", "forester", "sawmill", "quarry"]],
-		["Nahrung", ["farm", "pigFarm", "windmill", "butcher", "bakery", "fishery"]],
-		["Rohstoffe", ["coalMine", "ironMine", "goldMine", "smelter"]],
-		["Handwerk", ["toolsmith", "goldsmith", "blacksmith"]],
-		["Verwaltung", ["warehouse", "watchtower"]],
+		[Loc.t("siedler.group_material"), ["woodcutter", "forester", "sawmill", "quarry"]],
+		[Loc.t("siedler.group_food"), ["farm", "pigFarm", "windmill", "butcher", "bakery", "fishery"]],
+		[Loc.t("siedler.group_raw"), ["coalMine", "ironMine", "goldMine", "smelter"]],
+		[Loc.t("siedler.group_craft"), ["toolsmith", "goldsmith", "blacksmith"]],
+		[Loc.t("siedler.group_admin"), ["warehouse", "watchtower"]],
 	]
 	for group in groups:
 		column.add_child(Ui.label(str(group[0]), 14, UiTheme.TEXT_DIM))
@@ -333,7 +333,7 @@ func _palette_button(kind: String) -> Button:
 			_set_tool(Tool.SELECT)
 			_close_modal()
 			Sfx.select()
-			notify("%s is being built — tap a tile" % spec["name"])
+			notify(Loc.f("%s is being built — tap a tile", [str(spec["name"])]))
 	)
 	button.add_theme_font_size_override("font_size", 12)
 	button.tooltip_text = str(spec["desc"])
@@ -828,8 +828,8 @@ func _rebuild_props() -> void:
 		multimesh.set_instance_transform(slot, transform)
 
 
-## A translucent quad over every plot the player owns, so "wo darf ich noch
-## bauen?" is answered at a glance.
+## A translucent quad over every plot the player owns, so "where am I allowed to
+## build?" is answered at a glance.
 func _rebuild_territory() -> void:
 	var slot := 0
 	for i in siedler.cells.size():
@@ -908,7 +908,7 @@ func _sync_buildings() -> void:
 		var spec := Siedler.spec_of(str(building["kind"]))
 		if str(building["state"]) == "done" and not _building_labels.has(id):
 			var label := Label3D.new()
-			label.text = "%s %s" % [spec["icon"], spec["name"]]
+			label.text = Loc.f("%s %s", [spec["icon"], spec["name"]])
 			label.font_size = 44
 			label.pixel_size = 0.0055
 			label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -1028,38 +1028,40 @@ func _update_stats() -> void:
 	var food := siedler.food_pieces()
 	var store := siedler.store_report()
 	var lines: Array[String] = [
-		"Bauholz %d · Bauholzstämme %d" % [int(siedler.store.get("planks", 0)), int(siedler.store.get("logs", 0))],
-		"Stein %d · Kohle %d · Eisen %d" % [
+		Loc.f("Planks %d · Logs %d", [int(siedler.store.get("planks", 0)), int(siedler.store.get("logs", 0))]),
+		Loc.f("Stone %d · Coal %d · Iron %d", [
 			int(siedler.store.get("stone", 0)),
 			int(siedler.store.get("coal", 0)),
 			int(siedler.store.get("iron", 0)),
-		],
-		"Werkzeuge %d" % _tool_count(),
+		]),
+		"Tools %d" % _tool_count(),
 	]
 	# The storage line sits above the food, because it answers the same question:
 	# how much is there, and how much still fits? Without it the player only sees
 	# a full castle once nothing fits any more. The refused-delivery count lives
 	# here and not on the advisor card, because it keeps counting every second.
 	if bool(store["full"]):
-		lines.append("Lager voll: %d von %d Plätzen · %d Lieferungen abgewiesen" % [
-			int(store["used"]), int(store["capacity"]), int(store["refused_total"]),
-		])
+		lines.append(Loc.f("Storehouse full: %d of %d slots", [
+			int(store["used"]), int(store["capacity"]),
+		]) + "  ·  " + Loc.t("siedler.turned_away", {"count": int(store["refused_total"])}))
 	else:
-		lines.append("Lager %d von %d Plätzen" % [int(store["used"]), int(store["capacity"])])
+		lines.append(Loc.t("siedler.storehouse") + " " + Loc.f("%d of %d slots", [
+			int(store["used"]), int(store["capacity"]),
+		]))
 	if food <= 0:
-		lines.append("Nahrung 0 — Minen hungern!")
+		lines.append("Food: 0 — the mines are starving!")
 	else:
-		lines.append("Nahrung %d" % food)
-	lines.append("Siedler %d/%d · Territorium %d %%" % [
+		lines.append("Food %d" % food)
+	lines.append("Settlers %d/%d · Territory %d %%" % [
 		siedler.current_serfs(), siedler.serf_quota(), int(siedler.territory_share() * 100.0),
 	])
 	var stuck := siedler.stuck_goods()
 	if stuck > 0:
-		lines.append("%d Waren stauen sich" % stuck)
+		lines.append(Loc.tn("siedler.goods_piled", stuck))
 	var orphans := siedler.orphan_goods()
 	if not orphans.is_empty():
-		lines.append("kein Abnehmer: %s" % ", ".join(orphans.slice(0, 3)))
-	lines.append("Punkte %s" % Ui.format_number(siedler.score()))
+		lines.append("no buyer: %s" % ", ".join(orphans.slice(0, 3)))
+	lines.append("Score %s" % Ui.format_number(siedler.score()))
 	_stats_label.text = "\n".join(lines)
 
 
@@ -1127,15 +1129,15 @@ func _fix_label(fix: String) -> String:
 		var kind := fix.substr(6)
 		return "⌂ %s" % str(Siedler.spec_of(kind)["name"])
 	if fix == "queueTool":
-		return "⚒ einplanen"
+		return Loc.t("siedler.fix_queue_tool")
 	if fix.begins_with("road:"):
-		return "⇢ Straße bauen"
+		return Loc.t("siedler.fix_road")
 	if fix.begins_with("flag:"):
-		return "⚑ Fahne setzen"
+		return Loc.t("siedler.fix_flag")
 	if fix.begins_with("select:"):
-		return "⌖ zeigen"
+		return Loc.t("siedler.fix_show")
 	if fix == "book:food":
-		return "⌂ Nahrung bauen"
+		return "⌂ Build food"
 	return ""
 
 
@@ -1226,9 +1228,9 @@ func _show_all_advice() -> void:
 	column.add_child(close_row)
 
 
-# --- Handelswege -------------------------------------------------------------
+# --- trade routes ------------------------------------------------------------
 
-## The "Handelswege" card answers the question the proposal poses: *which* road
+## The "Trade routes" card answers the question the proposal poses: *which* road
 ## carries *which* good. The advisor says which building is hungry; this card
 ## says why the delivery is still too slow.
 func _open_routes_sheet() -> void:
@@ -1408,53 +1410,55 @@ func _update_inspector() -> void:
 	_inspector_body.add_child(Ui.label(Loc.f("%s %s", [spec["icon"], spec["name"]]), 20, UiTheme.ACCENT, true))
 	_inspector_body.add_child(Ui.label(str(spec["desc"]), 12, UiTheme.TEXT_DIM))
 
-	var status_text := "Rivale" if rival else Siedler.status_text(str(building["status"]))
+	var status_text := Loc.t("siedler.rival") if rival else Siedler.status_text(str(building["status"]))
 	var status_color := UiTheme.TEXT_DIM
 	if not rival:
 		status_color = UiTheme.SUCCESS if str(building["status"]) == "ok" else UiTheme.WARNING
-	_inspector_body.add_child(_row("Zustand", status_text, status_color))
+	_inspector_body.add_child(_row(Loc.t("siedler.state"), status_text, status_color))
 	# The castle *is* the warehouse: it shows the storage slots. A full store
 	# refuses deliveries, which is otherwise only visible in the queue row.
 	if not rival and str(building["kind"]) == "castle":
 		var store := siedler.store_report()
 		_inspector_body.add_child(_row(
-			"Lager", "%d von %d Plätzen" % [int(store["used"]), int(store["capacity"])],
+			"Storehouse", Loc.f("%d of %d slots", [int(store["used"]), int(store["capacity"])]),
 			UiTheme.DANGER if bool(store["full"]) else UiTheme.TEXT
 		))
 		if int(store["refused_total"]) > 0:
 			_inspector_body.add_child(_row(
-				"Vor dem Tor", "%d Lieferungen abgewiesen, %d warten" % [
+				"Before the gate", "%d deliveries turned away, %d waiting" % [
 					int(store["refused_total"]), int(store["stuck"]),
 				], UiTheme.WARNING
 			))
 	if int(spec["workers"]) > 0:
-		_inspector_body.add_child(_row("Siedler", "%d/%d" % [int(building["workers"]), int(spec["workers"])], UiTheme.TEXT))
+		_inspector_body.add_child(_row("Settlers", "%d/%d" % [int(building["workers"]), int(spec["workers"])], UiTheme.TEXT))
 	if str(spec["tool"]) != "":
 		var has_tool := str(building["tool"]) != ""
 		_inspector_body.add_child(_row(
-			"Werkzeug", Siedler.good_name(str(spec["tool"])),
+			"Tool", Siedler.good_name(str(spec["tool"])),
 			UiTheme.SUCCESS if has_tool else UiTheme.WARNING
 		))
 	if bool(spec["hungry"]):
 		var fed := siedler.food_pieces() > 0
 		_inspector_body.add_child(_row(
-			"Nahrung", "versorgt" if fed else "HUNGER",
+			Loc.t("siedler.food"), Loc.t("siedler.supplied") if fed else Loc.t("siedler.hunger"),
 			UiTheme.SUCCESS if fed else UiTheme.DANGER
 		))
 	if str(spec["harvest"]) != "":
 		_inspector_body.add_child(_row(
-			"Lagerstätte", "%d" % int(siedler.cells[int(building["cell"])]["amount"]), UiTheme.TEXT
+			Loc.t("siedler.deposit"), Loc.number(int(siedler.cells[int(building["cell"])]["amount"])), UiTheme.TEXT
 		))
 	if int(spec["territory"]) > 0:
-		_inspector_body.add_child(_row("Besatzung", "%d Ritter" % int(building["garrison"]), UiTheme.TEXT))
+		_inspector_body.add_child(_row(
+			Loc.t("siedler.garrison"), Loc.t("siedler.knights", {"count": int(building["garrison"])}), UiTheme.TEXT
+		))
 	var inputs: Dictionary = spec["inputs"]
 	if not inputs.is_empty():
-		_inspector_body.add_child(_row("Braucht", _goods_text(inputs, building["input"]), UiTheme.TEXT))
+		_inspector_body.add_child(_row(Loc.t("siedler.needs"), _goods_text(inputs, building["input"]), UiTheme.TEXT))
 	var outputs: Dictionary = spec["outputs"]
 	if not outputs.is_empty():
-		_inspector_body.add_child(_row("Liefert", _goods_text(outputs, building["output"]), UiTheme.SUCCESS))
+		_inspector_body.add_child(_row(Loc.t("siedler.delivers"), _goods_text(outputs, building["output"]), UiTheme.SUCCESS))
 	if str(building["kind"]) == "toolsmith" and not siedler.tool_queue.is_empty():
-		_inspector_body.add_child(_row("Schlange", " ".join(siedler.tool_queue), UiTheme.WARNING))
+		_inspector_body.add_child(_row(Loc.t("siedler.queue"), " ".join(siedler.tool_queue), UiTheme.WARNING))
 	if str(building["state"]) != "done" and not rival:
 		var bar := Ui.bar(UiTheme.ACCENT, 12.0)
 		Ui.set_bar(bar, float(building["progress"]), UiTheme.ACCENT)
@@ -1476,7 +1480,7 @@ func _update_inspector() -> void:
 					notify(siedler.notice)
 		))
 	elif str(building["state"]) == "done":
-		var toggle := "Weiterarbeiten" if bool(building["halted"]) else "Anhalten"
+		var toggle := Loc.t("siedler.keep_working") if bool(building["halted"]) else Loc.t("siedler.halt")
 		_inspector_body.add_child(Ui.button(toggle, Vector2(272, 42), UiTheme.PANEL_LIGHT, func() -> void:
 			building["halted"] = not bool(building["halted"])
 		))
@@ -1488,7 +1492,7 @@ func _update_inspector() -> void:
 			var key := tool_key
 			var button := Ui.button(Siedler.good_name(key).substr(0, 2), Vector2(29, 32), UiTheme.PANEL_LIGHT, func() -> void:
 				if siedler.request_tool(key):
-					notify("%s is scheduled" % Siedler.good_name(key))
+					notify(Loc.f("%s is scheduled", [Siedler.good_name(key)]))
 				else:
 					notify(siedler.notice)
 			)
@@ -1577,12 +1581,12 @@ func _show_help() -> void:
 	panel.add_child(column)
 	column.add_child(Ui.title("Settlers 3D", 28, UiTheme.ACCENT))
 	var texts := [
-		["Die Fahnen", "Jede türkise Fahne ist ein Verkehrsknoten. Zwei Fahnen trägt genau ein Träger, der eine Last schleppt und sie an der nächsten Fahne abgibt. Viele Fahnen auf derselben Straße = viele Träger = mehr Durchsatz. Zu wenige Fahnen = die Ware staut sich."],
-		["Handelswege", "„⇄ Wege“ zählt mit, welche Ware über welche Straße läuft, und nennt dir pro Strecke den nächsten Griff. „⇄ Optimieren“ macht ihn automatisch: zu lange Strecken werden in der Mitte geteilt, und die Priorität wird auf die Ware gehoben, auf die ein fertiges Gebäude wartet. Er nimmt dir nichts weg — Prioritäten steigen nur, und ein zweiter Durchgang ändert nichts mehr."],
-		["Werkzeuge sind der Schlüssel", "Ein Gebäude arbeitet nur, wenn ein Siedler mit dem richtigen Werkzeug dort steht. Die Schlosserei schmiedet aus 1 Eisen + 1 Holz. Steht eine Bäckerei still, fehlt fast immer eine Schaufel — oder das Brot."],
-		["Die Ketten", "Baum → Holzfäller (Axt) → Stämme → Schreiner (Säge) → Bauholz.\nKorn → Mühle → Mehl → Bäckerei → Brot. Minen hungern ohne Brot.\nEisenerz + Kohle → Schmelze → Eisen → Schlosserei → Werkzeuge."],
-		["Territorium & Militär", "Neue Gebäude brauchen Land, das zu deinem Territorium gehört. Ein Wachturm erweitert es, aber nur solange mindestens ein Ritter dort steht. Ritter rüstet die Schmiede aus (Schwert + Schild). Ziel: alle Rivalenburgen erobern."],
-		["Steuerung", "Antippen platziert und wählt · Ziehen verschiebt die Karte · Zwei Finger zoomen und drehen · 1/2/3 Werkzeug · Leertaste Tempo · Q/E drehen · W Handelswege · Esc abbrechen"],
+		["The banners", "Every turquoise banner is a junction. Exactly one carrier takes two banners: it drags a load and hands it over at the next banner. Many banners on the same road = many carriers = more throughput. Too few banners = the goods pile up."],
+		["Trade routes", "“⇄ Routes” works out which goods travel over which road and names the next move for each route. “⇄ Optimise” does it automatically: routes that are too long are split in the middle, and the priority is raised for the goods a finished building is waiting on. It takes nothing away from you — priorities only ever rise, and a second pass changes nothing more."],
+		["Tools are the key", "A building only works when a settler with the right tool stands at it. The toolshop forges tools from 1 iron + 1 wood. When a bakery stands idle, it is almost always a shovel that is missing — or the bread."],
+		["The chains", "Tree → woodcutter (axe) → logs → carpenter (saw) → planks.\nGrain → mill → flour → bakery → bread. Mines starve without bread.\nIron ore + coal → smelter → iron → toolshop → tools."],
+		["Territory & military", "New buildings need land that belongs to your territory. A watchtower expands it, but only while at least one knight stands there. Knights equip the smithy (sword + shield). Goal: capture every rival castle."],
+		[Loc.t("siedler.help_controls"), "Tap to place and select · Drag to move the map · Two fingers zoom and rotate · 1/2/3 tool · Space speed · Q/E rotate · W trade routes · Esc cancel"],
 	]
 	for entry in texts:
 		column.add_child(Ui.label(str(entry[0]), 17, UiTheme.WARNING, true))

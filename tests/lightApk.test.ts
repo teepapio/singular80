@@ -91,7 +91,10 @@ describe('Leichtes APK — Export-Presets', () => {
 
   it('lässt das volle Preset unangetastet', () => {
     const full = section('Android');
-    expect(full).toContain('export_path="/home/edi/singular80/build/singular80.apk"');
+    // Derived from the repository root like every other integration test here. A
+    // pinned home directory made this fail on every machine but this one, and it
+    // checked nothing about the preset itself.
+    expect(full).toContain(`export_path="${join(root, 'build', 'singular80.apk')}"`);
     expect(full).toContain('gradle_build/export_format=0');
   });
 
@@ -127,14 +130,15 @@ describe('Leichtes APK — Export-Presets', () => {
     }
   });
 
-  it('hat in beiden Presets Kommentare mit ";" — ConfigFile bricht bei "#" ab', () => {
+  it('trägt keine "#"-Kommentare mit "=" — ConfigFile bricht dabei ab', () => {
     // A `#` comment containing `=` is not a comment to Godot's ConfigFile; that
     // mistake once made the Play preset invisible.
-    for (const line of cfg.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith('#')) continue;
-      // Only comment lines are forbidden; a `#` inside a value is fine.
-      expect(trimmed, `Keine "#"-Kommentare in export_presets.cfg: ${trimmed}`).not.toMatch(/^#/);
-    }
+    //
+    // Asserted against the whole file, not line by line. The old version walked
+    // the lines, `continue`d on every line that started with `#` — exactly the
+    // forbidden ones — and then asserted `not.toMatch(/^#/)` on the rest, which
+    // could not match by construction. It passed on a file full of the thing it
+    // was written for. A guard that skips its own subject is not a guard.
+    expect(cfg).not.toMatch(/^\s*#.*=/m);
   });
 });

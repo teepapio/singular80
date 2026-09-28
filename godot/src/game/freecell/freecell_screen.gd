@@ -1,7 +1,7 @@
 class_name FreeCellScreen
 extends Screen
 ## FreeCell — solitaire with four free cells, supermove capacity, an undo stack
-## and the "Tipp" button that points at the single best next move. The rules
+## and the "Hint" button that points at the single best next move. The rules
 ## live in `Cards.freecell_*`; this file only draws them. Port of
 ## `scenes/FreeCellScene.ts`.
 
@@ -92,10 +92,10 @@ func _build_ui() -> void:
 	layer.add_child(help_label)
 	_help_label = help_label
 
-	_button(layer, 160, 692, "Neu", func() -> void: new_deal(), 200.0)
-	_button(layer, 400, 692, "Zurück", func() -> void: undo(), 200.0)
+	_button(layer, 160, 692, Loc.t("freecell.new_deal"), func() -> void: new_deal(), 200.0)
+	_button(layer, 400, 692, "Back", func() -> void: undo(), 200.0)
 	_button(layer, 640, 692, "Auto", func() -> void: auto_move(), 200.0)
-	_button(layer, 880, 692, "Tipp (−%d)" % HINT_COST, func() -> void: hint(), 200.0)
+	_button(layer, 880, 692, Loc.t("freecell.hint_cost", {"cost": HINT_COST}), func() -> void: hint(), 200.0)
 	_button(layer, 1120, 692, "Lobby", func() -> void: Router.to_lobby(), 200.0)
 
 
@@ -538,7 +538,7 @@ class BoardView:
 				var selected: bool = not screen.selection.is_empty() and str(screen.selection["from"]) == "cell" and int(screen.selection["index"]) == i
 				CardRenderer.card(self, Rect2(Vector2(x, TOP_Y), Vector2(CARD_W, CARD_H)), card, true, selected)
 			else:
-				_text("frei", Vector2(x, TOP_Y), CARD_W, CARD_H, 18, UiTheme.TEXT_MUTED, 0.9)
+				_text(Loc.t("freecell.free_cell"), Vector2(x, TOP_Y), CARD_W, CARD_H, 18, UiTheme.TEXT_MUTED, 0.9)
 
 		for c in COLS:
 			var x := screen.col_x(c)

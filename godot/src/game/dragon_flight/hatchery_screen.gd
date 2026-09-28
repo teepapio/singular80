@@ -251,7 +251,7 @@ func _build_target_chips() -> void:
 		var id := str(gene["id"])
 		var chip := Ui.button(str(gene["name"]), Vector2(130, 32), Color(str(gene["hue"])), _on_pick_target.bind(id))
 		chip.add_theme_font_size_override("font_size", 12)
-		chip.tooltip_text = "%s · %s" % [str(gene["desc"]), "rezessiv" if bool(gene.get("recessive", false)) else "dominant"]
+		chip.tooltip_text = Loc.f("%s · %s", [str(gene["desc"]), "rezessiv" if bool(gene.get("recessive", false)) else "dominant"])
 		_target_grid.add_child(chip)
 		_target_chips[id] = chip
 
@@ -517,22 +517,22 @@ func _refresh_pedigree() -> void:
 	if dragon.is_empty():
 		_label_pedigree.text = ""
 		return
-	var line := "A · %s" % _dragon_label(dragon)
+	var line := Loc.f("A · %s", [_dragon_label(dragon)])
 	var parents := DragonFlight.parent_uids(dragon)
 	if parents.is_empty():
-		line += "  ·  Stammlinie"
+		line += Loc.t("dragon_flight.purebred")
 	else:
 		var names: Array[String] = []
 		for uid in parents:
 			var parent := DragonFlight.dragon_by_uid(profile, int(uid))
 			names.append(_dragon_label(parent) if not parent.is_empty() else "?")
-		line += "  ·  Eltern: %s" % ", ".join(names)
+		line += Loc.t("dragon_flight.parents", {"names": ", ".join(names)})
 	var ancestors := DragonFlight.ancestors(profile, int(dragon["uid"]), 2)
 	if not ancestors.is_empty():
 		var older: Array[String] = []
 		for entry in ancestors:
 			older.append(_dragon_label(entry))
-		line += "  ·  Vorfahren: %s" % ", ".join(older)
+		line += Loc.t("dragon_flight.ancestors", {"names": ", ".join(older)})
 	_label_pedigree.text = line
 
 
@@ -591,10 +591,10 @@ func _refresh_forecast(a: Dictionary, b: Dictionary) -> void:
 func _refresh_egg_button() -> void:
 	var price := DragonFlight.egg_cost(profile)
 	var eggs := int(profile.get("eggs", 0))
-	_lay_button.text = "Ei legen (%d Eier, %d ◈)" % [eggs, price]
+	_lay_button.text = Loc.f("Lay an egg (%d eggs, %d ◈)", [eggs, price])
 	_lay_button.disabled = eggs < 1 or int(profile.get("gold", 0)) < price
 	var free_nest := _free_nest()
-	_lay_button.text = "Ei legen — kein Nest frei" if free_nest < 0 else _lay_button.text
+	_lay_button.text = "Lay an egg — no nest free" if free_nest < 0 else _lay_button.text
 	_lay_button.disabled = _lay_button.disabled or free_nest < 0
 
 
@@ -648,7 +648,7 @@ func _dragon_label(dragon: Dictionary) -> String:
 	if dragon.is_empty():
 		return "—"
 	var breed := DragonFlight.breed_by_id(str(dragon["breed"]))
-	return "%s (G%d)" % [str(breed["name"]), int(dragon.get("gen", 1))]
+	return Loc.f("%s (G%d)", [str(breed["name"]), int(dragon.get("gen", 1))])
 
 
 func _refresh_list() -> void:
@@ -699,11 +699,11 @@ func _egg_readout_line(row: VBoxContainer, readout: Dictionary) -> void:
 		return
 	var parts: Array[String] = []
 	if not shown.is_empty():
-		parts.append("schlüpft mit: %s" % _names(shown))
+		parts.append("hatches with: %s" % _names(shown))
 	else:
-		parts.append("schlüpft ohne Merkmale")
+		parts.append("hatches without traits")
 	if not carriers.is_empty():
-		parts.append("trägt weiter: %s" % _names(carriers))
+		parts.append("carries on: %s" % _names(carriers))
 	if bool(readout.get("rare", false)):
 		parts.append("seltenes Gen")
 	var text := Ui.label(" · ".join(parts), 12,
@@ -816,7 +816,7 @@ func _hatch_now(dragon: Dictionary, cost: int) -> void:
 	Sfx.level_up()
 	var breed := DragonFlight.breed_by_id(str(hatched["breed"]))
 	var traits := DragonFlight.expressed_traits(hatched.get("alleles", {}))
-	notify(Loc.f("%d hatched! Traits: %s", [int(hatched["gen"]), ", ".join(_names(traits)) if not traits.is_empty() else "keine"]))
+	notify(Loc.f("%d hatched! Traits: %s", [int(hatched["gen"]), ", ".join(_names(traits)) if not traits.is_empty() else "none"]))
 	refresh()
 
 

@@ -15,6 +15,7 @@ import {
   runResultText,
   parseCommand,
   sendMessage,
+  sendTest,
   suggestionIdArg,
 } from '../server/telegram';
 import { TelegramBot } from '../server/telegramBot';
@@ -39,8 +40,8 @@ const VIEW = {
 } as unknown as SuggestionView;
 
 const URL_TEXT = 'https://singular80.example/dashboard';
-/** `sendTest` really sends; this is only its text, checked without network. */
-const sendTestText = 'Singular 80: Telegram ist verbunden.';
+/** These are the ranges Telegram renders as emoji; the request was none. */
+const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{20E3}\u{2705}\u{274C}\u{2B50}\u{1F44D}\u{1F44E}]/u;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -80,12 +81,21 @@ describe('Telegram-Text', () => {
     expect(text).not.toContain('Anonym');
   });
 
-  it('schickt in keiner Nachricht ein Emoji', () => {
-    // These are the ranges Telegram renders as emoji; the request was none.
-    const emoji = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{20E3}\u{2705}\u{274C}\u{2B50}\u{1F44D}\u{1F44E}]/u;
-    expect(emoji.test(buildSuggestionText(VIEW, URL_TEXT))).toBe(false);
-    expect(emoji.test(HELP_TEXT)).toBe(false);
-    expect(emoji.test(sendTestText)).toBe(false);
+  it('schickt in keiner Nachricht ein Emoji', async () => {
+    // The test message is checked as it goes out, not as a copy of it. A local
+    // duplicate of `sendTest`'s text was what this used: the product could grow an
+    // emoji and the assertion would have kept passing on the old wording.
+    process.env.TELEGRAM_BOT_TOKEN = 'gut';
+    process.env.TELEGRAM_CHAT_ID = '42';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+    await sendTest(URL_TEXT);
+    const sentTestText = JSON.parse(fetchMock.mock.calls[0][1].body as string).text as string;
+    expect(EMOJI.test(buildSuggestionText(VIEW, URL_TEXT))).toBe(false);
+    expect(EMOJI.test(HELP_TEXT)).toBe(false);
+    expect(EMOJI.test(sentTestText)).toBe(false);
+    // The product sentence itself, so a rewrite of the wording is a visible change.
+    expect(sentTestText).toBe('Singular 80: Telegram ist verbunden.');
   });
 
   it('bleibt unter der Telegram-Grenze von 4096 Zeichen', () => {
@@ -488,20 +498,38 @@ describe('Der Offset überlebt einen Neustart', () => {
     process.env.TELEGRAM_CHAT_ID = '42';
     const root = mkdtempSync(join(tmpdir(), 's80-tgbot-noise-'));
     const errors: string[] = [];
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({ ok: false, status: 409, text: async () => '{"description":"Conflict"}' }),
-    );
-    const bot = makeBot({ projectRoot: root });
-    (bot as unknown as { deps: { onError: (e: Error) => void } }).deps.onError = (e) => errors.push(e.message);
-    const loop = (bot as unknown as { loop: () => Promise<void> }).loop.bind(bot);
-    void loop();
-    await new Promise((r) => setTimeout(r, 400));
-    await (bot as unknown as { stop: () => Promise<void> }).stop();
-    const unique = new Set(errors);
-    expect(errors.length).toBeGreaterThan(0);
-    expect(unique.size).toBe(1);
-  });
+    // Three answers: two the same, then a different one. Two identical failures are
+    // the case the bot must collapse; the third proves it is not simply muting
+    // itself after the first error.
+    const poll = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 409, text: async () => '{"description":"Conflict"}' })
+      .mockResolvedValueOnce({ ok: false, status: 409, text: async () => '{"description":"Conflict"}' })
+      .mockResolvedValue({ ok: false, status: 500, text: async () => '{"description":"kaputt"}' });
+    vi.stubGlobal('fetch', poll);
+    const bot = makeBot({ projectRoot: root, onError: (e) => errors.push(e.message) });
+    // Started through the public entry point, so nothing private is reached into:
+    // the old version called `loop()` and `deps.onError` by name, and waited a
+    // guessed 400 ms for a poll interval it did not know.
+    bot.start();
+    try {
+      await waitUntil(() => poll.mock.calls.length >= 2, 15_000, 'zwei Abfragen');
+      // The second one is the same failure and must not have produced a second line.
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain('409');
+      await waitUntil(() => poll.mock.calls.length >= 3, 15_000, 'die dritte Abfrage');
+      await waitUntil(() => errors.length >= 2, 5_000, 'die abweichende Fehlermeldung');
+      // The claim is "identical failures collapse, a different one gets through",
+      // not "the status code appears in the text": `getUpdates` retries three
+      // times internally and reports one collapsed line, so by the third poll the
+      // mock answers 500 forever and the code is `mehrfach fehlgeschlagen`.
+      expect(errors).toHaveLength(2);
+      expect(errors[1]).not.toBe(errors[0]);
+      expect(errors[1]).toContain('fehlgeschlagen');
+    } finally {
+      await bot.stop();
+    }
+  }, 60_000);
 });
 
 describe('getUpdates', () => {
@@ -551,6 +579,16 @@ describe('getUpdates', () => {
   });
 });
 
+/** Waits until `check` is true, or fails with a message that names what. */
+async function waitUntil(check: () => boolean, timeout: number, what: string): Promise<void> {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timeout beim Warten auf ${what}`);
+}
+
 /** Minimal stand-in: the bot needs only these two types. */
 type StartRun = (id: number) => { ok: boolean; runId?: string; error?: string };
 type CreateTask = (
@@ -558,7 +596,13 @@ type CreateTask = (
 ) => Promise<{ ok: boolean; runId?: string; suggestionId?: number; error?: string }>;
 
 function makeBot(
-  overrides: { startRun?: StartRun; createTask?: CreateTask; paused?: boolean; projectRoot?: string } = {},
+  overrides: {
+    startRun?: StartRun;
+    createTask?: CreateTask;
+    paused?: boolean;
+    projectRoot?: string;
+    onError?: (err: Error) => void;
+  } = {},
 ) {
   const runner = {
     isPaused: () => overrides.paused ?? false,
@@ -576,6 +620,6 @@ function makeBot(
     startRun: overrides.startRun ?? (() => ({ ok: true, runId: 'run_1' })),
     createTask: overrides.createTask ?? (async () => ({ ok: true, runId: 'run_1', suggestionId: 1 })),
     setStatus: () => ({ ok: true }),
-    onError: () => {},
+    onError: overrides.onError ?? (() => {}),
   });
 }

@@ -212,14 +212,39 @@ func _screen_plays(tree: SceneTree) -> void:
 	t.equal(screen.pending, shown, "Rueckgaengig stellt auch die Vorschau wieder her")
 	t.check(screen.history.is_empty(), "Nach Rueckgaengig gibt es nichts mehr zurueckzunehmen")
 
-	# The redraw with a ghost on the board and in the panel must not choke.
+	# The redraw with a ghost on the board and in the panel must not choke, and
+	# the panel has to learn about the new preview — `t.check(true, …)` proved
+	# neither, it only proved the frame turned. The board view paints the ghost
+	# itself and the `NextView` paints the panel copy, both from `screen.pending`
+	# and nothing else, so what can be asserted is the state both of them read and
+	# that a redraw leaves the nodes standing: a preview on an occupied cell is
+	# skipped by the painter, and a freed view takes the panel with it.
 	screen.close_modals()
 	screen._view.queue_redraw()
+	screen._next_view.queue_redraw()
 	await tree.process_frame
+	screen.pending = {"row": 0, "col": 0, "value": 2}
+	t.check(Twenty48.at(screen.board, 0, 0) == 0,
+		"Die Vorschau liegt auf einem freien Feld, auf dem der Maler sie zeichnet")
+	screen._refresh()
+	await tree.process_frame
+	t.check(is_instance_valid(screen._view) and is_instance_valid(screen._next_view),
+		"Der Screen zeichnet die Vorschau ohne Fehler — beide Ansichten leben")
+	t.check(screen._next_view.screen == screen and screen._view.screen == screen,
+		"Und beide hängen am selben Screen, dessen Vorschau sie malen")
+	# A ghost on a cell the board already holds is not painted at all — the panel
+	# must not claim one either, or the player sees a tile the move cannot make.
+	Twenty48.set_at(screen.board, 1, 1, 4)
+	screen.pending = {"row": 1, "col": 1, "value": 2}
+	screen._refresh()
+	await tree.process_frame
+	t.check(Twenty48.at(screen.board, 1, 1) == 4,
+		"Eine Vorschau auf ein belegtes Feld bleibt genau das: eine Vorschau")
 	screen.pending = {}
-	screen._view.queue_redraw()
+	screen._refresh()
 	await tree.process_frame
-	t.check(true, "Der Screen zeichnet die Vorschau ohne Fehler")
+	t.check(screen.pending.is_empty() and is_instance_valid(screen._next_view),
+		"Eine leere Vorschau wird zurückgenommen, ohne den Panel zu zerlegen")
 
 	# A ghost that blocks the last move ends the game even though no move was
 	# completed — the check cannot wait for a move that can no longer happen.

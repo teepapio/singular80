@@ -20,6 +20,11 @@ const FONT_REGULAR := "res://assets/fonts/DejaVuSans.ttf"
 const FONT_BOLD := "res://assets/fonts/DejaVuSans-Bold.ttf"
 
 static var _shared: Theme = null
+## Fonts are loaded once and reused by every screen. `Ui.label()` asks for one
+## per label, `CardRenderer` per drawn card and `VirtualStick._draw()` on every
+## drag event, so `load()` per call is a resource lookup in a hot path.
+static var _font_regular: Font = null
+static var _font_bold: Font = null
 
 
 static func shared() -> Theme:
@@ -29,13 +34,15 @@ static func shared() -> Theme:
 
 
 static func font_regular() -> Font:
-	var font := load(FONT_REGULAR)
-	return font as Font
+	if _font_regular == null:
+		_font_regular = load(FONT_REGULAR) as Font
+	return _font_regular
 
 
 static func font_bold() -> Font:
-	var font := load(FONT_BOLD)
-	return font as Font
+	if _font_bold == null:
+		_font_bold = load(FONT_BOLD) as Font
+	return _font_bold
 
 
 static func _build() -> Theme:
@@ -55,7 +62,9 @@ static func _build() -> Theme:
 	theme.set_stylebox("hover", "Button", hover)
 	theme.set_stylebox("pressed", "Button", pressed)
 	theme.set_stylebox("disabled", "Button", disabled)
-	theme.set_stylebox("focus", "Button", flat(Color(0, 0, 0, 0), ACCENT, 10))
+	# No "focus" stylebox: `Ui.button`, `add_action_button` and the two raw
+	# `Button.new()` call sites all set `focus_mode = FOCUS_NONE`, so it can
+	# never be drawn.
 	theme.set_color("font_color", "Button", TEXT)
 	theme.set_color("font_hover_color", "Button", Color.WHITE)
 	theme.set_color("font_pressed_color", "Button", Color.WHITE)
@@ -103,12 +112,9 @@ static func _build() -> Theme:
 	# Sliders / progress -----------------------------------------------------
 	theme.set_stylebox("background", "ProgressBar", flat(Color(0.043, 0.071, 0.125), BORDER, 6))
 	theme.set_stylebox("fill", "ProgressBar", flat(ACCENT, ACCENT, 6))
-	theme.set_stylebox("slider", "HSlider", flat(Color(0.043, 0.071, 0.125), BORDER, 6))
-	theme.set_stylebox("grabber_area", "HSlider", flat(ACCENT, ACCENT, 6))
-
-	# Check boxes -------------------------------------------------------------
-	theme.set_color("font_color", "CheckBox", TEXT)
-	theme.set_font_size("font_size", "CheckBox", 18)
+	# No HSlider and no CheckBox theme: the game has neither. The switches in
+	# the settings are buttons (`Ui.button`), and "sound" and "touch controls"
+	# are toggles, not check boxes.
 
 	theme.set_color("font_color", "PopupMenu", TEXT)
 	theme.set_stylebox("panel", "PopupMenu", flat(PANEL, BORDER, 10))

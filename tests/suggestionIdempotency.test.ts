@@ -20,6 +20,16 @@ import type { BusEvent, Suggestion, SuggestionView } from '../src/shared/types';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const tempDirs: string[] = [];
+/**
+ * Every booted app, closed in `afterEach`.
+ *
+ * The cases below used to end with `await api.close()` as their *last statement*,
+ * so a failing assertion skipped it: the Fastify instance and its SQLite handle
+ * stayed open for the rest of the file, and a `rmSync` on a live database is a
+ * different failure than the one under investigation. The same shape as
+ * `api.test.ts`.
+ */
+const opened: { close: () => Promise<void> }[] = [];
 let previousBin: string | undefined;
 let previousWebhook: string | undefined;
 
@@ -29,7 +39,8 @@ function tempDir(prefix: string): string {
   return dir;
 }
 
-afterEach(() => {
+afterEach(async () => {
+  for (const app of opened.splice(0)) await app.close();
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   if (previousBin === undefined) delete process.env.OPENCODE_BIN;
   else process.env.OPENCODE_BIN = previousBin;
@@ -87,6 +98,7 @@ async function boot(): Promise<Api> {
     runnerEnabled: false,
   });
   await app.ready();
+  opened.push({ close: () => app.close() });
   const store = (app as unknown as { _singular80: { store: Store } })._singular80.store;
   const bus = (app as unknown as { _singular80: { bus: EventEmitter } })._singular80.bus;
   const seen: BusEvent[] = [];
@@ -123,7 +135,6 @@ describe('POST /api/suggestions mit clientKey', () => {
     expect(res.body.clientKey).toBe('sug-2026-09-26-7');
     expect(api.count()).toBe(1);
     expect(api.suggestion(res.body.id).clientKey).toBe('sug-2026-09-26-7');
-    await api.close();
   });
 
   it('liefert beim Wiederholen dieselbe id und legt nichts Neues an', async () => {
@@ -134,7 +145,6 @@ describe('POST /api/suggestions mit clientKey', () => {
     expect(second.body.id).toBe(first.body.id);
     expect(second.body.createdAt).toBe(first.body.createdAt);
     expect(api.count()).toBe(1);
-    await api.close();
   });
 
   it('antwortet beim Wiederholen mit dem aktuellen Zustand, nicht mit dem alten', async () => {
@@ -145,7 +155,6 @@ describe('POST /api/suggestions mit clientKey', () => {
     expect(second.body.id).toBe(first.body.id);
     expect(second.body.status).toBe('implemented');
     expect(api.count()).toBe(1);
-    await api.close();
   });
 
   it('meldet beim Wiederholen weder Discord noch ein suggestion:new', async () => {
@@ -165,7 +174,6 @@ describe('POST /api/suggestions mit clientKey', () => {
     expect(second.headers['x-suggestion-replay']).toBe('1');
     expect(second.body.discordMessageId).toBe('msg-1');
     expect(second.body.id).toBe(first.body.id);
-    await api.close();
   });
 
   it('lässt einen neuen Schlüssel weiterhin einen neuen Vorschlag anlegen', async () => {
@@ -174,7 +182,6 @@ describe('POST /api/suggestions mit clientKey', () => {
     const b = await api.post({ text, author: 'Spiel', clientKey: 'b' });
     expect(b.body.id).not.toBe(a.body.id);
     expect(api.count()).toBe(2);
-    await api.close();
   });
 });
 
@@ -190,7 +197,6 @@ describe('POST /api/suggestions ohne clientKey', () => {
     expect(api.count()).toBe(2);
     expect(webhookCalls).toBe(2);
     expect(api.events().map((e) => e.type)).toEqual(['suggestion:new', 'suggestion:new']);
-    await api.close();
   });
 
   it('behandelt einen leeren Schlüssel wie einen fehlenden', async () => {
@@ -201,7 +207,6 @@ describe('POST /api/suggestions ohne clientKey', () => {
     expect(a.body.clientKey).toBeNull();
     expect(b.body.clientKey).toBeNull();
     expect(api.count()).toBe(2);
-    await api.close();
   });
 
   it('behandelt nur Leerzeichen als Leerraum, nicht als neuen Schlüssel', async () => {
@@ -211,7 +216,6 @@ describe('POST /api/suggestions ohne clientKey', () => {
     expect(b.body.id).toBe(a.body.id);
     expect(b.body.clientKey).toBe('mit rand');
     expect(api.count()).toBe(1);
-    await api.close();
   });
 });
 
@@ -226,7 +230,6 @@ describe('Unbrauchbarer clientKey', () => {
     // Ignored, not rejected: each is its own suggestion, like a client build that
     // does not know the field.
     expect(api.count()).toBe(6);
-    await api.close();
   });
 
   it('ignoriert einen zu langen Schlüssel, statt ihn zu kürzen', async () => {
@@ -239,7 +242,6 @@ describe('Unbrauchbarer clientKey', () => {
     // and hand a retry somebody else's suggestion.
     expect(b.body.id).not.toBe(a.body.id);
     expect(api.count()).toBe(2);
-    await api.close();
   });
 
   it('nimmt einen Schlüssel mit genau 64 Zeichen an', async () => {
@@ -250,7 +252,6 @@ describe('Unbrauchbarer clientKey', () => {
     expect(a.body.clientKey).toBe(key);
     expect(b.body.id).toBe(a.body.id);
     expect(api.count()).toBe(1);
-    await api.close();
   });
 
   it('normalisiert Schlüssel deterministisch', () => {

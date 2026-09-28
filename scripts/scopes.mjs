@@ -29,14 +29,61 @@ export const SHARED_FILES = [
   'godot/src/core/logic/game_registry.gd',
   'godot/src/core/autoload/router.gd',
   'godot/src/core/autoload/game_state.gd',
+  // Godot writes a `.uid` next to every script it imports and the repository
+  // versions them all, so a shared script without its `.uid` is an unownable
+  // file: `git add -A` picks it up and the pre-commit guard has to call it a
+  // violation.
+  'godot/src/core/autoload/router.gd.uid',
+  'godot/src/core/autoload/game_state.gd.uid',
+  'godot/src/core/logic/game_registry.gd.uid',
   'godot/assets/meshes/lod.json',
   'godot/tests/run_tests.gd',
   'godot/tests/test_logic.gd',
   'godot/tests/test_screens.gd',
   'godot/tests/test_improvements.gd',
+  'godot/tests/run_tests.gd.uid',
+  'godot/tests/test_logic.gd.uid',
+  'godot/tests/test_screens.gd.uid',
+  'godot/tests/test_improvements.gd.uid',
   'package.json',
   'opencode.json',
   'AGENTS.md',
+  // The runner writes a changelog line after every successful run and commits it
+  // on its own (`git commit -- CHANGELOG.md`). Nobody's `own`, everybody's
+  // business: without it here the commit is reported as "außerhalb des Scopes"
+  // for whichever lane happened to run, and an agent told that would look for a
+  // way around the guard rather than for the missing entry.
+  'CHANGELOG.md',
+];
+
+/**
+ * Files that belong to no agent, listed so the ownership rule can say "this one
+ * is on purpose" instead of staying quiet about it.
+ *
+ * Everything here is either written by a person, written by a tool that is not
+ * an agent, or belongs to a release process no suggestion agent touches. The
+ * list is deliberately short and each line says why — a growing allowlist is the
+ * same failure as an unowned file, only quieter, because the rule then passes
+ * for a reason nobody re-reads.
+ */
+export const UNOWNED_ALLOWED = [
+  // The repository itself: identity, licence, the file that lists what is
+  // ignored, and the example for the secrets that never get committed.
+  'LICENSE',
+  'README.md',
+  '.gitignore',
+  '.env.example',
+  // `npm install` writes it, no agent decides its content.
+  'package-lock.json',
+  // `npm run backup -- write` writes it. The dashboard history belongs in the
+  // repository, and it is data, not code.
+  'backup/dashboard.json',
+  // The agent definitions themselves: an agent cannot own the prompt it is given.
+  '.opencode/**',
+  // The Play release project. Its own scripts, its own config, its own docs, its
+  // own checks — it is a pipeline the owner runs, not a lane a suggestion agent
+  // works in, and `preflight.mjs` is the guard for it.
+  'googleplay/**',
 ];
 
 /**
@@ -75,6 +122,17 @@ const VARIANT_BASE = {
 };
 
 /**
+ * Suite files whose name is neither the registry id nor the directory name.
+ *
+ * One game owns two files because one of them is a screen sweep and the other
+ * the rules, and splitting them was a decision. The pattern is derived where it
+ * can be; this is the rest.
+ */
+const EXTRA_GAME_TESTS = {
+  metro3d: ['test_metro_screens'],
+};
+
+/**
  * The test suites each scope owns: `npm run test:game -- --scope tetris`
  * resolves to exactly these. `validate()` fails if a name no longer exists.
  *
@@ -84,7 +142,8 @@ const SCOPE_SUITES = {
   arena: ['PlayerStats', 'Arena — Spielablauf', 'Arena — Wellenvorschau', 'Arena — Kill-Ketten', 'Arena — Dash',
     'Arena — Level-Angebote', 'Arena — Kennzahl-Schreibweisen'],
   tetris: ['Tetris — Eingabe', 'Tetris — Punktewertung', 'Tetris — T-Spin-Erkennung',
-    'Tetris — Vorschaukette', 'Tetris — Brettgefahr', 'Tetris — Drehen & Wall-Kicks'],
+    'Tetris — Vorschaukette', 'Tetris — Brettgefahr', 'Tetris — Drehen & Wall-Kicks',
+    'Tetris — Wall-Kick-Tabellen', 'Tetris — T-Spin aus der Drehung', 'Tetris — Zugvorschau'],
   poker: ['Karten & Texas Hold\'em', 'Kartenspiele — Eingabe',
     'Poker — Persönlichkeiten', 'Poker — Tisches lesen', 'Poker — Typen-Bilanz'],
   freecell: ['Kartenspiele — Eingabe', 'FreeCell — Folgen', 'FreeCell — Supermove-Kapazität',
@@ -93,7 +152,7 @@ const SCOPE_SUITES = {
     'FreeCell — Tipp am Screen'],
   dame: ['Dame — Regeln', 'Dame — Schlagzug-Analyse', 'Dame — Ziehbare Steine', 'Dame — Tipp am Brett'],
   crystal3d: ['Crystal Tower', 'Crystal Tower — Flusskette', 'Crystal Tower — Flusspunkte',
-    'Crystal Tower — Screen'],
+    'Crystal Tower — Screen', 'Crystal Tower — Screen fehlt'],
   merge3d: ['Merge 3D', 'Merge 3D — Tipp', 'Merge 3D — Tipptext und Brettdruck', 'Merge 3D — Tipp am Screen'],
   horserunner: ['Pferde-Parcours', 'Pferde-Parcours — Beinahe-Treffer', 'Pferde-Parcours — Kette'],
   dragonrpg: ['Drachen-RPG', 'Drachen-RPG — Loot-Rarität',
@@ -136,7 +195,12 @@ const SCOPE_SUITES = {
     'Vorschlags-Warteschlange — Zustellung', 'Rechtliches & Melden',
     'Sprachen — Kataloge', 'Sprachen — Auflösung', 'Sprachen — Platzhalter',
     'Sprachen — Plural', 'Sprachen — Zahlen', 'Sprachen — Wechsel',
-    'Sprachen — Oberfläche'],
+    'Sprachen — Oberfläche',
+    'Sprachen — Idempotenz gesamt', 'Sprachen — Pluralformen',
+    'Sprachen — Spielerdatei', 'Sprachen — Vorlagenvertrag',
+    'Sprachen — Platzhalterverworfen', 'Sprachen — Abfrage',
+    'Sprachen — Zahlenränder', 'Sprachen — Kaltstart',
+    'Sprachen — Übersetzungen'],
   content: ['Content', 'Content-Integrität', 'Content-Synchronisation'],
   dashboard: [],
   tests: [],
@@ -225,6 +289,26 @@ const staticScopes = {
       'scripts/install-android-template.mjs',
       'scripts/smoke.ts',
       'scripts/backup.ts',
+      // Writes the session's line into CHANGELOG.md. It has to be a named file
+      // rather than `scripts/**`, which the meshes scope already reaches into.
+      'scripts/changelog.ts',
+      // Device work: the debug bridge, and the fonts the app and the desktop
+      // build both ship. Named one by one because `scripts/**` would swallow the
+      // meshes scope and `godot/assets/**` would swallow the content mirror.
+      'scripts/adb-device.sh',
+      'godot/assets/fonts/**',
+      // The Godot project shell: the scene graph's entry point, the project
+      // configuration every export reads (`emulate_mouse_from_touch` lives
+      // there), the export preset and the app icon. One suggestion agent changes
+      // one of them — and it is this lane, because the alternative is that the
+      // next one finds no owner either.
+      'godot/main.tscn',
+      'godot/project.godot',
+      'godot/export_presets.cfg',
+      'godot/icon.svg',
+      'godot/icon.svg.import',
+      'godot/src/main.gd',
+      'godot/src/main.gd.uid',
       'start.sh',
       'packaging/singular80.desktop',
     ],
@@ -237,6 +321,7 @@ const staticScopes = {
       'godot/assets/meshes/**',
       'scripts/blender/**',
       'godot/src/core/logic/asset_registry.gd',
+      'godot/src/core/logic/asset_registry.gd.uid',
     ],
     shared: [],
   },
@@ -249,7 +334,13 @@ const staticScopes = {
   lobby: {
     agent: 'lobby',
     label: 'Lobby & Kategorien',
-    own: ['godot/src/game/lobby/**', 'godot/src/core/logic/lobby.gd', 'godot/src/core/logic/mesh_gallery.gd'],
+    own: [
+      'godot/src/game/lobby/**',
+      'godot/src/core/logic/lobby.gd',
+      'godot/src/core/logic/lobby.gd.uid',
+      'godot/src/core/logic/mesh_gallery.gd',
+      'godot/src/core/logic/mesh_gallery.gd.uid',
+    ],
     shared: ['godot/src/core/logic/game_registry.gd', 'godot/src/core/logic/asset_registry.gd'],
   },
   tests: {
@@ -257,7 +348,13 @@ const staticScopes = {
     label: 'Test-Harness',
     // Only the harness itself. `godot/tests/test_<spiel>.gd` belongs to the game
     // of that name, so two games never append to the same file.
-    own: ['godot/tests/test_kit.gd', 'vitest.config.ts', 'tsconfig.json', 'tests/**'],
+    own: [
+      'godot/tests/test_kit.gd',
+      'godot/tests/test_kit.gd.uid',
+      'vitest.config.ts',
+      'tsconfig.json',
+      'tests/**',
+    ],
     shared: ['package.json', 'godot/tests/run_tests.gd', 'godot/tests/test_logic.gd',
       'godot/tests/test_screens.gd', 'godot/tests/test_improvements.gd'],
   },
@@ -274,20 +371,31 @@ const staticScopes = {
       'godot/src/core/logic/loc.gd',
       'godot/src/core/logic/loc.gd.uid',
       'godot/src/core/logic/suggestion_context.gd',
+      // The legal and reporting addresses. Nothing else in the game is a legal
+      // document, and the Play-mandated abuse report hangs on this one file.
+      'godot/src/core/logic/app_legal.gd',
+      'godot/src/core/logic/app_legal.gd.uid',
       // Each logic module brings its `.uid` sibling: the repo versions 61 of
       // them under `godot/src/`, so a new logic file that leaves its `.uid`
       // untracked is an inconsistency, not a detail.
+      'godot/src/core/logic/suggestion_context.gd.uid',
       'godot/src/core/logic/suggestion_queue.gd',
       'godot/src/core/logic/suggestion_queue.gd.uid',
+      'godot/src/core/logic/player_stats.gd.uid',
+      'godot/src/core/logic/item_inventory.gd.uid',
       // Die Kataloge liegen im Repo und sind ins Godot-Projekt gespiegelt, genau
       // wie `content/*.json` — beide Wege prüft `npm test` gegeneinander.
       'locale/**',
       'godot/assets/locale/**',
       'godot/src/core/ui/**',
       'godot/src/core/autoload/input_setup.gd',
+      'godot/src/core/autoload/input_setup.gd.uid',
       'godot/src/core/autoload/api_client.gd',
+      'godot/src/core/autoload/api_client.gd.uid',
       'godot/src/core/autoload/content_store.gd',
+      'godot/src/core/autoload/content_store.gd.uid',
       'godot/src/core/autoload/audio_service.gd',
+      'godot/src/core/autoload/audio_service.gd.uid',
       // Its own test file, as the games have: so nobody writes into
       // `test_logic.gd`.
       'godot/tests/test_core.gd',
@@ -295,26 +403,20 @@ const staticScopes = {
       'godot/tests/test_loc.gd',
       'godot/tests/test_loc.gd.uid',
     ],
+    // No `suites` and no `screens` here on purpose. `buildScopes()` overwrites
+    // both from `SCOPE_SUITES` / `SCOPE_SCREENS` for every static scope, so a
+    // list written into this object is dead the moment it is read — and it was
+    // also the copy missing the whole `Sprachen — *` block, which made it a
+    // trap: an agent adding a suite to the wrong list saw `list` stay green.
     shared: ['godot/src/core/autoload/game_state.gd', 'godot/src/core/logic/game_registry.gd'],
-    suites: [
-      'Mechaniken',
-      'Inventar',
-      'Vorschlag — Herkunft',
-      'Auftragsweg',
-      'Server-Adresse',
-      'Vorschlags-Warteschlange',
-      'Vorschlags-Warteschlange — Ablage',
-      'Vorschlags-Warteschlange — Backoff',
-      'Vorschlags-Warteschlange — Obergrenze',
-      'Vorschlags-Warteschlange — Zustellung',
-      'Rechtliches & Melden',
-    ],
-    screens: [],
   },
   content: {
     agent: 'game',
     label: 'Content-Packs (Gegner, Waffen, Modi)',
-    own: ['content/**'],
+    // The mirror under `godot/assets/content/` belongs here and not to a game:
+    // it is written by `npm run content:sync` from `content/*.json` and
+    // `npm test` fails when the two differ, so whoever edits a pack edits both.
+    own: ['content/**', 'godot/assets/content/**'],
     shared: [],
   },
 };
@@ -345,6 +447,16 @@ export function buildScopes() {
     const own = [
       `godot/src/game/${dir}/**`,
       `godot/tests/test_${base}.gd*`,
+      // The suite file is named after the *directory* in two games, so the glob
+      // built from the registry id (`candy3d` -> `test_candy3d.gd`) pointed at
+      // nothing while the real file sat unowned: `test_candy_match3.gd` with ten
+      // suites, `test_metro.gd` and `test_metro_screens.gd`. `validate()` only
+      // compared suite *names*, and those were all claimed, so the manifest
+      // called itself consistent. Deriving the second name from the directory
+      // covers the case instead of listing it, and `EXTRA_GAME_TESTS` below
+      // takes the rest.
+      `godot/tests/test_${dir}.gd*`,
+      ...(EXTRA_GAME_TESTS[base] ?? []).map((f) => `godot/tests/${f}.gd*`),
       ...logic.flatMap((file) => [file, `${file}.uid`]),
     ];
     scopes.set(base, {
@@ -433,21 +545,50 @@ export function validate(scopes = buildScopes()) {
   }
   // Exclusivity: no file may belong to two scopes. Variants are exempt — they
   // deliberately mirror the base scope.
-  const seen = new Map();
+  //
+  // Two passes, because a directory glob swallows a named file and the old
+  // single pass could only compare like with like: `tests/**` was checked
+  // against other `/**` globs and `tests/foo.ts` only against other named globs,
+  // so naming a file *inside* a directory another scope owns was invisible. The
+  // order scopes are declared in decided whether it was caught at all, which is
+  // the worst possible property for a rule whose job is to be boring.
+  const dirGlobs = new Map();
+  const fileGlobs = new Map();
   for (const [name, scope] of scopes) {
     if (scope.aliasOf) continue;
     for (const glob of scope.own) {
       if (glob.endsWith('/**')) {
         const dir = glob.slice(0, -3);
-        for (const other of seen.keys()) {
-          if (other.startsWith(dir) || dir.startsWith(other)) {
-            problems.push(`Überschneidung: '${name}' und der Scope für ${other} beanspruchen ${dir}`);
-          }
+        // The identical directory from two scopes is the same overlap the
+        // prefix test below reports, so it is checked here instead: collecting
+        // into a Map first would keep only the last claim and say nothing.
+        if (dirGlobs.has(dir) && dirGlobs.get(dir) !== name) {
+          problems.push(`Überschneidung: '${name}' und '${dirGlobs.get(dir)}' beanspruchen ${dir}`);
+        } else if (!dirGlobs.has(dir)) {
+          dirGlobs.set(dir, name);
         }
-        seen.set(dir, name);
       } else {
-        if (seen.has(glob)) problems.push(`Überschneidung: '${name}' und '${seen.get(glob)}' beanspruchen ${glob}`);
-        seen.set(glob, name);
+        // Two scopes naming the same file, same reasoning.
+        if (fileGlobs.has(glob) && fileGlobs.get(glob) !== name) {
+          problems.push(`Überschneidung: '${name}' und '${fileGlobs.get(glob)}' beanspruchen ${glob}`);
+        } else if (!fileGlobs.has(glob)) {
+          fileGlobs.set(glob, name);
+        }
+      }
+    }
+  }
+  for (const [dir, owner] of dirGlobs) {
+    for (const [other, otherOwner] of dirGlobs) {
+      if (dir === other) continue;
+      if (other.startsWith(dir) || dir.startsWith(other)) {
+        problems.push(`Überschneidung: '${owner}' und der Scope für ${otherOwner} beanspruchen ${dir}`);
+      }
+    }
+  }
+  for (const [glob, name] of fileGlobs) {
+    for (const [dir, owner] of dirGlobs) {
+      if (glob.startsWith(`${dir}/`)) {
+        problems.push(`Überschneidung: '${name}' beansprucht ${glob}, das im Verzeichnis ${dir} des Scopes '${owner}' liegt`);
       }
     }
   }
@@ -499,8 +640,76 @@ export function validate(scopes = buildScopes()) {
       problems.push(`${file} wird von run_tests.gd nicht geladen — die Suite läuft nie`);
     }
   }
+
+  // A suite NAME in the manifest is not a file. `SCOPE_SUITES.candy3d` listed ten
+  // Candy Crush suites while the file they live in — `test_candy_match3.gd`, named
+  // after the directory — belonged to nobody, and the same for both Metro files.
+  // The suite check passed, so nobody noticed: two agents could each `git add` a
+  // file the other was editing. Ownership is a property of the file, so it is
+  // checked on the file, in addition to the two rules below that would catch it
+  // anyway — this one says it in the words that name the cause.
+  for (const file of suiteFiles()) {
+    const owners = ownerOf(file, scopes);
+    const sharedBy = [...scopes.values()].filter((s) => !s.aliasOf && matchScope(file, s) === 'shared');
+    if (!owners.length && !sharedBy.length) {
+      problems.push(`${file} enthält Suites, gehört aber keinem Scope — die Datei hat keinen Besitzer`);
+    }
+  }
+
+  // Every tracked file must be somebody's, or be on the allowlist with a reason.
+  //
+  // This is the rule that would have caught all 88 unowned files on the day they
+  // appeared. Nothing before it looks at the repository at all: the manifest
+  // describes what it claims and checks itself for contradictions, so a file
+  // nobody claimed was invisible from the start — and invisible is exactly what a
+  // shared working tree punishes, because `git add -A` takes it and no scope
+  // check can object to a file no scope knows.
+  const unowned = unownedFiles(scopes);
+  if (unowned === null) {
+    problems.push('git ls-files schlägt fehl — die Eigentumsprüfung konnte nicht laufen');
+  } else {
+    for (const file of unowned) {
+      problems.push(`${file} gehört keinem Scope (own oder shared) — siehe UNOWNED_ALLOWED`);
+    }
+  }
   return problems;
 }
+
+/**
+ * Tracked files that no scope claims and the allowlist does not cover.
+ *
+ * `null` means "could not tell", which is not the same as "none": without git
+ * there is no list of what the repository contains, and reporting an empty
+ * result would turn a broken check into a green one.
+ */
+export function unownedFiles(scopes = buildScopes()) {
+  if (trackedCache === null) {
+    try {
+      trackedCache = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', maxBuffer: 1e8 })
+        .split('\n').map((s) => s.trim()).filter(Boolean);
+    } catch {
+      trackedCache = false;
+    }
+  }
+  if (trackedCache === false) return null;
+  const allowed = UNOWNED_ALLOWED.map((glob) => globToRegExp(glob));
+  return trackedCache
+    .filter((file) => !allowed.some((re) => re.test(file)))
+    // `own` and `shared` both count: a shared file is exactly as reachable by a
+    // stranger's `git add -A` as an owned one, it is just allowed to be reached
+    // by several people on purpose.
+    .filter((file) => ![...scopes.values()].some((s) => matchScope(file, s) !== null));
+}
+
+/**
+ * `git ls-files` once per process, and `false` for "git is not available here".
+ *
+ * `validate()` runs on every `GET /api/scopes` and the server already caches the
+ * manifest itself, so caching the file list costs nothing and keeps a dashboard
+ * poll from spawning git. `null` is "not read yet", which is why it is not also
+ * the value for "git failed" — the two mean different things to the caller.
+ */
+let trackedCache = null;
 
 /** Test files that define a suite, i.e. everything but the shared TestKit. */
 function suiteFiles() {

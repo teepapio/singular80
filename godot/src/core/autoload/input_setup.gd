@@ -86,11 +86,21 @@ func _register_all() -> void:
 		event.axis_value = direction
 		InputMap.action_add_event(action, event)
 
-	# Mouse/touch: the primary fire button of the arena game.
-	_ensure_action("fire")
-	var click := InputEventMouseButton.new()
-	click.button_index = MOUSE_BUTTON_LEFT
-	InputMap.action_add_event("fire", click)
+	# No mouse button is bound to a shared action, on purpose.
+	#
+	# `project.godot` sets `pointing/emulate_mouse_from_touch = true`, so on a
+	# device every finger press arrives as a left mouse button. A mouse event on
+	# a *shared* action therefore means "somebody touched the screen anywhere",
+	# and every screen that polls that action acts on it: the top bar's ⚙,
+	# "◀ Lobby", "Vorschlag" and the mute button all shoot the weapon of a game
+	# that reads `fire` (dragon flight, dragon RPG, Pang). It looked like a
+	# single binding; it was a button press on the entire top bar.
+	#
+	# `fire` is fed by the key and the gamepad above and by
+	# `WorldScreen.add_action_button()`, which is the only control a player can
+	# actually aim with. The arena game additionally checks
+	# `Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)` in its own code, where
+	# that check belongs.
 
 
 func _ensure_action(action: StringName) -> void:

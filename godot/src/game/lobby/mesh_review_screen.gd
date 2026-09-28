@@ -109,11 +109,11 @@ func _rebuild() -> void:
 		child.queue_free()
 	var marks := _marks()
 	var order: Array = marks.get("order", [])
-	_summary.text = "%d Meshes auf der Liste" % order.size()
+	_summary.text = Loc.t("gallery.marks_count", {"count": order.size()})
 	_submit_button.disabled = order.is_empty()
 	if order.is_empty():
 		_draft.text = ""
-		_draft.placeholder_text = "Sobald du in der Galerie ein Mesh vormerkst, steht der Vorschlag hier."
+		_draft.placeholder_text = Loc.t("gallery.draft_placeholder")
 		return
 	_selected = clampi(_selected, 0, order.size() - 1)
 	for i in order.size():
@@ -143,7 +143,7 @@ func _row(index: int, key: String) -> Control:
 	column.add_child(meta)
 
 	var note := TextEdit.new()
-	note.placeholder_text = "Was soll an diesem Mesh besser werden?  z. B. zu wenig Details an den Flügeln"
+	note.placeholder_text = Loc.t("gallery.note_placeholder")
 	note.custom_minimum_size = Vector2(0, 58)
 	note.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	note.text = str(entry.get("note", "")).substr(0, MAX_NOTE)
@@ -169,17 +169,17 @@ func _submit() -> void:
 		show_toast("The suggestion is still empty.")
 		return
 	_submit_button.disabled = true
-	_submit_button.text = "Sende …"
-	# The dialog adds "Mesh-Galerie: " itself, so the origin is never lost.
+	_submit_button.text = Loc.t("ui.suggest_sending")
+	# The dialog adds "Mesh gallery: " itself, so the origin is never lost.
 	var result: Dictionary = await Api.submit_suggestion(text, "Anonym", MeshGallery.context())
 	if result.is_empty():
 		# Only queued, not delivered: the list stays so the player can still copy
-		# the text, and `Liste leeren` clears it if they are done.
-		_submit_button.text = "Gespeichert ✓"
+		# the text, and "Clear list" clears it if they are done.
+		_submit_button.text = Loc.t("ui.suggest_stored")
 		_submit_button.disabled = false
-		show_toast("Saved offline — the suggestion goes out as soon as you are online again.", 3.5)
+		show_toast(Loc.resolve("Saved offline — the suggestion goes out as soon as you are online again."), 3.5)
 		return
-	_submit_button.text = "Gesendet ✓"
+	_submit_button.text = Loc.t("ui.suggest_sent")
 	show_toast(Loc.f("Thank you! Suggestion #%d is on the dashboard.", [int(result.get("id", 0))]), 3.0)
 	Sfx.level_up()
 	# Delivered: the work is done, so the list starts empty again.

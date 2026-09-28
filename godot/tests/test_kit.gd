@@ -54,18 +54,25 @@ func allow(name: String) -> void:
 ## `Router.go_to` drops requests while a fade runs, so a fixed sleep after
 ## another screen's switch is a race — the suite would inspect the *previous*
 ## screen. The cap keeps a broken screen from hanging the run.
+##
+## The cap is **wall-clock time**, not frames. The obvious `waited += 1.0/60.0`
+## per `process_frame` counted a frame as a sixtieth of a second, which is true
+## on a vsynced display and false in a headless run: there the loop iterates as
+## fast as the CPU allows, so a documented "2 second" cap was really 120
+## iterations of unbounded length — a hung screen could hold the suite for as
+## long as one frame took to produce. `Time.get_ticks_msec()` is the clock the
+## cap was always describing.
 func goto(router: Node, tree: SceneTree, screen_id: String, data: Dictionary = {}, cap := 2.0) -> bool:
 	if router == null:
 		return false
-	var waited := 0.0
-	while bool(router.transitioning) and waited < cap:
+	var budget := int(cap * 1000.0)
+	var started := Time.get_ticks_msec()
+	while bool(router.transitioning) and Time.get_ticks_msec() - started < budget:
 		await tree.process_frame
-		waited += 1.0 / 60.0
 	router.go_to(screen_id, data)
-	waited = 0.0
-	while waited < cap:
+	started = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - started < budget:
 		await tree.process_frame
-		waited += 1.0 / 60.0
 		# Both conditions matter: `current_id` flips as soon as the screen is in
 		# the tree, but the router only takes the next request once the fade
 		# back out has ended.

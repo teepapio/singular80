@@ -34,6 +34,21 @@ const TAP_SLOP := 24.0
 const PAN_SPEED := 0.05
 ## How many attempts the city-dressing pass makes.
 const DECOR_ATTEMPTS := 170
+## How often the HUD and the open station inspector rebuild their text.
+const HUD_INTERVAL := 0.1
+## The lighting is only re-derived when the clock has moved this far, so the
+## environment is not re-uploaded on every frame for an invisible change.
+const SKY_EPSILON := 0.004
+## Dusk and noon endpoints of the day/night cycle. Constant colours, so they are
+## parsed once at load instead of sixty times a second.
+const SKY_SUN_DUSK := Color("ff9a5c")
+const SKY_SUN_NOON := Color(1.0, 0.96, 0.88)
+const SKY_FILL_DUSK := Color("3b5b9a")
+const SKY_FILL_NOON := Color("9ec5ff")
+const SKY_AMBIENT_DUSK := Color("4a6ba8")
+const SKY_AMBIENT_NOON := Color("bcd8ff")
+const SKY_FOG_DUSK := Color("070c18")
+const SKY_FOG_NOON := Color("a9c9f0")
 
 enum Tool { BUILD, TRAIN, WAGON, REMOVE }
 
@@ -72,6 +87,11 @@ var cam_focus := Vector3(48.0, 0.0, 34.0)
 var cam_distance := CAM_DEFAULT_DISTANCE
 var cam_yaw := 0.0
 var _light_blend := 1.0
+## The `day` value the lighting was last derived from, so an unchanged clock
+## costs one subtraction instead of an environment upload.
+var _sky_day := -1.0
+## Countdown to the next HUD rebuild.
+var _hud_timer := 0.0
 
 # --- input ------------------------------------------------------------------
 var _pointers: Dictionary = {}
@@ -839,18 +859,27 @@ func _update_sparkles(delta: float) -> void:
 
 ## Day and night follow the in-game clock, so the city visibly wakes up, the
 ## commute peaks read as dusk, and night trains glow.
+##
+## The six endpoint colours are constants and were parsed out of hex strings
+## sixty times a second, and `set_fog` re-uploads the whole environment
+## volumetric every frame for a value that moves by less than a thousandth. The
+## colours are `const` now and the fog is only touched when `day` has actually
+## changed by a visible amount.
 func _update_sky(delta: float) -> void:
 	var target := metro.daylight() if metro.running else 0.6
 	_light_blend = lerpf(_light_blend, target, clampf(delta * 0.7, 0.0, 1.0))
 	var day := clampf(_light_blend, 0.0, 1.0)
-	sun.light_color = Color("ff9a5c").lerp(Color(1.0, 0.96, 0.88), day)
+	if absf(day - _sky_day) < SKY_EPSILON:
+		return
+	_sky_day = day
+	sun.light_color = SKY_SUN_DUSK.lerp(SKY_SUN_NOON, day)
 	sun.light_energy = 0.25 + day * 0.95
-	fill.light_color = Color("3b5b9a").lerp(Color("9ec5ff"), day)
+	fill.light_color = SKY_FILL_DUSK.lerp(SKY_FILL_NOON, day)
 	fill.light_energy = 0.3 + day * 0.35
 	var env := environment_node.environment
-	env.ambient_light_color = Color("4a6ba8").lerp(Color("bcd8ff"), day)
+	env.ambient_light_color = SKY_AMBIENT_DUSK.lerp(SKY_AMBIENT_NOON, day)
 	env.ambient_light_energy = 0.45 + day * 0.6
-	set_fog(Color("070c18").lerp(Color("a9c9f0"), day), 0.005)
+	set_fog(SKY_FOG_DUSK.lerp(SKY_FOG_NOON, day), 0.005)
 
 
 # --- HUD --------------------------------------------------------------------
@@ -869,9 +898,9 @@ func _build_ui() -> void:
 	column.custom_minimum_size = Vector2(256, 0)
 	hud_root.add_child(column)
 	column.add_child(Ui.label("▣ METROPOL", 20, UiTheme.ACCENT, true))
-	_money_label = _value(column, "Einnahmen", "0 $", Color("4ade80"))
-	_waiting_label = _value(column, "Wartende", "0", Color("fbbf24"))
-	_riding_label = _value(column, "In den Zügen", "0", Color("38bdf8"))
+	_money_label = _value(column, Loc.t("metro.income"), "0 $", Color("4ade80"))
+	_waiting_label = _value(column, Loc.t("metro.waiting"), "0", Color("fbbf24"))
+	_riding_label = _value(column, Loc.t("metro.on_trains"), "0", Color("38bdf8"))
 	column.add_child(Ui.label("Satisfaction", 14, UiTheme.TEXT_DIM))
 	_happiness = Ui.bar(Color("4ade80"), 14.0)
 	_happiness.custom_minimum_size = Vector2(250, 14)
@@ -947,12 +976,12 @@ func _build_resource_chips() -> void:
 	row.position = Vector2(12, 226)
 	hud_root.add_child(row)
 	var chips: Array[Dictionary] = [
-		{"icon": "▤", "caption": "Loks", "color": UiTheme.SUCCESS},
-		{"icon": "▥", "caption": "Wagen", "color": UiTheme.SUCCESS},
-		{"icon": "⌒", "caption": "Brücken", "color": UiTheme.WARNING},
-		{"icon": "◠", "caption": "Tunnel", "color": UiTheme.WARNING},
-		{"icon": "▣", "caption": "Linien", "color": UiTheme.ACCENT},
-		{"icon": "⇄", "caption": "Umstiege", "color": Color("a855f7")},
+		{"icon": "▤", "caption": Loc.t("metro.trains"), "color": UiTheme.SUCCESS},
+		{"icon": "▥", "caption": Loc.t("metro.wagons"), "color": UiTheme.SUCCESS},
+		{"icon": "⌒", "caption": Loc.t("metro.bridges"), "color": UiTheme.WARNING},
+		{"icon": "◠", "caption": Loc.t("metro.tunnels"), "color": UiTheme.WARNING},
+		{"icon": "▣", "caption": Loc.t("metro.lines"), "color": UiTheme.ACCENT},
+		{"icon": "⇄", "caption": Loc.t("metro.transfers"), "color": Color("a855f7")},
 	]
 	for chip in chips:
 		var cell := Ui.rect(Color(0.031, 0.047, 0.086, 0.8), 10, Color(1, 1, 1, 0.1), 1)
@@ -1137,19 +1166,19 @@ func _show_help() -> void:
 	panel.add_child(column)
 	column.add_child(Ui.title("How to play", 32, UiTheme.ACCENT))
 	var lines: Array[String] = [
-		"▪ Jeder Fahrgast will zu einer Station des gleichen Typs. Farbe und Symbol zeigen den Typ, der Buchstabe steht für den genauen Zielort.",
-		"▪ ▣ Bauen: Station antippen, dann die weiteren Stationen antippen. Den ersten Bahnhof erneut antippen schließt einen Ring. Auf leere Fläche tippen beendet die Linie.",
-		"▪ Tippen auf eine Station mit Linienanschluss öffnet die Ansicht — von dort kannst du eine Linie dorthin verzweigen.",
-		"▪ ▤ Lok: Werkzeug wählen, dann auf eine Linie tippen. Beim Bauen einer Linie wird automatisch eine Lok eingesetzt, solange das Depot eine hergibt.",
-		"▪ ▥ Wagen: Werkzeug wählen, dann auf einen Zug tippen. Jeder Wagen bringt %d Sitzplätze." % Metro.WAGON_CAPACITY,
-		"▪ ✂ Abbau: Linie oder Zug antippen, um sie zu entfernen. Im Extrem-Modus ist das gesperrt.",
-		"▪ Flüsse lassen sich nur mit Brücke oder Tunnel überqueren. Fehlt beides, entsteht eine provisorische Brücke — die Züge fahren dort nur halb so schnell.",
-		"▪ Zwei Linien an einem Bahnhof ergeben einen Streckenknoten. Dort dürfen Fahrgäste umsteigen, sofern sie eine Umstiegsfreigabe haben.",
-		"▪ Bedarfsprognose: über einem Bahnhof steht ⚠ mit dem Zielort, den niemand erreichen kann. Oben rechts steht, was die Stadt gerade vermisst und was der nächste Berufsverkehr verlangt — baue die fehlende Linie, bevor die Warteschlange steht.",
-		"▪ Alle %d Tage gibt es Karten, zusätzlich jede Woche ein Bonus. Uhrzeit und Wochentag bestimmen, wohin die Menschen wollen." % Metro.CARD_INTERVAL_DAYS,
-		"▪ Bleibt ein Bahnhof %d Sekunden mit mehr als %d Wartenden stehen, kollabiert das Netz." % [int(Metro.OVERCROWD_LIMIT), Metro.STATION_CAPACITY],
-		"▪ Schnell und pünktlich bringt Bonus: Wer unter %d Sekunden wartet, zahlt zusätzlich — und eine Serie lohnt sich immer mehr." % int(Metro.PUNCTUAL_WAIT),
-		"▪ Kamera: ziehen verschiebt, zwei Finger zoomen und drehen, Mausrad zoomt, Q und E drehen, R zeigt die ganze Stadt.",
+		"▪ Every passenger wants to reach a station of the same type. Colour and symbol show the type, the letter stands for the exact destination.",
+		"▪ ▣ Build: tap a station, then the further stations. Tapping the first station again closes a ring. Tapping empty ground ends the line.",
+		"▪ Tapping a station with a line connection opens the view — from there you can branch a line to it.",
+		"▪ ▤ Locomotive: pick the tool, then tap a line. Building a line automatically gets a locomotive as long as the depot has one.",
+		"▪ ▥ Coach: pick the tool, then tap a train. Each coach adds %d seats." % Metro.WAGON_CAPACITY,
+		"▪ ✂ Demolish: tap a line or a train to remove it. In extreme mode this is disabled.",
+		"▪ Rivers can only be crossed with a bridge or a tunnel. With neither, a provisional bridge appears — trains cross it at half speed.",
+		"▪ Two lines at one station form an interchange. Passengers may change there if they have a transfer permit.",
+		"▪ Demand forecast: a ⚠ above a station names the destination nobody can reach. Top right shows what the city is short of and what the next rush hour demands — build the missing line before the queue forms.",
+		"▪ Every %d days there are new cards, plus a bonus every week. Time of day and weekday decide where people want to go." % Metro.CARD_INTERVAL_DAYS,
+		Loc.f("▪ If a station stays above %d waiting passengers for %d seconds, the network collapses.", [int(Metro.OVERCROWD_LIMIT), Metro.STATION_CAPACITY]),
+		"▪ Fast and punctual pays a bonus: waiting under %d seconds pays extra — and a streak is worth more and more." % int(Metro.PUNCTUAL_WAIT),
+		"▪ Camera: dragging moves, two fingers zoom and rotate, the wheel zooms, Q and E rotate, R shows the whole city.",
 	]
 	for text in lines:
 		var label := Ui.label(text, 15, UiTheme.TEXT)
@@ -1256,12 +1285,12 @@ func _show_game_over(payload: Dictionary) -> void:
 		var best := Ui.label("New best!", 20, UiTheme.WARNING, true)
 		best.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		column.add_child(best)
-	column.add_child(_centered("Zugestellt %d   ·   Pünktlich %d   ·   Beste Serie %d" % [
+	column.add_child(_centered("Delivered %d   ·   Punctual %d   ·   Best streak %d" % [
 		int(payload.get("delivered", 0)),
 		int(payload.get("punctual", 0)),
 		int(payload.get("best_streak", 0)),
 	], 17, UiTheme.TEXT))
-	column.add_child(_centered("Überlebt %s   ·   Tage %d   ·   Linien %d   ·   Züge %d" % [
+	column.add_child(_centered("Survived %s   ·   Days %d   ·   Lines %d   ·   Trains %d" % [
 		metro.survival_text(),
 		int(payload.get("days", 1)),
 		int(payload.get("lines", 0)),
@@ -1561,7 +1590,7 @@ func _tap_build(world: Vector2) -> void:
 		_open_inspector(station)
 		return
 	if not metro.can_create_new_line():
-		_say("Keine Linienfarbe mehr frei", UiTheme.DANGER)
+		_say("No line colour left", UiTheme.DANGER)
 		Sfx.hurt()
 		return
 	var line_id := metro.begin_line(station)
@@ -1570,7 +1599,7 @@ func _tap_build(world: Vector2) -> void:
 	drawing_line = line_id
 	_finish_button.visible = true
 	Sfx.select()
-	_say("Weiteren Bahnhof antippen", UiTheme.ACCENT)
+	_say("Tap another station", UiTheme.ACCENT)
 
 
 ## Closes off the line the player was chaining, or reroutes the one the
@@ -1587,7 +1616,7 @@ func _finish_drawing() -> void:
 	_refresh_resources()
 	if built:
 		Sfx.select()
-		_say("Linie %s gebaut" % Metro.line_color_name(int(metro.lines[line_id]["color"])), UiTheme.SUCCESS)
+		_say("Line %s built" % Metro.line_color_name(int(metro.lines[line_id]["color"])), UiTheme.SUCCESS)
 	else:
 		_place_decor()
 
@@ -1598,7 +1627,7 @@ func _branch_from_inspector() -> void:
 	var station := _inspect_station
 	var serving := metro.lines_at_station(station)
 	if serving.is_empty():
-		_say("Hier fährt noch keine Linie", UiTheme.WARNING)
+		_say("No line runs here yet", UiTheme.WARNING)
 		return
 	for line_id in serving:
 		if metro.begin_line_with(line_id, station):
@@ -1607,52 +1636,52 @@ func _branch_from_inspector() -> void:
 			_inspect_panel.visible = false
 			_mark_all_dirty()
 			_refresh_resources()
-			_say("Linie %s verzweigt" % Metro.line_color_name(int(metro.lines[line_id]["color"])), UiTheme.ACCENT)
+			_say("Line %s branched" % Metro.line_color_name(int(metro.lines[line_id]["color"])), UiTheme.ACCENT)
 			return
-	_say("Im Extrem-Modus bleibt die Linie stehen", UiTheme.DANGER)
+	_say("In extreme mode the line stays as it is", UiTheme.DANGER)
 	Sfx.hurt()
 
 
 func _tap_train(world: Vector2) -> void:
 	if metro.trains_available() <= 0:
-		_say("Keine Lokomotive im Depot", UiTheme.DANGER)
+		_say("No locomotive in the depot", UiTheme.DANGER)
 		Sfx.hurt()
 		return
 	var line := metro.line_at(world, 3.0)
 	if line < 0:
-		_say("Tippe auf eine Linie", UiTheme.TEXT_DIM)
+		_say("Tap a line", UiTheme.TEXT_DIM)
 		return
 	if metro.add_train(line):
 		Sfx.select()
 		_say("Lokomotive eingesetzt", UiTheme.SUCCESS)
 		_refresh_resources()
 	else:
-		_say("Diese Linie ist zu kurz", UiTheme.DANGER)
+		_say("This line is too short", UiTheme.DANGER)
 
 
 func _tap_wagon(world: Vector2) -> void:
 	if int(metro.resources["wagons"]) <= 0:
-		_say("Kein Beiwagen im Depot", UiTheme.DANGER)
+		_say("No coach in the depot", UiTheme.DANGER)
 		Sfx.hurt()
 		return
 	var train := metro.train_at(world, 4.0)
 	if train < 0:
-		_say("Tippe auf einen Zug", UiTheme.TEXT_DIM)
+		_say("Tap a train", UiTheme.TEXT_DIM)
 		return
 	if metro.add_wagon(train):
 		Sfx.coin()
-		_say("+%d Sitzplätze" % Metro.WAGON_CAPACITY, UiTheme.SUCCESS)
+		_say("+%d seats" % Metro.WAGON_CAPACITY, UiTheme.SUCCESS)
 		_refresh_resources()
 
 
 func _tap_remove(world: Vector2) -> void:
 	if metro.mode == Metro.Mode.EXTREME:
-		_say("Im Extrem-Modus bleibt alles stehen", UiTheme.DANGER)
+		_say(Loc.t("metro.extreme_frozen"), UiTheme.DANGER)
 		return
 	var train := metro.train_at(world, 4.0)
 	if train >= 0 and metro.scrap_train(train):
 		Sfx.hit()
-		_say("Zug ausgemustert", UiTheme.WARNING)
+		_say("Train retired", UiTheme.WARNING)
 		_refresh_resources()
 		return
 	var line := metro.line_at(world, 3.0)
@@ -1661,7 +1690,7 @@ func _tap_remove(world: Vector2) -> void:
 	var color := int(metro.lines[line]["color"])
 	if metro.remove_line(line):
 		Sfx.hit()
-		_say("Linie %s abgerissen" % Metro.line_color_name(color), UiTheme.WARNING)
+		_say("Line %s torn down" % Metro.line_color_name(color), UiTheme.WARNING)
 		_mark_all_dirty()
 		_place_decor()
 		_refresh_resources()
@@ -1681,13 +1710,14 @@ func _mark_all_dirty() -> void:
 func _open_inspector(station_id: int) -> void:
 	_inspect_station = station_id
 	_inspect_panel.visible = true
+	_hud_timer = 0.0
 	_fill_inspector(station_id)
 
 
 func _fill_inspector(station_id: int) -> void:
 	var station: Dictionary = metro.stations[station_id]
 	var kind := int(station["type"])
-	_inspect_title.text = "%s  %s" % [Metro.type_glyph(kind), Metro.type_name(kind)]
+	_inspect_title.text = Loc.f("%s  %s", [Metro.type_glyph(kind), Metro.type_name(kind)])
 	var lines: Array[String] = []
 	var queue := (station["waiting"] as Array).size()
 	var stranded := metro.stranded_at(station_id)
@@ -1702,14 +1732,19 @@ func _fill_inspector(station_id: int) -> void:
 			"✓" if bool(entry["route"]) else "×",
 		])
 	if lines.is_empty():
-		lines.append("Keine Wartenden.")
+		lines.append(Loc.t("metro.nobody_waiting"))
 	lines.append("")
-	lines.append("Wartende %d von %d" % [queue, metro.capacity_of(station_id)])
-	lines.append("Anschluss %d von %d" % [queue - stranded, queue])
+	lines.append(Loc.t("metro.waiting_of", {
+		"queue": queue, "capacity": metro.capacity_of(station_id),
+	}))
+	lines.append(Loc.t("metro.connections_of", {"served": queue - stranded, "queue": queue}))
 	if stranded >= Metro.STRANDED_MIN:
-		lines.append("⚠ %d Fahrgäste kommen hier nicht weg." % stranded)
+		lines.append(Loc.t("metro.cannot_get_out", {"count": stranded}))
 	var served := metro.lines_at_station(station_id)
-	lines.append("Linien %d · Streckenknoten %s" % [served.size(), "ja" if metro.is_transfer(station_id) else "nein"])
+	lines.append(Loc.t("metro.lines_at_station", {
+		"lines": served.size(),
+		"transfer": Loc.t("metro.yes") if metro.is_transfer(station_id) else Loc.t("metro.no"),
+	}))
 	_inspect_body.text = "\n".join(lines)
 	var can_branch := metro.mode != Metro.Mode.EXTREME and not served.is_empty()
 	_inspect_branch.visible = can_branch
@@ -1734,29 +1769,29 @@ func _drain_events() -> void:
 				_say(str(payload["text"]), UiTheme.WARNING)
 				Sfx.level_up()
 			"rush":
-				_say("Rush Hour! Deutlich mehr Fahrgäste", UiTheme.DANGER)
+				_say("Rush hour! Many more passengers", UiTheme.DANGER)
 			"rush_over":
-				_say("Rush Hour vorbei", UiTheme.TEXT_DIM)
+				_say(Loc.t("metro.rush_over"), UiTheme.TEXT_DIM)
 			"new_station":
-				_say("Neuer Bahnhof eröffnet", UiTheme.ACCENT)
+				_say("New station opened", UiTheme.ACCENT)
 				_place_decor()
 			"shape_warning":
-				_say("Ein Bahnhof wechselt bald den Typ", UiTheme.WARNING)
+				_say("A station will change type soon", UiTheme.WARNING)
 			"overcrowd":
-				_say("Bahnhof überfüllt!", UiTheme.DANGER)
+				_say("Station overloaded!", UiTheme.DANGER)
 				Sfx.hurt()
 			"stranded":
 				# The demand marker has just appeared over this station.
-				_say("Bahnhof ohne Anschluss — %d warten auf %s" % [
+				_say("Station with no connection — %d are waiting for %s" % [
 					int(payload["count"]), Metro.type_name(int(payload["kind"]))
 				], UiTheme.DANGER)
 				Sfx.hurt()
 			"unmet":
-				_say("Niemand fährt zum %s — %d Fahrgäste wollen hin" % [
+				_say("Nobody goes to %s — %d passengers want to" % [
 					Metro.type_name(int(payload["kind"])), int(payload["want"])
 				], UiTheme.WARNING)
 			"card":
-				_say("%s erhalten" % str(payload["name"]), UiTheme.SUCCESS)
+				_say(Loc.t("metro.card_received", {"name": str(payload["name"])}), UiTheme.SUCCESS)
 				_refresh_resources()
 			"over":
 				_show_game_over(payload)
@@ -1799,7 +1834,14 @@ func _update_world(delta: float) -> void:
 		_update_beads(dt)
 		_update_sparkles(dt)
 		_update_sky(dt)
-		_refresh_hud()
+		# The HUD text and the open station inspector change slower than the eye
+		# reads; both rebuild at 10 Hz instead of once per frame. A newly opened
+		# inspector and a fresh run still force an immediate refresh, so nothing
+		# ever waits up to a tenth of a second to appear.
+		_hud_timer -= dt
+		if _hud_timer <= 0.0:
+			_hud_timer = HUD_INTERVAL
+			_refresh_hud()
 	_update_popups(dt)
 	_apply_camera(clampf(dt * 9.0, 0.0, 1.0))
 
@@ -1828,7 +1870,7 @@ func _refresh_hud() -> void:
 		phase = "%s · RUSH" % phase
 	_phase_label.text = phase
 	_phase_label.add_theme_color_override("font_color", UiTheme.DANGER if metro.rush_active else UiTheme.TEXT_DIM)
-	# Bedarfsprognose: the missing line, named.
+	# Demand forecast: the missing line, named.
 	_demand_label.text = metro.demand_text()
 	_peak_label.text = metro.peak_text()
 	var happy := metro.happiness()
@@ -1836,11 +1878,11 @@ func _refresh_hud() -> void:
 	var critical := metro.critical_station()
 	if critical >= 0 and not metro.over:
 		_critical_panel.visible = true
-		_critical_label.text = "⚠ %s: %d wartende · Kollaps in %ds" % [
+		_critical_label.text = Loc.f("⚠ %s: %d waiting · collapse in %ds", [
 			Metro.type_name(int(metro.stations[critical]["type"])),
 			(metro.stations[critical]["waiting"] as Array).size(),
 			ceili(metro.critical_countdown()),
-		]
+		])
 	else:
 		_critical_panel.visible = false
 	if _inspect_station >= 0 and _inspect_station < metro.stations.size():
@@ -1869,4 +1911,4 @@ func _start_run(mode: int) -> void:
 	_apply_camera(1.0)
 	_refresh_resources()
 	_refresh_hud()
-	_say("%s-Modus" % Metro.mode_name(mode), UiTheme.ACCENT)
+	_say(Loc.t("metro.mode_named", {"mode": Metro.mode_name(mode)}), UiTheme.ACCENT)

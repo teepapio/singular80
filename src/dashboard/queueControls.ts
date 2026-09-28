@@ -6,6 +6,7 @@ import type {
   ScopeInfo,
   ScopeManifest,
 } from '../shared/types';
+import { germanDuration } from './runActivity';
 
 /**
  * Pure formatting for the run panel: pause state, policy line, retry and timeout
@@ -36,13 +37,7 @@ export interface QueueSummary {
 
 /** German duration, reused for countdowns ("in 25 s", "in 2 min 5 s"). */
 export function formatCountdown(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds} s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  if (minutes < 60) return rest > 0 ? `${minutes} min ${rest} s` : `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours} h ${minutes % 60} min`;
+  return germanDuration(ms, true);
 }
 
 export function describePolicy(policy: RunnerPolicy): string {
@@ -81,6 +76,21 @@ export function describeQueue(state: QueueState, now: number): QueueSummary {
     totalLanes,
     blocked: state.blockedRunIds.length,
   };
+}
+
+/**
+ * The waiting line under the pause chip: how many runs wait, how many of them for
+ * a busy lane rather than for their turn, and when the next one may start.
+ *
+ * It lives here because it is written twice — once when the panel is built and
+ * once per second by the countdown tick — and the two copies had drifted into
+ * two grammars, of which the per-second one silently won every time.
+ */
+export function waitingLabel(summary: QueueSummary): string {
+  const parts = [`${summary.waiting} wartend`];
+  if (summary.blocked > 0) parts.push(`${summary.blocked} auf Spur`);
+  if (summary.startsIn) parts.push(summary.startsIn);
+  return parts.join(' · ');
 }
 
 /**

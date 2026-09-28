@@ -10,14 +10,41 @@ import type { RunRecord } from '../src/shared/types';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const tempDirs: string[] = [];
+/**
+ * Every `Runner` built here, released in `afterEach`. Each one owns a supervisor
+ * interval; without this they keep ticking against a database that the cleanup has
+ * already deleted, and the next case runs next to a runner that is not its own.
+ */
+const runners: Runner[] = [];
 
 afterEach(() => {
+  for (const runner of runners.splice(0)) runner.dispose();
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 function makeTempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'singular80-recovery-'));
   tempDirs.push(dir);
+  return dir;
+}
+
+/**
+ * An empty throwaway git repository. Not the real working tree: the `Runner`
+ * constructor creates `log/` under its `projectRoot` and the reconciliation asks
+ * git for a commit, so a test that handed it the checkout wrote into the directory
+ * the owner's own agent sessions are running in.
+ */
+function makeTempProjectRoot(): string {
+  const dir = makeTempDir();
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+  };
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.name', 'Test');
+  git('config', 'user.email', 'test@example.invalid');
+  writeFileSync(join(dir, 'README.md'), 'Test\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'init');
   return dir;
 }
 
@@ -94,12 +121,13 @@ function setupInterruptedRun(
   };
   store.createRun(run);
   store.setSuggestionRun(suggestion.id, run.id);
-  new Runner(store, {
+  const runner = new Runner(store, {
     projectRoot,
     dataDir: join(dir, 'data'),
     contentDir: join(root, 'content'),
     callbacks: {},
   });
+  runners.push(runner);
   return { store, run, suggestionId: suggestion.id };
 }
 
@@ -161,11 +189,12 @@ describe('Runner.reconcileNow (Dashboard-Aufräumaktion)', () => {
       status: 'implementing',
     });
     const runner = new Runner(store, {
-      projectRoot: root,
+      projectRoot: makeTempProjectRoot(),
       dataDir: join(dir, 'data'),
       contentDir: join(root, 'content'),
       callbacks: {},
     });
+    runners.push(runner);
     const logPath = join(dir, 'phantom.jsonl');
     writeFileSync(logPath, `${JSON.stringify({ type: 'run_meta', runId: 'run_phantom' })}\n`);
     const id = 'run_phantom';
@@ -281,11 +310,12 @@ describe('Übernommene Runs halten ihre Spur', () => {
     adopted.push(child);
     writeFileSync(join(dataDir, 'active-runs.json'), JSON.stringify({ run_adopted: child.pid }));
     const runner = new Runner(store, {
-      projectRoot: root,
+      projectRoot: makeTempProjectRoot(),
       dataDir,
       contentDir: join(root, 'content'),
       callbacks: {},
     });
+    runners.push(runner);
     return { runner, run, store };
   }
 

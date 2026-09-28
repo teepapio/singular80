@@ -79,15 +79,15 @@ static func are_neighbours(a: int, b: int) -> bool:
 static func special_name(special: int) -> String:
 	match special:
 		SPECIAL_ROW:
-			return "Streifen-Bonbon (Reihe)"
+			return "Striped candy (row)"
 		SPECIAL_COL:
-			return "Streifen-Bonbon (Spalte)"
+			return "Striped candy (column)"
 		SPECIAL_WRAPPED:
-			return "Verpacktes Bonbon"
+			return "Wrapped candy"
 		SPECIAL_BOMB:
-			return "Farbbombe"
+			return "Colour bomb"
 		_:
-			return "Bonbon"
+			return "Candy"
 
 
 static func is_striped(special: int) -> bool:
@@ -607,21 +607,21 @@ static func combo_kind(special_a: int, special_b: int) -> int:
 static func combo_name(kind: int) -> String:
 	match kind:
 		COMBO_BOMB:
-			return "Farbflut"
+			return "Colour flood"
 		COMBO_COLOUR:
-			return "Farbwelle"
+			return "Colour wave"
 		COMBO_FUSE:
-			return "Zündschnur"
+			return "Fuse"
 		COMBO_STORM:
-			return "Farbsturm"
+			return "Colour storm"
 		COMBO_SQUARE:
 			return "Detonation"
 		COMBO_CROSS:
-			return "Kreuzfeuer"
+			return "Crossfire"
 		COMBO_LINES:
-			return "Dreifachblitz"
+			return "Triple flash"
 		COMBO_STAR:
-			return "Blitzkreuz"
+			return "Flash cross"
 		_:
 			return ""
 
@@ -950,9 +950,9 @@ const WORLDS: Array[Dictionary] = [
 		],
 		"icing": "f5d0fe", "stone": "9ca3af",
 		"levelNames": [
-			"Zuckerwelle", "Bonbon-Brise", "Karamellpfütze", "Gummibärchen-Lach",
-			"Schokoladen-Schacht", "Herzlich-Süß", "Lolly-Regen", "Marshmallow-Boot",
-			"Nougat-Berg", "Zitronen-Fladen", "Toffee-Turm", "Zuckerwatte-Wolke",
+			"Zuckerwelle", "Bonbon-Brise", "Caramel puddle", "Gummy laugh",
+			"Schokoladen-Schacht", "Sweetheart", "Lolly-Regen", "Marshmallow-Boot",
+			"Nougat mountain", "Zitronen-Fladen", "Toffee tower", "Zuckerwatte-Wolke",
 			"Bonbon-Box", "Kirschen-Boom", "Pfefferminze-Pfeffer", "Gummi-Gummi",
 		],
 	},
@@ -967,7 +967,7 @@ const WORLDS: Array[Dictionary] = [
 			"Splitterfeld", "Quarz-Grube", "Bergkristall", "Fluorit-Gang",
 			"Juwelenschacht", "Amethystader", "Prismenpfad", "Smaragdkluft",
 			"Sternenglanz", "Eisberg-Spiegel", "Citrin-Katze", "Labyrinth-Licht",
-			"Kalktuff-Höhle", "Gipskristall", "Obsidian-Saum", "Diamantdunst",
+			"Limestone cave", "Gipskristall", "Obsidian-Saum", "Diamantdunst",
 		],
 	},
 	{
@@ -981,10 +981,10 @@ const WORLDS: Array[Dictionary] = [
 		],
 		"icing": "fef3c7", "stone": "9ca3af",
 		"levelNames": [
-			"Rosenrain", "Tulpenbeet", "Sonnenblumen-Feld", "Gänseblümchen-Wiese",
+			"Rosenrain", "Tulpenbeet", "Sonnenblumen-Feld", "Daisy meadow",
 			"Lilien-Teich", "Seerosen-Becken", "Kornblumen-Kante", "Mohnfeld",
 			"Orchideen-Bogen", "Lavendel-Hang", "Pfingstrose-Pfad", "Gartenlaube",
-			"Ranken-Dschungel", "Wildblüten-Wildnis", "Märchenblüte", "Duftgarten",
+			"Ranken-Dschungel", "Wildflower wilderness", "Fairy bloom", "Duftgarten",
 		],
 	},
 	{
@@ -998,10 +998,10 @@ const WORLDS: Array[Dictionary] = [
 		],
 		"icing": "ddd6fe", "stone": "94a3b8",
 		"levelNames": [
-			"Kürbisschatten", "Zahnstocher-Kerze", "Hexslumpen", "Spinnennetz",
-			"Geisterkürbis", "Schädel-Kamin", "Fledermaus-Flug", "Süßigkeiten-Boos",
-			"Nebelhöllen", "Rasenmäher-Lauf", "Süßkartoffel", "Gruselgarten",
-			"Würfel-Fluch", "Todesblüte", "Mitternachtswiese", "Knochenkirmes",
+			"Pumpkin shadow", "Zahnstocher-Kerze", "Hexslumpen", "Spinnennetz",
+			"Ghost pumpkin", "Skull chimney", "Bat flight", "Candy boss",
+			"Fog hollows", "Mower run", "Sweet potato", "Gruselgarten",
+			"Dice curse", "Death bloom", "Mitternachtswiese", "Knochenkirmes",
 		],
 	},
 	{
@@ -1015,8 +1015,8 @@ const WORLDS: Array[Dictionary] = [
 		],
 		"icing": "e0f2fe", "stone": "94a3b8",
 		"levelNames": [
-			"Tannenzapfen-Teppich", "Zuckerstangen-Gasse", "Glaskugeln-Baum",
-			"Lebkuchen-Plätzchen", "Christstern-Spitze", "Geschenk-Stapel",
+			"Tannenzapfen-Teppich", "Zuckerstangen-Gasse", "Glass bauble tree",
+			"Gingerbread cookie", "Christstern-Spitze", "Geschenk-Stapel",
 			"Glocken-Konzert", "Schneeflocken-Teppich", "Kerzen-Kranz", "Punschstand",
 			"Nussknacker", "Rutschbahn", "Wintermarkt", "Frost-Star",
 			"Weihnachtswunder", "Nordlicht-Kerzen",
@@ -1032,10 +1032,10 @@ const WORLDS: Array[Dictionary] = [
 		],
 		"icing": "fde68a", "stone": "9ca3af",
 		"levelNames": [
-			"Münz-Automat", "Ring-Reihen", "Amulett-Archiv", "Kronen-Schatzkammer",
-			"Kristall-Cluster", "Geldbeutel-Gang", "Tresor-Treppe", "Diamant-Wächter",
+			"Coin machine", "Ring-Reihen", "Amulett-Archiv", "Kronen-Schatzkammer",
+			"Kristall-Cluster", "Geldbeutel-Gang", "Tresor-Treppe", "Diamond guardian",
 			"Goldbarren-Silo", "Perlen-Kette", "Rubin-Grube", "Saphir-Schacht",
-			"Zeugenschatz", "Drachenhort", "Königsschatz", "Singular-Krone",
+			"Zeugenschatz", "Drachenhort", "King’s treasure", "Singular-Krone",
 		],
 	},
 ]
@@ -1076,11 +1076,11 @@ static func palette_color(world: Dictionary, index: int, mode: String = PALETTE_
 static func goal_text(goal: Dictionary) -> String:
 	match str(goal["kind"]):
 		"score":
-			return "Punkte sammeln — %d" % int(goal["target"])
+			return "Collect points — %d" % int(goal["target"])
 		"clear":
-			return "Blöcke räumen — %d" % int(goal["target"])
+			return "Clear blocks — %d" % int(goal["target"])
 		_:
-			return "Farbe %d einsammeln — %d" % [int(goal["color"]) + 1, int(goal["target"])]
+			return Loc.f("Collect colour %d — %d", [int(goal["color"]) + 1, int(goal["target"])])
 
 
 ## Deterministically builds level `(world, index)`. The optional `salt` creates
@@ -1140,7 +1140,7 @@ static func level_for(world_id: String, index: int, salt: String = "") -> Dictio
 		"worldId": world_id,
 		"index": level_index,
 		"number": world_index * LEVELS_PER_WORLD + level_index,
-		"title": "%s %d" % [str(names[(level_index - 1) % names.size()]), level_index],
+		"title": Loc.f("%s %d", [str(names[(level_index - 1) % names.size()]), level_index]),
 		"colors": colors,
 		"moves": moves,
 		"layout": layout,
@@ -1533,16 +1533,16 @@ static func run_moments(state: Dictionary) -> Array:
 			"unit": "Treffer in Folge", "move": 0})
 	if int(best["clear"]) >= 4:
 		moments.append({"icon": "◼", "label": "Biggest match", "value": int(best["clear"]),
-			"unit": "Bonbons auf einmal", "move": 0})
+			"unit": "All candies at once", "move": 0})
 	if int(best["comboBest"]) > 0:
 		moments.append({"icon": "✹", "label": "Combination: %s" % str(best["comboName"]),
-			"value": int(best["comboBest"]), "unit": "Bonbons auf einmal", "move": int(best["comboMove"])})
+			"value": int(best["comboBest"]), "unit": "All candies at once", "move": int(best["comboMove"])})
 	if int(best["specials"]) > 0:
 		moments.append({"icon": "◆", "label": "Special candies", "value": int(best["specials"]),
 			"unit": "gebildet", "move": 0})
 	if int(best["step"]) > 0:
 		moments.append({"icon": "★", "label": "Best move", "value": int(best["step"]),
-			"unit": "Punkte", "move": int(best["stepMove"])})
+			"unit": "Points", "move": int(best["stepMove"])})
 	return moments
 
 
@@ -1571,7 +1571,7 @@ static func star_ordinal(stars: int) -> String:
 static func date_key(unix_time: int = 0) -> String:
 	var stamp := unix_time if unix_time > 0 else int(Time.get_unix_time_from_system())
 	var parts := Time.get_datetime_dict_from_unix_time(stamp)
-	return "%04d-%02d-%02d" % [int(parts["year"]), int(parts["month"]), int(parts["day"])]
+	return Loc.f("%04d-%02d-%02d", [int(parts["year"]), int(parts["month"]), int(parts["day"])])
 
 
 static func _is_leap_year(year: int) -> bool:
@@ -1598,7 +1598,7 @@ static func shift_date_key(key: String, days: int) -> String:
 		if month > 12:
 			month = 1
 			year += 1
-	return "%04d-%02d-%02d" % [year, month, day]
+	return Loc.f("%04d-%02d-%02d", [year, month, day])
 
 
 static func _days_in_month(year: int, month: int) -> int:

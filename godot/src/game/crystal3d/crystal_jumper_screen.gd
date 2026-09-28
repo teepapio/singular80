@@ -16,6 +16,9 @@ const JUMP_SPEED := 18.5
 const BASE_SPEED := 12.0
 const BOUND := 18.0
 const WORLD_CRYSTAL_SCALE := 0.62
+## How often the three HUD labels are rebuilt. The camera and the crystals still
+## run every frame.
+const HUD_INTERVAL := 0.1
 const INVENTORY_SLOT := 0.85
 const INVENTORY_COLS := 6
 const INVENTORY_SCALE := 0.5
@@ -408,10 +411,10 @@ func _build_ui() -> void:
 	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_hud_layer.add_child(panel)
 
-	_score_label = _stat("Kristalle", "0", Vector2(0, 0), 60.0)
-	_points_label = _stat("Punkte", "0", Vector2(0, 46), 120.0)
-	_floor_label = _stat("Etage", "1/%d" % int(config["floors"]), Vector2(0, 92), 60.0)
-	_time_label = _stat("Zeit", "0:00", Vector2(0, 138), 120.0)
+	_score_label = _stat(Loc.t("crystal.crystals"), "0", Vector2(0, 0), 60.0)
+	_points_label = _stat(Loc.resolve("Points"), "0", Vector2(0, 46), 120.0)
+	_floor_label = _stat(Loc.t("crystal.floor"), "1/%d" % int(config["floors"]), Vector2(0, 92), 60.0)
+	_time_label = _stat("Time", "0:00", Vector2(0, 138), 120.0)
 
 	# The chain gets its own row plus a bar that drains while it is alive: the
 	# player has to see the window closing to know the next pickup is urgent.
@@ -444,7 +447,7 @@ func _build_ui() -> void:
 	hud_root.add_child(_hint_label)
 
 	if equipped_tier > 0:
-		_hint_label.text += "  ·  Ausgerüstet: %s" % CrystalTower.crystal_tier_name(theme, equipped_tier)
+		_hint_label.text += "  ·  Equipped: %s" % CrystalTower.crystal_tier_name(theme, equipped_tier)
 
 
 ## One caption/value pair of the top-right status block.
@@ -585,13 +588,21 @@ func _update_world(delta: float) -> void:
 	camera.position = camera.position.lerp(_camera_goal, clampf(5.0 * dt, 0.0, 1.0))
 	camera.look_at(_camera_look, Vector3.UP)
 
-	_score_label.text = str(collected)
+	# The camera runs every frame; the three labels do not. A clock that ticks
+	# ten times a second is still a clock, and the crystal count only moves when
+	# one is picked up.
+	_hud_timer -= dt
+	if _hud_timer > 0.0:
+		return
+	_hud_timer = HUD_INTERVAL
+	_score_label.text = Loc.number(collected)
 	_floor_label.text = "%d/%d" % [checkpoint + 1, int(config["floors"])]
 	_time_label.text = CrystalTower.format_time(elapsed * 1000.0) if running else CrystalTower.format_time(summit_time)
 
 
 var _camera_goal := Vector3.ZERO
 var _camera_look := Vector3.ZERO
+var _hud_timer := 0.0
 
 
 func _update_crystals(dt: float) -> void:
@@ -851,6 +862,13 @@ func _update_merge(dt: float) -> void:
 # --- summit panel -----------------------------------------------------------
 
 func _show_summit_panel() -> void:
+	# `modal()` and `close_modals()` are the base contract on `WorldScreen`: a
+	# full-rect layer in the root marked with the `modal` meta tag, and the one
+	# function that removes every layer carrying that tag. The summit panel used
+	# to carry private copies of both names over a `summit_panel` tag inside
+	# `hud_root`, which meant two incompatible APIs under one name — anything
+	# that called `close_modals()` from the base class would have left this
+	# panel on screen, and anything that called `has_modal()` saw nothing.
 	close_modals()
 	if not summit_reached:
 		return
@@ -937,18 +955,3 @@ func _next_level() -> void:
 	Game.set_number("%s_unlocked" % prefix, maxf(Game.get_number("%s_unlocked" % prefix, 1.0), float(config["level"]) + 1.0))
 	Game.set_number("%s_level" % prefix, float(config["level"]) + 1.0)
 	Router.go_to(screen_id)
-
-
-func close_modals() -> void:
-	for child in hud_root.get_children():
-		if child.has_meta("summit_panel"):
-			child.queue_free()
-
-
-func modal() -> Control:
-	var layer := Control.new()
-	layer.set_meta("summit_panel", true)
-	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud_root.add_child(layer)
-	return layer

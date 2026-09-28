@@ -62,7 +62,10 @@ func _screen_opens(tree: SceneTree) -> void:
 	# The mode picker greets the player before the city exists.
 	t.check(not screen._started, "Vor dem Moduswahl laeuft noch keine Stadt")
 	t.check(screen._modal_layer != null, "Die Moduswahl ist offen")
-	t.check(not screen._line_meshes.is_empty() or true, "Es ist noch kein Band gebaut")
+	# Before the run starts there is no line and therefore no ribbon: the mesh
+	# list is what proves it, and an `or true` would have passed on a screen that
+	# built geometry for a city that does not exist yet.
+	t.equal(screen._line_meshes.size(), 0, "Es ist noch kein Band gebaut")
 
 	screen._start_run(Metro.Mode.NORMAL)
 	await tree.create_timer(0.3).timeout

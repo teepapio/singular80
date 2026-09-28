@@ -27,6 +27,7 @@ func run(kit: TestKit) -> void:
 ## which is what a swallowed runtime error looks like.
 func _suite(fn: Callable) -> void:
 	fn.call()
+	t.close_suite()
 
 
 # --- Tetris: scoring --------------------------------------------------------
@@ -470,9 +471,24 @@ func _suggestion_context() -> void:
 	t.equal(SuggestionContext.for_screen("lobby"), "Lobby", "Die Lobby heißt Lobby")
 	t.equal(SuggestionContext.for_screen(""), "Spiel", "Ohne Bildschirm bleibt eine neutrale Angabe")
 	t.equal(SuggestionContext.for_screen("gibtesnicht"), "gibtesnicht", "Ein unbekannter Bildschirm zählt durch")
-	# The label is the source-language game name now: the code says "Dragon RPG",
-	# and `for_screen` hands it to the server as a grouping key.
-	t.check(SuggestionContext.for_screen("dragonrpg").contains("Dragon"), "Das Drachen-RPG liefert seinen Namen")
+	# The label is the registry's game name, in the player's language: the code
+	# says "Dragon RPG 3D" and the dashboard groups by what `for_screen` answers.
+	# Comparing against the catalogue instead of a hard-coded word is what makes
+	# the assertion hold in German *and* in English — `de.json` translates the
+	# name, so a test that spelled out "Dragon" was asserting the English
+	# catalogue while the suite runs pinned to German.
+	var dragon_label := Loc.resolve(str(GameRegistry.game_by_id("dragonrpg").get("name", "")))
+	t.equal(SuggestionContext.for_screen("dragonrpg"), dragon_label, "Das Drachen-RPG liefert seinen Namen")
+
+	# …and a game owns more screens than the registry lists. The dragon flight has
+	# a hangar, a run and a hatchery; Pang has a menu and the game itself.
+	# `resolve()` matches a game's id *or* its screen, `for_screen()` only the
+	# screen — so a sub-screen the registry does not name falls through to the raw
+	# router id, and every idea from that screen is grouped in the dashboard under
+	# "dragonflight_run". The raw id must never be the answer.
+	for sub in ["dragonflight_run", "dragonflight_hatchery", "pang"]:
+		t.check(SuggestionContext.for_screen(sub) != sub,
+			"'%s' trägt nicht die rohe Router-Kennung als Herkunft" % sub)
 
 	# A game id resolves just like a screen id.
 	t.equal(SuggestionContext.resolve("tetris"), "Tetris", "Eine Spiel-ID wird aufgelöst")
@@ -501,6 +517,7 @@ func _suggestion_context() -> void:
 	var long_text := "y".repeat(1900)
 	t.check(SuggestionContext.compose("lobby", long_text).length() < 2000,
 		"Ein langer Vorschlag bleibt unter der Grenze")
+	t.suite_done()
 
 
 # --- Detailstufen -----------------------------------------------------------
@@ -509,9 +526,23 @@ func _lod_tiers() -> void:
 	t.suite("Mesh — Detailstufen")
 
 	t.equal(AssetRegistry.TIERS, ["low", "med", "high"] as Array[String], "Es gibt drei Stufen")
-	t.equal(str(AssetRegistry.TIER_LABELS["low"]), "Low Poly", "Die niedrigste Stufe ist Low Poly")
-	t.equal(str(AssetRegistry.TIER_LABELS["med"]), "Mittel", "Die mittlere Stufe heißt Mittel")
-	t.equal(str(AssetRegistry.TIER_LABELS["high"]), "Hoch", "Die hohe Stufe heißt Hoch")
+	# `TIER_LABELS` holds the source-language fallback; `tier_label()` is what the
+	# gallery and the level card read, and it asks the catalogue first
+	# (`TIER_LOC_KEY`). Comparing against `Loc.t` therefore pins the wiring — the
+	# label comes from the catalogue and is translatable — without spelling a
+	# word out in any one language. A German run expects "Mittel"/"Hoch", an
+	# English one "Medium"/"High".
+	t.equal(str(AssetRegistry.TIER_LABELS["low"]), "Low Poly", "Die niedrigste Stufe heißt nach dem Verfahren selbst")
+	t.equal(AssetRegistry.tier_label("med"), Loc.t(str(AssetRegistry.TIER_LOC_KEY["med"])),
+		"Die mittlere Stufe kommt aus dem Katalog")
+	t.equal(AssetRegistry.tier_label("high"), Loc.t(str(AssetRegistry.TIER_LOC_KEY["high"])),
+		"Die hohe Stufe kommt aus dem Katalog")
+	t.check(not AssetRegistry.tier_label("med").is_empty() and not AssetRegistry.tier_label("high").is_empty(),
+		"Beide Stufen haben einen Namen")
+	t.check(AssetRegistry.tier_label("med") != AssetRegistry.tier_label("high"),
+		"Die beiden Stufen heißen nicht gleich")
+	t.check(str(AssetRegistry.TIER_LOC_KEY).has("med") and str(AssetRegistry.TIER_LOC_KEY).has("high"),
+		"Beide Stufen haben einen Katalogschlüssel")
 	t.equal(int(AssetRegistry.TIER_BUDGET["med"]), 1000, "Mittel zielt auf 1 000 Dreiecke")
 	t.equal(int(AssetRegistry.TIER_BUDGET["high"]), 10000, "Hoch zielt auf 10 000 Dreiecke")
 
@@ -559,6 +590,7 @@ func _lod_tiers() -> void:
 	t.equal(high_low, 0, "Hoch ist nie grober als Mittel")
 	t.check(AssetRegistry.tri_text("rpg/knight", "low") != "—", "Die Zahl wird als Text geliefert")
 	t.equal(AssetRegistry.tri_text("gibtesnicht", "low"), "—", "Unbekanntes ergibt einen Gedankenstrich")
+	t.suite_done()
 
 
 # --- Galerie: Anordnung -----------------------------------------------------
@@ -621,6 +653,7 @@ func _gallery_layout() -> void:
 	t.equal(MeshGallery.page(many, 5).size(), 0, "Hinter der letzten Seite ist nichts")
 	t.equal(MeshGallery.page([], 0).size(), 0, "Eine leere Sammlung hat keine Seite")
 	t.equal(MeshGallery.page(["a", "b"], 0).size(), 2, "Eine kleine Sammlung zeigt alles")
+	t.suite_done()
 
 
 # --- Galerie: Merkliste und Vorschlag ---------------------------------------
@@ -695,3 +728,4 @@ func _gallery_marks() -> void:
 	t.check(MeshGallery.tier_caption("low").contains("Low Poly"), "Die Low-Stufe wird erklärt")
 	t.check(MeshGallery.tier_caption("med").contains("1.000"), "Das Ziel der mittleren Stufe steht dabei")
 	t.check(MeshGallery.tier_caption("high").contains("10.000"), "Das Ziel der hohen Stufe steht dabei")
+	t.suite_done()

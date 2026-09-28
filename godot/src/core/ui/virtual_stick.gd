@@ -117,14 +117,30 @@ func _draw() -> void:
 
 
 ## Merges the stick, the keyboard and a gamepad into one direction vector.
-## `keys_x`/`keys_y` are the InputMap actions for the horizontal/vertical axis.
-static func combined(stick: Vector2, keys_x: StringName, keys_y: StringName, deadzone: float = 0.25) -> Vector2:
+## `key_left`/`key_right` and `key_up`/`key_down` are the InputMap actions of
+## the two axes; they used to be documented as parameters and then ignored in
+## favour of a hard-coded "move_*", so a game with its own names got the
+## default movement.
+##
+## The magnitude survives, exactly as in `_update`: a keyboard is analog too.
+## Normalising here turned a diagonal keypress (0.7, 0.7) into a full-length
+## vector, so keyboard players moved 41 % faster diagonally and had no ramp
+## between the deadzone and full tilt.
+static func combined(
+		stick: Vector2,
+		key_left: StringName = &"move_left",
+		key_right: StringName = &"move_right",
+		key_up: StringName = &"move_up",
+		key_down: StringName = &"move_down",
+		deadzone: float = 0.25) -> Vector2:
 	var from_keys := Vector2(
-		Input.get_axis("move_left", "move_right"),
-		Input.get_axis("move_up", "move_down")
+		Input.get_axis(key_left, key_right),
+		Input.get_axis(key_up, key_down)
 	)
-	if from_keys.length() > deadzone:
-		return from_keys.normalized()
+	var length := from_keys.length()
+	if length > deadzone:
+		var scaled := (length - deadzone) / (1.0 - deadzone)
+		return from_keys / length * clampf(scaled, 0.0, 1.0)
 	if stick.length() > 0.02:
 		return stick
 	return Vector2.ZERO

@@ -15,6 +15,10 @@ const OBSTACLE_LIMIT := 12
 const PICKUP_LIMIT := 4
 const LABEL_LIMIT := 12
 const PARTICLE_COUNT := 240
+## How often the HUD labels are rebuilt. The time bar is the only element that
+## reads as motion, and twenty updates a second are enough for one that empties
+## over a whole level.
+const HUD_INTERVAL := 0.05
 
 const CAMERA_TARGET := Vector3(0.0, 8.2, 0.0)
 const CAMERA_BASE := 24.0
@@ -140,6 +144,7 @@ var _balls_label: Label
 ## while nothing changes.
 var _balls_shown := -1
 var _balls_shown_waves := -1
+var _hud_timer := 0.0
 var _hook_label: Label
 ## The wave warning in the top-left column and the countdown over the arriving
 ## flank. Both are formatted only when this step moves on, so the frame loop
@@ -469,11 +474,11 @@ func _build_ui() -> void:
 	column.add_theme_constant_override("separation", 2)
 	hud_root.add_child(column)
 	column.add_child(Ui.label("⇈  PANG 3D", 22, UiTheme.TEXT, true))
-	_level_label = _value(column, "Level", "1", Color("38bdf8"))
-	_score_label = _value(column, "Punkte", "0", Color("facc15"))
-	_lives_label = _value(column, "Leben", "3", Color("f87171"))
-	_balls_label = _value(column, "Kugeln", "0", Color("a3e635"))
-	_hook_label = _value(column, "Haken", "0/1", Color("e2e8f0"))
+	_level_label = _value(column, Loc.t("pang.level"), "1", Color("38bdf8"))
+	_score_label = _value(column, Loc.resolve("Points"), "0", Color("facc15"))
+	_lives_label = _value(column, Loc.t("pang.lives"), "3", Color("f87171"))
+	_balls_label = _value(column, Loc.t("pang.balls"), "0", Color("a3e635"))
+	_hook_label = _value(column, Loc.t("pang.hooks"), "0/1", Color("e2e8f0"))
 	# The wave warning sits under the counters: it is the only line in the HUD
 	# that changes on its own, and it changes only while a wave is announced.
 	_alert_label = Ui.label("", 15, WAVE_ALERT, true)
@@ -734,6 +739,7 @@ func _update_world(delta: float) -> void:
 	_tick_particles(dt)
 	_tick_labels(dt)
 	_tick_camera(dt)
+	_hud_timer -= dt
 	_sync_hud()
 
 
@@ -754,7 +760,7 @@ func _tick_countdown(dt: float) -> void:
 		return
 	time_left = maxf(0.0, time_left - dt)
 	if time_left <= 0.0:
-		_lose("Die Zeit ist um")
+		_lose("Time is up")
 
 
 ## The reinforcement, in three stages. `Pang.wave_stage` owns the whole
@@ -812,7 +818,9 @@ func _drop_wave() -> void:
 	# The arrival is the one moment the level interrupts itself, so it says so —
 	# on screen, in the corner list and through the floor.
 	notify(Loc.f("Reinforcements: %d balls from %s", [batch.size(), Pang.wave_side_label(wave)]), 2.0)
-	_effect_chip("☄  Nachschub!  %s" % ("Noch " + Pang.wave_label(waves_left) if waves_left > 0 else "Letzte Welle"), WAVE_ALERT, 2.4)
+	_effect_chip(Loc.f("☄  Resupply!  %s", [
+		Loc.f("Still %s", [Pang.wave_label(waves_left)]) if waves_left > 0 else Loc.t("pang.last_wave"),
+	]), WAVE_ALERT, 2.4)
 	Sfx.tone(520.0, 0.18, "saw", -20.0, 160.0)
 	shake = maxf(shake, 0.18)
 
@@ -843,7 +851,7 @@ func _update_wave_marker() -> void:
 	var step := int(progress * 20.0)
 	if step != _alert_step:
 		_alert_step = step
-		_wave_count.text = "%.1f" % maxf(0.0, Pang.wave_eta(wave, balls_left, wave_clock, wave_warned))
+		_wave_count.text = Loc.decimal(maxf(0.0, Pang.wave_eta(wave, balls_left, wave_clock, wave_warned)), 1)
 		_wave_count.modulate.a = 0.55 + 0.45 * progress
 		_alert_label.text = Pang.wave_alert(wave, wave_warned)
 	# The knight warns while it stands in the band, which is the decision the
@@ -1342,7 +1350,7 @@ func _take_hit() -> void:
 	Sfx.hurt()
 	_burst(player.position + Vector3(0.0, 1.0, 0.0), Color("f87171"), 24, 5.0)
 	if lives <= 0:
-		_lose("Keine Leben mehr")
+		_lose("Out of lives")
 
 
 # --- end states -------------------------------------------------------------
@@ -1358,16 +1366,17 @@ func _check_cleared() -> void:
 	Game.submit_score(Game.HS_PANG, score)
 	Sfx.level_up()
 	var lines: Array[String] = [
-		"%s  ·  %.1f s" % [Pang.level_title(level), run_time],
-		"Bestzeit: %s" % ("neuer Rekord!" if new_record else ("%.1f s" % best_time if best_time > 0.0 else "—")),
-		"Zeitbonus: +%d" % Pang.clear_bonus(level, time_left),
-		"Kugeln: %d" % layout_total,
+		Loc.f("%s  ·  %.1f s", [Pang.level_title(level), run_time]),
+		Loc.t("pang.best_time", {"time": Loc.t("pang.new_record") if new_record
+			else (Loc.t("common.seconds", {"seconds": Loc.decimal(best_time, 1)}) if best_time > 0.0 else "—")}),
+		Loc.f("Time bonus: +%d", [Pang.clear_bonus(level, time_left)]),
+		Loc.f("Balls: %d", [layout_total]),
 	]
 	if waves_total > 0:
 		var arrived := waves_total - waves_left
-		lines.append("Nachschub: %s" % ("alle Wellen gekommen" if arrived == waves_total else "%d von %d Wellen gekommen" % [arrived, waves_total]))
-	lines.append("Punkte: %s" % Ui.format_number(score))
-	_show_overlay("Level geschafft!", Color("4ade80"), lines)
+		lines.append(Loc.f("Resupply: %s", [Loc.t("pang.all_waves_cleared") if arrived == waves_total else Loc.f("Survived %d of %d waves", [arrived, waves_total])]))
+	lines.append(Loc.f("Points: %s", [Ui.format_number(score)]))
+	_show_overlay(Loc.t("candy.level_done"), Color("4ade80"), lines)
 
 
 func _lose(reason: String) -> void:
@@ -1377,14 +1386,14 @@ func _lose(reason: String) -> void:
 	Game.submit_score(Game.HS_PANG, score)
 	Sfx.game_over()
 	var lines: Array[String] = [
-		reason,
-		"Level %d  ·  Kugeln: %d" % [level, balls_popped],
+		Loc.resolve(reason),
+		Loc.f("Level %d  ·  Balls: %d", [level, balls_popped]),
 	]
 	if waves_left > 0:
-		lines.append("Nachschub: %s kamen nicht mehr" % Pang.wave_label(waves_left))
-	lines.append("Punkte: %s" % Ui.format_number(score))
-	lines.append("Bestwert: %s" % Ui.format_number(maxi(Game.highscore(Game.HS_PANG), score)))
-	_show_overlay("Game Over", Color("f87171"), lines)
+		lines.append(Loc.f("No more resupply: %s", [Pang.wave_label(waves_left)]))
+	lines.append(Loc.f("Points: %s", [Ui.format_number(score)]))
+	lines.append(Loc.f("Best: %s", [Ui.format_number(maxi(Game.highscore(Game.HS_PANG), score))]))
+	_show_overlay(Loc.t("ui.origin.game_over"), Color("f87171"), lines)
 
 
 func _toggle_pause() -> void:
@@ -1395,7 +1404,7 @@ func _toggle_pause() -> void:
 	if state != STATE_PLAYING:
 		return
 	state = STATE_PAUSED
-	_show_overlay("Pause", UiTheme.ACCENT, ["Der Timer wartet auf dich."], false)
+	_show_overlay("Pause", UiTheme.ACCENT, ["The timer is waiting for you."], false)
 
 
 func _show_overlay(title: String, color: Color, lines: Array[String], offer_next: bool = true) -> void:
@@ -1531,7 +1540,14 @@ func _fit_camera() -> void:
 	_tick_camera(1.0)
 
 
+## The HUD runs at 20 Hz, not 60: the time bar is the only thing here that
+## reads as motion, and twenty updates a second are enough for a bar that empties
+## over a whole level. The ball row already had a change flag; the rest is text
+## that is identical most frames.
 func _sync_hud() -> void:
+	if _hud_timer > 0.0:
+		return
+	_hud_timer = HUD_INTERVAL
 	_level_label.text = "%d/%d" % [level, Pang.TOTAL_LEVELS]
 	_score_label.text = Ui.format_number(score)
 	_lives_label.text = "♥%d" % lives

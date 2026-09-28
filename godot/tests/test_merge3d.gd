@@ -14,7 +14,9 @@ func run(kit: TestKit, tree: SceneTree) -> void:
 	t = kit
 	_router = tree.root.get_node_or_null("/root/Router")
 	_hint()
+	t.close_suite()
 	_hint_text_and_pressure()
+	t.close_suite()
 	await _screen_hint(tree)
 	t.close_suite()
 

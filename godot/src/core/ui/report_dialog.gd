@@ -42,7 +42,10 @@ static func _build(tree: SceneTree, id: int, text: String) -> void:
 	root.theme = UiTheme.shared()
 	_layer.add_child(root)
 
-	root.add_child(Ui.backdrop(0.82))
+	# On the backdrop, not on `root`: `Ui.backdrop()` is MOUSE_FILTER_STOP and
+	# eats the press, so `root.gui_input` never fired.
+	var backdrop := Ui.backdrop(0.82)
+	root.add_child(backdrop)
 
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -67,6 +70,10 @@ static func _build(tree: SceneTree, id: int, text: String) -> void:
 
 	column.add_child(Ui.label(Loc.t("ui.report_reason"), 17, UiTheme.TEXT_DIM, true))
 	var reasons := OptionButton.new()
+	# The one control in the game that can take keyboard focus, so it needs the
+	# focus stylebox itself — the theme's Button entry is dead, every other
+	# button sets `FOCUS_NONE`.
+	reasons.add_theme_stylebox_override("focus", UiTheme.flat(Color(0, 0, 0, 0), UiTheme.ACCENT, 10))
 	# Displayed is the translation, reported is the German text from `REASONS`.
 	for index in AppLegal.REASONS.size():
 		reasons.add_item(AppLegal.reason_label(index))
@@ -119,7 +126,7 @@ static func _build(tree: SceneTree, id: int, text: String) -> void:
 	actions.add_child(copy)
 	actions.add_child(send)
 
-	root.gui_input.connect(func(event: InputEvent) -> void:
+	backdrop.gui_input.connect(func(event: InputEvent) -> void:
 		if event is InputEventScreenTouch and (event as InputEventScreenTouch).pressed:
 			close()
 	)

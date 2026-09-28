@@ -274,14 +274,16 @@ const TIERS: Array[String] = ["low", "med", "high"]
 
 ## What the gallery calls the tiers, plus the triangle budget each one aims for.
 ##
-## "med" and "high" are display names, not asset keys, and a language that wants
-## to say something other than the English "Medium" needs a key to say it with —
-## hence `TIER_LOC_KEY` and `tier_label()`. "Low Poly" is the name of the
+## The values are the **source language** and nothing else: a literal in
+## `godot/src` is English, and a German fallback here showed up as "Mittel" on
+## an English screen and on a French one. `tier_label()` is what reads them, and
+## it asks `TIER_LOC_KEY` first — the catalogue is the answer, these are what it
+## falls back to while a translation is missing. "Low Poly" is the name of the
 ## technique itself and stays what it is in every language.
 const TIER_LABELS := {
 	"low": "Low Poly",
-	"med": "Mittel",
-	"high": "Hoch",
+	"med": "Medium",
+	"high": "High",
 }
 
 const TIER_LOC_KEY := {
@@ -328,10 +330,25 @@ static func tier_exists(key: String, tier: String) -> bool:
 
 
 ## The finest level that is actually present, never finer than `tier`.
+##
+## `TIERS` is ordered coarse → fine, so the candidates have to be walked
+## **backwards**: a request for `high` looks at `high` first and only falls back
+## to `med` and then `low`. Walking forwards returned `low` for every single
+## request, because `low` sits at index 0 and therefore always satisfies
+## "coarser than high" — so the gallery stood a low-poly mesh under the heading
+## "High", printed its "instead of" notice on every pedestal at every level and
+## quoted the low triangle count, while 310 `.glb` files nobody ever loaded
+## shipped in the APK.
 static func best_available(key: String, tier: String) -> String:
-	for candidate in TIERS:
-		if TIERS.find(candidate) < TIERS.find(tier) and tier_exists(key, candidate):
+	# An unknown or empty tier asks for the coarsest level, which is the one
+	# every mesh is promised to have.
+	var wanted := maxi(TIERS.find(tier), 0)
+	for i in range(wanted, -1, -1):
+		var candidate: String = TIERS[i]
+		if tier_exists(key, candidate):
 			return candidate
+	# Nothing on disk at all: `low` is the last resort, and the caller falls
+	# back to a procedural primitive beyond that.
 	return "low"
 
 
@@ -486,11 +503,22 @@ static func _sub_keys(folder: String) -> Array[String]:
 	return out
 
 
-## Keys whose richer tiers are missing, `[]` once the generator has run.
+## Keys that do not have this detail level, `[]` once the generator has run.
+##
+## Every tier is checked, `low` included: it used to return `[]` for `low`
+## without looking at a single file, which made an assertion on it vacuous —
+## the suite proved nothing about the 155 low-poly meshes it claimed to check.
+##
+## **The real gate is the two generated tiers:** after
+## `scripts/blender/generate_lod_meshes.py` has run, `tiers_missing("med")` and
+## `tiers_missing("high")` must both be empty. `tiers_missing("low")` empty only
+## says the registry and the mesh folder agree; it says nothing about the two
+## levels the gallery exists to show.
+##
+## A tier nobody has — a typo, or one the build skipped — has no files at all,
+## so every key is reported for it. That is the answer to the question asked.
 static func tiers_missing(tier: String) -> Array[String]:
 	var out: Array[String] = []
-	if tier == "low" or not (tier in TIERS):
-		return out
 	for key in KEYS:
 		if not tier_exists(key, tier):
 			out.append(key)

@@ -9,15 +9,27 @@ extends RefCounted
 var t: TestKit
 
 
+## Entry point used by `run_tests.gd`.
+##
+## Every suite is followed by `t.close_suite()`: a GDScript runtime error unwinds
+## the suite function without raising, so an aborted suite would look like one
+## that simply stopped asserting.
 func run(kit: TestKit) -> void:
 	t = kit
 	_sequences()
+	t.close_suite()
 	_capacity()
+	t.close_suite()
 	_safety()
+	t.close_suite()
 	_hint_text()
+	t.close_suite()
 	_suggestion()
+	t.close_suite()
 	_legality()
+	t.close_suite()
 	_dead_end()
+	t.close_suite()
 	_opening()
 	t.close_suite()
 
@@ -274,7 +286,11 @@ func _suggestion() -> void:
 	cols = board([["7K", "6P", "5H"], ["8C"]])
 	list = Cards.freecell_suggest(four_empty_cells(), none, cols)
 	t.equal(int(list[0]["score"]), 300, "Ein leerer Stapel ist das wertvollste Ziel")
-	t.check(Cards.freecell_hint_text(list[0]).contains("wird frei"), "Der Text sagt, dass die Spalte leer wird")
+	# The note the hint appends is a source-language string that does not go
+	# through the catalogue, so the test resolves the same fragment instead of
+	# spelling out German prose that only one language ever had.
+	t.check(Cards.freecell_hint_text(list[0]).contains(Loc.resolve("becomes free")),
+		"Der Text sagt, dass die Spalte leer wird")
 	t.check(is_legal(four_empty_cells(), none, cols, list[0]), "und der Zug ist erlaubt")
 
 	# A cell card on an empty pile frees one up again.
@@ -366,20 +382,50 @@ func _dead_end() -> void:
 ## The hint has to work on a real, freshly dealt board — not just on layouts
 ## someone made up. 40 games, every proposal checked against independently
 ## re-derived rules.
+##
+## The dealer has a seed of its own. `Cards.shuffle` draws from the global RNG,
+## so the old version of this suite was a lottery: it asserted `silent == 0` and
+## `checked > 100` on 40 boards nobody could reproduce, and a green run said
+## nothing about the next one. `_deal()` keeps the same Fisher-Yates the game
+## uses, with a private linear generator, so the boards below are the same 40 on
+## every machine — and the assertions are therefore *rates*, not one lucky draw.
+const BOARDS := 40
+const DEAL_SEED := 20240917
+
+
+func _deal(salt: int) -> Array:
+	var deck := Cards.create_deck()
+	var state := (DEAL_SEED + salt * 7919) & 0x7FFFFFFF
+	for i in range(deck.size() - 1, 0, -1):
+		state = (state * 1103515245 + 12345) & 0x7FFFFFFF
+		var j := (state >> 8) % (i + 1)
+		var tmp: Variant = deck[i]
+		deck[i] = deck[j]
+		deck[j] = tmp
+	return deck
+
+
 func _opening() -> void:
 	t.suite("FreeCell — Tipp am Anfang")
 	var none := foundations_of([0, 0, 0, 0])
 	var silent := 0
 	var checked := 0
 	var bad := 0
-	for attempt in 40:
-		var deck := Cards.create_deck()
-		Cards.shuffle(deck)
+	var shapes := {}
+	for attempt in BOARDS:
+		var deck := _deal(attempt)
 		var cols: Array = []
 		for c in 8:
 			cols.append([])
 		for i in deck.size():
 			(cols[i % 8] as Array).append(deck[i])
+		# A fingerprint of the dealt board: forty rounds of the same shuffle would
+		# be forty runs of the same test.
+		var shape := ""
+		for column in cols:
+			var top: Cards.Card = (column as Array)[0]
+			shape += "%d.%d " % [top.rank, top.suit]
+		shapes[shape] = true
 		var cells := four_empty_cells()
 		var list := Cards.freecell_suggest(cells, none, cols)
 		if list.is_empty():
@@ -388,9 +434,19 @@ func _opening() -> void:
 			if not is_legal(cells, none, cols, move):
 				bad += 1
 			checked += 1
-	t.equal(silent, 0, "Auf keinem der 40 Bretter schweigt der Tipp")
-	t.equal(bad, 0, "und keiner seiner Vorschläge war unzulässig")
-	t.check(checked > 100, "Über hundert Vorschläge aus echten Partien geprüft (%d)" % checked)
+	t.equal(shapes.size(), BOARDS, "Die %d Bretter sind wirklich %d verschiedene" % [BOARDS, BOARDS])
+	# Rates, not counts of a single draw. The dealer has a seed now, so an exact
+	# `silent == 0` is reproducible — but the property is a rate, and a rate says
+	# what happens when the next bug moves one board: at most this often.
+	t.check(float(silent) / float(BOARDS) <= 0.0,
+		"Der Tipp schweigt auf keinem Brett (Quote %.3f, %d von %d)"
+		% [float(silent) / float(BOARDS), silent, BOARDS])
+	t.check(float(bad) / float(maxi(checked, 1)) <= 0.0,
+		"und keiner seiner Vorschläge war unzulässig (Quote %.4f, %d von %d)"
+		% [float(bad) / float(maxi(checked, 1)), bad, checked])
+	t.check(float(checked) / float(BOARDS) > 2.5,
+		"Im Schnitt mehr als 2,5 Vorschläge je Brett (%.2f über %d Bretter)"
+		% [float(checked) / float(BOARDS), BOARDS])
 	t.suite_done()
 
 

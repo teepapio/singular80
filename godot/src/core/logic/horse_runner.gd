@@ -31,6 +31,12 @@ const KINDS := [OBSTACLE_LOG, OBSTACLE_ROCK, OBSTACLE_FENCE]
 ## that is a heartbeat too late.
 const GRAZE_MARGIN := 0.5
 
+## How far below an obstacle's top a hoof still counts as hitting it. The graze
+## test has to use the same figure, or the band between the two is neither a hit
+## nor a graze and a jump that lands a whisker short pays nothing and hurts
+## nothing.
+const HOOF_HIT_EPSILON := 0.04
+
 ## Points the first link of a chain pays; every further link pays again.
 const GRAZE_POINTS := 25
 
@@ -82,7 +88,7 @@ static func collides(horse_x: float, horse_feet_y: float, horse_z: float, obstac
 		return false
 	if absf(horse_z - obstacle_z) >= float(spec["halfDepth"]) + HORSE_HALF_LENGTH:
 		return false
-	return horse_feet_y < float(spec["top"]) - 0.04
+	return horse_feet_y < float(spec["top"]) - HOOF_HIT_EPSILON
 
 
 ## Highest hoof clearance of a jump with the given initial speed.
@@ -128,7 +134,9 @@ static func pass_of(horse_x: float, horse_feet_y: float, obstacle_x: float, spec
 	if gap >= 0.0 and gap <= GRAZE_MARGIN and horse_feet_y < top:
 		return PASS_NEAR
 	var clearance: float = horse_feet_y - top
-	if clearance >= 0.0 and clearance <= GRAZE_MARGIN:
+	# From the same line the hit test uses: a hoof up to `HOOF_HIT_EPSILON`
+	# below the top is a graze, not a clear pass.
+	if clearance >= -HOOF_HIT_EPSILON and clearance <= GRAZE_MARGIN:
 		return PASS_NEAR
 	return PASS_CLEAR
 

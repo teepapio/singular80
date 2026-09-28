@@ -234,16 +234,23 @@ describe('Migration einer bestehenden Datenbank', () => {
     db.close();
 
     const store = new Store(dataDir);
-    const old = store.getRun('run_alt')!;
-    // New columns read back as "first attempt, no timeout, no scope", not null.
-    expect(old.attempt).toBe(1);
-    expect(old.maxAttempts).toBe(1);
-    expect(old.timeoutMs).toBe(0);
-    expect(old.scopes).toEqual([]);
-    expect(old.note).toBeNull();
-    expect(store.getSettings().model).toBe('gpt-alt');
-    expect(store.getQueuePaused()).toBe(false);
-    rmSync(dataDir, { recursive: true, force: true });
+    try {
+      const old = store.getRun('run_alt')!;
+      // New columns read back as "first attempt, no timeout, no scope", not null.
+      expect(old.attempt).toBe(1);
+      expect(old.maxAttempts).toBe(1);
+      expect(old.timeoutMs).toBe(0);
+      expect(old.scopes).toEqual([]);
+      expect(old.note).toBeNull();
+      expect(store.getSettings().model).toBe('gpt-alt');
+      expect(store.getQueuePaused()).toBe(false);
+    } finally {
+      // The handle is closed before the directory goes: a `rmSync` under an open
+      // SQLite connection is the kind of failure that hides the real one, and a
+      // failing assertion used to skip the cleanup entirely.
+      store.db.close();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 });
 

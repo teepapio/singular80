@@ -30,6 +30,19 @@ func _suite(body: Callable) -> void:
 
 # --- helpers ----------------------------------------------------------------
 
+## Does this sentence name that kind of station, in whichever language it is?
+##
+## The station type reaches the screen through two different routes: the HUD line
+## is built with `Loc.f`, which resolves the *values* too, and the notify line is
+## formatted with `%` and only then handed to `Loc` as a finished sentence — which
+## no catalogue entry can match. So the test asks for the type's name in both
+## spellings instead of guessing which route produced the line.
+func _names(sentence: String, kind: int) -> bool:
+	var text := Loc.resolve(sentence)
+	var source := Metro.type_name(kind)
+	return text.contains(Loc.resolve(source)) or text.contains(source)
+
+
 ## Three starting stations with fixed types, so the assertions do not depend on
 ## the seed of the city.
 func _demo(kinds: Array[int]) -> Metro:
@@ -279,10 +292,21 @@ func _anschluss_marker(tree: SceneTree) -> void:
 	t.check(marker.text.contains("P"), "Er nennt den gesuchten Zielort")
 	var quiet: Label3D = screen._station_nodes[1].get_node("Demand")
 	t.check(not quiet.visible, "Der bediente Bahnhof bleibt ohne Marker")
-	t.check(screen._demand_label.text.contains("ohne Anschluss"), "Das HUD zählt die Festgefahrenen")
+	# The HUD and the notify line are the two places the player reads this. Both
+	# name the destination the city is missing, and both reach the screen through
+	# `Loc` — so the expectation is the destination's own name rather than the
+	# German word "ohne Anschluss", which the source no longer produces and which
+	# the assertion therefore never actually checked. Both spellings are accepted:
+	# a caption assembled with `%` before it reaches `Loc` still carries the source
+	# spelling, and one assembled by `Loc.f` carries the translated one.
+	t.equal(screen._demand_label.text, metro.demand_text(),
+		"Das HUD zeigt genau den Text der Logik")
+	t.check(not metro.demand_text().is_empty() and _names(screen._demand_label.text, Metro.Kind.SPORTS),
+		"Und nennt den Zielort, für den es keine Linie gibt")
 	t.check(screen._peak_label.text.contains(":"), "Die Berufsverkehrs-Prognose steht im HUD")
-	t.check(screen._notify_label != null and screen._notify_label.text.contains("ohne Anschluss"),
-		"Der Hinweis auf dem Weg zum Bahnhof erscheint")
+	t.check(screen._notify_label != null and not screen._notify_label.text.is_empty() \
+			and _names(screen._notify_label.text, Metro.Kind.SPORTS),
+		"Der Hinweis auf dem Weg zum Bahnhof erscheint und nennt den gesuchten Zielort")
 
 	# Building the line the forecast asked for clears the station.
 	metro.extend_line(home, 2)

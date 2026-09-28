@@ -1,7 +1,7 @@
 extends Screen
 ## List lobby — a flat overview of every game, grouped by the same categories the
-## 3D lobby uses. Reachable from the 3D lobby ("Liste") and the fallback when
-## 3D is unavailable.
+## 3D lobby uses. Reachable from the 3D lobby and the fallback when 3D is
+## unavailable.
 ##
 ## Container based, so it stays centred and readable in phone landscape.
 
@@ -16,6 +16,8 @@ const BUTTON_GAP := 9.0
 var _muted_button: Button
 var _server_button: Button
 var _pending_label: Label
+## The drifting background motes, so a window resize can put them back on screen.
+var _motes: Array[Control] = []
 
 
 func _ready_game() -> void:
@@ -25,6 +27,12 @@ func _ready_game() -> void:
 	_build_footer()
 
 
+## Drifting motes, matching the browser lobby's ambience.
+##
+## The field is the size of the window, not a fixed 1400x760. A 4:3 tablet runs
+## a 1280x1707 viewport, and a hard-coded extent stops the motes at y~760 — the
+## lower two thirds of the screen is then bare. Reading the window and respawning
+## on a resize is the whole fix; the loop itself is unchanged.
 func _draw_background() -> void:
 	var layer := Control.new()
 	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -33,20 +41,39 @@ func _draw_background() -> void:
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	layer.add_child(background)
 
-	# Drifting motes, matching the browser lobby's ambience.
 	for i in 40:
 		var dot := Ui.rect(Color(0.220, 0.741, 0.973, randf_range(0.08, 0.3)))
 		dot.size = Vector2.ONE * float(randi_range(2, 5))
 		layer.add_child(dot)
-		dot.position = Vector2(randf() * 1400.0 - 60.0, randf() * 760.0)
+		dot.position = Vector2(randf() * _mote_extent().x - 60.0, randf() * _mote_extent().y)
+		_motes.append(dot)
+		var extent := _mote_extent()
 		var tween := dot.create_tween()
 		tween.set_loops()
 		tween.tween_property(dot, "position:y", dot.position.y - randf_range(40.0, 120.0), randf_range(4.0, 9.0)).set_trans(Tween.TRANS_SINE)
 		tween.tween_property(dot, "modulate:a", 0.0, randf_range(4.0, 9.0))
 		tween.tween_callback(func() -> void:
-			dot.position.y = randf() * 760.0
+			dot.position.y = randf() * extent.y
 			dot.modulate.a = 1.0)
 	content_layer().add_child(layer)
+	var viewport := get_viewport()
+	if not viewport.size_changed.is_connected(_respawn_motes):
+		viewport.size_changed.connect(_respawn_motes)
+
+
+## The area the motes drift through: the window, with a margin for the drift.
+func _mote_extent() -> Vector2:
+	return Vector2(maxf(320.0, get_viewport_rect().size.x) + 60.0, maxf(240.0, get_viewport_rect().size.y))
+
+
+## A window that changed shape leaves half the motes outside it. One pass puts
+## every one back inside.
+func _respawn_motes() -> void:
+	var extent := _mote_extent()
+	for dot in _motes:
+		if not is_instance_valid(dot):
+			continue
+		dot.position = Vector2(randf() * extent.x - 60.0, randf() * extent.y)
 
 
 func _build_header() -> void:
@@ -193,9 +220,9 @@ func _build_footer() -> void:
 		Sfx.select()
 		Router.go_to("main_menu")
 	))
-	_muted_button = Ui.button(_mute_label(), Vector2(140, 48), UiTheme.PANEL_LIGHT, func() -> void:
+	_muted_button = Ui.button(Ui.mute_label(), Vector2(140, 48), UiTheme.PANEL_LIGHT, func() -> void:
 		Game.toggle_muted()
-		_muted_button.text = _mute_label()
+		_muted_button.text = Ui.mute_label()
 	)
 	row.add_child(_muted_button)
 
@@ -245,10 +272,6 @@ func _on_pending_changed(count: int) -> void:
 		"reason": Loc.t("ui.pending_no_server") if not Game.has_server() else Loc.t("ui.pending_unreachable"),
 	})
 	_pending_label.add_theme_color_override("font_color", UiTheme.WARNING)
-
-
-func _mute_label() -> String:
-	return Loc.t("ui.sound_on") if not Game.muted else Loc.t("ui.sound_off")
 
 
 func _refresh_server_button() -> void:

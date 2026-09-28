@@ -65,8 +65,6 @@ static var _specifiers: Dictionary = {}
 ## the number a complaint about the one thing that is right.
 static var _identical: Dictionary = {}
 
-const _MISSING := "__loc_missing__"
-
 
 # --- Start ------------------------------------------------------------------
 
@@ -159,7 +157,7 @@ static func _load_catalogue(file: String, dir: DirAccess) -> void:
 	var raw := FileAccess.get_file_as_string("%s/%s" % [DIR, file])
 	var parsed: Variant = JSON.parse_string(raw)
 	if not (parsed is Dictionary):
-		push_warning("Loc: %s ist kein Objekt und wird übersprungen." % file)
+		push_warning("Loc: %s is not an object and is skipped." % file)
 		return
 	var catalogue: Dictionary = parsed
 	var code := str(catalogue.get("code", file.trim_suffix(".json")))
@@ -570,7 +568,21 @@ static func resolve(value: String) -> String:
 ## over unchanged — checked when the catalogue is read (`_checked`).
 static func f(template: String, values: Array) -> String:
 	_ensure()
-	return resolve(template) % values
+	# The values are resolved as well as the template. A composition template like
+	# `"%s  %s"` is deliberately not a catalogue key — there is nothing to
+	# translate about a template that is only punctuation — so the arguments are
+	# the only strings in here that ever need translating, and the substitution
+	# happens *after* the lookup. Without this a category header reads
+	# `◼  Board games` on a German screen while the tagline right below it is
+	# correct.
+	#
+	# Only Strings go through `resolve`. Passing a number would turn it into a
+	# String, and a `%d` handed a String is exactly the runtime formatting error
+	# this function is written to prevent.
+	var args: Array = []
+	for value in values:
+		args.append(resolve(value) if value is String else value)
+	return resolve(template) % args
 
 
 static func has(key: String) -> bool:

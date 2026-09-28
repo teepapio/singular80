@@ -25,6 +25,33 @@ var _router: Node
 var _game: Node
 
 
+## Is this sentence on the panel, in whichever language is active?
+##
+## The screen builds its captions from source-language templates and hands them
+## to `Loc`, so the panel shows the translation and the test has to look for the
+## translation too — a test that typed "Level geschafft!" or "Zug 1" was
+## asserting one language against a screen that follows the catalogue. The
+## expectation is therefore written as the *template* and resolved here, and both
+## spellings are accepted, because a caption the catalogue does not carry is
+## shown exactly as the source wrote it.
+func _says(panel: String, expected: String) -> bool:
+	return panel.contains(Loc.resolve(expected)) or panel.contains(expected)
+
+
+## The row of a moment list that carries `icon`.
+##
+## `run_moments` labels its rows in the source language and one of them is a
+## template with the combination's name substituted into it — a string no
+## catalogue entry can ever match, because the entry is for the template. The
+## glyph is production data and the same in every language, so it is what
+## identifies a row here.
+func _moment(moments: Array, icon: String) -> Dictionary:
+	for moment in moments:
+		if str((moment as Dictionary).get("icon", "")) == icon:
+			return moment
+	return {}
+
+
 ## Entry point used by `run_tests.gd`.
 func run(kit: TestKit, tree: SceneTree) -> void:
 	t = kit
@@ -71,10 +98,16 @@ func _moments() -> void:
 	# A peak that never happened stays out, every row carries number and unit.
 	var hand := CandyMatch3.run_moments(game)
 	t.equal(hand.size(), 3, "Ein einzelner Schritt liefert Match, Spezial und Zug")
+	# `run_moments` returns the *source* label; the screen is what shows the
+	# translated one. So both sides are resolved before they are compared — a
+	# test that looked for the German word passed only while the catalogue had
+	# no entry for it, and passed for the wrong reason after it got one.
 	var labels: Array = []
 	for moment in hand:
-		labels.append(str((moment as Dictionary)["label"]))
-	t.check(not labels.has("Längste Kette"), "Eine Kette von 1 ist kein Highlight")
+		labels.append(Loc.resolve(str((moment as Dictionary)["label"])))
+	t.check(not labels.has(Loc.resolve("Longest chain")), "Eine Kette von 1 ist kein Highlight")
+	t.check(labels.has(Loc.resolve("Biggest match")), "Der größte Match ist dabei")
+	t.check(labels.has(Loc.resolve("Special candies")), "Und die entstandenen Spezialbonbons")
 
 	# A real run through the level: the moments have to describe what happened.
 	var played := CandyMatch3.start_level(level)
@@ -105,7 +138,7 @@ func _moments() -> void:
 		var row: Dictionary = moment
 		t.check(int(row["value"]) > 0, "'%s' hat einen Wert" % str(row["label"]))
 		t.check(not str(row["label"]).is_empty() and not str(row["unit"]).is_empty(), "Die Zeile ist beschriftet")
-		if str(row["label"]) == "Größter Match":
+		if Loc.resolve(str(row["label"])) == Loc.resolve("Biggest match"):
 			best_clear = int(row["value"])
 	t.check(best_clear >= 3, "Der größte Match umfasst mindestens drei Bonbons")
 
@@ -201,6 +234,12 @@ func _clock(tree: SceneTree) -> void:
 
 ## The result screen has to say what the level was like, not only how many
 ## stars it earned. Drives the screen to a finished run and reads the panel.
+##
+## Every expectation below is built from the same template the screen renders,
+## through `Loc.f`. A test that spelled out "Level geschafft!" or "Zug 1" was
+## asserting the German catalogue while the code had already become English —
+## and it read as a localisation failure rather than as the stale expectation it
+## was. The templates are the contract; the wording is the catalogue's.
 func _result_summary(tree: SceneTree) -> void:
 	t.suite("Candy Crush — Ergebnisbildschirm")
 	var screen = await _open_candy(tree)
@@ -233,14 +272,19 @@ func _result_summary(tree: SceneTree) -> void:
 	t.check(int((gap as Dictionary)["missing"]) > 0, "Die Lücke zum dritten Stern ist positiv")
 
 	var text := _collect_text(screen.hud_root)
-	t.check(text.contains("Level geschafft!"), "Der Ergebnistitel steht da")
-	t.check(text.contains("Punkte:"), "Das Ergebnis nennt die Punkte")
-	t.check(text.contains("Züge:"), "Das Ergebnis nennt die verbrauchten Züge")
+	t.check(_says(text, "Level geschafft!"), "Der Ergebnistitel steht da")
+	t.check(_says(text, "Points: %s" % Ui.format_number(int(screen.state["score"]))),
+		"Das Ergebnis nennt die Punkte")
+	t.check(_says(text, "Moves: %d" % (int(level["moves"]) - int(screen.state["movesLeft"]))),
+		"Das Ergebnis nennt die verbrauchten Züge")
 	t.check(text.contains("★☆"), "Zwei von drei Sternen sind sichtbar")
 	# The run summary: what the level was like and what is still missing.
-	t.check(text.contains("Bester Zug"), "Das Ergebnis nennt den besten Zug")
-	t.check(text.contains("Zug 1"), "Der beste Zug nennt seinen Zug")
-	t.check(text.contains("Größter Match"), "Das Ergebnis nennt den größten Match")
+	t.check(_says(text, "Best move"), "Das Ergebnis nennt den besten Zug")
+	# The move number the panel prints is a source-language suffix the catalogue
+	# never reaches, so the test hands the same words to `Loc` rather than typing
+	# "Zug 1" — a word that exists in exactly one language.
+	t.check(_says(text, "Move %d" % 1), "Der beste Zug nennt seinen Zug")
+	t.check(_says(text, "Biggest match"), "Das Ergebnis nennt den größten Match")
 	t.check(text.contains(CandyMatch3.star_ordinal(3)), "Das Ergebnis nennt den fehlenden Stern")
 	t.check(text.contains(Ui.format_number(int((gap as Dictionary)["missing"]))), "Die Lücke ist als Zahl da")
 	t.suite_done()
@@ -505,10 +549,7 @@ func _preview(tree: SceneTree) -> void:
 	t.equal(int(peaks["comboMove"]), 1, "Der Peak merkt sich den Zug")
 
 	# The result screen tells the story: one row for the best combination.
-	var moment_row := {}
-	for moment in m.run_moments(screen.state):
-		if str((moment as Dictionary)["label"]).begins_with("Kombination:"):
-			moment_row = moment
+	var moment_row := _moment(m.run_moments(screen.state), "✹")
 	t.check(not moment_row.is_empty(), "Das Ergebnis nennt die Kombination")
 	if not moment_row.is_empty():
 		t.equal(int(moment_row["value"]), int(peaks["comboBest"]), "Die Zeile nennt die Bonbonszahl")
@@ -519,11 +560,11 @@ func _preview(tree: SceneTree) -> void:
 	screen._undo()
 	t.equal(int(m.highlights(screen.state)["combos"]), 0, "Nach Undo zählt keine Kombination")
 	t.equal(int(m.highlights(screen.state)["comboBest"]), 0, "Nach Undo ist der Einschlag zurückgenommen")
-	var gone := true
-	for moment in m.run_moments(screen.state):
-		if str((moment as Dictionary)["label"]).begins_with("Kombination:"):
-			gone = false
-	t.check(gone, "Nach Undo nennt das Ergebnis keine Kombination")
+	# The old check looked for the German label prefix, which the source no longer
+	# produces — so it passed for the wrong reason: there was no row at all. The
+	# row is found by its glyph, and "no row" is now the actual claim.
+	t.check(_moment(m.run_moments(screen.state), "✹").is_empty(),
+		"Nach Undo nennt das Ergebnis keine Kombination")
 
 	# The board a player gets may have holes and blockers in it. The preview and
 	# the move have to work on every layout, not only on the one the test

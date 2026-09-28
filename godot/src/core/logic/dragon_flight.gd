@@ -620,16 +620,20 @@ static func inbreeding_penalty(parent_a: Dictionary, parent_b: Dictionary) -> fl
 	return clampf(1.0 - float(shared) * 0.02, 0.7, 1.0)
 
 
-## Two dragons are related when they share a non-trivial allele at a gene.
+## Two dragons are related when they carry the very same allele pair at a gene.
+## Shared alleles are what `inbreeding_penalty` charges for and what `pairing_cost`
+## prices, so a clone pays the full penalty while a cross of two unrelated
+## bloodlines pays none.
 static func _shares_lineage(a: Dictionary, b: Dictionary, trait_id: String) -> bool:
-	var left := str(a.get(trait_id, ""))
-	var right := str(b.get(trait_id, ""))
+	# The pairs live in the dragon's "alleles" map; a bare genome is accepted
+	# too, because that is what a genome comparison has at hand. Asking the
+	# dragon for the gene itself found nothing on either side, so every pair of
+	# dragons counted as unrelated and the penalty never fired at all.
+	var left := allele_pair(a["alleles"] if a.has("alleles") else a, trait_id)
+	var right := allele_pair(b["alleles"] if b.has("alleles") else b, trait_id)
 	if left.length() < 2 or right.length() < 2:
 		return false
-	for i in 2:
-		if left[i] != right[i]:
-			return true
-	return false
+	return left == right
 
 
 # --- bloodline readout ------------------------------------------------------
@@ -1024,21 +1028,21 @@ static func level_resist_summary(level_def: Dictionary) -> String:
 static func element_name(element: String) -> String:
 	match element:
 		"fire":
-			return "Feuer"
+			return "Fire"
 		"ice":
 			return "Frost"
 		"poison":
-			return "Gift"
+			return "Poison"
 		"storm":
-			return "Sturm"
+			return "Storm"
 		"earth":
-			return "Erde"
+			return "Earth"
 		"void":
-			return "Leere"
+			return "Void"
 		"air":
-			return "Luft"
+			return "Air"
 		"light":
-			return "Licht"
+			return "Light"
 		_:
 			return element.capitalize()
 
@@ -1203,7 +1207,21 @@ static func default_profile() -> Dictionary:
 		"breeds": [],
 		"hatched": 0,
 		"eggs_found": 0,
+		"last_collect": 0,
 	}
+
+
+## A fresh profile that already owns a breeding pair, so the hatchery is usable
+## from the first minute: breeding needs a pair, and the whole game hangs on it.
+static func starter_profile() -> Dictionary:
+	var profile := default_profile()
+	var starter := random_dragon(1, ["ember"])
+	var second := random_dragon(2, ["frost"])
+	profile["dragons"] = [starter, second]
+	profile["next_uid"] = 3
+	profile["active"] = starter["uid"]
+	profile["breeds"] = unlocked_breeds(profile)
+	return profile
 
 
 static func dragons_of(profile: Dictionary) -> Array:
@@ -1405,30 +1423,33 @@ static func next_unlocked(from_n: int, profile: Dictionary) -> int:
 
 static func load_profile() -> Dictionary:
 	if not FileAccess.file_exists(save_path):
-		var fresh := default_profile()
-		# Two starters, so the hatchery is usable from the first minute: breeding
-		# needs a pair, and the whole game hangs on breeding.
-		var starter := random_dragon(1, ["ember"])
-		var second := random_dragon(2, ["frost"])
-		fresh["dragons"] = [starter, second]
-		fresh["next_uid"] = 3
-		fresh["active"] = starter["uid"]
-		fresh["breeds"] = unlocked_breeds(fresh)
+		var fresh := starter_profile()
 		save_profile(fresh)
 		return fresh
 	var text := FileAccess.get_file_as_string(save_path)
 	var parsed: Variant = JSON.parse_string(text)
 	if not (parsed is Dictionary):
-		return default_profile()
+		# A corrupt save must not leave the hatchery empty on every launch: fall
+		# back to a playable profile and write it over the broken file, so the
+		# player recovers instead of re-reading the same garbage each time.
+		var recovered := starter_profile()
+		save_profile(recovered)
+		return recovered
 	return _merge_defaults(parsed as Dictionary)
 
 
 ## Fills in keys an older or partial save does not have, so a new field never
-## breaks an existing profile.
+## breaks an existing profile. Keys the save has but the defaults do not are
+## carried over untouched — a field that only lives in the save (like
+## `last_collect`, written by `collect_hatched`) would otherwise be dropped on
+## every load and make the hatchery re-report every dragon as newly hatched.
 static func _merge_defaults(saved: Dictionary) -> Dictionary:
 	var profile := default_profile()
 	for key in profile:
 		if saved.has(key):
+			profile[key] = saved[key]
+	for key in saved:
+		if not profile.has(key):
 			profile[key] = saved[key]
 	return profile
 

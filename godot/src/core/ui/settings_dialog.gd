@@ -26,10 +26,17 @@ static func open(parent: Node) -> void:
 static func close() -> void:
 	var tree := _tree
 	_release()
-	if _rebuild and tree != null:
-		_rebuild = false
-		# `go_to` is asynchronous and fades; the dialog is gone by then.
-		Router.go_to(Router.current_id)
+	if not _rebuild or tree == null:
+		return
+	if Router.transitioning:
+		# `go_to` returns immediately while another screen change is fading, so
+		# the rebuild would be dropped silently — the dialog has just told the
+		# player the new language is on screen. Keep the flag: the next close
+		# performs the rebuild.
+		return
+	_rebuild = false
+	# `go_to` is asynchronous and fades; the dialog is gone by then.
+	Router.go_to(Router.current_id)
 
 
 static func _release() -> void:
@@ -52,7 +59,11 @@ static func _build(tree: SceneTree) -> void:
 	root.theme = UiTheme.shared()
 	_layer.add_child(root)
 
-	root.add_child(Ui.backdrop(0.84))
+	# On the backdrop, not on `root`: `Ui.backdrop()` is MOUSE_FILTER_STOP, so
+	# it eats the press and `root.gui_input` never sees it. The backdrop itself
+	# is what the player taps to dismiss.
+	var backdrop := Ui.backdrop(0.84)
+	root.add_child(backdrop)
 
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -133,7 +144,7 @@ static func _build(tree: SceneTree) -> void:
 		close()
 	))
 
-	root.gui_input.connect(func(event: InputEvent) -> void:
+	backdrop.gui_input.connect(func(event: InputEvent) -> void:
 		if event is InputEventScreenTouch and (event as InputEventScreenTouch).pressed:
 			close()
 	)

@@ -24,7 +24,29 @@ const NEAR_DISTANCE := 4.2
 # --- review list ------------------------------------------------------------
 
 ## The context line that ends up in front of a submitted suggestion.
-const CONTEXT := "Mesh-Galerie"
+##
+## A key, not a string: the line is handed to `Api.submit_suggestion` as the
+## suggestion's origin and the player reads it back in the dashboard, so it has
+## to be in their language. It was a hardcoded "Mesh-Galerie" — German in a
+## source that is otherwise English, in no catalogue, and therefore the same
+## German word for an English and a French player.
+const CONTEXT_LOC_KEY := "gallery.context"
+
+## The sentence the marked list is written into the draft under.
+const DRAFT_LOC_KEY := "gallery.draft"
+
+## Both keys above, in the array form the extractor recognises.
+##
+## The extractor reads a `…_LOC_KEYS` list, a `…_LOC_KEY` dictionary and a
+## `Loc.t("…")` literal — and nothing else. A lone `const X_LOC_KEY := "ui.…"`
+## matches none of the three, which is why `asset_registry.gd` and
+## `suggestion_context.gd` each keep such a list next to the dictionary. A key
+## that is never written down anywhere is a key nobody can find when it goes
+## missing: `check` only reports the ones it can see in use.
+const MESH_GALLERY_LOC_KEYS: Array[String] = [
+	"gallery.context",
+	"gallery.draft",
+]
 
 ## The player's list of meshes to improve. It outlives the gallery screen,
 ## because it is the input to the suggestion written afterwards.
@@ -184,18 +206,25 @@ static func draft(marks: Dictionary) -> String:
 		var tier := str(entry.get("tier", "low"))
 	# The level the player was looking at is part of the complaint: a 10 000
 	# triangle version of a bad shape is a different problem than a 400 triangle one.
-		var head := "%s — %s, Stufe %s (%s Dreiecke)" % [
+		var head := Loc.f("%s — %s, level %s (%s triangles)", [
 			AssetRegistry.display_name(key), key,
 			AssetRegistry.tier_label(tier), AssetRegistry.tri_text(key, tier),
-		]
+		])
 		var note := str(entry.get("note", ""))
 		lines.append("– %s" % head if note == "" else "– %s\n  %s" % [head, note])
-	return "Diese Meshes soll ich verbessern:\n%s" % "\n".join(lines)
+	# The list is a whole sentence with the meshes in it, so it is one key with a
+	# `{meshes}` placeholder rather than `Loc.f`: `Loc.f` looks the template up
+	# in the `text` half of the catalogue, which is generated from the literals in
+	# the code, and this one was a hardcoded German sentence that was in neither
+	# half. `{name}` instead of `%s` because a translation may want the list
+	# before the sentence.
+	return Loc.t(DRAFT_LOC_KEY, {"meshes": "\n".join(lines)})
 
 
-## The context the suggestion dialog shows for this screen.
+## The context the suggestion dialog shows for this screen, in the player's
+## language.
 static func context() -> String:
-	return CONTEXT
+	return Loc.t(CONTEXT_LOC_KEY)
 
 
 ## How the gallery describes the detail levels, for the HUD.

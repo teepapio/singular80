@@ -19,12 +19,29 @@ const CHAIN_STEP := 1.0
 ## Chain steps at which the bonus stops growing.
 const CHAIN_CAP := 12
 
-const RARITY_COLORS := {
-	"common": Color(0.392, 0.455, 0.545),
-	"uncommon": Color(0.133, 0.773, 0.369),
-	"rare": Color(0.231, 0.510, 0.965),
-	"epic": Color(0.659, 0.333, 0.969),
-}
+## The rarity ladder, one list for colour and for draft weight. It used to be
+## two dictionaries that both stopped at epic, while `DragonRpg.RARITIES` — the
+## other half of the same ladder — has five rungs: a legendary card therefore
+## got the common grey and weight 0.0, which made it undrawable. The ids here
+## are the ids there, in the same order.
+const RARITY_LADDER: Array[Dictionary] = [
+	{"id": "common", "color": Color(0.392, 0.455, 0.545), "weight": 10.0},
+	{"id": "uncommon", "color": Color(0.133, 0.773, 0.369), "weight": 6.0},
+	{"id": "rare", "color": Color(0.231, 0.510, 0.965), "weight": 3.0},
+	{"id": "epic", "color": Color(0.659, 0.333, 0.969), "weight": 1.5},
+	{"id": "legendary", "color": Color(0.984, 0.749, 0.141), "weight": 0.6},
+]
+
+## Colour per rarity and draft weight per rarity, both read out of the ladder.
+static var RARITY_COLORS: Dictionary = _rarity_field("color")
+static var RARITY_WEIGHT: Dictionary = _rarity_field("weight")
+
+
+static func _rarity_field(key: String) -> Dictionary:
+	var out: Dictionary = {}
+	for entry in RARITY_LADDER:
+		out[str(entry["id"])] = entry[key]
+	return out
 
 
 ## 1-based wave number for an elapsed time.
@@ -120,7 +137,7 @@ static func register_kill(state: Dictionary, now: float, base_xp: int) -> Dictio
 		"chain": chain,
 		"last_kill": now,
 		"bonus": int(round(float(maxi(0, capped - 1)) * CHAIN_STEP)),
-		"milestone": capped in [3, 5, 8, 12, 20],
+		"milestone": capped in [3, 5, 8, 12],
 	}
 
 
@@ -163,11 +180,6 @@ static func color_of(def: Dictionary) -> Color:
 
 ## How many offers one level-up presents.
 const DRAFT_SIZE := 3
-
-## Rarity weights of the draft. The arena screen used to keep its own copy of this
-## table; one table means the pool that is drawn and the pool that is previewed can
-## never drift apart.
-const RARITY_WEIGHT := {"common": 10.0, "uncommon": 6.0, "rare": 3.0, "epic": 1.5}
 
 ## What each stat serves. The axis decides how much a relative gain counts: in a
 ## survival run damage ends it long before tempo runs out, so an offensive card is
@@ -308,7 +320,7 @@ static func weighted_draft(candidates: Array, count: int, rolls: PackedFloat32Ar
 	while picks.size() < count and not available.is_empty():
 		var total := 0.0
 		for def in available:
-			total += float(RARITY_WEIGHT.get(str((def as Dictionary).get("rarity", "common")), 0.0))
+			total += _rarity_weight(def)
 		if total <= 0.0:
 			break
 		var roll: float = randf() if used >= rolls.size() else rolls[used]
@@ -316,13 +328,21 @@ static func weighted_draft(candidates: Array, count: int, rolls: PackedFloat32Ar
 		roll = clampf(roll, 0.0, 0.999999) * total
 		var index := available.size() - 1
 		for i in available.size():
-			roll -= float(RARITY_WEIGHT.get(str((available[i] as Dictionary).get("rarity", "common")), 0.0))
+			roll -= _rarity_weight(available[i])
 			if roll <= 0.0:
 				index = i
 				break
 		picks.append(available[index])
 		available.remove_at(index)
 	return picks
+
+
+## Draft weight of one card. A rarity the ladder does not know falls back to the
+## common weight: weight 0.0 would drop the card from the draft without a word,
+## which is what a legendary card used to do.
+static func _rarity_weight(def: Variant) -> float:
+	var rarity := str((def as Dictionary).get("rarity", "common"))
+	return float(RARITY_WEIGHT.get(rarity, RARITY_WEIGHT["common"]))
 
 
 ## A heal card for slot `slot`, scaled to what the player is actually missing. Three
@@ -363,7 +383,7 @@ static func hit_damage(armor: float) -> float:
 ## The damage of an average shot with crits folded in — the one unit both crit stats
 ## speak in, so a chance and a multiplier can be compared.
 static func _crit_power(crit_chance: float, crit_mult: float) -> float:
-	return 1.0 + clampf(crit_chance, 0.0, 0.9) * maxf(0.0, crit_mult - 1.0)
+	return 1.0 + clampf(crit_chance, 0.0, PlayerStats.MAX_CRIT_CHANCE) * maxf(0.0, crit_mult - 1.0)
 
 
 ## The worth of one offer in the one unit the draft compares in: how much bigger the
@@ -464,7 +484,7 @@ static func effect_text(upgrade: Dictionary, stats: PlayerStats, weapon: Diction
 			if weapon.is_empty():
 				return Loc.f("Fire rate  ×%s → ×%s", [_x(1.0 + stats.fire_rate), _x(1.0 + stats.fire_rate + amount)])
 			var base := float(weapon.get("cooldown", 500.0))
-			var faster := maxf(70.0, base / (1.0 + stats.fire_rate + amount))
+			var faster := maxf(PlayerStats.MIN_COOLDOWN_MS, base / (1.0 + stats.fire_rate + amount))
 			return Loc.f("Draw  %d → %d ms", [_i(stats.effective_cooldown(weapon)), _i(faster)])
 		"pickup_radius":
 			return Loc.f("Pickup  %d → %d", [_i(stats.pickup_radius), _i(stats.pickup_radius + amount)])

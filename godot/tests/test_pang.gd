@@ -249,10 +249,17 @@ func _reinforcements() -> void:
 	t.check(Pang.reinforcement_size(Pang.SIZE_LARGEST) > Pang.SIZE_LARGEST, "Der Nachschub ist kleiner als die Kettenkugeln")
 	t.check(Pang.reinforcement_size(Pang.SIZE_SMALLEST) <= Pang.SIZE_SMALLEST, "Und bleibt in der Größentabelle")
 
-	# The count sits in front of a noun in the HUD and on the level card.
-	t.equal(Pang.wave_label(1), "1 Welle", "Eine einzelne Welle heißt Welle")
-	t.equal(Pang.wave_label(0), "0 Wellen", "Keine heißt Wellen")
-	t.equal(Pang.wave_label(2), "2 Wellen", "Zwei heißen Wellen")
+	# The count sits in front of a noun in the HUD and on the level card, so the
+	# two forms have to be told apart — and a count cannot be read out of a
+	# translated sentence, so the expectation is the *template* from the
+	# catalogue, resolved by `Loc.f` (template first, formatting afterwards) and
+	# not a word in any one language. A third assertion pins what the first two
+	# are really about: one ball-less wave must not use the plural template.
+	t.equal(Pang.wave_label(1), Loc.f("%d wave", [1]), "Eine einzelne Welle benutzt die Einzahl")
+	t.equal(Pang.wave_label(0), Loc.f("%d waves", [0]), "Keine benutzt die Mehrzahl")
+	t.equal(Pang.wave_label(2), Loc.f("%d waves", [2]), "Zwei benutzen die Mehrzahl")
+	t.check(Pang.wave_label(1) != Loc.f("%d waves", [1]),
+		"Die beiden Formen sind verschiedene Vorlagen")
 
 
 func _sum_wave_balls(waves: Array) -> int:
@@ -401,13 +408,20 @@ func _flank() -> void:
 
 	# A wave without balls is total, not crashing: the band is then the whole
 	# arena and the label says so, because a hand-written layout may say that.
+	#
+	# `wave_side_label` answers in the source language — the screen hands the word
+	# to `Loc.f`, which resolves the values along with the template — so both
+	# sides of the comparison go through `Loc.resolve` and the assertion holds in
+	# German ("links") as well as in English ("left") and French ("gauche").
 	t.equal(Pang.wave_band({}), Vector2(-Pang.ARENA_HALF_WIDTH, Pang.ARENA_HALF_WIDTH), "Eine Welle ohne Kugeln hat das ganze Feld als Band")
-	t.equal(Pang.wave_side_label(_left_wave()), "links", "Ein Band links heißt links")
-	t.equal(Pang.wave_side_label(_left_wave([{"x": 10.0, "y": 15.0, "size": 3}])), "rechts", "…und rechts heißt rechts")
-	t.equal(Pang.wave_side_label(_left_wave([{"x": 0.0, "y": 15.0, "size": 3}])), "der Mitte", "Eine mittige Welle braucht die dritte Form")
+	t.equal(Loc.resolve(Pang.wave_side_label(_left_wave())), Loc.resolve("left"), "Ein Band links heißt links")
+	t.equal(Loc.resolve(Pang.wave_side_label(_left_wave([{"x": 10.0, "y": 15.0, "size": 3}]))), Loc.resolve("right"), "…und rechts heißt rechts")
+	t.equal(Loc.resolve(Pang.wave_side_label(_left_wave([{"x": 0.0, "y": 15.0, "size": 3}]))), Loc.resolve("the middle"), "Eine mittige Welle braucht die dritte Form")
 
 	# The level card names the side, so a player can read a level's plan before
-	# the first ball drops.
+	# the first ball drops. `wave_flanks_label` joins the same source words, and
+	# the test builds its expectation from the very labels the three bands above
+	# produced: no word is spelled out here in any language.
 	t.equal(Pang.wave_flanks_label(1), "", "Ein Level ohne Wellen nennt keine Seite")
 	var first_wave_level := 0
 	for level in range(1, Pang.TOTAL_LEVELS + 1):
@@ -415,11 +429,19 @@ func _flank() -> void:
 			first_wave_level = level
 			break
 	t.check(first_wave_level >= Pang.WAVE_FIRST_LEVEL, "Der erste Level mit Welle liegt nicht vor dem Nachschub")
-	t.check(Pang.wave_flanks_label(first_wave_level) in ["links", "rechts"], "Eine einzelne Welle nennt genau eine Seite")
+	var left_word := Loc.resolve(Pang.wave_side_label(_left_wave()))
+	var right_word := Loc.resolve(Pang.wave_side_label(_left_wave([{"x": 10.0, "y": 15.0, "size": 3}])))
+	t.check(Pang.wave_flanks_label(first_wave_level) in [left_word, right_word],
+		"Eine einzelne Welle nennt genau eine Seite")
 	var expected: Array[String] = []
 	for index in Pang.wave_count(Pang.TOTAL_LEVELS):
-		expected.append("links" if Pang.wave_flank(Pang.TOTAL_LEVELS, index) < 0 else "rechts")
-	t.equal(Pang.wave_flanks_label(Pang.TOTAL_LEVELS), ", ".join(expected),
+		expected.append(left_word if Pang.wave_flank(Pang.TOTAL_LEVELS, index) < 0 else right_word)
+	# A joined list of two words is not a catalogue entry, so the words are
+	# resolved one by one — which is also how the level card has to read them.
+	var named: Array[String] = []
+	for word in Pang.wave_flanks_label(Pang.TOTAL_LEVELS).split(", "):
+		named.append(Loc.resolve(word))
+	t.equal(", ".join(named), ", ".join(expected),
 		"Der letzte Level nennt seine Wellen in Ankunftsreihenfolge")
 	t.equal(expected.size(), 2, "…und das sind zwei Seiten")
 

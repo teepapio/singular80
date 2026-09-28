@@ -20,6 +20,16 @@ const runners: Runner[] = [];
 const children: ReturnType<typeof spawn>[] = [];
 let previousBin: string | undefined;
 
+/**
+ * Every case in this file spawns a real process and then *waits* for it, so the
+ * budget is the sum of the waits, not the global 20 s: `waitFor(…, 8_000)` alone
+ * fits, but the hard-timeout case waits 8 s for the start and another 15 s for the
+ * kill. Without its own limit that case failed as a bare `Test timed out`, which
+ * says nothing about *which* of the two waits ran out — `waitFor` names it in its
+ * own message, and this is what lets that message ever be seen.
+ */
+const SLOW = 60_000;
+
 /** A stand-in for `opencode run`: no model, deterministic, killable. */
 const FAKE_BIN = `#!/bin/sh
 # The runner passes "--title Vorschlag #<id>"; recover it so a fake commit can
@@ -149,7 +159,10 @@ function runsOf(store: Store, suggestionId: number): RunRecord[] {
 describe('Hartes Zeitlimit', () => {
   it('beendet einen hängenden Prozess und markiert den Run als fehlgeschlagen', async () => {
     process.env.FAKE_RUNNER_MODE = 'hang';
-    const h = harness({ runTimeoutMinutes: 0.02 });
+    // Three seconds, not 1.2: the timeout is measured from `startedAt`, and a
+    // shared machine that is slow to fork the stub would otherwise trip it before
+    // the process exists — a failure that looks like a runner bug.
+    const h = harness({ runTimeoutMinutes: 0.05 });
     const suggestion = h.suggestion();
     const run = h.runner.enqueue(suggestion, h.store.getSettings(), [suggestion]);
     await waitFor(() => h.store.getRun(run.id)!.status === 'running', 8000, 'Start');
@@ -160,7 +173,7 @@ describe('Hartes Zeitlimit', () => {
     expect(stored.note).toContain('Zeitüberschreitung');
     expect(stored.resultSummary.length).toBeGreaterThan(0);
     expect(h.store.getSuggestion(suggestion.id)!.status).toBe('failed');
-  });
+  }, SLOW);
 
   it('lässt einen Run ohne Zeitlimit laufen', async () => {
     process.env.FAKE_RUNNER_MODE = 'ok';
@@ -169,7 +182,7 @@ describe('Hartes Zeitlimit', () => {
     const run = h.runner.enqueue(suggestion, h.store.getSettings(), [suggestion]);
     expect(run.timeoutMs).toBe(0);
     await waitFor(() => h.store.getRun(run.id)!.status === 'succeeded', 8000, 'Erfolg');
-  });
+  }, SLOW);
 
   it('zählt die Wartezeit nach einem Neustart weiter', async () => {
     // A run that was already over budget when the new server starts: the timeout
@@ -220,7 +233,7 @@ describe('Hartes Zeitlimit', () => {
     expect(stored.status).toBe('failed');
     expect(stored.note).toContain('Zeitüberschreitung');
     await waitFor(() => !isProcessAlive(sleeper), 8000, 'Prozess beendet');
-  });
+  }, SLOW);
 });
 
 describe('Wiederholungen', () => {
@@ -243,7 +256,7 @@ describe('Wiederholungen', () => {
     // The retry is a new row with its own log, not a state of the old one.
     expect(second.logPath).not.toBe(first.logPath);
     expect(second.prompt).toContain('WIEDERHOLUNGSVERSUCH 2');
-  });
+  }, SLOW);
 
   it('wiederholt keinen erfolgreichen Run', async () => {
     process.env.FAKE_RUNNER_MODE = 'ok';
@@ -253,7 +266,7 @@ describe('Wiederholungen', () => {
     await waitFor(() => h.store.getRun(run.id)!.status === 'succeeded', 8000, 'Erfolg');
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(runsOf(h.store, suggestion.id)).toHaveLength(1);
-  });
+  }, SLOW);
 
   it('wiederholt nicht, wenn der fehlgeschlagene Versuch schon committet hat', async () => {
     process.env.FAKE_RUNNER_MODE = 'fail-commit';
@@ -267,7 +280,7 @@ describe('Wiederholungen', () => {
     expect(runsOf(h.store, suggestion.id)).toHaveLength(1);
     const events = h.runner.getEvents(run.id);
     expect(events.some((e) => e.text.includes('Kein Wiederholungsversuch'))).toBe(true);
-  });
+  }, SLOW);
 
   it('hält sich an die Obergrenze der Versuche', async () => {
     process.env.FAKE_RUNNER_MODE = 'fail';
@@ -280,7 +293,7 @@ describe('Wiederholungen', () => {
     expect(attempts).toHaveLength(3);
     expect(attempts.every((r) => r.status === 'failed')).toBe(true);
     expect(Math.max(...attempts.map((r) => r.attempt))).toBe(3);
-  });
+  }, SLOW);
 
   it('wartet mit dem Start auf den Backoff', async () => {
     process.env.FAKE_RUNNER_MODE = 'fail';
@@ -292,7 +305,7 @@ describe('Wiederholungen', () => {
     expect(retry.status).toBe('queued');
     expect(retry.notBefore).toBeGreaterThan(Date.now() + 100_000);
     expect(h.runner.queueState().queue.map((r) => r.id)).toContain(retry.id);
-  });
+  }, SLOW);
 
   it('überlebt einen Neustart: die wartende Wiederholung startet danach', async () => {
     process.env.FAKE_RUNNER_MODE = 'fail';
@@ -332,7 +345,7 @@ describe('Wiederholungen', () => {
     // instead of starting the retry immediately.
     expect(restarted.queueState().queue.map((r) => r.id)).toContain(retry.id);
     expect(retry.notBefore).toBeGreaterThan(Date.now());
-  });
+  }, SLOW);
 });
 
 describe('Pause', () => {
@@ -349,7 +362,7 @@ describe('Pause', () => {
     expect(h.store.getRun(runB.id)!.status).toBe('queued');
     expect(h.runner.queueState().paused).toBe(true);
     expect(h.runner.queueState().queue).toHaveLength(2);
-  });
+  }, SLOW);
 
   it('lässt den laufenden Run zu Ende laufen und setzt danach fort', async () => {
     process.env.FAKE_RUNNER_MODE = 'ok';
@@ -365,7 +378,7 @@ describe('Pause', () => {
     expect(h.store.getRun(runB.id)!.status).toBe('queued');
     h.runner.setPaused(false);
     await waitFor(() => h.store.getRun(runB.id)!.status === 'succeeded', 8000, 'Fortsetzung');
-  });
+  }, SLOW);
 
   it('überlebt einen Neustart im pausierten Zustand', async () => {
     const h = harness();
@@ -385,7 +398,7 @@ describe('Pause', () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(restarted.isPaused()).toBe(true);
     expect(h.store.getRun(run.id)!.status).toBe('queued');
-  });
+  }, SLOW);
 
   it('lässt sich abbrechen, während die Schlange pausiert ist', async () => {
     const h = harness();
@@ -395,13 +408,13 @@ describe('Pause', () => {
     expect(h.runner.cancel(run.id).ok).toBe(true);
     expect(h.store.getRun(run.id)!.status).toBe('cancelled');
     expect(h.runner.queueState().queue).toHaveLength(0);
-  });
+  }, SLOW);
 
   it('unterscheidet Abbruch von Zeitüberschreitung', async () => {
     // Both kill the process, but the outcome must stay distinguishable: a
     // cancellation is the operator's decision, a timeout is the runner's.
     process.env.FAKE_RUNNER_MODE = 'hang';
-    const h = harness({ runTimeoutMinutes: 0.02 });
+    const h = harness({ runTimeoutMinutes: 0.05 });
     const suggestion = h.suggestion();
     const cancelled = h.runner.enqueue(suggestion, h.store.getSettings(), [suggestion]);
     await waitFor(() => h.store.getRun(cancelled.id)!.status === 'running', 8000, 'Start');
@@ -411,7 +424,7 @@ describe('Pause', () => {
     expect(h.store.getRun(cancelled.id)!.note).toContain('Abgebrochen');
     // A cancelled run is not repeated either: the operator stopped it on purpose.
     expect(runsOf(h.store, suggestion.id)).toHaveLength(1);
-  });
+  }, SLOW);
 });
 
 describe('Manuelles Wiederholen', () => {
@@ -425,7 +438,7 @@ describe('Manuelles Wiederholen', () => {
     expect(result.ok).toBe(true);
     expect(result.run!.attempt).toBe(2);
     expect(result.run!.retryOf).toBe(first.id);
-  });
+  }, SLOW);
 
   it('verweigert das Wiederholen eines laufenden Runs', async () => {
     process.env.FAKE_RUNNER_MODE = 'hang';
@@ -434,7 +447,7 @@ describe('Manuelles Wiederholen', () => {
     const run = h.runner.enqueue(suggestion, h.store.getSettings(), [suggestion]);
     await waitFor(() => h.store.getRun(run.id)!.status === 'running', 8000, 'Start');
     expect(h.runner.retry(run.id).ok).toBe(false);
-  });
+  }, SLOW);
 
   it('verweigert das Wiederholen eines erfolgreichen Runs', async () => {
     process.env.FAKE_RUNNER_MODE = 'ok';
@@ -446,7 +459,7 @@ describe('Manuelles Wiederholen', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain('nichts zu wiederholen');
     expect(runsOf(h.store, suggestion.id)).toHaveLength(1);
-  });
+  }, SLOW);
 
   it('verweigert das Wiederholen, wenn schon ein Commit existiert', async () => {
     process.env.FAKE_RUNNER_MODE = 'fail-commit';
@@ -457,7 +470,7 @@ describe('Manuelles Wiederholen', () => {
     const result = h.runner.retry(run.id);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('Commit');
-  });
+  }, SLOW);
 
   it('erlaubt es mit force trotzdem', async () => {
     process.env.FAKE_RUNNER_MODE = 'fail-commit';
@@ -466,7 +479,7 @@ describe('Manuelles Wiederholen', () => {
     const run = h.runner.enqueue(suggestion, h.store.getSettings(), [suggestion]);
     await waitFor(() => h.store.getRun(run.id)!.status === 'failed', 8000, 'Fehlschlag');
     expect(h.runner.retry(run.id, { force: true }).ok).toBe(true);
-  });
+  }, SLOW);
 });
 
 describe('Scope-Buchführung am Run', () => {
@@ -479,7 +492,7 @@ describe('Scope-Buchführung am Run', () => {
     expect(run.scope).toBe('tetris');
     await waitFor(() => h.store.getRun(run.id)!.status === 'succeeded', 8000, 'Erfolg');
     expect(h.store.getRun(run.id)!.note).toBe('ok');
-  });
+  }, SLOW);
 
   it('merkt sich, dass ein Run außerhalb seines Scopes gearbeitet hat', async () => {
     process.env.FAKE_RUNNER_MODE = 'fail-edit';
@@ -491,5 +504,5 @@ describe('Scope-Buchführung am Run', () => {
     expect(audit.scopes).toContain('tetris');
     expect(audit.ok).toBe(true);
     expect(audit.checked).toBeGreaterThan(0);
-  });
+  }, SLOW);
 });

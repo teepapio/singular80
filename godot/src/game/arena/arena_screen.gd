@@ -15,6 +15,7 @@ const MAX_GEMS := 160
 const MAX_SPARKS := 160
 const BOSS_INTERVAL := 120.0
 const WAVE_DURATION := 30.0
+const HUD_INTERVAL := 0.1
 const SPAWN_MARGIN := 60.0
 
 const RARITY_COLOR := {
@@ -38,6 +39,14 @@ class Enemy:
 	var is_boss := false
 	var radius := 16.0
 	var flash := 0.0
+	## Everything `_draw_enemy` would otherwise recompute for all 220 pooled
+	## enemies on every frame. The colour is a hex string in the content file and
+	## the outline is a closed ring of unit offsets; both are constant for the
+	## life of a spawn, so they are built once here and only translated by `pos`
+	## while drawing.
+	var color := Color(0.58, 0.64, 0.72)
+	var shape := "circle"
+	var outline: PackedVector2Array = PackedVector2Array()
 
 
 class Bullet:
@@ -155,6 +164,10 @@ var mode: Dictionary = {}
 var elapsed := 0.0
 var kills := 0
 var score := 0
+## The HUD is rebuilt at 10 Hz, not every frame: its strings change slower than
+## the eye can read them and the rebuild is the most expensive thing this screen
+## does outside the entity loops.
+var _hud_timer := 0.0
 
 var enemies: Array[Enemy] = []
 var bullets: Array[Bullet] = []
@@ -321,15 +334,39 @@ func _build_hud() -> void:
 	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(_hint_label)
 
+	# The stick and the pause button follow the window, not the 1280x720 design
+	# rect: on a 4:3 tablet the stage floats in the middle of a 1280x1707 window
+	# and controls pinned to it sit a thousand pixels above the bottom edge.
+	var chrome := Control.new()
+	chrome.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	chrome.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content_layer().add_child(chrome)
+
 	_stick = VirtualStick.new()
 	_stick.size = VirtualStick.SIZE
-	_stick.position = Vector2(18, 720.0 - VirtualStick.SIZE.y - 16.0)
+	# Offsets, not `position`: with a bottom anchor the two differ by the parent's
+	# height, and only the offset means "16 px above the bottom edge".
+	_stick.anchor_left = 0.0
+	_stick.anchor_right = 0.0
+	_stick.anchor_top = 1.0
+	_stick.anchor_bottom = 1.0
+	_stick.offset_left = 18.0
+	_stick.offset_right = 18.0 + VirtualStick.SIZE.x
+	_stick.offset_top = -VirtualStick.SIZE.y - 16.0
+	_stick.offset_bottom = -16.0
 	_stick.visible = Game.touch_controls
-	layer.add_child(_stick)
+	chrome.add_child(_stick)
 
 	var pause := Ui.button("❚❚", Vector2(54, 46), UiTheme.PANEL_LIGHT, toggle_pause)
-	pause.position = Vector2(1280.0 - 74.0, 720.0 - 64.0)
-	layer.add_child(pause)
+	pause.anchor_left = 1.0
+	pause.anchor_right = 1.0
+	pause.anchor_top = 1.0
+	pause.anchor_bottom = 1.0
+	pause.offset_left = -74.0
+	pause.offset_right = -20.0
+	pause.offset_top = -64.0
+	pause.offset_bottom = -18.0
+	chrome.add_child(pause)
 	refresh_hud()
 
 
@@ -452,7 +489,16 @@ func _process(delta: float) -> void:
 	_update_sparks(delta)
 	_update_spawning(delta)
 	_update_shake(delta)
-	refresh_hud()
+	# The HUD is the heaviest string builder in the codebase: a boss preview, six
+	# `Loc.f` calls, two formatters and a loop over every mechanic — 60 times a
+	# second for text the eye cannot read. Ten times a second is
+	# indistinguishable. The score stays exact because it is three additions,
+	# not a rebuild.
+	score = kills * 10 + int(elapsed) * 2 + stats.level * 100
+	_hud_timer -= delta
+	if _hud_timer <= 0.0:
+		_hud_timer = HUD_INTERVAL
+		refresh_hud()
 	_board.queue_redraw()
 
 	if stats.hp <= 0.0:
@@ -678,6 +724,40 @@ func _spawn_enemy(enemy: Enemy, def: Dictionary, pos: Vector2, hp_mult: float, s
 	enemy.pos = pos
 	enemy.wobble = randf() * TAU
 	enemy.flash = 0.0
+	# Parsed and built once per spawn instead of once per enemy per frame.
+	enemy.color = UiTheme.from_hex(str(def.get("color", "#94a3b8")), Color(0.58, 0.64, 0.72))
+	enemy.shape = str(def.get("shape", "circle"))
+	enemy.outline = _shape_outline(enemy.shape, enemy.radius)
+
+
+## The closed ring of unit-radius offsets for a shape, with the first point
+## repeated at the end so `draw_polyline` closes it. Empty for the circle, which
+## is drawn with `draw_arc` and needs no polygon at all.
+func _shape_outline(shape: String, radius: float) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	match shape:
+		"square":
+			points.append(Vector2(-radius, -radius))
+			points.append(Vector2(radius, -radius))
+			points.append(Vector2(radius, radius))
+			points.append(Vector2(-radius, radius))
+		"triangle":
+			points.append(Vector2(0.0, -radius))
+			points.append(Vector2(radius, radius))
+			points.append(Vector2(-radius, radius))
+		"diamond":
+			points.append(Vector2(0.0, -radius))
+			points.append(Vector2(radius, 0.0))
+			points.append(Vector2(0.0, radius))
+			points.append(Vector2(-radius, 0.0))
+		"hexagon":
+			for i in 6:
+				var angle := PI / 3.0 * float(i) - PI * 0.5
+				points.append(Vector2(cos(angle), sin(angle)) * radius)
+		_:
+			return PackedVector2Array()
+	points.append(points[0])
+	return points
 
 
 func _update_spawning(delta: float) -> void:
@@ -754,7 +834,7 @@ func _spawn_boss(wave: int) -> void:
 	boss_banner_name = str(def.get("name", ""))
 	boss_banner_time = 3.4
 	if _boss_banner != null:
-		_boss_banner.text = "☠  %s erscheint  ☠" % boss_banner_name
+		_boss_banner.text = Loc.t("arena.boss_banner", {"name": boss_banner_name})
 		_boss_banner.add_theme_color_override("font_color", Color("f87171"))
 		_boss_banner.modulate.a = 1.0
 	show_toast(Loc.f("%s has surfaced", [boss_banner_name]), 2.0)
@@ -997,9 +1077,7 @@ func refresh_hud() -> void:
 	Ui.set_bar(_hp_bar, ratio, hp_color)
 	Ui.set_bar(_xp_bar, clampf(stats.xp / maxf(1.0, stats.xp_next), 0.0, 1.0), Color(0.220, 0.741, 0.973))
 
-	var seconds := int(elapsed)
 	var wave := ArenaRuns.wave_at(elapsed)
-	score = kills * 10 + seconds * 2 + stats.level * 100
 
 	# What is coming, and how long there is until it arrives.
 	var countdown := ArenaRuns.boss_countdown(elapsed, next_boss_at)
@@ -1012,9 +1090,9 @@ func refresh_hud() -> void:
 	# standing countdown may overwrite it.
 	if _boss_banner != null and boss_banner_time <= 0.0:
 		if countdown <= 20.0 and countdown > 0.0:
-			_boss_banner.text = "⚠  %s in %ds  ⚠" % [
+			_boss_banner.text = Loc.f("⚠  %s in %ds  ⚠", [
 				str(upcoming.get("name", "Boss")), maxi(0, int(ceil(countdown))),
-			]
+			])
 			_boss_banner.add_theme_color_override("font_color",
 				Color("fbbf24") if ArenaRuns.boss_threat(countdown) == 2 else Color("f87171"))
 			_boss_banner.modulate.a = 1.0
@@ -1076,6 +1154,9 @@ func _end_game() -> void:
 	if game_ended:
 		return
 	game_ended = true
+	# The death can come out of `_update_combat`, which runs before the frame's
+	# score line, so the final value is computed here rather than relied upon.
+	score = kills * 10 + int(elapsed) * 2 + stats.level * 100
 	Sfx.game_over()
 	shake_camera(400.0, 0.008)
 	Game.submit_score(Game.HS_ARENA, score)
@@ -1180,34 +1261,33 @@ class ArenaBoard:
 	## Enemy shapes mirror the content definition, exactly like the browser
 	## build's procedurally generated textures.
 	func _draw_enemy(enemy: Enemy) -> void:
-		var base: Color = UiTheme.from_hex(str(enemy.def.get("color", "#94a3b8")), Color(0.58, 0.64, 0.72))
-		if enemy.flash > 0.0:
-			base = Color(1, 1, 1)
+		# `color` and `outline` are parsed and built at spawn; only the translation
+		# by `pos` happens here, and that reuses one scratch array per frame
+		# instead of allocating two or three per enemy per draw.
+		var base: Color = Color(1, 1, 1) if enemy.flash > 0.0 else enemy.color
 		var r := enemy.radius
 		var border := Color(0.059, 0.090, 0.165, 0.55)
-		match str(enemy.def.get("shape", "circle")):
-			"square":
-				var box := Rect2(enemy.pos - Vector2(r, r), Vector2(r * 2.0, r * 2.0))
-				draw_rect(box, base)
-				draw_rect(box, border, false, 3.0)
-			"triangle":
-				var tri := PackedVector2Array([enemy.pos + Vector2(0, -r), enemy.pos + Vector2(r, r), enemy.pos + Vector2(-r, r)])
-				draw_colored_polygon(tri, base)
-				draw_polyline(PackedVector2Array([tri[0], tri[1], tri[2], tri[0]]), border, 3.0, true)
-			"diamond":
-				var dia := PackedVector2Array([enemy.pos + Vector2(0, -r), enemy.pos + Vector2(r, 0), enemy.pos + Vector2(0, r), enemy.pos + Vector2(-r, 0)])
-				draw_colored_polygon(dia, base)
-				draw_polyline(PackedVector2Array([dia[0], dia[1], dia[2], dia[3], dia[0]]), border, 3.0, true)
-			"hexagon":
-				var hex := PackedVector2Array()
-				for i in 6:
-					var angle := PI / 3.0 * float(i) - PI * 0.5
-					hex.append(enemy.pos + Vector2(cos(angle), sin(angle)) * r)
-				draw_colored_polygon(hex, base)
-				draw_polyline(PackedVector2Array([hex[0], hex[1], hex[2], hex[3], hex[4], hex[5], hex[0]]), border, 3.0, true)
-			_:
-				draw_circle(enemy.pos, r, base)
-				draw_arc(enemy.pos, r, 0.0, TAU, 24, border, 3.0, true)
+		if enemy.shape == "circle":
+			draw_circle(enemy.pos, r, base)
+			draw_arc(enemy.pos, r, 0.0, TAU, 24, border, 3.0, true)
+		elif enemy.shape == "square":
+			var box := Rect2(enemy.pos - Vector2(r, r), Vector2(r * 2.0, r * 2.0))
+			draw_rect(box, base)
+			draw_rect(box, border, false, 3.0)
+		else:
+			# `outline` is a closed ring; the fill wants it open.
+			var ring := enemy.outline
+			var last := ring.size() - 1
+			var points := PackedVector2Array()
+			points.resize(last + 1)
+			for i in last:
+				points[i] = enemy.pos + ring[i]
+			draw_colored_polygon(points, base)
+			# Shift by one to close the ring for the outline pass.
+			for i in range(last, 0, -1):
+				points[i] = enemy.pos + ring[i]
+			points[0] = points[last]
+			draw_polyline(points, border, 3.0, true)
 
 		if enemy.hp < enemy.max_hp and not enemy.is_boss:
 			var width := r * 2.0

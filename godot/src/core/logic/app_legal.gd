@@ -7,11 +7,39 @@ extends RefCounted
 ## addresses, which is why they live here and not in two screens.
 ## Pure logic, no renderer, so the suite can check it without a window.
 
-## Public pages. `googleplay/config/app.json` -> `urls`.
+## Public pages and the moderation mailbox.
+##
+## **These three constants are the single source.** The comment used to point at
+## `googleplay/config/app.json` -> `urls`, which nothing in this repository ever
+## reads: the game is built from the literals below, so the JSON was a second,
+## unwired copy of the same three values. `googleplay/scripts/preflight.mjs`
+## reads *these* lines and refuses a release while they still hold a
+## placeholder, and the same preflight run compares them against the JSON, so
+## the two ends cannot drift apart unnoticed any more.
+##
+## They are deliberately still `example.invalid`. An invented address that looks
+## real is worse than an obvious one: the preflight has to fail on a build that
+## still carries them, and `is_configured()` has to answer false so the report
+## dialog says so instead of mailing into the void.
 const TERMS_URL := "https://example.invalid/terms"
 const PRIVACY_URL := "https://example.invalid/privacy"
 ## Mailbox the reports go to.
 const MODERATION_MAIL := "moderation@example.invalid"
+
+## The three values by name, so `missing()` walks a list instead of repeating
+## three `if`s, and a fourth address only has to be added in one place.
+const ADDRESSES := {
+	"TERMS_URL": TERMS_URL,
+	"PRIVACY_URL": PRIVACY_URL,
+	"MODERATION_MAIL": MODERATION_MAIL,
+}
+
+## The same three as a list, which is what a release check walks:
+## `googleplay/scripts/preflight.mjs` matches it against the addresses it
+## expects, so a name added on one side only is noticed. That is also why the
+## names are spelled out instead of taken from `ADDRESSES` — a release check
+## cannot read a GDScript dictionary, only a list it can match against its own.
+const ADDRESS_NAMES: Array[String] = ["TERMS_URL", "PRIVACY_URL", "MODERATION_MAIL"];
 
 ## The reasons from §4 of the terms, in the same order. The player picks one, so
 ## the report is classified on arrival and is not just "I don't like it".
@@ -67,20 +95,22 @@ static func moderation_mail() -> String:
 
 ## Not filled in yet? Then the suggestion dialog must not enable its send button
 ## — an honest notice beats an invented address.
+##
+## All three are checked, not only the two the dialog needs: a build whose
+## privacy page is still a placeholder is a build Play rejects, and finding that
+## out from the console is a bad way to find it out.
 static func is_configured() -> bool:
-	return not TERMS_URL.contains("example.invalid") and not MODERATION_MAIL.contains("example.invalid")
+	return missing().is_empty()
 
 
 ## The addresses still missing from the config, for the error message and the
-## final check in the Play project.
+## final check in the Play project. Empty means the app may report abuse, and
+## `googleplay/scripts/preflight.mjs` treats a non-empty list as a blocker.
 static func missing() -> PackedStringArray:
 	var out := PackedStringArray()
-	if TERMS_URL.contains("example.invalid"):
-		out.append("TERMS_URL")
-	if PRIVACY_URL.contains("example.invalid"):
-		out.append("PRIVACY_URL")
-	if MODERATION_MAIL.contains("example.invalid"):
-		out.append("MODERATION_MAIL")
+	for name in ADDRESS_NAMES:
+		if str(ADDRESSES.get(name, "")).contains("example.invalid"):
+			out.append(name)
 	return out
 
 

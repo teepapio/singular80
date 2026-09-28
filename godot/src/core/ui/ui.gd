@@ -6,15 +6,15 @@ extends RefCounted
 ## `Loc.resolve()`, so being multi-language is decided in one place. Callers
 ## that want a key rather than a sentence write `Ui.label(Loc.t("ui.play"))`.
 
-const FONT := "res://assets/fonts/DejaVuSans.ttf"
-const FONT_BOLD := "res://assets/fonts/DejaVuSans-Bold.ttf"
+## Height of the top bar's buttons. The bar itself is as tall as its base class
+## wants (`Screen.BAR_HEIGHT`, `WorldScreen.HUD_HEIGHT`), the buttons are the
+## same size in both — they used to drift (40 vs 42) between two copies of the
+## same bar.
+const TOP_BAR_BUTTON := 40.0
 
 
 ## Shared font instances, loaded once and reused by every screen.
-static func font() -> Font:
-	return UiTheme.font_regular()
-
-
+## `UiTheme` owns the cache; this is the shortcut for the two hot callers.
 static func font_bold() -> Font:
 	return UiTheme.font_bold()
 
@@ -24,7 +24,7 @@ static func label(text: String, size: int = 18, color: Color = UiTheme.TEXT, bol
 	node.text = Loc.resolve(text)
 	node.add_theme_font_size_override("font_size", size)
 	node.add_theme_color_override("font_color", color)
-	node.add_theme_font_override("font", font_bold() if bold else font())
+	node.add_theme_font_override("font", UiTheme.font_bold() if bold else UiTheme.font_regular())
 	node.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return node
 
@@ -141,10 +141,53 @@ static func set_bar(node: ProgressBar, ratio: float, color: Color) -> void:
 		fill.bg_color = color
 
 
-## Centres a control inside a rect (works with the expanded stretch viewport).
-static func place(control: Control, rect: Rect2) -> void:
-	control.position = rect.position
-	control.size = rect.size
+## The persistent top bar of every screen, 2D and 3D alike.
+##
+## One builder, because the two base classes carried the same 35 lines with two
+## differences: `SuggestDialog.open` vs `open_world` (passed in as
+## `on_suggest`) and the bar's own height (passed in as `height`).
+## `owner` is the screen the ⚙ opens the settings on.
+static func top_bar(height: float, owner: Node, on_suggest: Callable) -> HBoxContainer:
+	var bar := HBoxContainer.new()
+	bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	bar.offset_bottom = height
+	bar.offset_left = 10
+	bar.offset_right = -10
+	bar.add_theme_constant_override("separation", 8)
+	bar.alignment = BoxContainer.ALIGNMENT_BEGIN
+
+	var brand := label("SINGULAR 80", 20, UiTheme.ACCENT, true)
+	brand.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	brand.custom_minimum_size = Vector2(190, 0)
+	bar.add_child(brand)
+
+	# Qualified: the local `spacer` would otherwise shadow the factory.
+	var spacer := Ui.spacer()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.add_child(spacer)
+
+	bar.add_child(button(Loc.t("ui.back_to_lobby"), Vector2(120, TOP_BAR_BUTTON), UiTheme.PANEL_LIGHT, func() -> void:
+		Sfx.select()
+		Router.to_lobby()
+	))
+	bar.add_child(button(Loc.t("ui.suggestion"), Vector2(150, TOP_BAR_BUTTON), UiTheme.PANEL_LIGHT, on_suggest))
+	# `⚙` is in DejaVu Sans; an emoji here would render as an empty box.
+	bar.add_child(button(Loc.t("ui.settings_short"), Vector2(60, TOP_BAR_BUTTON), UiTheme.PANEL_LIGHT, func() -> void:
+		Sfx.select()
+		SettingsDialog.open(owner)
+	))
+	var mute: Button
+	mute = button(mute_label(), Vector2(110, TOP_BAR_BUTTON), UiTheme.PANEL_LIGHT, func() -> void:
+		Game.toggle_muted()
+		mute.text = mute_label()
+	)
+	bar.add_child(mute)
+	return bar
+
+
+## Caption of the top bar's sound button, in the active language.
+static func mute_label() -> String:
+	return Loc.t("ui.sound_on") if not Game.muted else Loc.t("ui.sound_off")
 
 
 static func format_time(ms: float) -> String:

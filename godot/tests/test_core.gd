@@ -258,7 +258,12 @@ func _delivery() -> void:
 	t.equal(api.pending_count(), 1, "Der Vorschlag bleibt trotzdem in der Warteschlange")
 	t.equal(api.pending_hint(), "1 Vorschlag wartet auf Netz", "Der Spieler sieht, dass es wartet")
 	t.equal(pending_events.size(), 1, "Der Wartestand wird genau einmal gemeldet")
-	t.check(failed_events.size() == 1 and "saved locally" in str(failed_events[0]),
+	# The warning is a catalogue string now: `ui.queue_saved_unreachable` is what
+	# the client emits, and the test compares against the same key instead of
+	# grepping for the English fragment "saved locally" — which the German
+	# catalogue has never contained, so the assertion could only ever have
+	# measured the language, not the behaviour.
+	t.check(failed_events.size() == 1 and str(failed_events[0]) == Loc.t("ui.queue_saved_unreachable"),
 		"Der Spieler wird gewarnt, statt eine Löschung zu melden")
 	t.equal(sent_events.size(), 0, "Ohne Server wird kein Erfolg gemeldet")
 	var key := str(api._queue[0].get("clientKey", ""))

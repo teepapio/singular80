@@ -17,8 +17,10 @@ const I_PIECE_TYPE := 0
 ## Points for a line clear before level and difficulty bonuses.
 const LINE_SCORES: Array[int] = [0, 100, 300, 500, 800]
 
-## T-Spin line-clear bases. Index = lines cleared, so a T-Spin triple pays 1600.
-const TSPIN_SCORES: Array[int] = [400, 800, 1200, 1600]
+## T-Spin line-clear bases. Index = lines cleared, so a T-Spin triple pays 1600
+## and a T-Spin Quad, the only four-line clear a T can make, pays 1600 as well.
+## `score_clear` clamps to 0-4, so the table has to cover five entries.
+const TSPIN_SCORES: Array[int] = [400, 800, 1200, 1600, 1600]
 
 ## Extra points per Back-to-Back step (50, 100, 200, …).
 const B2B_STEP := 50
@@ -111,8 +113,8 @@ static func score_clear(lines: int, level: int, combo: int, back_to_back: int, t
 	var base := 0
 	if spin != "none":
 		# `TSPIN_SCORES` is indexed by lines cleared: index 0 is the line-less
-		# T-Spin, 1 a Single, 2 a Double and 3 a Triple.
-		base = TSPIN_SCORES[count]
+		# T-Spin, 1 a Single, 2 a Double, 3 a Triple and 4 a Quad.
+		base = TSPIN_SCORES[clampi(count, 0, TSPIN_SCORES.size() - 1)]
 		if spin == "mini":
 			base = int(round(float(base) * 0.5))
 	else:
@@ -373,10 +375,10 @@ static func is_quarter_turn(from_state: int, to_state: int) -> bool:
 	return step == 1 or step == 3
 
 
-## A kick in words, for the hint in the HUD: "Kick ↓2" or "ohne Kick".
+## A kick in words, for the hint in the HUD: "Kick ↓2" or "without a kick".
 static func kick_text(kick: Vector2i) -> String:
 	if kick == Vector2i.ZERO:
-		return "ohne Kick"
+		return "without a kick"
 	var parts: Array[String] = []
 	if kick.x < 0:
 		parts.append("←%d" % -kick.x)
@@ -498,11 +500,11 @@ static func spin_preview(piece_type: int, state: int, x: int, y: int, matrix: Ar
 			"kick": plan["kick"],
 			"spin": spin,
 			"rows": rows,
-			"label": "%s  ·  %s→%s  %s" % [
+			"label": Loc.f("%s  ·  %s→%s  %s", [
 				spin_name(spin, rows),
 				state_name(state),
 				state_name(int(plan["state"])),
 				kick_text(plan["kick"]),
-			],
+			]),
 		}
 	return best

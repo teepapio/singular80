@@ -11,7 +11,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import {
-  config, PROJECT, ASSET_DIR, BUILD_DIR, SHOT_DIR, listTodos, isTodo,
+  config, PROJECT, GODOT_DIR, ASSET_DIR, BUILD_DIR, SHOT_DIR, listTodos, isTodo,
   ok, info, warn, fail, step, done, abort, tryRun, which,
 } from './lib.mjs';
 
@@ -55,6 +55,71 @@ for (const [name, url] of Object.entries(cfg.urls)) {
 soft(cfg.app.storeName.length <= 30, `App-Name "${cfg.app.storeName}" (${cfg.app.storeName.length}/30 Zeichen)`, `App-Name ist ${cfg.app.storeName.length} Zeichen — Play erlaubt 30.`);
 soft(/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(cfg.app.packageName), `Paketname ${cfg.app.packageName} ist gültig`, `Paketname ${cfg.app.packageName} ist kein gültiger Android-Paketname.`);
 soft(cfg.version.versionCode >= 1, `versionCode ${cfg.version.versionCode}`, 'versionCode muss ≥ 1 sein.');
+
+// --- 1b. addresses the APK actually ships -------------------------------------
+step('1b Meldeadressen im Spiel');
+
+// `godot/src/core/logic/app_legal.gd` is the single source for the three
+// addresses the game carries; `config/app.json` only holds the same values for
+// the store listing, and nothing in the game reads it from there. That is why
+// this reads the GDScript and not the JSON above: a release with a filled-in
+// config and an unfilled-in `app_legal.gd` passes every other check in this file
+// and still ships an app whose report button says "not configured" — and the
+// in-app abuse report is something Play requires of an app with player
+// submissions, so it is a blocker and not a hint.
+//
+// The values are parsed rather than imported: the game is GDScript and there is
+// no way to run it from here. `ADDRESSES` in that file lists the names, and the
+// two lists are compared so a fourth address cannot be added to one and not the
+// other without this noticing.
+const APP_LEGAL = join(GODOT_DIR, 'src', 'core', 'logic', 'app_legal.gd');
+const APP_LEGAL_CONSTS = ['TERMS_URL', 'PRIVACY_URL', 'MODERATION_MAIL'];
+const APP_LEGAL_VALUES = {};
+if (!existsSync(APP_LEGAL)) {
+  hard(false, '', `${APP_LEGAL} fehlt — ohne sie hat das Spiel keine Meldeadresse.`);
+} else {
+  const source = readFileSync(APP_LEGAL, 'utf8');
+  const declared = [...source.matchAll(/^const ADDRESS_NAMES:[^=]*=\s*\[([^\]]*)\]/gm)]
+    .flatMap((m) => [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]));
+  hard(
+    declared.length > 0 && APP_LEGAL_CONSTS.every((n) => declared.includes(n)),
+    `ADDRESS_NAMES nennt ${declared.length} Adresse(n)`,
+    `ADDRESS_NAMES in app_legal.gd nennt ${declared.join(', ') || 'nichts'} — erwartet ${APP_LEGAL_CONSTS.join(', ')}.`,
+  );
+  for (const name of APP_LEGAL_CONSTS) {
+    const found = new RegExp(`^const ${name} := "([^"]*)"$`, 'm').exec(source);
+    if (!found) {
+      hard(false, '', `app_legal.gd: ${name} fehlt oder ist keine const — der Preflight kann sie nicht prüfen.`);
+      continue;
+    }
+    const value = found[1];
+    const placeholder = /(example\.invalid|example\.com|TODO)/i.test(value);
+    // A placeholder is the failure this check exists for, so it is `hard`: the
+    // constant is still `example.invalid`, `is_configured()` answers false and
+    // the player cannot report anything.
+    hard(!placeholder, `${name} ist ausgefüllt`,
+      `${name} = ${value} — Platzhalter. Play verlangt eine erreichbare Adresse, und ohne sie ist der Melde-Dialog im Spiel tot.`);
+    APP_LEGAL_VALUES[name] = value;
+    // The shape only says something about an address that is there. Checking it
+    // on a placeholder would report `https://example.invalid/terms` as a
+    // well-formed https-URL one line after calling it a placeholder.
+    if (placeholder) continue;
+    const shape = name === 'MODERATION_MAIL' ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/ : /^https:\/\/[^\s]+$/;
+    soft(shape.test(value), `${name} sieht aus wie eine echte Adresse`,
+      `${name} = ${value} — erwartet wird ${name === 'MODERATION_MAIL' ? 'eine E-Mail-Adresse' : 'eine https-URL'}.`);
+  }
+  // And the two ends must not drift: the store listing quotes
+  // `config/app.json`, the game ships `app_legal.gd`, and a player who reads one
+  // and reports to the other has been told two different things. Soft, because
+  // one side may still be a `TODO:` and a `TODO:` is not a disagreement yet.
+  for (const [constName, cfgName] of [['TERMS_URL', 'termsOfUse'], ['PRIVACY_URL', 'privacyPolicy']]) {
+    const inGame = APP_LEGAL_VALUES[constName] ?? '';
+    const inConfig = String(cfg.urls?.[cfgName] ?? '');
+    if (!inGame || isTodo(inConfig) || isTodo(inGame)) continue;
+    soft(inGame === inConfig, `${constName} stimmt mit urls.${cfgName} überein`,
+      `${constName} = ${inGame}, urls.${cfgName} = ${inConfig} — dieselbe Seite, zwei verschiedene Adressen.`);
+  }
+}
 
 // --- 2. store listing -------------------------------------------------------
 step('2 Store-Texte');

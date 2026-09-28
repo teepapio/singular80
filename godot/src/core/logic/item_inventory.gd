@@ -59,9 +59,20 @@ static func stack_data_equals(a: Dictionary, b: Dictionary) -> bool:
 	if a.size() != b.size():
 		return false
 	for key in a:
-		if not b.has(key) or float(a[key]) != float(b[key]):
+		if not b.has(key) or not _data_value_equals(a[key], b[key]):
 			return false
 	return true
+
+
+## Two per-stack values mean the same state. Numbers compare numerically — a
+## `3` that came back from JSON and a `3.0` held in memory are one value —
+## everything else compares by equality. Comparing everything through `float()`
+## made two *different* enchantments look equal, because `float("sharp")` and
+## `float("blunt")` are both 0, and the merge then threw one of them away.
+static func _data_value_equals(a: Variant, b: Variant) -> bool:
+	if (a is int or a is float) and (b is int or b is float):
+		return is_equal_approx(float(a), float(b))
+	return a == b
 
 
 ## True when two stacks can be merged into one (same id + same data).
@@ -473,8 +484,12 @@ func sort(compare: Callable = Callable()) -> void:
 func _default_compare(a: ItemStack, b: ItemStack) -> bool:
 	var def_a: Dictionary = catalog.require(a.id)
 	var def_b: Dictionary = catalog.require(b.id)
-	if str(def_a["rarity"]) != str(def_b["rarity"]):
-		return int(RARITY_ORDER[def_b["rarity"]]) < int(RARITY_ORDER[def_a["rarity"]])
+	# An unknown rarity sorts last instead of crashing the sort on a missing
+	# key, which is what indexing `RARITY_ORDER` with a made-up name did.
+	var rarity_a := int(RARITY_ORDER.get(str(def_a["rarity"]), -1))
+	var rarity_b := int(RARITY_ORDER.get(str(def_b["rarity"]), -1))
+	if rarity_a != rarity_b:
+		return rarity_b < rarity_a
 	if str(def_a["name"]) != str(def_b["name"]):
 		return str(def_a["name"]) < str(def_b["name"])
 	return a.id < b.id
@@ -564,7 +579,7 @@ func can_equip(index: int) -> bool:
 	var stack := get_slot(index)
 	if stack == null:
 		return false
-	return str(catalog.require(stack.id)["slot"]) != ""
+	return is_equip_slot(str(catalog.require(stack.id)["slot"]))
 
 
 ## Equips the item at `index`. An already-equipped item is swapped back into the
@@ -576,7 +591,11 @@ func equip(index: int) -> bool:
 	if stack == null:
 		return false
 	var slot := str(catalog.require(stack.id)["slot"])
-	if slot == "":
+	# The slot has to be one this inventory knows. A catalog entry naming
+	# anything outside `EQUIP_SLOTS` used to be written into `_equipped` and
+	# then ignored by `equipment()`, `total_weight` and the save, so the item
+	# existed nowhere and was gone on the next load.
+	if not is_equip_slot(slot):
 		return false
 	_slots[index] = null
 	var previous: ItemStack = _equipped[slot]
@@ -746,6 +765,13 @@ static func _sanitize(value: Variant) -> ItemStack:
 	if raw is Dictionary:
 		for key in raw:
 			var entry: Variant = (raw as Dictionary)[key]
-			if entry is int or entry is float:
-				data[key] = float(entry)
+			# Numbers, strings and flags survive the round trip. A stack may
+			# carry an enchantment, and that is a string: keeping only numbers
+			# deleted it on the first save, against the promise that a per-stack
+			# state is never lost. Anything else is not JSON-safe state.
+			match typeof(entry):
+				TYPE_INT, TYPE_FLOAT:
+					data[str(key)] = float(entry)
+				TYPE_STRING, TYPE_BOOL:
+					data[str(key)] = entry
 	return ItemStack.new(id, count, data)

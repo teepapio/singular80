@@ -213,10 +213,10 @@ func _build_ui() -> void:
 
 	var title := Ui.label(Loc.f("%s  %s", [theme["icon"], theme["title"]]), 22, UiTheme.TEXT, true)
 	column.add_child(title)
-	_score_label = _hud_value(column, "Punkte", "0", Color("facc15"))
-	_best_label = _hud_value(column, "Bestwert", str(highscore), Color("facc15"))
-	_used_label = _hud_value(column, "Felder belegt", "0", UiTheme.TEXT)
-	_sel_label = _hud_value(column, "Auswahl", "—", UiTheme.TEXT_DIM)
+	_score_label = _hud_value(column, Loc.resolve("Points"), "0", Color("facc15"))
+	_best_label = _hud_value(column, Loc.t("merge.best"), Loc.number(highscore), Color("facc15"))
+	_used_label = _hud_value(column, Loc.t("merge.fields_used"), "0", UiTheme.TEXT)
+	_sel_label = _hud_value(column, Loc.t("merge.selection"), "—", UiTheme.TEXT_DIM)
 
 	_mode_label = Ui.button(_mode_caption(), Vector2(190, 52), UiTheme.ACCENT, _toggle_mode)
 	_mode_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)

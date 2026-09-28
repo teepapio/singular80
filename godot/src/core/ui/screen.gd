@@ -8,6 +8,16 @@ extends Control
 
 const BAR_HEIGHT := 52
 const DESIGN := Vector2(1280, 720)
+## Draw order inside `_root`. Godot paints later siblings on top, and
+## `_ready_game()` appends the screen's own content to the same `_root` after
+## the bar exists — the four menu screens that paint an opaque full-rect
+## background covered the brand, "◀ Lobby", "Vorschlag", ⚙ and the mute button,
+## and with them every `show_toast`. On `main_menu`, `game_over` and
+## `pang_menu` nothing else offers ⚙, so the server address was unreachable
+## there. The bar therefore floats above the content, and a modal layer above
+## the bar, which is what a dimmed pause overlay has always done.
+const CHROME_Z := 10
+const MODAL_Z := 20
 
 var screen_id: String = ""
 var data: Dictionary = {}
@@ -57,58 +67,26 @@ func _build() -> void:
 	_root.add_child(_stage)
 
 	_bar = _build_top_bar()
+	_bar.z_index = CHROME_Z
 	_root.add_child(_bar)
 
 	_toast = Ui.label("", 17, UiTheme.TEXT)
 	_toast.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	_toast.position = -Vector2(260, 0) + Vector2(0, 300)
-	_toast.size = Vector2(520, 40)
+	# `offset_*`, never `position`: with the centre preset `position` is
+	# measured from the parent origin, so the rect would land at
+	# (-260, 300) — half off screen and the text hard against the left edge.
+	_toast.offset_left = -260.0
+	_toast.offset_right = 260.0
+	_toast.offset_top = 300.0
+	_toast.offset_bottom = 340.0
 	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_toast.visible = false
+	_toast.z_index = CHROME_Z
 	_root.add_child(_toast)
 
 
 func _build_top_bar() -> Control:
-	var bar := HBoxContainer.new()
-	bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	bar.offset_bottom = BAR_HEIGHT
-	bar.offset_left = 10
-	bar.offset_right = -10
-	bar.add_theme_constant_override("separation", 8)
-	bar.alignment = BoxContainer.ALIGNMENT_BEGIN
-
-	var brand := Ui.label("SINGULAR 80", 20, UiTheme.ACCENT, true)
-	brand.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	brand.custom_minimum_size = Vector2(190, 0)
-	bar.add_child(brand)
-
-	var spacer := Ui.spacer()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.add_child(spacer)
-
-	bar.add_child(Ui.button(Loc.t("ui.back_to_lobby"), Vector2(120, 40), UiTheme.PANEL_LIGHT, func() -> void:
-		Sfx.select()
-		Router.to_lobby()
-	))
-	bar.add_child(Ui.button(Loc.t("ui.suggestion"), Vector2(150, 40), UiTheme.PANEL_LIGHT, func() -> void:
-		SuggestDialog.open(self)
-	))
-	# `⚙` is in DejaVu Sans; an emoji here would render as an empty box.
-	bar.add_child(Ui.button(Loc.t("ui.settings_short"), Vector2(60, 40), UiTheme.PANEL_LIGHT, func() -> void:
-		Sfx.select()
-		SettingsDialog.open(self)
-	))
-	var mute: Button
-	mute = Ui.button(_mute_label(), Vector2(110, 40), UiTheme.PANEL_LIGHT, func() -> void:
-		Game.toggle_muted()
-		mute.text = _mute_label()
-	)
-	bar.add_child(mute)
-	return bar
-
-
-func _mute_label() -> String:
-	return Loc.t("ui.sound_on") if not Game.muted else Loc.t("ui.sound_off")
+	return Ui.top_bar(BAR_HEIGHT, self, func() -> void: SuggestDialog.open(self))
 
 
 ## Container for adaptive, full-window layouts (menus, lobbies).
@@ -137,6 +115,9 @@ func modal() -> Control:
 	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.set_meta("modal", true)
+	# Above the bar (`CHROME_Z`): the overlay's backdrop dims whatever is
+	# under it, the top bar included — as it always did.
+	layer.z_index = MODAL_Z
 	_root.add_child(layer)
 	return layer
 

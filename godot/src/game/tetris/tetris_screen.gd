@@ -129,12 +129,12 @@ func _build_ui() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(title)
 
-	_score_label = _stat(layer, 74, "PUNKTE", "0")
-	_level_label = _stat(layer, 142, "LEVEL", "1")
-	_lines_label = _stat(layer, 210, "LINIEN", "0")
-	_combo_label = _stat(layer, 278, "COMBO", "0")
-	_b2b_label = _stat(layer, 346, "BACK-TO-BACK", "0")
-	_perfect_stat_label = _stat(layer, 414, "PERFEKT", "—")
+	_score_label = _stat(layer, 74, Loc.t("tetris.stat_points"), "0")
+	_level_label = _stat(layer, 142, Loc.t("tetris.stat_level"), "1")
+	_lines_label = _stat(layer, 210, Loc.t("tetris.stat_lines"), "0")
+	_combo_label = _stat(layer, 278, Loc.t("tetris.stat_combo"), "0")
+	_b2b_label = _stat(layer, 346, Loc.t("tetris.stat_b2b"), "0")
+	_perfect_stat_label = _stat(layer, 414, Loc.t("tetris.stat_perfect"), "—")
 
 	_danger_label = Ui.label("", 15, Color("f87171"), true)
 	_danger_label.position = Vector2(24, 486)
@@ -185,13 +185,13 @@ func _build_ui() -> void:
 	_perfect_bonus.modulate.a = 0.0
 	layer.add_child(_perfect_bonus)
 
-	var preview_caption := Ui.label("PREVIEW", 15, UiTheme.TEXT_DIM)
+	var preview_caption := Ui.label(Loc.t("tetris.preview_caption"), 15, UiTheme.TEXT_DIM)
 	preview_caption.position = Vector2(970, 68)
 	preview_caption.size = Vector2(180, 20)
 	preview_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(preview_caption)
 
-	var hold_caption := Ui.label("HOLD", 15, UiTheme.TEXT_DIM)
+	var hold_caption := Ui.label(Loc.t("tetris.hold_caption"), 15, UiTheme.TEXT_DIM)
 	hold_caption.position = Vector2(970, 500)
 	hold_caption.size = Vector2(180, 20)
 	hold_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -203,7 +203,7 @@ func _build_ui() -> void:
 	_highscore_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(_highscore_label)
 
-	_build_touch_controls(layer)
+	_build_touch_controls()
 
 	# The full control reference lives in the pause overlay; on-screen players
 	# only need the essentials.
@@ -254,20 +254,37 @@ func _help_lines() -> Array:
 
 
 ## On-screen controls so the game is fully playable without a keyboard.
-func _build_touch_controls(layer: Control) -> void:
+##
+## The seven action buttons live in the full-window layer, not in `stage()`.
+## The stage is the centred 1280x720 design rect: on a 4:3 tablet the window is
+## 1280x1707, the stage floats in the middle, and controls pinned to
+## `position = Vector2(20, 650)` end up a thousand pixels above the bottom edge —
+## off the thumb. Anchoring to the root rect keeps them under the fingers on
+## every aspect ratio.
+##
+## They are also gated on `Game.touch_controls`, the one switch the settings
+## dialog has; without it a desktop player gets seven permanent on-screen Tetris
+## buttons over the board.
+func _build_touch_controls() -> void:
+	if not Game.touch_controls:
+		return
+	var layer := Control.new()
+	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content_layer().add_child(layer)
 	var size := Vector2(66, 58)
 	var left := Ui.button("◀", size, UiTheme.PANEL_LIGHT, func() -> void:
 		_move_h(-1)
 		_refresh()
 	)
-	left.position = Vector2(20, 586)
+	_anchor(left, Vector2(0.0, 1.0), Vector2(20, -130))
 	layer.add_child(left)
 
 	var right := Ui.button("▶", size, UiTheme.PANEL_LIGHT, func() -> void:
 		_move_h(1)
 		_refresh()
 	)
-	right.position = Vector2(94, 586)
+	_anchor(right, Vector2(0.0, 1.0), Vector2(94, -130))
 	layer.add_child(right)
 
 	var down := Ui.button("▼", size, UiTheme.PANEL_LIGHT, func() -> void:
@@ -277,42 +294,60 @@ func _build_touch_controls(layer: Control) -> void:
 			_lock_piece()
 		_refresh()
 	)
-	down.position = Vector2(94, 650)
+	_anchor(down, Vector2(0.0, 1.0), Vector2(94, -66))
 	layer.add_child(down)
 
 	var drop := Ui.button("⤓", Vector2(90, 58), UiTheme.ACCENT, func() -> void:
 		_hard_drop()
 		_refresh()
 	)
-	drop.position = Vector2(20, 650)
+	_anchor(drop, Vector2(0.0, 1.0), Vector2(20, -66))
 	layer.add_child(drop)
 
 	var hold := Ui.button("Stop", Vector2(100, 58), UiTheme.PANEL_LIGHT, func() -> void:
 		_hold_piece()
 		_refresh()
 	)
-	hold.position = Vector2(996, 650)
+	_anchor(hold, Vector2(1.0, 1.0), Vector2(-184, -66))
 	layer.add_child(hold)
 
 	var rotate := Ui.button("↻", Vector2(72, 58), UiTheme.PANEL_LIGHT, func() -> void:
 		_rotate(true)
 		_refresh()
 	)
-	rotate.position = Vector2(1188, 650)
+	_anchor(rotate, Vector2(1.0, 1.0), Vector2(-92, -66))
 	layer.add_child(rotate)
 
 	var rotate_ccw := Ui.button("↺", Vector2(72, 58), UiTheme.PANEL_LIGHT, func() -> void:
 		_rotate(false)
 		_refresh()
 	)
-	rotate_ccw.position = Vector2(1108, 650)
+	_anchor(rotate_ccw, Vector2(1.0, 1.0), Vector2(-172, -66))
 	layer.add_child(rotate_ccw)
 
 	# How far to look ahead is a matter of taste, so it is a button rather than a
-	# buried setting.
+	# buried setting. It labels the preview box, and that box is part of the
+	# fixed stage layout like the board and the stat column — so this one button
+	# stays in the stage and moves with the thing it describes.
 	_preview_button = Ui.button("", Vector2(100, 30), UiTheme.PANEL_LIGHT, _cycle_preview)
 	_preview_button.position = Vector2(1010, 452)
-	layer.add_child(_preview_button)
+	stage().add_child(_preview_button)
+
+
+## Anchors a control to one corner of its parent and offsets it from there, so
+## the offset means "from the edge" instead of "from the top left of a 1280x720
+## design that may not be where the window is".
+func _anchor(control: Control, anchor: Vector2, offset: Vector2) -> void:
+	control.anchor_left = anchor.x
+	control.anchor_right = anchor.x
+	control.anchor_top = anchor.y
+	control.anchor_bottom = anchor.y
+	control.offset_left = offset.x
+	control.offset_right = offset.x
+	control.offset_top = offset.y
+	control.offset_bottom = offset.y + control.custom_minimum_size.y
+	control.grow_horizontal = Control.GROW_DIRECTION_BOTH if anchor.x > 0.5 else Control.GROW_DIRECTION_END
+	control.grow_vertical = Control.GROW_DIRECTION_BEGIN if anchor.y > 0.5 else Control.GROW_DIRECTION_END
 
 
 ## Steps the queue preview through `TetrisRules.PREVIEW_OPTIONS`.
@@ -767,7 +802,7 @@ func _toggle_pause() -> void:
 		_show_overlay("Pause", UiTheme.TEXT, [
 			["Resume", func() -> void: _toggle_pause()],
 			["Restart", func() -> void: reset_game()],
-			["◀  Lobby", func() -> void: Router.to_lobby()],
+			[Loc.t("ui.back_to_lobby"), func() -> void: Router.to_lobby()],
 		], help)
 	else:
 		close_modals()
@@ -784,14 +819,14 @@ func _trigger_game_over() -> void:
 		Game.submit_score(Game.HS_TETRIS, score)
 		highscore = score
 	var rows := [
-		["Punkte: %d" % score],
-		["Linien: %d   ·   Level: %d" % [lines, level]],
-		["Perfekte Clears: %d" % perfect_clears],
-		["★ Neuer Highscore! ★" if is_record else "Highscore: %d" % highscore],
+		[Loc.f("Points: %s", [Ui.format_number(score)])],
+		[Loc.f("Lines: %d   ·   Level: %d", [lines, level])],
+		[Loc.tn("tetris.perfect_clears", perfect_clears)],
+		[Loc.t("tetris.new_record") if is_record else Loc.t("ui.highscore_of", {"score": Ui.format_number(highscore)})],
 	]
 	_show_overlay("GAME OVER", Color("f87171"), [
-		["🔁  Nochmal", func() -> void: reset_game()],
-		["◀  Lobby", func() -> void: Router.to_lobby()],
+		[Loc.t("tetris.play_again"), func() -> void: reset_game()],
+		[Loc.t("ui.back_to_lobby"), func() -> void: Router.to_lobby()],
 	], rows, Color("facc15") if is_record else Color("cbd5e1"))
 
 
@@ -830,10 +865,10 @@ func _refresh() -> void:
 	_board_view.queue_redraw()
 	if _score_label == null:
 		return
-	_score_label.text = str(score)
+	_score_label.text = Ui.format_number(score)
 	_level_label.text = str(level)
 	_lines_label.text = str(lines)
-	_highscore_label.text = "Highscore: %d" % highscore
+	_highscore_label.text = Loc.t("ui.highscore_of", {"score": Ui.format_number(highscore)})
 	_combo_label.text = ("×%d" % combo) if combo > 0 else "—"
 	_b2b_label.text = ("×%d" % back_to_back) if back_to_back > 0 else "—"
 	if _perfect_stat_label != null:
@@ -843,7 +878,7 @@ func _refresh() -> void:
 	if _spin_hint != null:
 		_spin_hint.text = str(spin_preview["label"]) if not spin_preview.is_empty() else ""
 	if _preview_button != null:
-		_preview_button.text = "Vorschau %d" % preview_size
+		_preview_button.text = Loc.t("tetris.preview_size", {"size": preview_size})
 
 
 func _move_h(dir: int) -> void:

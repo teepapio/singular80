@@ -5,7 +5,7 @@ extends RefCounted
 ## Port of `src/game/holdem.ts`.
 
 const CATEGORY_NAMES := [
-	"High Card", "Paar", "Zwei Paare", "Drilling", "Straße", "Flush",
+	"High Card", "Paar", "Zwei Paare", "Drilling", "Straight", "Flush",
 	"Full House", "Vierling", "Straight Flush", "Royal Flush",
 ]
 
@@ -502,6 +502,10 @@ class HoldemGame:
 			return false
 		var to_call := current_bet - player.bet
 		var kind := str(action.get("type", ""))
+		# The bet this seat was facing *before* the action: `act` raises
+		# `current_bet` to the committed amount, so counting afterwards can never
+		# see an all-in that went above the bet and calls every shove a call.
+		var facing := current_bet
 
 		match kind:
 			"fold":
@@ -532,7 +536,7 @@ class HoldemGame:
 					min_raise = increment
 				current_bet = player.bet
 				player.has_acted = true
-				player.last_action = ("All-in %d" % player.bet) if player.all_in else ("Erhöht %d" % player.bet)
+				player.last_action = ("All-in %d" % player.bet) if player.all_in else ("Raised to %d" % player.bet)
 			"allin":
 				var total := player.bet + player.chips
 				if total > current_bet:
@@ -548,22 +552,25 @@ class HoldemGame:
 			_:
 				return false
 
-		_count_action(player, kind)
+		_count_action(player, kind, facing)
 		_advance()
 		return true
 
 	## One line of the read-out: what this seat actually did, which is what makes
 	## the personality badge trustworthy instead of decorative.
-	func _count_action(player: Player, kind: String) -> void:
+	func _count_action(player: Player, kind: String, facing: int) -> void:
 		match kind:
 			"fold":
 				player.tally["folds"] = int(player.tally.get("folds", 0)) + 1
 			"raise":
 				player.tally["raises"] = int(player.tally.get("raises", 0)) + 1
 			"allin":
-				# An all-in above the current bet is an aggressive move, a short
-				# all-in is just a call that happened to empty the stack.
-				var key := "raises" if player.bet > current_bet else "calls"
+				# An all-in that ends above the bet the seat was facing is an
+				# aggressive move, a short all-in is just a call that happened to
+				# empty the stack. The comparison uses `facing`, the bet from
+				# *before* the action, because committing has already raised
+				# `current_bet` to the all-in amount.
+				var key := "raises" if player.bet > facing else "calls"
 				player.tally[key] = int(player.tally.get(key, 0)) + 1
 			"call":
 				player.tally["calls"] = int(player.tally.get("calls", 0)) + 1
@@ -728,6 +735,11 @@ class HoldemGame:
 				var hand: Variant = values[i]
 				if hand != null and (hand as Holdem.HandValue).score == best_score:
 					winners.append(i)
+			# No eligible seat has a five-card hand — a table where every hand is
+			# still null, or one that was dealt a board without a full hand. The
+			# money stays in the pot instead of dividing by zero.
+			if winners.is_empty():
+				continue
 			var share: int = int(floor(float(amount) / float(winners.size())))
 			var distributed := 0
 			for winner in winners:

@@ -9,7 +9,15 @@ spiegelt.
 | **App** | Godot 4.5 (GDScript), Android 7.0+ (`arm64-v8a`), Release-APK 81 MB — schlank 29 MB |
 | **Backend** | Fastify + SQLite, Content-Server, Discord-Bot, OpenCode-Runner |
 | **Dashboard** | Vanilla-Web (Vite), bewusst nahezu unverändert |
-| **Assets** | 168 Blender-GLBs in drei Auflösungen, keine Texturen — 2D wird prozedural gezeichnet |
+
+> **Zugriffsschutz:** Der Server bindet absichtlich auf `0.0.0.0`, damit ein
+> Telefon im selben Netz die Vorschläge einsenden kann, und hat von sich aus
+> **keine Anmeldung**. Wer das im eigenen LAN betreibt, setzt
+> `SINGULAR80_TOKEN` in der `.env`; dann verlangt jeder schreibende Aufruf den
+> Header `x-singular80-token` mit demselben Wert, und `Access-Control-Allow-Origin`
+> wird auf die anfragende Herkunft eingeschränkt. Ohne die Variable verhält sich
+> alles wie bisher — mit einer Warnung beim Start.
+| **Assets** | 155 Blender-GLBs in drei Auflösungen (465 Dateien), keine Texturen — 2D wird prozedural gezeichnet |
 
 ## Die Spiele
 

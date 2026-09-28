@@ -20,9 +20,13 @@ import type {
 import type { Store } from './db';
 import { appendChangelog } from './changelog';
 import {
+  buildTerminalCommand,
   buildTerminalSession,
   clearTerminalState,
+  findByEnvMarker,
   findTerminal,
+  isolateDataHome,
+  runMarker,
   readExitFile,
   readPidFile,
   type TerminalSession,
@@ -38,6 +42,14 @@ export interface RunnerCallbacks {
 }
 
 type RunnerChild = ChildProcessByStdio<null, Readable, Readable>;
+
+/** What a terminal run ended with: the exit code it left behind, and the verdict. */
+interface TerminalOutcome {
+  code?: number | null;
+  /** Set when the evidence decides the status; null code without it means "unknown". */
+  status?: RunRecord['status'];
+  note?: string;
+}
 
 interface RunEntry {
   record: RunRecord;
@@ -59,6 +71,19 @@ interface RunEntry {
    * `exitFile` instead of the close event.
    */
   terminal: TerminalSession | null;
+  /**
+   * Set in TUI mode: the emulator's process, whose descendants are the real
+   * session. No shell sits between the two, because a full-screen interface
+   * cannot be a background job.
+   */
+  terminalTuiPid: number | null;
+  /**
+   * Set once a terminal session was really there. The marker in the process
+   * environment takes a moment to appear, and a window that never came up must
+   * fall back to the piped run instead of being reported as finished — but a
+   * session that *was* there and is gone is an end, however it ended.
+   */
+  terminalSeen: boolean;
   /** Changelog text when a terminal run produced no JSON summary. */
   summaryFallback: string | null;
   /** Argv of the piped run, kept so a failed terminal can fall back to it. */
@@ -68,6 +93,21 @@ interface RunEntry {
 const MAX_MEMORY_EVENTS = 4000;
 const MAX_DETAIL = 6000;
 const MAX_SUMMARY = 600;
+
+/**
+ * A changelog line shorter than this says nothing about what changed. Below it
+ * the agent's own words are not used at all and the suggestion's text is the
+ * line — see `shortSummary`.
+ */
+const MIN_SUMMARY_CHARS = 20;
+
+/**
+ * Below this the chosen sentence is a stub ("Ja.", "Ok.") rather than a summary.
+ * It is well below `MIN_SUMMARY_CHARS` on purpose: a short but complete sentence
+ * ("Slime langsamer.") is a good changelog line, and only a *stub* first sentence
+ * is worth looking past.
+ */
+const STUB_SUMMARY_CHARS = 8;
 
 /** How often an adopted (orphaned) run is checked for new log output and process exit. */
 const ORPHAN_POLL_MS = 3000;
@@ -193,11 +233,22 @@ export function formatBudget(ms: number): string {
 export function shortSummary(raw: string, fallback: string): string {
   const clean = raw.replace(/\s+/g, ' ').trim();
   if (!clean) return fallback;
+  // Too little to summarize. Without a floor here a three-character answer
+  // ("Ja.") became the changelog line, and the file the owner reads is worth less
+  // than its own empty space. The fallback is the suggestion's own text, which at
+  // least says what was asked for.
+  if (clean.length < MIN_SUMMARY_CHARS) return fallback;
   // A sentence end after at least 15 characters: earlier than that and "e.g." or
   // a numbered list steals the summary.
   const sentence = clean.match(/^[^.!?\n]{15,}[.!?](?=\s|$)/);
   let text = sentence ? sentence[0] : clean.split(/(?<=[.!?])\s/)[0] ?? clean;
   if (text.length < 15) text = clean.split(/(?<=[.!?])\s/).find((p) => p.length >= 15) ?? text;
+  // An answer whose first sentence is a stub — "Ja.", "Ok." — summarizes nothing,
+  // even when the agent kept talking afterwards. Then the first sentence that
+  // says something wins, and the whole text is the last resort.
+  if (text.length < STUB_SUMMARY_CHARS) {
+    text = clean.split(/(?<=[.!?])\s/).find((p) => p.trim().length >= MIN_SUMMARY_CHARS) ?? clean;
+  }
   if (text.length > MAX_SUMMARY) {
     const cut = text.slice(0, MAX_SUMMARY);
     const lastSpace = cut.lastIndexOf(' ');
@@ -402,6 +453,8 @@ export class Runner {
       logOffset: 0,
       timer: null,
       terminal: null,
+      terminalTuiPid: null,
+      terminalSeen: false,
       summaryFallback: null,
       pipedArgs: null,
     };
@@ -989,6 +1042,19 @@ export class Runner {
 
   /** SIGTERM, then SIGKILL after a grace period. Works for own and adopted children. */
   private terminate(entry: RunEntry): void {
+    // TUI mode: the session hangs below the emulator, so signalling one pid is
+    // not enough — the whole subtree has to go, or the interface keeps running
+    // with nobody watching it.
+    if (entry.terminalTuiPid !== null) {
+      // The emulator is already gone; the session is the marked process.
+      for (const pid of [...findByEnvMarker(runMarker(entry.record.id)), entry.terminalTuiPid]) {
+        try {
+          process.kill(pid, 'SIGTERM');
+        } catch {
+          /* already gone */
+        }
+      }
+    }
     const pid = entry.child?.pid ?? entry.pid;
     if (entry.child) entry.child.kill('SIGTERM');
     if (pid != null && !entry.child) {
@@ -1009,12 +1075,17 @@ export class Runner {
     }, KILL_GRACE_MS).unref?.();
   }
 
+  /** `tui` or `run`; `tui` is the default because the owner asked for it. */
+  private terminalMode(): 'tui' | 'run' {
+    return (process.env.S80_TERMINAL ?? 'tui').toLowerCase() === 'run' ? 'run' : 'tui';
+  }
+
   /**
    * The argv for the chosen terminal mode. `S80_TERMINAL=tui` or `run`, default
    * `tui`.
    */
   private terminalArgs(bin: string, record: RunRecord): string[] {
-    const mode = (process.env.S80_TERMINAL ?? 'tui').toLowerCase();
+    const mode = this.terminalMode();
     // `--standalone` is not optional and not a detail. Without it `opencode`
     // connects to the **background service** — the one the owner's own opencode
     // window is attached to. The run then does not stay in the terminal we opened
@@ -1059,17 +1130,36 @@ export class Runner {
     const { record } = entry;
     const stateDir = join(this.options.projectRoot, 'run', 'terminal');
     mkdirSync(stateDir, { recursive: true });
-    const session = buildTerminalSession({
-      bin: found.bin,
-      args: found.args,
-      title: `Singular 80 — #${record.suggestionId}`,
-      cwd: this.options.projectRoot,
-      command: this.terminalArgs(bin, record),
-      stateDir,
-      runId: record.id,
-    });
+    const title = `Singular 80 — #${record.suggestionId}`;
+    const command = this.terminalArgs(bin, record);
+    const tui = this.terminalMode() === 'tui';
+    // TUI mode gets no wrapper: the interface has to be the foreground process of
+    // its own terminal or it freezes on the first write.
+    const session = tui
+      ? null
+      : buildTerminalSession({
+          bin: found.bin,
+          args: found.args,
+          title,
+          cwd: this.options.projectRoot,
+          command,
+          stateDir,
+          runId: record.id,
+        });
+    const launch: { bin: string; argv: string[] } = tui
+      ? buildTerminalCommand({
+          bin: found.bin,
+          args: found.args,
+          title,
+          command,
+          marker: runMarker(record.id),
+          // Private session store, so the run's window cannot list the owner's
+          // own sessions. `--standalone` alone does not do this.
+          dataHome: isolateDataHome(record.id, this.options.dataDir, homedir()),
+        })
+      : { bin: session!.bin, argv: session!.args };
     try {
-      const child = spawn(session.bin, session.args, {
+      const child = spawn(launch.bin, launch.argv, {
         cwd: this.options.projectRoot,
         env: { ...process.env },
         stdio: 'ignore',
@@ -1078,9 +1168,14 @@ export class Runner {
       child.on('error', (err) => {
         this.finalize(entry, null, `Terminal nicht zu öffnen: ${err.message}`);
       });
-      // The emulator exits right away; its exit code is meaningless. The real
-      // outcome is read from `exitFile` in `tick()`.
-      child.on('close', () => {});
+      if (tui) {
+        // The emulator process is not the session; the session is below it.
+        entry.terminalTuiPid = child.pid ?? null;
+      } else {
+        // The wrapper's exit code is meaningless for the emulator; the real
+        // outcome is read from `exitFile` in `tick()`.
+        child.on('close', () => {});
+      }
     } catch (err) {
       this.finalize(entry, null, `Terminal nicht zu öffnen: ${(err as Error).message}`);
       return null;
@@ -1088,8 +1183,8 @@ export class Runner {
     entry.terminal = session;
     entry.child = null;
     entry.summaryFallback = this.store.getSuggestion(record.suggestionId)?.text.slice(0, 200) ?? null;
-    // The session writes its own pid a moment later; register it as soon as it
-    // appears so a server restart can still adopt and stop the run.
+    // Either way the outcome arrives by polling: the pid file in wrapper mode, the
+    // process tree in TUI mode.
     this.watchTerminal(entry);
     // Verification, because a terminal can be *present* and still unusable: the
     // dev server runs detached from the desktop session, and without DISPLAY
@@ -1099,7 +1194,12 @@ export class Runner {
     // nothing behind it.
     setTimeout(() => {
       if (entry.record.status !== 'running') return;
-      if (readPidFile(session.pidFile) !== null) return;
+      // Proof that a session really exists: in wrapper mode the pid file, in TUI
+      // mode a live process below the emulator.
+      const started = session
+        ? readPidFile(session.pidFile) !== null
+        : entry.terminalTuiPid !== null && findByEnvMarker(runMarker(entry.record.id)).length > 0;
+      if (started) return;
       this.fallbackFromTerminal(entry, 'Terminal hat die Sitzung nicht gestartet');
     }, TERMINAL_VERIFY_MS).unref?.();
     return session;
@@ -1109,16 +1209,27 @@ export class Runner {
    * Gives up on the terminal and runs the session the old way. Used when the
    * window did not appear; the run then behaves exactly as it did before this
    * existed, minus the interactive part.
+   *
+   * TUI mode included. It used to bail out at the first line because there is no
+   * wrapper session to clear, and that turned "the window did not come up" into
+   * "the run hangs until the hard timeout" — with `entry.pid` still null, so not
+   * even the cancel button had something to kill. The subtree that may or may
+   * not have come up is killed first, so the fallback is the only session left.
    */
   private fallbackFromTerminal(entry: RunEntry, reason: string): void {
-    const session = entry.terminal;
-    if (!session) return;
+    if (entry.record.status !== 'running') return;
     if (entry.timer) {
       clearInterval(entry.timer);
       entry.timer = null;
     }
-    clearTerminalState(session);
+    const session = entry.terminal;
+    if (session) clearTerminalState(session);
     entry.terminal = null;
+    entry.terminalSeen = false;
+    if (entry.terminalTuiPid !== null) {
+      this.terminate(entry);
+      entry.terminalTuiPid = null;
+    }
     entry.summaryFallback = null;
     this.pushEvent(entry.record.id, { t: Date.now(), kind: 'info', text: `${reason} — Rückfall auf den Lauf im Dashboard.` });
     this.startPiped(entry, findOpencodeBinary(), entry.pipedArgs ?? []);
@@ -1131,12 +1242,39 @@ export class Runner {
   }
 
   private checkTerminal(entry: RunEntry): void {
+    if (entry.record.status !== 'running') return;
+    if (entry.terminalTuiPid !== null) {
+      // TUI mode: no files and no process tree — the emulator exits as soon as
+      // the window is open and the session is re-parented. The marker in the
+      // session's own environment is what identifies it.
+      const sessions = findByEnvMarker(runMarker(entry.record.id));
+      if (sessions.length > 0) {
+        entry.terminalSeen = true;
+        const session = sessions[0];
+        if (entry.pid !== session) {
+          entry.pid = session;
+          this.rememberPid(entry.record.id, session);
+        }
+        return;
+      }
+      // Only report an end once the session was really there: the marker takes a
+      // moment to appear, and a run that never started must fall back instead of
+      // being called finished. A remembered pid is that proof — and so is a
+      // session we saw and killed ourselves (cancel, timeout).
+      if (entry.pid !== null) entry.terminalSeen = true;
+      if (!entry.terminalSeen) return;
+      this.finishTerminalRun(entry, this.terminalOutcome(entry));
+      return;
+    }
     const session = entry.terminal;
-    if (!session || entry.record.status !== 'running') return;
+    if (!session) return;
     const pid = readPidFile(session.pidFile);
-    if (pid !== null && entry.pid !== pid) {
-      entry.pid = pid;
-      this.rememberPid(entry.record.id, pid);
+    if (pid !== null) {
+      entry.terminalSeen = true;
+      if (entry.pid !== pid) {
+        entry.pid = pid;
+        this.rememberPid(entry.record.id, pid);
+      }
     }
     const code = readExitFile(session.exitFile);
     if (code === null) {
@@ -1145,25 +1283,47 @@ export class Runner {
       // and closing the window is how the owner says so.
       //
       // Without this the run stays "läuft" for the full hard timeout, and the
-      // queue waits behind a job nobody is doing any more. It is also the one
-      // place where success cannot be claimed: the result was never reported, so
-      // the run is recorded as cancelled and the suggestion returns to the queue
-      // where the owner can look at the window's output and decide.
+      // queue waits behind a job nobody is doing any more.
       if (entry.pid !== null && !isProcessAlive(entry.pid)) {
-        this.finishTerminalRun(entry, 'Im Terminal beendet, ohne Ergebnis zu melden.', 'cancelled');
+        this.finishTerminalRun(entry, this.terminalOutcome(entry));
       }
       return;
     }
-    this.finishTerminalRun(entry, undefined, undefined, code);
+    this.finishTerminalRun(entry, { code });
+  }
+
+  /**
+   * The outcome of a terminal run whose session is gone and which reported
+   * nothing.
+   *
+   * The agent's closing words live in the window that just closed; in TUI mode
+   * there is no exit file and no stream, so there is nothing to read. What *is*
+   * left is the work itself, and the repository is the honest place to look for
+   * it — the same signal `finishEntry` already uses for a process that died.
+   *
+   * Deciding this as "cancelled" without looking was the bug that made terminal
+   * runs look like lost ones: `finalize` maps cancelled back to the suggestion
+   * status `approved`, the changelog is gated on `succeeded`, and no retry is
+   * scheduled — so a run that opened a window, did the work and committed was
+   * recorded as nothing having happened. 4 of 44 runs on this machine.
+   *
+   * Without that evidence the old verdict stands: cancelled, and not a success
+   * nobody confirmed.
+   */
+  private terminalOutcome(entry: RunEntry): TerminalOutcome {
+    const commit = commitSince(entry.record.startedAt, this.options.projectRoot, entry.record.suggestionId);
+    if (commit !== null) {
+      return {
+        code: 0,
+        status: 'succeeded',
+        note: `Im Terminal beendet — der Commit ${commit} für Vorschlag #${entry.record.suggestionId} belegt die Arbeit.`,
+      };
+    }
+    return { code: null, status: 'cancelled', note: 'Im Terminal beendet, ohne Ergebnis zu melden.' };
   }
 
   /** Closes a terminal run down: stop the poll, clear the files, record the outcome. */
-  private finishTerminalRun(
-    entry: RunEntry,
-    note?: string,
-    forced?: 'cancelled',
-    code?: number,
-  ): void {
+  private finishTerminalRun(entry: RunEntry, outcome: TerminalOutcome): void {
     const session = entry.terminal;
     if (entry.timer) {
       clearInterval(entry.timer);
@@ -1171,11 +1331,15 @@ export class Runner {
     }
     if (session) clearTerminalState(session);
     if (entry.timedOut) return;
-    if (entry.cancelRequested || forced === 'cancelled') {
-      this.finalize(entry, code ?? null, note ?? 'Abgebrochen (Terminal)', 'cancelled');
-    } else {
-      this.finalize(entry, code ?? null, note);
+    if (entry.cancelRequested) {
+      this.finalize(entry, outcome.code ?? null, outcome.note ?? 'Abgebrochen (Terminal)', 'cancelled');
+      return;
     }
+    if (outcome.status) {
+      this.finalize(entry, outcome.code ?? null, outcome.note, outcome.status);
+      return;
+    }
+    this.finalize(entry, outcome.code ?? null, outcome.note);
   }
 
   /** The argv of a run whose output the runner parses. */
@@ -1365,10 +1529,28 @@ export class Runner {
     // something before it hung.
     record.note = note ?? (record.status === 'succeeded' ? 'ok' : `exit ${exitCode ?? '?'}`);
     if (record.status === 'succeeded' && record.commitHash === null) {
-      const hash = spawnSync('git', ['-C', this.options.projectRoot, 'log', '-1', '--pretty=format:%h'], {
-        encoding: 'utf8',
-      });
-      if (hash.status === 0) record.commitHash = hash.stdout.trim() || null;
+      // Only a commit that belongs to *this* suggestion and was made after it
+      // started. The previous fallback was an unfiltered `git log -1`, which on
+      // the normal path always fired — a run that did not come through
+      // `finishEntry` has no hash of its own — and with more than one lane in
+      // flight it handed one run the hash of whatever was committed last. That is
+      // where a changelog line citing a commit came from that
+      // `git log --grep=suggestion-14` does not match.
+      record.commitHash = commitSince(record.startedAt, this.options.projectRoot, record.suggestionId);
+    }
+    // A run that committed is not "nothing happened". The work is in the
+    // repository even when the process died before it could report, and recording
+    // it as cancelled answers "implemented?" with "no" for work that is on `main`
+    // — the suggestion goes back to `approved` and is offered to the queue again.
+    // `failed` rather than `succeeded`: the run did not end cleanly, and the
+    // commitHash says who did the work.
+    if (record.status === 'cancelled' && record.commitHash === null) {
+      const commit = commitSince(record.startedAt, this.options.projectRoot, record.suggestionId);
+      if (commit !== null) {
+        record.commitHash = commit;
+        record.status = 'failed';
+        record.note = `${record.note} — es gibt aber einen Commit (${commit}) für diesen Vorschlag.`;
+      }
     }
     const fallback =
       record.status === 'succeeded'
@@ -1389,12 +1571,6 @@ export class Runner {
       kind: 'done',
       text: note ?? (record.status === 'succeeded' ? 'Erfolgreich abgeschlossen' : `Fehlgeschlagen (Exit ${exitCode})`),
     });
-    // The changelog is appended here, and only for a run that actually
-    // succeeded. It is best-effort: a changelog that misses a line must never
-    // turn a good run into a failed one, so the return value is not inspected.
-    if (record.status === 'succeeded' && suggestion) {
-      appendChangelog(this.options.projectRoot, suggestion, record);
-    }
     // The lane is freed *before* the retry is queued. A retry repeats this very
     // scope, and the finished run still claims it — ordering these two the other
     // way round would make the retry block on the ghost of its own predecessor
@@ -1402,6 +1578,19 @@ export class Runner {
     this.releaseLane(record);
     const retry = this.scheduleRetry(entry);
     this.pump();
+    // The changelog goes in *after* the queue is settled, and only for a run that
+    // actually succeeded. It is a git commit plus a push, all of it synchronous:
+    // an unreachable remote would otherwise freeze the SSE stream, the Telegram
+    // poll and the supervisor tick for as long as the TCP connect hangs — on the
+    // critical path of a run that is already over. It is still best-effort: a
+    // changelog that misses a line must never turn a good run into a failed one,
+    // so the return value is not inspected.
+    if (record.status === 'succeeded' && suggestion) {
+      const projectRoot = this.options.projectRoot;
+      setImmediate(() => {
+        appendChangelog(projectRoot, suggestion, record);
+      }).unref?.();
+    }
     if (silent) return;
     this.options.callbacks.onFinished?.(record, suggestion!);
     if (retry) this.options.callbacks.onQueueState?.(this.queueState());
@@ -1512,10 +1701,22 @@ export class Runner {
       this.finalize(entry, null, 'Vor dem Start abgebrochen', 'cancelled');
       return { ok: true };
     }
-    if (this.activeIds.has(runId) && entry.child) {
-      entry.cancelRequested = true;
-      this.terminate(entry);
-      return { ok: true };
+    if (this.activeIds.has(runId)) {
+      // A terminal run has no child handle: the session hangs below the emulator
+      // and is reached through its pid or its environment marker. Requiring a
+      // child meant "Abbrechen" did nothing for the first seconds of every
+      // terminal run and then depended on which of the two the poll had found.
+      const terminalRun = entry.terminalTuiPid !== null || entry.terminal !== null;
+      if (entry.child || terminalRun || (entry.pid !== null && isProcessAlive(entry.pid))) {
+        entry.cancelRequested = true;
+        // The poll only reports the end of a terminal run once it has seen the
+        // session, and in the first seconds it has not. Without this a cancel
+        // there would kill the window and leave the run "läuft" until the hard
+        // timeout.
+        if (terminalRun) entry.terminalSeen = true;
+        this.terminate(entry);
+        return { ok: true };
+      }
     }
     // Adopted orphan: the process outlived its server, so kill it by PID.
     if (entry.pid !== null && isProcessAlive(entry.pid)) {
@@ -1535,6 +1736,7 @@ export class Runner {
       return {
         ...record,
         events: entry.events,
+        lastEventAt: lastEventAt(entry.events),
         summary: entry.summary,
         alive,
         scopeAudit: this.auditOf(record, entry.events),
@@ -1546,7 +1748,14 @@ export class Runner {
       .map((event) => event.text)
       .join('')
       .slice(-8000);
-    return { ...record, events, summary, alive, scopeAudit: this.auditOf(record, events) };
+    return {
+      ...record,
+      events,
+      lastEventAt: lastEventAt(events),
+      summary,
+      alive,
+      scopeAudit: this.auditOf(record, events),
+    };
   }
 
   /**
@@ -1602,6 +1811,20 @@ export class Runner {
   listSuggestionRuns(suggestionId: number): RunRecord[] {
     return this.store.listRuns(200).filter((r) => r.suggestionId === suggestionId);
   }
+}
+
+/**
+ * Timestamp of the newest event, or null for a run that has not said anything
+ * yet. The dashboard polls this to decide whether a run is still alive, and
+ * scanning the array itself on the client meant transferring megabytes of log
+ * data every few seconds to compute one maximum.
+ */
+function lastEventAt(events: readonly RunEvent[]): number | null {
+  let newest: number | null = null;
+  for (const event of events) {
+    if (typeof event.t === 'number' && (newest === null || event.t > newest)) newest = event.t;
+  }
+  return newest;
 }
 
 function readRunEvents(logPath: string): RunEvent[] {

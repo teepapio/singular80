@@ -150,11 +150,27 @@ describe('Erkennung sichtbarer Texte', () => {
 
   it('lässt Ids, Pfade, Zahlen und Symbole liegen', () => {
     for (const value of [
-      'res://assets/meshes/crystal.glb', 'user://singular80.cfg', 'crystal', 'rpg/axe',
-      '2048', '1.234', '#facc15', '◉', '☄', '♠', '⚙', '⚑', '↑', '%s', '%d',
+      'res://assets/meshes/crystal.glb', 'user://singular80.cfg', 'rpg/axe', 'crystal1',
+      'free_cells', '2048', '1.234', '#facc15', '◉', '☄', '♠', '⚙', '⚑', '↑', '%s', '%d',
       // …but a separator between two placeholders is content, not a pattern
       // with nothing in it: „%d · %s" is a line in a summary.
     ]) {
+      expect(isDisplayText(value, 'text'), value).toBe(false);
+    }
+  });
+
+  it('hält einen nackten Kleinbuchstaben füranzeigbaren Text, einen Id nicht', () => {
+    // The rule changed on purpose. A bare lowercase word used to be dropped,
+    // which threw away real captions — „recessive", „dominant", „carrier",
+    // „shows" in the hatchery are all one word. An id is still an id because it
+    // carries `_`, `.`, `/`, `-` or a digit; `crystal` on its own is a word, and
+    // the mesh key that reaches it never gets past the id filter upstream.
+    for (const value of ['recessive', 'dominant', 'carrier', 'shows', 'Gold', 'low', 'crystal']) {
+      expect(isDisplayText(value, 'text'), value).toBe(true);
+    }
+    // The extractor must still not leak asset keys, so the id shapes are pinned
+    // separately even though a bare word is now kept.
+    for (const value of ['rpg/axe', 'free_cells', 'crystal1']) {
       expect(isDisplayText(value, 'text'), value).toBe(false);
     }
   });

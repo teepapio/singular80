@@ -16,6 +16,12 @@ const SCREEN_LOC_KEY := {
 	"game_over": "ui.origin.game_over",
 	"mesh_gallery": "ui.origin.mesh_gallery",
 	"mesh_review": "ui.origin.mesh_review",
+	# The two dragon-flight screens below the hangar. The registry names
+	# `dragonflight` — the hangar — and the play screen and the hatchery are
+	# separate router screens with no registry entry of their own, so without
+	# keys they reached the dashboard as the machine id.
+	"dragonflight_run": "ui.origin.dragonflight_run",
+	"dragonflight_hatchery": "ui.origin.dragonflight_hatchery",
 }
 
 ## Every key above, in the array form the extractor recognises. They are only
@@ -28,6 +34,8 @@ const SCREEN_LOC_KEYS: Array[String] = [
 	"ui.origin.game_over",
 	"ui.origin.mesh_gallery",
 	"ui.origin.mesh_review",
+	"ui.origin.dragonflight_run",
+	"ui.origin.dragonflight_hatchery",
 	"ui.origin.unknown",
 ]
 
@@ -44,13 +52,22 @@ static func unknown() -> String:
 
 ## The label for a screen id, from the game registry when the screen belongs to
 ## a game. Registry names and free text are already in the catalogue, so they go
-## through `Loc.resolve`; the six screens above have no registry entry and get a
-## key.
+## through `Loc.resolve`; the screens in `SCREEN_LOC_KEY` have no registry entry
+## and get a key.
+##
+## The registry is consulted by **id and by screen**, exactly as `resolve()`
+## does, and for one reason: a game with more than one screen is registered
+## under its menu (`pang_menu`, `dragonflight`), so a lookup on `screen` alone
+## left every other screen of that game unresolved. The two functions then
+## disagreed about the same input — `resolve("pang")` said "Pang 3D" and
+## `for_screen("pang")` said "pang" — and it was `for_screen` that the suggest
+## dialog calls, so a player who filed an idea mid-level sent the machine id to
+## the dashboard.
 static func for_screen(screen_id: String) -> String:
 	if screen_id == "":
 		return unknown()
 	for game in GameRegistry.GAMES:
-		if str(game.get("screen", "")) == screen_id:
+		if str(game.get("id", "")) == screen_id or str(game.get("screen", "")) == screen_id:
 			return Loc.resolve(str(game.get("name", screen_id)))
 	var key := str(SCREEN_LOC_KEY.get(screen_id, ""))
 	if key != "":

@@ -193,7 +193,7 @@ static func freecell_suggest(free_cells: Array, foundations: Array, columns: Arr
 				if s == 0:
 					out.append(_freecell_move({"zone": "col", "index": c, "start": 0},
 							{"zone": "col", "index": d, "empty": false}, "build", 300, count,
-							column[0], target[target.size() - 1], "  ·  Spalte %d wird frei" % (c + 1)))
+							column[0], target[target.size() - 1], "  ·  column %d becomes free" % (c + 1)))
 				else:
 					out.append(_freecell_move({"zone": "col", "index": c, "start": s},
 							{"zone": "col", "index": d, "empty": false}, "build", 200 + count * 12, count,

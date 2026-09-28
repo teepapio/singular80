@@ -202,6 +202,13 @@ export interface RunRecord {
 
 export interface RunView extends RunRecord {
   events: RunEvent[];
+  /**
+   * Timestamp of the most recent event, or null when the run has produced none.
+   * The dashboard polls for activity liveness and only ever needed this one
+   * number, so it is sent explicitly instead of making every client walk the
+   * whole event array to find a maximum.
+   */
+  lastEventAt: number | null;
   summary: string;
   /** Whether the runner currently knows a live opencode process for this run. */
   alive: boolean;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -14,8 +14,24 @@ import { buildTerminalSession, readExitFile, readPidFile, shellQuote } from '../
 
 const args = (title: string, script: string) => ['-e', 'bash', '-c', script];
 
+/**
+ * Temp directories are cleaned here and not as the last line of each case: a
+ * failing assertion used to leave the directory behind for the rest of the run.
+ */
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
 function session(overrides: Partial<Parameters<typeof buildTerminalSession>[0]> = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 's80-term-'));
+  const dir = tempDir('s80-term-');
   return {
     dir,
     built: buildTerminalSession({
@@ -36,7 +52,6 @@ describe('Die Kommandozeile fuer das Terminal', () => {
     const { built, dir } = session();
     expect(built.pidFile).toBe(join(dir, 'run_x.pid'));
     expect(built.exitFile).toBe(join(dir, 'run_x.exit'));
-    rmSync(dir, { recursive: true, force: true });
   });
 
   it('schreibt den Exit-Code ueber den Erfolg der Sitzung', () => {
@@ -45,7 +60,6 @@ describe('Die Kommandozeile fuer das Terminal', () => {
     const script = built.args[built.args.length - 1];
     expect(script).toContain(`printf '%s' "$?"`);
     expect(script).toContain(shellQuote(built.exitFile));
-    rmSync(dir, { recursive: true, force: true });
   });
 
   it('leitet SIGTERM an die Sitzung weiter', () => {
@@ -55,13 +69,20 @@ describe('Die Kommandozeile fuer das Terminal', () => {
     const script = built.args[built.args.length - 1];
     expect(script).toContain('trap');
     expect(script).toContain('kill -TERM');
-    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('schaltet Job-Control ein, sonst endet die Oberflaeche nie', () => {
+    // Measured: without `set -m` the backgrounded session keeps the wrapper's
+    // process group, and the interface never finishes — the test had to be
+    // killed at its 120 s timeout. With it the session is a real foreground job
+    // and completes.
+    const { built, dir } = session();
+    expect(built.args[built.args.length - 1]).toContain('set -m');
   });
 
   it('haelt das Fenster offen, damit die Ausgabe lesbar bleibt', () => {
     const { built, dir } = session();
     expect(built.args[built.args.length - 1]).toContain('exec bash');
-    rmSync(dir, { recursive: true, force: true });
   });
 
   it('schuetzt einen Auftragstext mit Anfuehrungszeichen und Dollarzeichen', () => {
@@ -71,13 +92,11 @@ describe('Die Kommandozeile fuer das Terminal', () => {
     expect(script).toContain(`'\\''`);
     // The dangerous text is inside quotes, so the substitution cannot fire.
     expect(script).not.toMatch(/^\s*\$\(/m);
-    rmSync(dir, { recursive: true, force: true });
   });
 
   it('wechselt vor dem Start in das Projektverzeichnis', () => {
     const { built, dir } = session();
     expect(built.args[built.args.length - 1]).toContain(`cd ${shellQuote('/home/edi/singular80')}`);
-    rmSync(dir, { recursive: true, force: true });
   });
 });
 

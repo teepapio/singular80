@@ -88,7 +88,7 @@ const ARM_BLINK := 0.26
 const ARM_TINT := Color("f8fafc")
 ## The one-line rule the HUD teaches. It lives here with the rest of the rules
 ## so the copy and the behaviour cannot drift apart.
-const ARM_HINT := "Kleinste Kugel: 1. Treffer lässt sie blinken, 2. Treffer platzt"
+const ARM_HINT := "Smallest ball: 1 hit makes it flash, 2 hits pop it"
 
 # --- harpoon ----------------------------------------------------------------
 
@@ -379,7 +379,7 @@ static func wave_balls(level: int, index: int) -> int:
 ## front of this noun, and telling the two forms apart is the only German
 ## conjugation the game needs.
 static func wave_label(count: int) -> String:
-	return "%d Welle" % count if count == 1 else "%d Wellen" % count
+	return "%d wave" % count if count == 1 else "%d waves" % count
 
 
 ## The size a reinforcement arrives in: two steps below the level's own balls,
@@ -436,17 +436,17 @@ static func wave_side(band: Vector2) -> int:
 	return 1 if centre > 0.0 else 0
 
 
-## "links" / "rechts" / "der Mitte" — the three German forms the HUD needs for
+## "links" / "rechts" / "the middle" — the three German forms the HUD needs for
 ## "Nachschub von …". Lives here with the band so the copy and the arrival
 ## cannot drift apart.
 static func wave_side_label(wave: Dictionary) -> String:
 	match wave_side(wave_band(wave)):
 		-1:
-			return "links"
+			return "left"
 		1:
-			return "rechts"
+			return "right"
 		_:
-			return "der Mitte"
+			return "the middle"
 
 
 ## Is `x` part of the arriving band? The screen paints the band and warns the
@@ -464,7 +464,7 @@ static func in_wave_band(wave: Dictionary, x: float) -> bool:
 static func wave_flanks_label(level: int) -> String:
 	var words: Array[String] = []
 	for index in wave_count(level):
-		words.append("links" if wave_flank(level, index) < 0 else "rechts")
+		words.append("left" if wave_flank(level, index) < 0 else "right")
 	return ", ".join(words)
 
 
@@ -759,7 +759,7 @@ static func validate_level(data: Dictionary) -> Array[String]:
 	var balls: Array = data.get("balls", [])
 	if balls.is_empty():
 		problems.append("Level hat keine Kugeln")
-	_ball_problems(balls, "Kugel", problems)
+	_ball_problems(balls, "Ball", problems)
 	# A wave that can never arrive or never be shot at would make a level
 	# unclearable in a way the opening layout cannot.
 	for wave in data.get("waves", []):

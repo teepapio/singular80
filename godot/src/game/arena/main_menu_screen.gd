@@ -34,6 +34,12 @@ func _ready_game() -> void:
 	_load_implemented.call_deferred()
 
 
+## Drifting motes, matching the browser lobby's ambience.
+##
+## The field is the size of the window, not a fixed 1360x700. A 4:3 tablet runs
+## a 1280x1707 viewport, and a hard-coded extent stops the motes at y~760 — the
+## lower two thirds of the screen is then bare. Reading the window and respawning
+## on a resize is the whole fix; the loop itself is unchanged.
 func _draw_background() -> void:
 	var layer := Control.new()
 	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -41,20 +47,39 @@ func _draw_background() -> void:
 	var background := Ui.rect(UiTheme.BG)
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	layer.add_child(background)
+	var extent := _mote_extent()
 	for i in 54:
 		var dot := Ui.rect(Color(0.220, 0.741, 0.973, randf_range(0.08, 0.35)))
 		dot.size = Vector2.ONE * float(randi_range(2, 4))
 		layer.add_child(dot)
-		dot.position = Vector2(randf() * 1360.0 - 40.0, randf() * 700.0 + 20.0)
+		dot.position = Vector2(randf() * extent.x - 40.0, randf() * extent.y + 20.0)
 		_stars.append(dot)
 		var tween := dot.create_tween()
 		tween.set_loops()
 		tween.tween_property(dot, "position:y", dot.position.y - randf_range(40.0, 120.0), randf_range(4.0, 9.0)).set_trans(Tween.TRANS_SINE)
 		tween.tween_property(dot, "modulate:a", 0.0, randf_range(4.0, 9.0))
 		tween.tween_callback(func() -> void:
-			dot.position.y = randf() * 700.0 + 20.0
+			dot.position.y = randf() * extent.y + 20.0
 			dot.modulate.a = 1.0)
 	content_layer().add_child(layer)
+	var viewport := get_viewport()
+	if not viewport.size_changed.is_connected(_respawn_stars):
+		viewport.size_changed.connect(_respawn_stars)
+
+
+## The area the motes drift through: the window, with a margin for the drift.
+func _mote_extent() -> Vector2:
+	return Vector2(maxf(320.0, get_viewport_rect().size.x) + 40.0, maxf(240.0, get_viewport_rect().size.y) - 20.0)
+
+
+## A window that changed shape (rotation, a resized desktop window) leaves half
+## the motes outside it. One pass puts every one back inside.
+func _respawn_stars() -> void:
+	var extent := _mote_extent()
+	for dot in _stars:
+		if not is_instance_valid(dot):
+			continue
+		dot.position = Vector2(randf() * extent.x - 40.0, randf() * extent.y + 20.0)
 
 
 func _build_content() -> void:
@@ -77,10 +102,10 @@ func _build_content() -> void:
 	column.add_child(record)
 
 	column.add_child(_spacer(10))
-	column.add_child(_caption("Start weapon"))
+	column.add_child(_caption(Loc.t("arena.start_weapon")))
 	column.add_child(_weapon_row())
 	column.add_child(_spacer(8))
-	column.add_child(_caption("Difficulty"))
+	column.add_child(_caption(Loc.t("arena.difficulty")))
 	column.add_child(_mode_row())
 	column.add_child(_spacer(10))
 

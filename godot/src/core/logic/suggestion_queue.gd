@@ -39,6 +39,12 @@ const BACKOFF_BASE := 15.0
 const BACKOFF_FACTOR := 1.6
 const BACKOFF_MAX := 300.0
 
+## The queue's own generator, seeded once from the system entropy. Godot does not
+## seed the global `randi()` at startup, and nothing in this game calls
+## `randomize()`, so two launches drew the very same sequence — and the key is
+## what the whole dedupe story rests on.
+static var _rng: RandomNumberGenerator
+
 
 # --- Insert -----------------------------------------------------------------
 
@@ -109,18 +115,25 @@ static func distinct_keys(items: Array) -> int:
 
 ## Reads the queue from disk and repairs it on the way. A missing file is not an
 ## error: the player has saved nothing yet.
-static func restore(path: String = PATH, limit: int = MAX_ITEMS) -> Array[Dictionary]:
+## `write_back` says whether the repaired list may replace the file. `Api` passes
+## its own "this is a real launch" switch, so a `--script` run — which loads the
+## autoloads for real — reads the player's suggestions without overwriting them.
+static func restore(path: String = PATH, limit: int = MAX_ITEMS, write_back: bool = true) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	if not FileAccess.file_exists(path):
 		return out
-	out = decode(FileAccess.get_file_as_string(path))
+	var text := FileAccess.get_file_as_string(path)
+	out = decode(text)
 	var cap := maxi(limit, 1)
 	if out.size() > cap:
 		# Overflow from a time with a higher limit: the newest wins.
 		out = out.slice(out.size() - cap)
-	# Write back immediately: `decode()` has filled in missing keys and dropped
-	# duplicates; the on-disk state is now the truth a crash can no longer corrupt.
-	persist(path, out)
+	# Write back, but only when the repair changed something: `decode()` has
+	# filled in missing keys and dropped duplicates, and the on-disk state is
+	# then the truth a crash can no longer corrupt. A queue that was already in
+	# shape must not cost a write on every single start.
+	if write_back and encode(out) != text:
+		persist(path, out)
 	return out
 
 
@@ -143,7 +156,7 @@ static func persist(path: String, items: Array) -> bool:
 static func _write_plain(path: String, text: String) -> bool:
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
-		push_warning("Vorschlags-Warteschlange nicht schreibbar: %s" % path)
+		push_warning("Suggestion queue not writable: %s" % path)
 		return false
 	file.store_string(text)
 	file.close()
@@ -199,28 +212,45 @@ static func sanitise(entry: Variant) -> Dictionary:
 	var text := str(source.get("text", "")).strip_edges()
 	if text.length() > MAX_TEXT:
 		text = text.substr(0, MAX_TEXT)
-	var key := str(source.get("clientKey", "")).strip_edges()
-	if key.is_empty() or key.length() > CLIENT_KEY_MAX:
-		key = new_client_key()
 	var queued_at := int(source.get("queuedAt", 0))
 	var author := str(source.get("author", "")).strip_edges()
-	out["clientKey"] = key
 	out["queuedAt"] = queued_at if queued_at > 0 else int(Time.get_unix_time_from_system())
 	out["text"] = text
 	out["author"] = author if author != "" else "Anonym"
 	out["source"] = str(source.get("source", "game")).strip_edges()
+	ensure_key(out)
 	return out
+
+
+## The `clientKey` of an entry, minted once if it has none yet. Every path that
+## puts an entry into the queue or sends it goes through here, so the key that is
+## stored, the key that is sent and the key a retry looks the entry up with are
+## the same string by construction.
+static func ensure_key(entry: Dictionary) -> String:
+	var key := str(entry.get("clientKey", "")).strip_edges()
+	if key.is_empty() or key.length() > CLIENT_KEY_MAX:
+		key = new_client_key()
+		entry["clientKey"] = key
+	return key
 
 
 ## The POST body for one entry. `clientKey` sits on top and stays the same across
 ## all retries — the server dedupes on exactly that.
 static func request_body(item: Dictionary) -> Dictionary:
 	var clean := sanitise(item)
+	# The key of the entry **as it was handed in**, and `ensure_key` stores one
+	# there if it was missing. `clean` is a copy, so its freshly minted key is not
+	# the entry's: posting that one would leave the local row — which the caller
+	# removes by the key it looked the entry up with — in the queue for good,
+	# while the server took the same idea under a new key on every attempt. Three
+	# keys, three identical rows in the dashboard: what this file promises cannot
+	# happen.
+	ensure_key(item)
 	return {
 		"text": str(clean.get("text", "")),
 		"author": str(clean.get("author", "Anonym")),
 		"source": str(clean.get("source", "game")),
-		"clientKey": str(clean.get("clientKey", "")),
+		"clientKey": str(item.get("clientKey", "")),
 	}
 
 
@@ -268,7 +298,20 @@ static func cap_warning(dropped_item: Dictionary, limit: int) -> String:
 ## suggestion. Short enough for the server's 64-character limit, unique enough for
 ## two ideas in the same millisecond.
 static func new_client_key() -> String:
-	return "s80_%08x%06x" % [
-		randi() & 0xFFFFFFFF,
-		int(Time.get_unix_time_from_system() * 1000.0) & 0xFFFFFF,
+	# Not `Loc.f`: this is an identifier the backend stores, and `Loc.f` resolves
+	# its values — a resolved value here would mint a different key every time the
+	# catalogue changed. Two draws instead of `randi()` plus the millisecond clock:
+	# the clock is the same in two processes started in the same millisecond, and
+	# the global generator repeats its whole sequence from the second launch on.
+	return "s80_%08x%08x" % [
+		_random().randi() & 0xFFFFFFFF,
+		_random().randi() & 0xFFFFFFFF,
 	]
+
+
+## The queue's generator, seeded on first use.
+static func _random() -> RandomNumberGenerator:
+	if _rng == null:
+		_rng = RandomNumberGenerator.new()
+		_rng.randomize()
+	return _rng

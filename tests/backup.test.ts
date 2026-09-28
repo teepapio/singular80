@@ -20,6 +20,7 @@ import {
   readSnapshotFile,
   writeSnapshotFile,
 } from '../server/backup';
+import { hashVoterId } from '../server/db';
 import { Store } from '../server/db';
 import type { RunRecord, Suggestion } from '../src/shared/types';
 import type { BackupSnapshot } from '../server/backup';
@@ -111,7 +112,13 @@ describe('buildSnapshot', () => {
     expect(snapshot.kind).toBe(BACKUP_KIND);
     expect(snapshot.counts).toEqual({ suggestions: 1, runs: 1, votes: 1 });
     expect(snapshot.suggestions[0].id).toBe(suggestion.id);
-    expect(snapshot.votes[0]).toMatchObject({ suggestionId: suggestion.id, voterId: 'voter_abcdef' });
+    // The committed file carries a hash, never the raw device id: the repository
+    // is public and `voterId` is a stable per-device identifier.
+    expect(snapshot.votes[0]).toMatchObject({
+      suggestionId: suggestion.id,
+      voterId: hashVoterId('voter_abcdef'),
+    });
+    expect(snapshot.votes[0].voterId).not.toBe('voter_abcdef');
   });
 
   it('lässt den Prompt weg und macht den Logpfad repo-relativ', () => {

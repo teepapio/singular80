@@ -28,6 +28,14 @@ const API = 'https://api.telegram.org';
 /** Telegram allows 4096 characters per message; above that it answers 400. */
 const MAX_MESSAGE = 4096;
 
+/**
+ * A deadline for every outbound call. A player submission awaits the Telegram
+ * send inside the request, so a socket that never answers would hold that request
+ * open for as long as the network keeps the connection — and a hung network is
+ * exactly the situation in which nobody is waiting for a chat message.
+ */
+const SEND_TIMEOUT_MS = 10_000;
+
 function token(): string {
   return (process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
 }
@@ -81,6 +89,7 @@ export async function editMessageText(
         text: clip(text),
         parse_mode: 'HTML',
       }),
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     });
     if (!res.ok) {
       const raw = await res.text().catch(() => '');
@@ -88,7 +97,7 @@ export async function editMessageText(
     }
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: (err as Error).message };
+    return { ok: false, error: fetchError(err) };
   }
 }
 
@@ -123,6 +132,7 @@ export async function sendMessage(text: string): Promise<{ ok: boolean; error?: 
           // preview on its own.
           disable_web_page_preview: true,
         }),
+        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       });
       if (res.ok) {
         // The id is what makes "write the outcome into that message" possible
@@ -136,11 +146,21 @@ export async function sendMessage(text: string): Promise<{ ok: boolean; error?: 
       // torn connection or a 5xx is worth repeating.
       if (res.status < 500) return { ok: false, error: last };
     } catch (err) {
-      last = (err as Error).message;
+      last = fetchError(err);
     }
     if (attempt < SEND_ATTEMPTS - 1) await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
   }
   return { ok: false, error: last };
+}
+
+/** A `fetch` failure as a line someone can act on; a timeout is its own case. */
+function fetchError(err: unknown): string {
+  const error = err as { name?: string; message?: string };
+  if (error?.name === 'TimeoutError') {
+    return `Zeitüberschreitung nach ${SEND_TIMEOUT_MS / 1000}s bei Telegram`;
+  }
+  if (error?.name === 'AbortError') return 'Verbindung zu Telegram abgebrochen';
+  return error?.message ?? 'unbekannter Fehler';
 }
 
 /** Turns Telegram errors into something one can actually fix. */
@@ -308,6 +328,10 @@ export async function getUpdates(offset: number, timeout = API_TIMEOUT): Promise
       const res = await fetch(`${API}/bot${token()}/getUpdates?offset=${offset}&timeout=${timeout}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
+        // Longer than the long-poll `timeout` parameter, plus margin: the
+        // deadline exists for a socket that never answers at all, and must not
+        // cut off a poll that is behaving exactly as documented.
+        signal: AbortSignal.timeout((timeout + 15) * 1000),
       });
       if (!res.ok) {
         const raw = await res.text().catch(() => '');
@@ -323,7 +347,7 @@ export async function getUpdates(offset: number, timeout = API_TIMEOUT): Promise
       return { ok: true, result: data.result ?? [] };
     } catch (err) {
       if (attempt === 0) await new Promise((r) => setTimeout(r, 1200));
-      else return { ok: false, error: (err as Error).message };
+      else return { ok: false, error: fetchError(err) };
     }
   }
   return { ok: false, error: 'getUpdates: mehrfach fehlgeschlagen' };

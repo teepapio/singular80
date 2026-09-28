@@ -45,6 +45,11 @@ var _capture_label: Label
 var _wins_label: Label
 var _mode_button: Button
 var _hint_button: Button
+## The last values the piece-count labels were built from; see `_refresh`.
+var _shown_white := -1
+var _shown_black := -1
+var _shown_wins := -1
+var _shown_two_player := false
 
 
 func _ready_game() -> void:
@@ -107,10 +112,10 @@ func _build_ui() -> void:
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(hint)
 
-	_hint_button = _button(layer, 200, 694, "Tipp", show_hint)
-	_button(layer, 420, 694, "Neu", func() -> void: reset_game())
-	_button(layer, 640, 694, "Zurück", func() -> void: undo())
-	_mode_button = _button(layer, 860, 694, "2 Spieler", _toggle_mode)
+	_hint_button = _button(layer, 200, 694, Loc.t("dame.hint"), show_hint)
+	_button(layer, 420, 694, Loc.t("dame.new"), func() -> void: reset_game())
+	_button(layer, 640, 694, "Back", func() -> void: undo())
+	_mode_button = _button(layer, 860, 694, Loc.t("dame.two_players"), _toggle_mode)
 	_button(layer, 1080, 694, "Lobby", func() -> void: Router.to_lobby())
 
 
@@ -139,7 +144,7 @@ func reset_game() -> void:
 
 func _toggle_mode() -> void:
 	two_player = not two_player
-	_mode_button.text = "1 Spieler" if two_player else "2 Spieler"
+	_mode_button.text = Loc.t("dame.one_player") if two_player else Loc.t("dame.two_players")
 	reset_game()
 
 
@@ -167,13 +172,24 @@ func _clear_selection() -> void:
 	legal_turns = []
 
 
+## The board redraws whenever `_refresh` runs, because the selection ring moves.
+## The three labels behind it are different: they depend on the piece counts and
+## the win tally, and both only change on a move. Two full scans of a 32-square
+## board per frame bought the same three strings sixty times a second.
 func _refresh() -> void:
 	_view.queue_redraw()
-	_player_label.text = Loc.f("You: %d pieces", [Checkers.count_pieces(board, Checkers.WHITE)])
-	_ai_label.text = (Loc.f("AI: %d pieces", [Checkers.count_pieces(board, Checkers.BLACK)]) if not two_player
-		else Loc.f("Opponent: %d pieces", [Checkers.count_pieces(board, Checkers.BLACK)]))
-	_wins_label.text = (Loc.f("You %d  :  %d AI", [wins, 0]) if not two_player
-		else Loc.f("You %d  :  %d Opponent", [wins, 0]))
+	var white := Checkers.count_pieces(board, Checkers.WHITE)
+	var black := Checkers.count_pieces(board, Checkers.BLACK)
+	if white != _shown_white or black != _shown_black or wins != _shown_wins or two_player != _shown_two_player:
+		_shown_white = white
+		_shown_black = black
+		_shown_wins = wins
+		_shown_two_player = two_player
+		_player_label.text = Loc.f("You: %d pieces", [white])
+		_ai_label.text = (Loc.f("AI: %d pieces", [black]) if not two_player
+			else Loc.f("Opponent: %d pieces", [black]))
+		_wins_label.text = (Loc.f("You %d  :  %d AI", [wins, 0]) if not two_player
+			else Loc.f("You %d  :  %d Opponent", [wins, 0]))
 	_hint_button.disabled = game_over
 	if not _status.is_empty():
 		_message_label.text = Loc.resolve(_status)

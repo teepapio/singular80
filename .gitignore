@@ -16,10 +16,32 @@ run/
 godot/shot.gd
 godot/shot.tscn
 godot/probe.gd
+godot/probe.gd.uid
 godot/shot.gd.uid
+godot/shot.tscn.uid
 godot/lootshot.gd
 godot/lootshot.tscn
+godot/lootshot.gd.uid
+godot/lootshot.tscn.uid
+# Godot writes a .uid next to every script it imports. A probe script that an
+# agent created, ran and deleted leaves its .uid behind while the .gd is gone —
+# an untracked stub that no scope owns, and `git add -A` commits it happily.
+godot/_probe_*.gd
+godot/_probe_*.gd.uid
 # Von `googleplay/scripts/install-export-preset.mjs` nach godot/ kopiert
 # (Quelle: googleplay/scripts/validate-presets.gd).
 godot/_cfgtest.gd
 godot/_cfgtest.gd.uid
+# Leftovers of a manual run in the repository root. `/build/` holds the exported
+# APKs — `*.apk` above covers the files, the empty directory is still noise.
+# NOTE: `backup/` is deliberately NOT ignored, the dashboard history belongs in
+# the repository (AGENTS.md).
+nohup.out
+*.tmp
+*.bak
+*.orig
+*.rej
+*.swp
+.env.local
+.env.*.local
+/build/

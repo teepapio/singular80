@@ -14,18 +14,31 @@ signal pending_changed(count: int)
 const TIMEOUT := 4.0
 const QueueClass := preload("res://src/core/logic/suggestion_queue.gd")
 
-var online: bool = false
+## Whether the player's queue may be written. A `--script` run loads the
+## autoloads for real, and `restore()` writes the repaired list straight back —
+## so a green suite replaced the suggestions the player was still waiting to
+## send. `Game.persist` is the same switch for the config file: off in a
+## `--script` run, on in every real launch, and nothing in the game turns it off.
+var _persist := not OS.get_cmdline_args().has("--script")
+
 var _queue: Array[Dictionary] = []
 var _timer: Timer
 var _attempt: int = 0
 var _busy: bool = false
 var _announced: int = 0
+## The address the pending attempt was armed for. A focus notification is only
+## news when the address is not this one.
+var _armed_for: String = ""
+## Health as of the last probe. Private, because a public `online` reads like
+## "the network works" while it is one answer from one moment — and nothing
+## outside this file ever asked for it.
+var _reachable: bool = false
 
 
 func _ready() -> void:
 	process_priority = -40
 	# Restored from `user://`: the list survives a crash or a reboot.
-	_queue = QueueClass.restore()
+	_queue = QueueClass.restore(QueueClass.PATH, QueueClass.MAX_ITEMS, _persist)
 	_timer = Timer.new()
 	_timer.one_shot = true
 	_timer.timeout.connect(_on_timer)
@@ -37,9 +50,12 @@ func _ready() -> void:
 
 
 func _notification(what: int) -> void:
-	# Waking the phone is when the network comes back. Godot reports that as window
-	# focus (on Android every child gets `WINDOW_EVENT_FOCUS_IN`) and, per platform,
-	# additionally as application focus or resume.
+	# Waking the phone is when the network comes back. Android reports that as
+	# `APPLICATION_FOCUS_IN` and `APPLICATION_RESUMED`; the window notification is
+	# the one the desktop and the editor deliver, and it is documented on `Node`,
+	# not only on `Window`. Which of them a given platform actually sends was not
+	# measured here — `wake()` is the cheap half of this, since it returns
+	# without a request unless something is really waiting.
 	if what == NOTIFICATION_WM_WINDOW_FOCUS_IN \
 			or what == NOTIFICATION_APPLICATION_FOCUS_IN \
 			or what == NOTIFICATION_APPLICATION_RESUMED:
@@ -47,20 +63,47 @@ func _notification(what: int) -> void:
 
 
 ## Resets the backoff and retries at once: the network has only just come back.
+## Every focus the window gets ends up here, and most of them have nothing to do
+## with the network — the notification shade, the keyboard, a permission dialog,
+## a phone call. So it only does something when something is waiting *and* the
+## backoff is actually running, or when the address is not the one the pending
+## attempt was armed for: `ServerDialog.apply` reaches a queue that sits at the
+## backoff cap through here, and that one has to go out at once.
 func wake() -> void:
 	if _queue.is_empty():
+		return
+	if _attempt == 0 and _armed_for == Game.server_url:
 		return
 	_arm(0, 0.25)
 
 
 ## True when a server URL is configured and its health endpoint answered.
+## Shares the mutex with the two delivery paths, which is what `main.gd`'s
+## startup probe was missing: without the guard it and the retry timer each fired
+## their own `/api/health`, the startup flush came back as "busy" without sending
+## anything, and two health requests raced for the same answer.
 func probe() -> bool:
 	if not Game.has_server():
-		online = false
+		_reachable = false
 		return false
+	if not _try_lock():
+		# A delivery owns the health request right now. Answer with the last known
+		# state instead of "no" — the caller only uses this to decide whether a
+		# further request is worth it, and "no" would skip content that is about
+		# to arrive.
+		return _reachable
+	var answer: bool = await _probe_health()
+	_unlock()
+	return answer
+
+
+## The health request itself, without the guard. Callers that already hold the
+## mutex come here: through `probe()` they would only be told the state of the
+## previous attempt and would send the queue without ever having checked it.
+func _probe_health() -> bool:
 	var result: Variant = await _request("/api/health")
-	online = result is Dictionary
-	return online
+	_reachable = result is Dictionary
+	return _reachable
 
 
 # --- content ----------------------------------------------------------------
@@ -95,13 +138,12 @@ func submit_suggestion(text: String, author: String, context: String = "") -> Di
 		suggestion_failed.emit(Loc.t("ui.queue_saved_offline"))
 		_arm(0, 0.25)
 		return {}
-	if _busy:
+	if not _try_lock():
 		# A flush is already running; the new entry goes out with its next pass.
 		return {}
 	# 2. Send once directly — the dialog waits for the result.
-	_busy = true
 	var view := await _deliver(key)
-	_busy = false
+	_unlock()
 	if view.is_empty():
 		suggestion_failed.emit(Loc.t("ui.queue_saved_unreachable"))
 		_arm(1)
@@ -143,14 +185,14 @@ func pending_hint() -> String:
 ## Sends everything that is still queued. What does not go through stays in the
 ## queue and is retried with backoff.
 func flush_queue() -> void:
-	if _busy or _queue.is_empty():
+	if _queue.is_empty() or not _try_lock():
 		_arm(0)
 		return
 	if not Game.has_server():
 		# Nothing to probe, but the address may still be set while the game runs.
+		_unlock()
 		_arm(_attempt)
 		return
-	_busy = true
 	var failed := false
 	# Over a copy: `_deliver()` removes successful entries from `_queue`.
 	for entry in _queue.duplicate():
@@ -159,7 +201,7 @@ func flush_queue() -> void:
 			# The first failure speaks for all; continuing would wait out N timeouts.
 			failed = true
 			break
-	_busy = false
+	_unlock()
 	_announce_pending()
 	if failed:
 		_arm(_attempt + 1)
@@ -198,23 +240,39 @@ func _on_timer() -> void:
 
 
 func _attempt_queue() -> void:
-	if _busy or _queue.is_empty() or not Game.has_server():
+	if _queue.is_empty() or not Game.has_server() or not _try_lock():
 		_arm(_attempt)
 		return
-	_busy = true
 	# Health endpoint first: a forced POST with no network drains the battery.
-	var reachable: bool = await probe()
-	_busy = false
+	var reachable: bool = await _probe_health()
+	_unlock()
 	if not reachable:
 		_arm(_attempt + 1)
 		return
 	flush_queue()
 
 
+## The manual mutex the three request paths share — `probe`, `submit_suggestion`
+## and `flush_queue`. A `Node` cannot hold a lock across an `await` any other
+## way, and skipping it is not a slow path but a wrong one: two concurrent
+## `/api/health` requests, and one of the callers walking away believing it had
+## sent the queue.
+func _try_lock() -> bool:
+	if _busy:
+		return false
+	_busy = true
+	return true
+
+
+func _unlock() -> void:
+	_busy = false
+
+
 ## Arms the next delivery attempt. Without `wait` the backoff time of level
 ## `attempt` applies; an explicit value overrides it (startup, resume).
 func _arm(attempt: int, wait: float = -1.0) -> void:
 	_attempt = maxi(attempt, 0)
+	_armed_for = Game.server_url
 	if _queue.is_empty():
 		if _timer != null:
 			_timer.stop()
@@ -237,7 +295,10 @@ func _announce_pending() -> void:
 
 
 ## Writes the queue to disk; callers must do this **before** the server answers.
+## A `--script` run leaves the player's own file alone — see `_persist`.
 func _save() -> void:
+	if not _persist:
+		return
 	QueueClass.persist(QueueClass.PATH, _queue)
 
 

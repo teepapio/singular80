@@ -10,6 +10,9 @@ const ENEMY_POOL := DragonFlight.MAX_ENEMIES
 const CLOUD_POOL := 12
 const ISLAND_POOL := 12
 const TRAIL_POOL := 24
+## How often the HUD text is rebuilt. The hp bar is a `ProgressBar` and keeps
+## its value every frame; the labels wait.
+const HUD_INTERVAL := 0.05
 
 var profile: Dictionary = {}
 var level_n := 1
@@ -73,6 +76,7 @@ var _label_buff: Label
 var _over: Control
 var _banner: Label
 var _banner_timer := 0.0
+var _hud_timer := 0.0
 
 
 func _ready_world() -> void:
@@ -268,13 +272,15 @@ func _build_pools() -> void:
 func _begin() -> void:
 	running = true
 	finished = false
-	_banner_text("Level %d · %s" % [level_n, str(level_def["name"])], 2.0)
+	_banner_text(Loc.f("Level %d · %s", [level_n, str(level_def["name"])]), 2.0)
 
 
 # --- HUD --------------------------------------------------------------------
 
 func _build_ui() -> void:
-	_stick = add_stick("bottom_left", "Flug")
+	# The stick caption is drawn with `draw_string` inside `VirtualStick`, which
+	# no catalogue tooling sees, so it is resolved by the caller instead.
+	_stick = add_stick("bottom_left", Loc.t("dragon_flight.stick_flight"))
 	add_action_button("◈", 66.0, &"fire")
 
 	_hud = VBoxContainer.new()
@@ -290,11 +296,11 @@ func _build_ui() -> void:
 	_hp_bar = Ui.bar(Color("ef4444"), 16.0)
 	_hud.add_child(_hp_bar)
 
-	_label_score = _value(_hud, "Punkte", "0", Color("facc15"))
+	_label_score = _value(_hud, "Points", "0", Color("facc15"))
 	_label_gold = _value(_hud, "Gold", "0", Color("fbbf24"))
-	_label_trait = _value(_hud, "Merkmale", "—", Color("c084fc"))
-	_label_element = _value(_hud, "Element", "—", Color("38bdf8"))
-	_label_buff = _value(_hud, "Effekt", "—", Color("38bdf8"))
+	_label_trait = _value(_hud, Loc.t("dragon_flight.traits"), "—", Color("c084fc"))
+	_label_element = _value(_hud, Loc.t("dragon_flight.element"), "—", Color("38bdf8"))
+	_label_buff = _value(_hud, Loc.t("dragon_flight.effect"), "—", Color("38bdf8"))
 
 	_banner = Ui.label("", 30, Color.WHITE, true)
 	_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
@@ -358,7 +364,10 @@ func _update_world(delta: float) -> void:
 	_update_trail(dt)
 	_update_camera(dt)
 	_update_timers(dt)
-	_update_hud()
+	_hud_timer -= dt
+	if _hud_timer <= 0.0:
+		_hud_timer = HUD_INTERVAL
+		_update_hud()
 	_check_end()
 
 
@@ -663,19 +672,19 @@ func _collect(pickup: Dictionary) -> void:
 			_banner_text("+ Heilung", 0.9)
 		"shield":
 			buff_shield = float(entry["duration"])
-			_banner_text("Drachenschild", 0.9)
+			_banner_text(Loc.t("dragon_flight.dragon_found"), 0.9)
 		"rapid":
 			buff_rapid = float(entry["duration"])
-			_banner_text("Feuersturm", 0.9)
+			_banner_text(Loc.t("dragon_flight.fire_storm"), 0.9)
 		"magnet":
 			buff_magnet = float(entry["duration"])
-			_banner_text("Magnetstein", 0.9)
+			_banner_text(Loc.t("dragon_flight.magnet_stone"), 0.9)
 		"gold":
 			gold += maxi(1, roundi(amount * float(stats["gold_mult"])))
 			_banner_text("+%d Gold" % maxi(1, roundi(amount)), 0.9)
 		"egg":
 			eggs_found += 1
-			_banner_text("Drachenei gefunden!", 1.2)
+			_banner_text(Loc.t("dragon_flight.egg_found"), 1.2)
 		_:
 			pass
 	Sfx.coin()
@@ -785,10 +794,13 @@ func _update_timers(dt: float) -> void:
 	breath.visible = maxf(0.0, fire_cd * 3.0) > 0.18
 
 
+## The HUD runs at 20 Hz. Everything in it changes on a pickup or a hit, not on
+## a frame, and the buff row builds up to four `Loc.f` calls and a join per frame
+## to say the same thing it said last frame.
 func _update_hud() -> void:
 	Ui.set_bar(_hp_bar, hp / maxf(1.0, max_hp), Color("ef4444") if hp / max_hp < 0.35 else Color("22c55e"))
 	_label_score.text = Ui.format_number(score)
-	_label_gold.text = "%d" % gold
+	_label_gold.text = Loc.number(gold)
 	var traits: Array = stats.get("traits", [])
 	_label_trait.text = ", ".join(_short(traits)) if not traits.is_empty() else "—"
 	var summary := DragonFlight.level_resist_summary(level_def)

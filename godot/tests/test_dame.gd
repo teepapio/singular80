@@ -14,7 +14,10 @@ func run(kit: TestKit, tree: SceneTree) -> void:
 	t = kit
 	_suite(_capture_analysis)
 	_suite(_movable_pieces)
+	# Awaited rather than wrapped in `_suite()`: that helper is synchronous, and
+	# the screen suite is not. It gets the same protection by hand.
 	await _hint_at_the_board(tree)
+	t.close_suite()
 
 
 ## Runs one suite and fails it if it returned before its own `t.suite_done()`,
@@ -180,6 +183,9 @@ func _movable_pieces() -> void:
 ## The marks and the hint on the real screen, and the move the hint offers.
 func _hint_at_the_board(tree: SceneTree) -> void:
 	t.suite("Dame — Tipp am Brett")
+	# The two early exits below return without `t.suite_done()` — which is
+	# deliberate, so that the `t.close_suite()` in `run()` reports them as the
+	# aborted suites they are instead of as a suite that passed nothing.
 	var router := tree.root.get_node_or_null("/root/Router")
 	if router == null:
 		t.check(false, "Der Router ist erreichbar")

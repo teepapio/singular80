@@ -12,6 +12,9 @@ const CAMERA_HEIGHT := 9.6
 const CAMERA_DISTANCE := 12.5
 const ROOM_RADIUS := 17.0
 const SPIN_SPEED := 0.9
+## Fallback rate for the info caption when nothing flagged a change. The change
+## flag is what normally drives it; this bounds the staleness if a flag is missed.
+const INFO_INTERVAL := 0.1
 
 ## How tall a mesh appears on its pedestal, whatever its real size is.
 const MESH_ON_PEDESTAL := 1.75
@@ -46,6 +49,9 @@ var _tier_buttons: Array[Button] = []
 var _group_buttons: Array[Button] = []
 ## The ids behind `_group_buttons`, in the same order.
 var _group_ids: Array[String] = []
+## The info caption is rebuilt on a change flag or at 10 Hz, not every frame.
+var _info_dirty := true
+var _info_timer := 0.0
 
 
 func _ready_world() -> void:
@@ -292,6 +298,7 @@ func _set_tier(next_tier: String) -> void:
 	if not (next_tier in AssetRegistry.TIERS) or next_tier == tier:
 		return
 	tier = next_tier
+	_info_dirty = true
 	Sfx.select()
 	_refresh()
 
@@ -301,6 +308,7 @@ func _set_group(next_group: String) -> void:
 		return
 	group_id = next_group
 	page_index = 0
+	_info_dirty = true
 	Sfx.select()
 	_refresh()
 
@@ -310,6 +318,7 @@ func _turn_page(step: int) -> void:
 	if count <= 1:
 		return
 	page_index = posmod(page_index + step, count)
+	_info_dirty = true
 	Sfx.select()
 	_refresh()
 
@@ -332,6 +341,7 @@ func _toggle_mark() -> void:
 	else:
 		Sfx.select()
 		notify(Loc.f("%s removed again", [AssetRegistry.display_name(key)]), 1.2)
+	_info_dirty = true
 	_refresh()
 
 
@@ -353,14 +363,24 @@ func _update_world(delta: float) -> void:
 	player.rotation.y = facing
 	follow_camera(player.position, CAMERA_HEIGHT, CAMERA_DISTANCE, 7.0, delta)
 
-	active_pedestal = MeshGallery.nearest_pedestal(visible_keys(), pos)
+	var nearest := MeshGallery.nearest_pedestal(visible_keys(), pos)
+	if nearest != active_pedestal:
+		active_pedestal = nearest
+		_info_dirty = true
 	var pressed := Input.is_action_pressed("interact")
 	if pressed and not _interact_held and active_pedestal >= 0:
 		_toggle_mark()
 	_interact_held = pressed
 
 	_animate_slots(delta)
-	_refresh_info()
+	_info_timer -= delta
+	# Six `Loc.f` calls, two `to_upper()` and a join per frame for a caption that
+	# only changes when the player walks to another pedestal. The animation above
+	# still runs every frame; the text waits for the change or the 10 Hz tick.
+	if _info_dirty or _info_timer <= 0.0:
+		_info_dirty = false
+		_info_timer = INFO_INTERVAL
+		_refresh_info()
 
 
 ## Spins every mesh on its pedestal and makes the nearest one glow.
@@ -528,7 +548,7 @@ func _refresh_info() -> void:
 		_mark_button.disabled = true
 		return
 	_mark_button.disabled = false
-	_info_name.text = "%s  %s" % [AssetRegistry.group_of(key).substr(0, 1).to_upper(), AssetRegistry.display_name(key)]
+	_info_name.text = Loc.f("%s  %s", [AssetRegistry.group_of(key).substr(0, 1).to_upper(), AssetRegistry.display_name(key)])
 	# Label and triangle count must match the level that actually stands there,
 	# or a slim build claims "1.000 triangles" over a 200-triangle mesh.
 	var shown := AssetRegistry.best_available(key, tier)

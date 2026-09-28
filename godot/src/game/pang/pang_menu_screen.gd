@@ -13,6 +13,8 @@ var _page := 0
 var _page_label: Label
 var _detail: Label
 var _panel: VBoxContainer
+## The drifting background discs, so a window resize can put them back on screen.
+var _discs: Array[Control] = []
 
 
 func _ready_game() -> void:
@@ -28,15 +30,39 @@ func _draw_background() -> void:
 	content_layer().add_child(layer)
 	layer.add_child(Ui.rect(UiTheme.BG))
 	# A few slow drifting discs, echoing the bouncing balls of the game.
+	#
+	# The field is the size of the window, not a fixed 1300x700: a 4:3 tablet runs
+	# a 1280x1707 viewport, and a hard-coded extent leaves the lower two thirds
+	# of the screen bare.
+	var extent := _disc_extent()
 	for i in 16:
 		var dot := Ui.rect(Color(0.055, 0.647, 0.898, randf_range(0.05, 0.22)), 64)
 		dot.size = Vector2.ONE * randf_range(60.0, 190.0)
-		dot.position = Vector2(randf() * 1300.0 - 40.0, randf() * 700.0 - 40.0)
+		dot.position = Vector2(randf() * extent.x - 40.0, randf() * extent.y - 40.0)
 		layer.add_child(dot)
+		_discs.append(dot)
 		var tween := dot.create_tween()
 		tween.set_loops()
 		tween.tween_property(dot, "position:y", dot.position.y + randf_range(120.0, 320.0), randf_range(7.0, 14.0)).set_trans(Tween.TRANS_SINE)
 		tween.tween_property(dot, "position:y", dot.position.y - 120.0, randf_range(7.0, 14.0)).set_trans(Tween.TRANS_SINE)
+	var viewport := get_viewport()
+	if not viewport.size_changed.is_connected(_respawn_discs):
+		viewport.size_changed.connect(_respawn_discs)
+
+
+## The area the discs drift through: the window, plus the width of the largest one.
+func _disc_extent() -> Vector2:
+	var size := get_viewport_rect().size
+	return Vector2(maxf(320.0, size.x) + 40.0, maxf(240.0, size.y) + 320.0)
+
+
+## A window that changed shape leaves half the discs outside it.
+func _respawn_discs() -> void:
+	var extent := _disc_extent()
+	for dot in _discs:
+		if not is_instance_valid(dot):
+			continue
+		dot.position = Vector2(randf() * extent.x - 40.0, randf() * extent.y - 40.0)
 
 
 func _build_chrome() -> void:
@@ -115,9 +141,9 @@ func _page_best(span: Vector2i) -> String:
 	var best := 0.0
 	for level in range(span.x, span.y + 1):
 		best = maxf(best, Pang.level_best_time(level))
-	# See `hangar_screen.gd`: the condition belongs outside the format, or a
-	# `%.1f` ends up with a dash. `—` needs no translation.
-	return Loc.f("%.1f s", [best]) if best > 0.0 else "—"
+	# The condition belongs outside the format, or `Loc.decimal` ends up with a
+	# dash. `—` needs no translation.
+	return Loc.t("common.seconds", {"seconds": Loc.decimal(best, 1)}) if best > 0.0 else "—"
 
 
 func _level_card(level: int) -> Control:
@@ -136,7 +162,7 @@ func _level_card(level: int) -> Control:
 	# The card counts every ball the level ships, reinforcements included, so it
 	# never promises a nearly empty arena.
 	var waves := int(config["waves"])
-	var count_text := "%d Kugeln" % Pang.level_ball_total(level)
+	var count_text := "%d balls" % Pang.level_ball_total(level)
 	if waves > 0:
 		count_text += "  ·  " + Pang.wave_label(waves)
 	var count := Ui.label(count_text, 13, UiTheme.TEXT_DIM)
@@ -150,7 +176,7 @@ func _level_card(level: int) -> Control:
 		flanks.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		column.add_child(flanks)
 
-	var record := Ui.label(Loc.f("%.1f s", [best]) if best > 0.0 else "—", 18, Color("facc15") if best > 0.0 else UiTheme.TEXT_MUTED, true)
+	var record := Ui.label(Loc.t("common.seconds", {"seconds": Loc.decimal(best, 1)}) if best > 0.0 else "—", 18, Color("facc15") if best > 0.0 else UiTheme.TEXT_MUTED, true)
 	record.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(record)
 

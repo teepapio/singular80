@@ -10,7 +10,10 @@ import { join } from 'node:path';
  *
  * These are source-level assertions on purpose: the dashboard has no DOM in the
  * test suite, and the failure this guards (someone re-adding the run id while
- * fixing something else) shows up as a string in the template.
+ * fixing something else) shows up as a string in the template. What they cannot
+ * do is survive a reformat silently — hence every marker below is checked before
+ * it is sliced, so a renamed function reports itself instead of returning the
+ * wrong region.
  */
 
 const MAIN = readFileSync(join(import.meta.dirname, '..', 'src/dashboard/main.ts'), 'utf8');
@@ -20,7 +23,10 @@ const BLOCKS = [
   {
     name: 'Warteschlangen-Eintrag',
     start: 'html += queued',
-    end: 'data-action="cancel-run" data-run="${run.id}">⏹ Entfernen',
+    // The button that closes the entry. Deliberately not its full markup: the id
+    // inside it is wrapped in a helper now, and a marker that spells the whole
+    // attribute breaks on a rename that changes nothing an operator sees.
+    end: 'data-action="cancel-run"',
   },
   { name: 'aktiver Run', start: 'function renderRunCard', end: 'data-run-activity' },
   { name: 'Historie', start: 'function renderRunHistory', end: 'data-action="retry-run"' },
@@ -41,8 +47,9 @@ describe('Ein Run ist an seinem Text erkennbar', () => {
 
   it.each(BLOCKS)('$name nennt die kryptische Run-Id nicht', (b) => {
     // The id is a `run_`-blob; the owner asked for it to go. It may still appear
-    // in a `data-` attribute, which the eye never sees.
-    const shown = block(b).replace(/data-[a-z-]+="\$\{run\.id\}"/g, '');
+    // in a `data-` attribute, which the eye never sees — and it may be wrapped in
+    // a helper there, so the attribute is recognised by what it contains.
+    const shown = block(b).replace(/data-[a-z-]+="[^"]*run\.id[^"]*"/g, '');
     expect(shown).not.toMatch(/\$\{run\.id\}/);
   });
 
@@ -62,7 +69,12 @@ describe('Ein Run ist an seinem Text erkennbar', () => {
 /** The helper itself, so the assertions read as one block. */
 function suggestionTextSource(): string {
   const from = MAIN.indexOf('function suggestionText');
-  return MAIN.slice(from, MAIN.indexOf('\n}', from) + 2);
+  // Guarded like `block()` above: `slice(from, -1)` would return the rest of the
+  // file and every assertion below would quietly pass on unrelated code.
+  expect(from, 'Startmarker "function suggestionText" gefunden').toBeGreaterThan(-1);
+  const to = MAIN.indexOf('\n}', from);
+  expect(to, 'Endmarker "}" gefunden').toBeGreaterThan(from);
+  return MAIN.slice(from, to + 2);
 }
 
 describe('Der Vorschlagstext', () => {

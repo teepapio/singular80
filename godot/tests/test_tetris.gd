@@ -205,7 +205,11 @@ func _drehen() -> void:
 # --- the kick tables --------------------------------------------------------
 
 func _kick_tabellen() -> void:
-	t.suite("Tetris — Drehen & Wall-Kicks")
+	# The four suites in this file were all called "Tetris — Drehen & Wall-Kicks",
+	# so a red run could not say which of them failed. Each body now carries its
+	# own name; the manifest in `scripts/scopes.mjs` lists the first one and has to
+	# be given the other three.
+	t.suite("Tetris — Wall-Kick-Tabellen")
 
 	# Every quarter turn of every piece kind has its five offsets. A half turn is
 	# not part of the system and has no table.
@@ -247,7 +251,7 @@ func _kick_tabellen() -> void:
 		"Der I dreht zurück mit zwei Spalten Versatz")
 
 	# A kick is worth saying out loud; the hint in the HUD says it.
-	t.equal(TetrisRules.kick_text(Vector2i.ZERO), "ohne Kick", "Ohne Versatz gibt es keinen Kicker")
+	t.equal(TetrisRules.kick_text(Vector2i.ZERO), "without a kick", "Ohne Versatz gibt es keinen Kicker")
 	t.equal(TetrisRules.kick_text(Vector2i(0, 2)), "Kick ↓2", "Zwei Reihen tiefer wird nach unten gezählt")
 	t.equal(TetrisRules.kick_text(Vector2i(-1, -1)), "Kick ←1+↑1", "Ein Kicker in zwei Richtungen nennt beide")
 	t.equal(TetrisRules.kick_text(Vector2i(2, 0)), "Kick →2", "Nach rechts zählt als Pfeil nach rechts")
@@ -270,7 +274,7 @@ func _kick_tabellen() -> void:
 # --- a T-Spin out of a turn -------------------------------------------------
 
 func _tspin_drehen() -> void:
-	t.suite("Tetris — Drehen & Wall-Kicks")
+	t.suite("Tetris — T-Spin aus der Drehung")
 
 	# The board above, seen from the T: it rests on the bump at (2, 3), the turn
 	# costs no kick, and the piece drops two rows into the slot.
@@ -285,7 +289,7 @@ func _tspin_drehen() -> void:
 	t.equal(int(preview["x"]), 2, "Das Stück landet in der Senke")
 	t.equal(int(preview["y"]), 5, "zwei Reihen tiefer, wo es zur Ruhe kommt")
 	t.equal(preview["matrix"], TetrisRules.rotate_matrix(T, true), "in der Lage, die der T-Spin braucht")
-	t.equal(str(preview["label"]), "T-Spin Double  ·  0→R  ohne Kick", "Der Hinweis nennt Turn, Kicker und Ertrag")
+	t.equal(str(preview["label"]), "T-Spin Double  ·  0→R  without a kick", "Der Hinweis nennt Turn, Kicker und Ertrag")
 
 	# What the scoring table promises for that arrangement: 1200 instead of 300
 	# for a plain Double. The whole point of the feature.
@@ -322,7 +326,7 @@ func _tspin_drehen() -> void:
 # --- what the player is told -------------------------------------------------
 
 func _vorschau() -> void:
-	t.suite("Tetris — Drehen & Wall-Kicks")
+	t.suite("Tetris — Zugvorschau")
 
 	var notch := _shape(_double_board)
 	# Counter-clockwise, the same resting T turns into a shape that cannot move

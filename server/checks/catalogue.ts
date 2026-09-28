@@ -13,13 +13,17 @@
  * nothing but the repository, and a `device` probe that measures the installed
  * app. The static one runs unattended because it is deterministic and cheap; the
  * device one is what an operator starts when static found nothing but a player
- * still complains.
+ * still complains — and it is run out of process, by the `device-debug` agent on
+ * a phone over adb, which is why the queue refuses it here with a reason instead
+ * of starting something it cannot finish. Their `targets` and `limits` are part
+ * of the catalogue so the dashboard can describe what the device run would do,
+ * and the refusal names them; nothing in this process measures against them.
  *
  * The static globs are deliberately coarse: a check that looked at one screen
  * would go green while the same defect sat in the next one, and a queue
  * reporting "all clear" on a partial view is worse than no queue.
  */
-import type { CheckKind, CheckSpec } from '../../src/shared/types.js';
+import type { CheckSpec } from '../../src/shared/types.js';
 
 /** Where the game's own GDScript lives. */
 const GAME_SRC = 'godot/src/game';
@@ -35,7 +39,8 @@ export const CHECK_SPECS: CheckSpec[] = [
       'Findet Schaltflächen, die gerendert werden, aber weder einen Callback noch eine '
       + 'Input-Action bekommen. Ui.button() verbindet nur `if on_press.is_valid()` — ein '
       + 'fehlender Callback ist deshalb kein Fehler, sondern ein toter Knopf, der im '
-      + 'Screenshot gut aussieht.',
+      + 'Screenshot gut aussieht. Erfasst werden alle drei Bauformen: Ui.button(), '
+      + 'add_action_button() und ein selbstgebautes Button.new().',
     scope: [`${GAME_SRC}/**/*.gd`, `${LOGIC_SRC}/**/*.gd`],
   },
   {
@@ -57,7 +62,7 @@ export const CHECK_SPECS: CheckSpec[] = [
     title: 'Logspam',
     description:
       'Findet `print` und Verwandte in Funktionen, die pro Frame oder pro Eingabe laufen. '
-      + 'Ein einzelnes `print` in `_process` sind rund 60 Zeilen pro Sekunde: auf Android '
+      + 'Ein einzelner `print` in `_process` sind rund 60 Zeilen pro Sekunde: auf Android '
       + 'teuer, und es begräbt die eine Zeile, auf die es ankommt.',
     scope: [`${GAME_SRC}/**/*.gd`, `${LOGIC_SRC}/**/*.gd`],
   },
@@ -80,9 +85,11 @@ export const CHECK_SPECS: CheckSpec[] = [
     title: 'Ruckler-Ursachen',
     description:
       'Findet Allokationen (`new`) und wachsende Container in `_process`, `_physics_process` '
-      + 'und `_update_world`. Eine Allokation pro Frame ist der klassische GC-Ruckler auf '
-      + 'Android; ein Container ohne `clear()` wächst und wird mit der Zeit immer langsamer.',
-    scope: [`${GAME_SRC}/**/*.gd`],
+      + 'und `_update_world`, außerdem das pro Frame gesetzte Label und das pro Frame '
+      + 'ausgelöste `queue_redraw()`. Eine Allokation pro Frame ist der klassische '
+      + 'GC-Ruckler auf Android; ein Container ohne `clear()` wächst und wird mit der Zeit '
+      + 'immer langsamer; ein Text, der sich nicht ändert, kostet trotzdem 60 Layout-Durchläufe.',
+    scope: [`${GAME_SRC}/**/*.gd`, `${LOGIC_SRC}/**/*.gd`],
   },
   {
     id: 'performance-fps',
@@ -101,14 +108,6 @@ export const CHECK_SPECS: CheckSpec[] = [
 /** Every spec, by id. */
 export const CHECKS_BY_ID = new Map(CHECK_SPECS.map((spec) => [spec.id, spec]));
 
-export function specsOfKind(kind: CheckKind): CheckSpec[] {
-  return CHECK_SPECS.filter((spec) => spec.kind === kind);
-}
-
-export function specsForProbe(probe: CheckSpec['probe']): CheckSpec[] {
-  return CHECK_SPECS.filter((spec) => spec.probe === probe);
-}
-
 /** Human label for a finding code, for the dashboard and the promoted suggestion. */
 export const FINDING_LABELS: Record<string, string> = {
   'button-without-callback': 'Knopf ohne Callback',
@@ -118,19 +117,37 @@ export const FINDING_LABELS: Record<string, string> = {
   'alloc-per-frame': 'Allokation pro Frame',
   'array-per-frame': 'Container pro Frame',
   'append-per-frame': 'Wachsender Container pro Frame',
+  'redraw-per-frame': 'Neuzeichnen pro Frame',
+  'text-per-frame': 'Text pro Frame gesetzt',
 };
+
+/** A finding as far as the suggestion text cares: the where and the what. */
+export interface FindingSummary {
+  code: string;
+  file: string;
+  line: number;
+  message: string;
+  hint?: string;
+}
 
 /**
  * Turns findings into a German text for a promoted suggestion, so the operator
  * does not have to write the sentence a second time in the dashboard form.
+ *
+ * This is the one implementation of that sentence: `CheckRunner.promote` calls
+ * this, so what the dashboard previews, what the test proves and what lands in
+ * the suggestion queue are the same text. It used to have a second, divergent
+ * copy in the runner with a different headline, a different limit and no hint.
  */
 export function findingToSuggestionText(
   spec: CheckSpec,
-  findings: { code: string; file: string; line: number; message: string }[],
+  findings: FindingSummary[],
   limit = 5,
 ): string {
   const head = `Die Prüfung „${spec.title}" meldet ${findings.length} Fundort(e):`;
-  const lines = findings.slice(0, limit).map((f) => `- ${f.file}:${f.line} — ${f.message}`);
+  const lines = findings
+    .slice(0, limit)
+    .map((f) => `- ${f.file}:${f.line} — ${f.message}${f.hint ? `\n  ${f.hint}` : ''}`);
   const rest = findings.length > limit ? `\n… und ${findings.length - limit} weitere.` : '';
   return `${head}\n\n${lines.join('\n')}${rest}`;
 }

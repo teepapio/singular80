@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -62,6 +62,152 @@ export function findTerminal(): { bin: string; args: (title: string, script: str
     if (exists(candidate.bin)) return candidate;
   }
   return null;
+}
+
+/**
+ * The direct launch, with no shell in between: `gnome-terminal … -- opencode …`.
+ *
+ * **A full-screen interface must not be a background job.** With a wrapper that
+ * starts it and waits, the session runs in the wrapper's process group, the
+ * terminal's foreground group is the wrapper, and the interface's first write
+ * raises SIGTTOU: the window shows a frozen copy and the shell prints
+ * `Stopped`. Measured both ways — with `set -m` the process is stopped, without
+ * it the run never finishes. So in this mode there is no wrapper at all.
+ *
+ * The cost is the exit code, which the emulator's own process does not have; the
+ * runner finds the real session as a descendant and watches that instead.
+ */
+export function buildTerminalCommand(input: {
+  bin: string;
+  args: (title: string, script: string) => string[];
+  title: string;
+  command: string[];
+  marker?: string;
+  /** Per-run data directory, see `isolateDataHome`. */
+  dataHome?: string;
+}): { bin: string; argv: string[] } {
+  // `env` carries the run id into the session — the handle that survives the
+  // emulator re-parenting — and moves the session store somewhere private.
+  //
+  // `--standalone` is not enough for that: it starts a private *server*, but the
+  // sessions live in one shared database on disk, so the new window lists the
+  // owner's own sessions. `XDG_DATA_HOME` is what actually moves the store, and
+  // it is the documented XDG lever rather than a trick.
+  const env: string[] = [];
+  if (input.marker) env.push(input.marker);
+  if (input.dataHome) env.push(`XDG_DATA_HOME=${input.dataHome}`);
+  const parts = env.length > 0 ? ['env', ...env, ...input.command] : input.command;
+  // The same argv builder, but the "script" is the command itself, so every
+  // emulator spelling stays in one place.
+  const joined = parts.map(shellQuote).join(' ');
+  return { bin: input.bin, argv: input.args(input.title, joined) };
+}
+
+/**
+ * Finds a process by an environment marker — our own `env` wrapper puts the run
+ * id in the session's environment.
+ *
+ * Needed because the process tree is not usable here: `gnome-terminal` exits the
+ * moment the window is open, and the session is re-parented to
+ * `gnome-terminal-server`. So the emulator's pid dies immediately and the session
+ * is not below it, which made the runner report a finished run that was still on
+ * screen. An environment marker survives re-parenting and is unique per run, so
+ * it is the one handle that actually identifies *this* session.
+ */
+export function findByEnvMarker(marker: string): number[] {
+  const found: number[] = [];
+  let entries: string[] = [];
+  try {
+    entries = readdirSync('/proc').filter((name) => /^\d+$/.test(name));
+  } catch {
+    return found;
+  }
+  for (const name of entries) {
+    const pid = Number(name);
+    if (pid === process.pid) continue;
+    try {
+      const env = readFileSync(`/proc/${pid}/environ`, 'utf8');
+      if (env.split('\0').includes(marker)) found.push(pid);
+    } catch {
+      /* not ours to read */
+    }
+  }
+  return found;
+}
+
+/**
+ * A private data directory for one run, with the parts of the owner's store it
+ * needs.
+ *
+ * Only what must be shared is linked in: the configuration (their models,
+ * providers, agents) and the credentials. Sessions, logs, snapshots and the shell
+ * scratch space stay out, so the run's window shows an empty session list instead
+ * of the owner's, and its own files cannot collide with theirs.
+ */
+export function isolateDataHome(runId: string, base: string, ownerHome: string): string {
+  // `base` is where the isolated homes live (the project's data directory, which
+  // is git-ignored); `ownerHome` is where the credentials are borrowed from.
+  const dir = join(base, 'opencode-runs', runId);
+  mkdirSync(dir, { recursive: true });
+  // `auth.json` is the credential store and lives inside the data directory. If
+  // the provider keeps its key there — it does on this machine — a run without it
+  // cannot authenticate at all, which is worse than a shared session list.
+  for (const name of ['auth.json']) {
+    const source = join(ownerHome, '.local', 'share', 'opencode', name);
+    const target = join(dir, name);
+    try {
+      if (!existsSync(target) && existsSync(source)) symlinkSync(source, target);
+    } catch {
+      /* best effort: the run may still find its credentials elsewhere */
+    }
+  }
+  return dir;
+}
+
+/** The marker a session carries, unique per run. */
+export function runMarker(runId: string): string {
+  return `SINGULAR80_RUN=${runId}`;
+}
+
+/** Every live process below `pid`, deepest last. Reads /proc, no dependencies. */
+export function descendantsOf(pid: number): number[] {
+  const found: number[] = [];
+  let frontier = [pid];
+  for (let depth = 0; depth < 8 && frontier.length > 0; depth += 1) {
+    const next: number[] = [];
+    for (const parent of frontier) {
+      let entries: string[] = [];
+      try {
+        entries = readdirSync('/proc').filter((name) => /^\d+$/.test(name));
+      } catch {
+        return found;
+      }
+      for (const name of entries) {
+        const stat = readStatOf(Number(name));
+        if (stat && stat.ppid === parent) {
+          const child = Number(name);
+          if (!found.includes(child)) {
+            found.push(child);
+            next.push(child);
+          }
+        }
+      }
+    }
+    frontier = next;
+  }
+  return found;
+}
+
+function readStatOf(pid: number): { ppid: number } | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    // The executable name may contain spaces and parentheses, so the fields after
+    // the last ')' are the reliable ones.
+    const after = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    return { ppid: Number(after[1]) };
+  } catch {
+    return null;
+  }
 }
 
 export interface TerminalSession {

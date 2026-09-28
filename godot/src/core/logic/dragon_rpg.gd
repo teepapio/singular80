@@ -136,10 +136,11 @@ static func base_player_stats() -> Stats:
 	return Stats.new()
 
 
-## XP required to advance from `level` to the next level.
+## XP required to advance from `level` to the next level. The numbers live in
+## `PlayerStats.XP_CURVES` — the arena and the RPG are two progressions in one
+## table, not two private formulas that can drift apart.
 static func xp_to_next(level: int) -> int:
-	var l: int = maxi(1, level)
-	return roundi(8.0 + float(l) * 6.0 + float(l) * float(l) * 1.5)
+	return roundi(PlayerStats.xp_with_curve(level, "rpg"))
 
 
 # --- the escape burst ------------------------------------------------------

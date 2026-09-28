@@ -22,6 +22,22 @@ const RUNNER = readFileSync(join(import.meta.dirname, '..', 'server', 'runner.ts
 const APP = readFileSync(join(import.meta.dirname, '..', 'server', 'app.ts'), 'utf8');
 const INDEX = readFileSync(join(import.meta.dirname, '..', 'server', 'index.ts'), 'utf8');
 
+/**
+ * `OPENCODE_BIN` is restored here and not at the end of the case that sets it: a
+ * failing assertion in between used to skip the `delete`, and the stub then stayed
+ * behind for every case that ran after it. `touched` keeps the cases that never
+ * set it from deleting a value the machine itself provided.
+ */
+let previousBin: string | undefined;
+let touched = false;
+
+afterEach(() => {
+  if (!touched) return;
+  touched = false;
+  if (previousBin === undefined) delete process.env.OPENCODE_BIN;
+  else process.env.OPENCODE_BIN = previousBin;
+});
+
 describe('Terminalfenster nur auf ausdruecklichen Wunsch', () => {
   it('der Runner oeffnet ohne Opt-in gar nichts', () => {
     // The exact line that stops the windows. If it ever becomes `!== false`
@@ -69,6 +85,8 @@ describe('Kein Fenster, wenn der Test laeuft', () => {
     const fake = join(repo, 'fake-opencode');
     writeFileSync(fake, '#!/bin/sh\nsleep 0.2\n');
     chmodSync(fake, 0o755);
+    previousBin = process.env.OPENCODE_BIN;
+    touched = true;
     process.env.OPENCODE_BIN = fake;
 
     const store = new Store(dir);
@@ -78,19 +96,25 @@ describe('Kein Fenster, wenn der Test laeuft', () => {
       contentDir: join(repo, 'content'),
       callbacks: {},
     });
-    const suggestion = store.createSuggestion({
-      text: 'Tetris: mehr Bälle am Stück',
-      author: 'Anonym',
-      source: 'game',
-      category: 'mechanics',
-      canonicalId: null,
-      status: 'approved',
-    });
-    runner.enqueue(suggestion, store.getSettings(), [suggestion]);
-    await new Promise((r) => setTimeout(r, 250));
-    runner.dispose();
-    delete process.env.OPENCODE_BIN;
+    try {
+      const suggestion = store.createSuggestion({
+        text: 'Tetris: mehr Bälle am Stück',
+        author: 'Anonym',
+        source: 'game',
+        category: 'mechanics',
+        canonicalId: null,
+        status: 'approved',
+      });
+      runner.enqueue(suggestion, store.getSettings(), [suggestion]);
+      await new Promise((r) => setTimeout(r, 250));
+    } finally {
+      // The store is deliberately not closed: the child of the run is still
+      // finishing, and its exit handler writes through this handle.
+      runner.dispose();
+    }
 
+    // `OPENCODE_BIN` is put back by the `afterEach` above, which runs whether this
+    // case passes or fails — the `delete` that used to stand here did not.
     expect(existsSync(join(repo, 'run', 'terminal'))).toBe(false);
   });
 });

@@ -66,7 +66,7 @@ const LINE_COLORS: Array[Color] = [
 	Color("ff664d"),
 ]
 
-const LINE_COLOR_NAMES: Array[String] = ["Pink", "Orange", "Türkis", "Violett", "Koralle"]
+const LINE_COLOR_NAMES: Array[String] = ["Pink", "Orange", "Turquoise", "Violett", "Koralle"]
 
 ## Where people want to go, by origin kind, time of day and weekday/weekend.
 ## Mirrors the commute table of the original game: the clock is not decoration,
@@ -208,19 +208,19 @@ const CAM_MAX_DISTANCE := 96.0
 const CARD_NAMES: Dictionary = {
 	"train": "Lokomotive",
 	"wagon": "Beiwagen",
-	"line": "Neue Linie",
-	"bridge": "Brücke",
+	"line": "New line",
+	"bridge": "Bridge",
 	"tunnel": "Tunnel",
 	"transfer": "Umstiegsfreigabe",
 }
 
 const CARD_HINTS: Dictionary = {
 	"train": "Setzt eine Lokomotive ins Depot",
-	"wagon": "Ein Beiwagen, +6 Sitzplätze",
+	"wagon": "One trailer, +6 seats",
 	"line": "Eine weitere Linienfarbe",
-	"bridge": "Volle Geschwindigkeit über Wasser",
-	"tunnel": "Unterirdisch durchs Wasser",
-	"transfer": "Jeder Fahrgast darf ein Umstieg mehr nutzen",
+	"bridge": "Full speed over water",
+	"tunnel": "Underground through the water",
+	"transfer": "Every passenger may make one more transfer",
 }
 
 # --- run state --------------------------------------------------------------
@@ -423,6 +423,11 @@ func _update_growth(dt: float) -> void:
 			var spot := _free_station_position()
 			if spot.x > -900.0:
 				_spawn_station_at(spot, kind)
+				# `_spawn_station_at` starts with an empty line list, and only
+				# `refresh_transfers` fills it. Without this the new station is
+				# invisible to passenger spawning and to the service scan until
+				# the next line edit, so a line built to it serves nobody.
+				refresh_transfers()
 				emit_event("new_station", {"pos": spot})
 
 	shape_change_timer -= dt
@@ -591,6 +596,8 @@ func collapse(station_id: int) -> void:
 		return
 	over = true
 	running = false
+	# The run is over: a collapse is never part of a punctual streak.
+	streak = 0
 	emit_event("over", {
 		"station": station_id,
 		"money": money,
@@ -608,15 +615,15 @@ func collapse(station_id: int) -> void:
 
 ## Small celebrations that make a long run readable. Fired once per threshold.
 func _celebrate() -> void:
-	_check_milestone(10, "10 Fahrgäste zugestellt", delivered >= 10)
-	_check_milestone(50, "50 Fahrgäste zugestellt", delivered >= 50)
-	_check_milestone(150, "150 Fahrgäste zugestellt", delivered >= 150)
-	_check_milestone(400, "400 Fahrgäste zugestellt", delivered >= 400)
-	_check_milestone(5, "5 Züge im Einsatz", trains.size() >= 5)
-	_check_milestone(12, "12 Züge im Einsatz", trains.size() >= 12)
+	_check_milestone(10, "10 passengers delivered", delivered >= 10)
+	_check_milestone(50, "50 passengers delivered", delivered >= 50)
+	_check_milestone(150, "150 passengers delivered", delivered >= 150)
+	_check_milestone(400, "400 passengers delivered", delivered >= 400)
+	_check_milestone(5, "5 trains in service", trains.size() >= 5)
+	_check_milestone(12, "12 trains in service", trains.size() >= 12)
 	_check_milestone(6, "6 Streckenknoten", transfers.size() >= 6)
-	_check_milestone(4, "4 Brücken gebaut", _built("bridge") >= 4)
-	_check_milestone(3, "Alle Linienfarben genutzt", lines.size() >= max_lines)
+	_check_milestone(4, "4 bridges built", _built("bridge") >= 4)
+	_check_milestone(3, "All line colours used", lines.size() >= max_lines)
 
 
 func _check_milestone(threshold: int, text: String, reached: bool) -> void:
@@ -802,10 +809,10 @@ func unmet_top() -> Dictionary:
 func demand_text() -> String:
 	var top := unmet_top()
 	if not top.is_empty():
-		return "%d warten auf %s — keine Linie fährt dorthin" % [
-			int(top["want"]), type_name(int(top["kind"]))]
+		return Loc.f("%d are waiting for %s — no line runs there", [
+			int(top["want"]), type_name(int(top["kind"]))])
 	if stranded_total > 0:
-		return "%d Fahrgäste ohne Anschluss" % stranded_total
+		return "%d passengers stranded" % stranded_total
 	return ""
 
 
@@ -869,8 +876,8 @@ func peak_text() -> String:
 	if not asked:
 		return ""
 	if open.is_empty():
-		return "%02d:00 abgedeckt" % hour
-	return "%02d:00 ohne Anschluss: %s" % [hour, ", ".join(open)]
+		return "%02d:00 covered" % hour
+	return Loc.f("%02d:00 with no connection: %s", [hour, ", ".join(open)])
 
 
 ## Grades every queue against the network and notes what the city is missing.
@@ -1691,6 +1698,9 @@ func _drop_train(train_id: int, refund: bool) -> void:
 		(lines[line_id]["trains"] as Array).erase(train_id)
 	for pid in trains[train_id]["passengers"]:
 		_drop_passenger(int(pid))
+	# Riders left on a platform nobody will collect break the punctual run.
+	if not (trains[train_id]["passengers"] as Array).is_empty():
+		streak = 0
 	if refund:
 		resources["trains"] = int(resources["trains"]) + 1
 	trains.remove_at(train_id)
@@ -1891,7 +1901,9 @@ func _deliver(index: int, station: Dictionary) -> void:
 	var passenger: Dictionary = passengers[index]
 	var on_time := float(passenger["wait"]) <= PUNCTUAL_WAIT
 	delivered += 1
-	streak += 1
+	# The streak is a run of consecutive punctual deliveries, not a delivery
+	# counter: a rider who had to wait past the punctuality window breaks it.
+	streak = streak + 1 if on_time else 0
 	best_streak = maxi(best_streak, streak)
 	if on_time:
 		punctual += 1
@@ -1992,7 +2004,7 @@ func score() -> int:
 ## Seconds survived, formatted for the game-over card.
 func survival_text() -> String:
 	var total := int(game_time)
-	return "%d:%02d" % [total / 60, total % 60]
+	return Loc.f("%d:%02d", [total / 60, total % 60])
 
 
 # --- events -----------------------------------------------------------------
@@ -2042,20 +2054,20 @@ static func line_color_name(color: int) -> String:
 static func mode_name(value: int) -> String:
 	match value:
 		Mode.ENDLESS:
-			return "Endlos"
+			return "Endless"
 		Mode.EXTREME:
-			return "Extrem"
+			return "Extreme"
 	return "Normal"
 
 
 static func mode_hint(value: int) -> String:
 	match value:
 		Mode.NORMAL:
-			return "Linien frei umbaubar. Eine Station bleibt 10 s überfüllt, kollabiert das Netz."
+			return "Lines can be rebuilt freely. If one station stays overloaded for 10 s, the network collapses."
 		Mode.ENDLESS:
-			return "Kein Kollaps. Optimiere Wartezeiten, Punktzahl und Zufriedenheit."
+			return "No collapse. Optimise waiting times, score and satisfaction."
 		Mode.EXTREME:
-			return "Linien sind eingefroren — sie lassen sich nur am Ende verlängern."
+			return "Lines are frozen — they can only be extended at the end."
 	return ""
 
 
@@ -2111,23 +2123,23 @@ func clock_text() -> String:
 	var ratio := clampf(day_timer / DAY_DURATION, 0.0, 0.9999)
 	var hour := int(ratio * 24.0)
 	var minute := int((ratio * 24.0 - float(hour)) * 60.0)
-	return "%02d:%02d" % [hour, minute]
+	return Loc.f("%02d:%02d", [hour, minute])
 
 
 func day_text() -> String:
-	return "%s  Tag %d" % [DAY_NAMES[clampi(day, 0, DAY_NAMES.size() - 1)], int(game_time / DAY_DURATION) + 1]
+	return Loc.f("%s  Tag %d", [DAY_NAMES[clampi(day, 0, DAY_NAMES.size() - 1)], int(game_time / DAY_DURATION) + 1])
 
 
 ## "Morgen", "Nachmittag", "Abend" or "Nacht" — the lighting follows this.
 func time_of_day_name() -> String:
 	var hour := hour_of_day()
 	if hour >= 6 and hour < 12:
-		return "Morgen"
+		return "Morning"
 	if hour >= 12 and hour < 18:
-		return "Nachmittag"
+		return "Afternoon"
 	if hour >= 18 and hour < 22:
-		return "Abend"
-	return "Nacht"
+		return "Evening"
+	return "Night"
 
 
 ## The two commute peaks, the hours a rush hour is expected in.

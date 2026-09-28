@@ -141,10 +141,10 @@ func _build_ui() -> void:
 	_fold_button = _action(170, 650, 150, 56, "Fold", UiTheme.PANEL_LIGHT, func() -> void: _act({"type": "fold"}))
 	_check_call_button = _action(350, 650, 210, 56, "Check", UiTheme.ACCENT, func() -> void: _human_action())
 	_adjust(480, 650, 44, 44, "−", func() -> void: _nudge_raise(-BIG_BLIND))
-	_raise_button = _action(640, 650, 190, 56, "Erhöhen", UiTheme.PANEL_LIGHT, func() -> void: _act({"type": "raise", "target": raise_to}))
+	_raise_button = _action(640, 650, 190, 56, "Raise", UiTheme.PANEL_LIGHT, func() -> void: _act({"type": "raise", "target": raise_to}))
 	_adjust(772, 650, 44, 44, "+", func() -> void: _nudge_raise(BIG_BLIND))
 	_allin_button = _action(900, 650, 170, 56, "All-in", Color(0.153, 0.212, 0.345), func() -> void: _act({"type": "allin"}))
-	_next_button = _action(1090, 650, 190, 56, "Nächste Hand", UiTheme.SUCCESS, _start_hand)
+	_next_button = _action(1090, 650, 190, 56, "Next hand", UiTheme.SUCCESS, _start_hand)
 
 
 func _action(x: float, y: float, w: float, h: float, text: String, color: Color, on_press: Callable) -> Button:
@@ -261,11 +261,11 @@ func _refresh() -> void:
 		# now, the type is what holds for good. Its colour makes the table readable
 		# at a glance.
 		var name_label := _name_labels[i] as Label
-		name_label.text = "%s  %s%s" % [
+		name_label.text = Loc.f("%s  %s%s", [
 			player.name,
 			Ui.format_number(player.chips),
 			("   %s" % style_name) if not style_name.is_empty() else "",
-		]
+		])
 		name_label.add_theme_color_override("font_color", UiTheme.TEXT if player.is_human else Color(str(read["color"])))
 
 		var status := player.last_action
@@ -290,20 +290,20 @@ func _refresh() -> void:
 	_raise_button.visible = human_turn
 	_raise_label.visible = human_turn
 	_check_call_button.text = "Check" if int(legal["callAmount"]) <= 0 else "Call %s" % Ui.format_number(int(legal["callAmount"]))
-	_raise_label.text = "Erhöhen auf: %s" % Ui.format_number(raise_to)
+	_raise_label.text = "Raise to: %s" % Ui.format_number(raise_to)
 
 	if waiting_next:
 		var winner := _pot_winner_text()
-		_message_label.text = "%s   ·   Nächste Hand in %d …" % [winner, int(ceil(next_hand_timer))]
+		_message_label.text = Loc.f("%s   ·   Next hand in %d …", [winner, int(ceil(next_hand_timer))])
 	elif table.hand_over:
 		_message_label.text = _pot_winner_text()
 	elif human_turn:
-		_message_label.text = "Du bist am Zug"
+		_message_label.text = "It is your turn"
 	else:
 		var actor: Holdem.Player = table.current_player()
 		var actor_read: Dictionary = table.style_read(table.active_index)
 		var cue := " (%s)" % str(actor_read["label"]) if not actor.is_human and not str(actor_read["label"]).is_empty() else ""
-		_message_label.text = "%s%s ist am Zug" % [actor.name, cue]
+		_message_label.text = Loc.f("%s%s is to move", [actor.name, cue])
 
 
 ## What the type has shown so far. Until a seat acts, its promise stands there
@@ -336,8 +336,8 @@ func _pot_winner_text() -> String:
 		for winner in award["winners"]:
 			names.append((table.players[int(winner)] as Holdem.Player).name)
 		if not names.is_empty():
-			return "%s gewinnt %s" % [" & ".join(names), Ui.format_number(int(award["amount"]))]
-	return "Hand beendet"
+			return Loc.f("%s wins %s", [" & ".join(names), Ui.format_number(int(award["amount"]))])
+	return Loc.t("poker.hand_over")
 
 
 ## Draws the felt table, the community cards, every seat and the dealer button.

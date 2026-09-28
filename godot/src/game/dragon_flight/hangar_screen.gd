@@ -80,7 +80,7 @@ func _build_hangar() -> void:
 	_detail.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(_detail)
-	_start = Ui.button("Start", Vector2(300, 52), UiTheme.ACCENT, _on_start)
+	_start = Ui.button(Loc.resolve("Start"), Vector2(300, 52), UiTheme.ACCENT, _on_start)
 	footer.add_child(_start)
 
 
@@ -117,7 +117,7 @@ func _wrap(text: String, size: int, color: Color, bold: bool = false) -> Label:
 
 
 func _build_dragon_panel() -> Control:
-	var parts := _panel("Deine Drachen", PANEL_WIDTH)
+	var parts := _panel("Your dragons", PANEL_WIDTH)
 	var panel: PanelContainer = parts[0]
 	var box: VBoxContainer = parts[1]
 	_dragon_row = Ui.hbox(5)
@@ -179,7 +179,9 @@ func _rebuild_dragons() -> void:
 		# "+2" is the hidden part of the dragon's value: two recessive genes
 		# this one carries without showing them.
 		var carried := DragonFlight.carried_traits(dragon.get("alleles", {}))
-		var caption := "%s\nG%d · %d Merkmale" % [str(breed["name"]), int(dragon.get("gen", 1)), traits.size()]
+		var caption := Loc.t("dragon_flight.dragon_caption", {
+			"name": str(breed["name"]), "gen": int(dragon.get("gen", 1)), "traits": traits.size(),
+		})
 		if not carried.is_empty():
 			caption += " · +%d" % carried.size()
 		var button := Ui.button(caption, Vector2(100, 78), Color(str(breed["accent"])) if is_active else UiTheme.PANEL_LIGHT, _on_pick_dragon.bind(uid))
@@ -210,13 +212,16 @@ func _refresh_stats() -> void:
 	var stats := DragonFlight.resolve_stats(dragon, profile.get("upgrades", {}))
 	_title.text = Loc.f("☄  DRAGON FLIGHT  ·  %s", [str(breed["name"])])
 	_stats.add_child(_wrap(str(breed["desc"]), 14, UiTheme.TEXT_MUTED))
-	_stat_row("Lebensenergie", "%d" % roundi(float(stats["max_hp"])), Color("22c55e"))
-	_stat_row("Tempo", "%.0f" % float(stats["speed"]), Color("38bdf8"))
-	_stat_row("Wendigkeit", "%.1f" % float(stats["turn"]), Color("38bdf8"))
-	_stat_row("Schaden", "%.0f" % float(stats["damage"]), Color("f97316"))
-	_stat_row("Feuerrate", "%.2f s" % float(stats["fire_rate"]), Color("f59e0b"))
-	_stat_row("Rüstung", "%d %%" % roundi(float(stats["armor"]) * 100.0), Color("94a3b8"))
-	_stat_row("Größe", "×%.2f" % DragonFlight.visual_scale(dragon), Color("a855f7"))
+	_stat_row(Loc.t("dragon_flight.stat_health"), Loc.number(roundi(float(stats["max_hp"]))), Color("22c55e"))
+	_stat_row(Loc.t("dragon_flight.stat_speed"), Loc.number(roundi(float(stats["speed"]))), Color("38bdf8"))
+	_stat_row(Loc.resolve("Agility"), Loc.decimal(float(stats["turn"]), 1), Color("38bdf8"))
+	_stat_row(Loc.resolve("Damage"), Loc.number(roundi(float(stats["damage"]))), Color("f97316"))
+	_stat_row(Loc.t("dragon_flight.stat_fire_rate"), Loc.t("common.seconds", {"seconds": Loc.decimal(float(stats["fire_rate"]), 2)}), Color("f59e0b"))
+	# "Armour" has been in the catalogue since the first sync; it was simply never
+	# looked up, because the row passed the German word. `Loc.resolve` reads the
+	# `text` section, which is where a bare display word belongs.
+	_stat_row(Loc.resolve("Armour"), Loc.f("%d %%", [roundi(float(stats["armor"]) * 100.0)]), Color("94a3b8"))
+	_stat_row(Loc.resolve("Size"), "×" + Loc.decimal(DragonFlight.visual_scale(dragon), 2), Color("a855f7"))
 	var traits: Array = stats.get("traits", [])
 	if traits.is_empty():
 		_stats.add_child(Ui.label("No inherited traits", 14, UiTheme.TEXT_MUTED))
@@ -238,7 +243,7 @@ func _refresh_stats() -> void:
 		var names: Array[String] = []
 		for id in carried:
 			names.append(str(DragonFlight.trait_by_id(id)["name"]))
-		_stats.add_child(_wrap("Verdeckte Träger: %s" % ", ".join(names), 13, Color("fbbf24")))
+		_stats.add_child(_wrap("Hidden carriers: %s" % ", ".join(names), 13, Color("fbbf24")))
 
 
 func _on_pick_dragon(uid: int) -> void:
@@ -349,7 +354,7 @@ func _refresh_detail() -> void:
 		Ui.format_number(int(level_def["length"])) + " m",
 		DragonFlight.concurrent_for(selected_level),
 		boss_name,
-	]
+	])
 	_start.disabled = not DragonFlight.is_unlocked(selected_level, profile)
 
 

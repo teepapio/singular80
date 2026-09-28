@@ -19,6 +19,9 @@ const INVULN_TIME := 0.6
 const PARTICLE_COUNT := 260
 const PARTICLE_TOP := 24.0
 const PARTICLE_AREA := 70.0
+## How often the HUD labels are rebuilt. The bars are `ProgressBar`s and keep
+## following the fight; only the text waits.
+const HUD_INTERVAL := 0.05
 
 const ENVIRONMENT := [
 	{"key": "rpg/pine_tree", "count": 14, "minR": 20.0, "maxR": 30.0, "minS": 0.9, "maxS": 1.6},
@@ -92,6 +95,7 @@ var _over_layer: Control
 var _aim := Vector3.ZERO
 ## Pre-allocated pool of world-space labels; see `_push_label`.
 var _label_pool: Array[Label3D] = []
+var _hud_timer := 0.0
 
 
 func _ready_world() -> void:
@@ -295,12 +299,12 @@ func _build_ui() -> void:
 	column.add_theme_constant_override("separation", 2)
 	hud_root.add_child(column)
 	column.add_child(Ui.label("☄  DRAGON RPG 3D", 22, UiTheme.TEXT, true))
-	_wave_label = _value(column, "Welle", "0")
-	_level_label = _value(column, "Level", "1")
-	_gold_label = _value(column, "Gold", "0", Color("fbbf24"))
-	_weapon_label = _value(column, "Waffe", str(weapon["name"]))
-	_kills_label = _value(column, "Kills", "0")
-	_loot_label = _value(column, "Letzte Beute", "—")
+	_wave_label = _value(column, Loc.t("dragon_rpg.wave"), "0")
+	_level_label = _value(column, Loc.resolve("Level"), "1")
+	_gold_label = _value(column, Loc.resolve("Gold"), "0", Color("fbbf24"))
+	_weapon_label = _value(column, Loc.t("dragon_rpg.weapon"), str(weapon["name"]))
+	_kills_label = _value(column, Loc.resolve("Kills"), "0")
+	_loot_label = _value(column, Loc.t("dragon_rpg.last_loot"), "—")
 
 	_hp_bar = Ui.bar(Color("ef4444"), 20.0)
 	_hp_bar.position = Vector2(20, 264)
@@ -451,7 +455,12 @@ func _update_world(delta: float) -> void:
 	_update_loot(dt)
 	_update_floating(dt)
 	_update_particles(dt)
-	_update_hud()
+	# Eight label writes and five formatters, every frame, for numbers that only
+	# move when the player fights. 20 Hz is indistinguishable.
+	_hud_timer -= dt
+	if _hud_timer <= 0.0:
+		_hud_timer = HUD_INTERVAL
+		_update_hud()
 
 	camera.position = camera.position.lerp(Vector3(player_pos.x, CAMERA_HEIGHT, player_pos.z + CAMERA_DISTANCE), clampf(dt * 6.0, 0.0, 1.0))
 	camera.look_at(player_pos + Vector3(0, 1.0, 0), Vector3.UP)
@@ -784,7 +793,7 @@ func _announce_loot(item: Dictionary, verdict: String) -> void:
 	var rarity := DragonRpg.rarity_by_id(str(item.get("rarity", "common")))
 	var name_text := str(item.get("name", "?"))
 	if _loot_label != null:
-		_loot_label.text = "%s  ·  %s" % [name_text, str(rarity["name"])]
+		_loot_label.text = Loc.f("%s  ·  %s", [name_text, str(rarity["name"])])
 		_loot_label.add_theme_color_override("font_color", rarity["color"])
 	if verdict == "":
 		return

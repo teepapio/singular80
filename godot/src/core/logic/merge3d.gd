@@ -100,11 +100,17 @@ static func tier_asset(theme: Dictionary, tier: int) -> String:
 	return str((theme["tierAssets"] as Array)[index])
 
 
+## Score value per tier, index = tier - 1. The ladder triples because merging
+## takes three of a kind, so the crystal tower reads its values from here instead
+## of carrying a second list of the same five numbers.
+const TIER_VALUES: Array[int] = [1, 3, 9, 27, 81]
+
+
 ## Score value of a single item of the given tier.
 static func tier_value(tier: int) -> int:
 	if tier <= 0:
 		return 0
-	return int(pow(3.0, float(mini(MAX_MERGE_TIER, tier) - 1)))
+	return TIER_VALUES[clampi(tier, 1, TIER_VALUES.size()) - 1]
 
 
 ## Points for merging `amount` items of `tier` into the next tier. Both the merge

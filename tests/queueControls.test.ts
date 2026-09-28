@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   attemptLabel,
+  BROAD_SCOPE_IDS,
+  describeLaneRisks,
   describePolicy,
   describeQueue,
   formatCountdown,
   groupScopes,
+  laneLabel,
+  laneRisks,
   manifestHeadline,
   outcomeBadge,
   scopeLabel,
@@ -66,6 +70,81 @@ describe('formatCountdown', () => {
 
   it('behandelt Stunden', () => {
     expect(formatCountdown(3_720_000)).toBe('1 h 2 min');
+  });
+});
+
+describe('laneLabel', () => {
+  it('nennt eine einzelne Spur ausdrücklich, statt "0 von 1" zu schreiben', () => {
+    // "0 von 1 Spuren belegt" reads like a defect; the wording is the reason this
+    // function exists at all.
+    expect(laneLabel(1, 0)).toBe('1 Spur (nur nacheinander)');
+    expect(laneLabel(1, 1)).toBe('1 Spur, belegt');
+  });
+
+  it('zählt bei mehreren Spuren, und eine unmögliche Anzahl wird eine', () => {
+    expect(laneLabel(3, 0)).toBe('0 von 3 Spuren belegt');
+    expect(laneLabel(3, 2)).toBe('2 von 3 Spuren belegt');
+    // 0 lanes would divide by nothing and say "0 von 0"; the queue never runs
+    // zero sessions, so the label must not either.
+    expect(laneLabel(0, 0)).toBe('1 Spur (nur nacheinander)');
+  });
+});
+
+describe('laneRisks', () => {
+  const busy = (id: string, lane: number, scopes: string[]): RunRecord =>
+    run({ id, lane, status: 'running', scopes, scope: scopes[0] ?? null });
+
+  it('meldet zwei Spuren, die auf denselben breiten Scope zeigen', () => {
+    // The one collision parallel lanes deliberately allow: `scopesConflict`
+    // compares the primary scope, so two different games may both be handed
+    // `core` as a supplement.
+    const risks = laneRisks([busy('a', 1, ['tetris', 'core']), busy('b', 2, ['pang', 'content'])]);
+    expect(risks).toEqual([]);
+    const shared = laneRisks([busy('a', 1, ['tetris', 'core']), busy('b', 2, ['pang', 'core'])]);
+    expect(shared).toEqual([{ scope: 'core', lanes: [1, 2] }]);
+  });
+
+  it('nennt die Spuren aufsteigend, unabhängig von der Reihenfolge', () => {
+    const risks = laneRisks([busy('a', 3, ['content']), busy('b', 1, ['content'])]);
+    expect(risks[0].lanes).toEqual([1, 3]);
+  });
+
+  it('schweigt bei verschiedenen Spielen ohne gemeinsamen breiten Scope', () => {
+    expect(laneRisks([busy('a', 1, ['tetris']), busy('b', 2, ['pang'])])).toEqual([]);
+  });
+
+  it('zählt einen Run ohne Spur nicht als Paar', () => {
+    // A queued run has no lane; pairing it with a running one would warn about a
+    // collision that cannot happen yet.
+    expect(laneRisks([busy('a', 1, ['core']), run({ id: 'b', lane: null, scopes: ['core'] })])).toEqual([]);
+  });
+
+  it('kennt nur die beiden breiten Scopes als Supplement', () => {
+    expect([...BROAD_SCOPE_IDS].sort()).toEqual(['content', 'core']);
+  });
+});
+
+describe('describeLaneRisks', () => {
+  it('schweigt, wenn es nichts zu sagen gibt', () => {
+    expect(describeLaneRisks([])).toBeNull();
+  });
+
+  it('nennt Scope und beide Spuren — die Beschriftung, die AGENTS.md verlangt', () => {
+    // AGENTS.md: "der Scope-Audit meldet es pro Run, und das Panel beschriftet ein
+    // solches Paar". Without this line the pair is silent.
+    const text = describeLaneRisks([{ scope: 'core', lanes: [1, 2] }]);
+    expect(text).toContain('core');
+    expect(text).toContain('Spur 1 + 2');
+    expect(text).toContain('Scope-Audit');
+  });
+
+  it('zählt mehrere Paare, statt nur das erste zu zeigen', () => {
+    const text = describeLaneRisks([
+      { scope: 'core', lanes: [1, 2] },
+      { scope: 'content', lanes: [2, 3] },
+    ]);
+    expect(text).toContain('core (Spur 1 + 2)');
+    expect(text).toContain('content (Spur 2 + 3)');
   });
 });
 

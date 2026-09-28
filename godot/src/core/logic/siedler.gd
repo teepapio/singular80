@@ -55,12 +55,12 @@ const GOODS: Array[String] = [
 ]
 
 const GOOD_NAMES := {
-	"logs": "Baumstämme", "planks": "Bauholz", "stone": "Stein", "grain": "Korn",
-	"flour": "Mehl", "bread": "Brot", "fish": "Fisch", "pork": "Schwein",
-	"ham": "Schinken", "coal": "Kohle", "ironOre": "Eisenerz", "iron": "Eisen",
-	"goldOre": "Golderz", "goldBar": "Goldbarren", "sword": "Schwert",
-	"shield": "Schild", "shovel": "Schaufel", "hammer": "Hammer", "rod": "Angel",
-	"scythe": "Sense", "cleaver": "Fleischerbeil", "axe": "Axt", "saw": "Säge",
+	"logs": "Logs", "planks": "Bauholz", "stone": "Stein", "grain": "Grain",
+	"flour": "Flour", "bread": "Bread", "fish": "Fisch", "pork": "Schwein",
+	"ham": "Schinken", "coal": "Coal", "ironOre": "Iron ore", "iron": "Iron",
+	"goldOre": "Golderz", "goldBar": "Goldbarren", "sword": "Sword",
+	"shield": "Shield", "shovel": "Schaufel", "hammer": "Hammer", "rod": "Angel",
+	"scythe": "Sense", "cleaver": "Fleischerbeil", "axe": "Axt", "saw": "Saw",
 	"pickaxe": "Spitzhacke", "pliers": "Zange",
 }
 
@@ -96,8 +96,8 @@ const KINDS: Array[String] = [
 ]
 
 const RES_NAMES := {
-	"grass": "Freie Fläche", "forest": "Wald", "stone": "Stein", "coal": "Kohle",
-	"iron": "Eisenerz", "gold": "Golderz", "water": "Wasser",
+	"grass": "Open ground", "forest": "Forest", "stone": "Stein", "coal": "Coal",
+	"iron": "Iron ore", "gold": "Golderz", "water": "Water",
 }
 
 ## Per-building data. `requires` is the terrain the site must stand on, `harvest`
@@ -305,6 +305,8 @@ var territory_radius: float = 4.0
 ## `-1` nobody, `0` player, `1` rival. Rebuilt by `refresh_territory`.
 var owner_grid: PackedInt32Array = PackedInt32Array()
 var won: bool = false
+## Declared for the end panel, which offers a loss screen for it. No rule sets
+## it: conquest only runs player → rival, so the settlement cannot be lost.
 var lost: bool = false
 var produced_total: int = 0
 var delivered_total: int = 0
@@ -396,18 +398,18 @@ static func good_name(good: String) -> String:
 
 static func status_text(status: String) -> String:
 	match status:
-		"ok": return "arbeitet"
-		"site": return "Bauplatz — wartet auf Bauholz & Stein"
-		"levelling": return "Planieren (Schaufel nötig)"
-		"building": return "wird gebaut (Hammer nötig)"
-		"noWorker": return "kein Siedler am Platz"
-		"noTool": return "Werkzeug fehlt"
-		"noInput": return "Rohstoff fehlt"
-		"noResource": return "Lagerstätte erschöpft"
-		"hungry": return "Siedler unversorgt"
-		"halted": return "angehalten"
-		"notConnected": return "nicht an die Straße angeschlossen"
-		"unreachable": return "Straßennetz unterbrochen"
+		"ok": return "working"
+		"site": return "Building site — waiting for planks and stone"
+		"levelling": return "Levelling (needs a shovel)"
+		"building": return "being built (needs a hammer)"
+		"noWorker": return "no settler at the site"
+		"noTool": return "Tool missing"
+		"noInput": return "raw material missing"
+		"noResource": return "Deposit exhausted"
+		"hungry": return "Settlers unsupplied"
+		"halted": return "stopped"
+		"notConnected": return "not connected to a road"
+		"unreachable": return "road network broken"
 	return status
 
 
@@ -436,9 +438,13 @@ func cell_position(index: int, y_offset: float = 0.0) -> Vector3:
 
 
 ## The cell a world XZ position falls on, or -1 when it is off the map.
+## The inverse of `cell_to_world`, which centres a cell at `i - n/2 + 0.5`, so
+## the index is `floor(x + n/2)` — rounding the world position first shifts every
+## cell on the positive half of the map one to the right and hands the last
+## column back as -1.
 func world_to_cell(x: float, z: float) -> int:
-	var gx := int(round(x)) + int(map_size / 2)
-	var gy := int(round(z)) + int(map_size / 2)
+	var gx := int(floor(x + float(map_size) * 0.5))
+	var gy := int(floor(z + float(map_size) * 0.5))
 	if not in_bounds(gx, gy):
 		return -1
 	return cell_index(gx, gy)
@@ -881,10 +887,14 @@ func demolish(building_id: int) -> bool:
 	var cell: int = building["cell"]
 	_drop_node(int(building["node"]))
 	cells[cell]["building"] = -1
-	# Half the material comes back, so a misclick is recoverable.
+	# Half the material survives as salvage, and the salvage is the settlement's
+	# own stock: the ruin is carried away and the part of the material that is
+	# still in the yard leaves the yard with it. Nothing is added here, because
+	# a refund from thin air turns every build/demolish cycle into a printer —
+	# and lets a conquered rival camp, which was never paid for, pay out.
 	var spec := spec_of(str(building["kind"]))
-	stock_add(store, "planks", int(spec["cost"]["planks"]) / 2)
-	stock_add(store, "stone", int(spec["cost"]["stone"]) / 2)
+	for good in ["planks", "stone"]:
+		store[good] = maxi(0, int(store.get(good, 0)) - int(spec["cost"].get(good, 0)) / 2)
 	for serf in serfs:
 		if int(serf["building"]) == building_id:
 			serf["building"] = -1
@@ -1027,7 +1037,7 @@ func _find_road_path(from_cell: int, to_cell: int, passable: Callable) -> Packed
 ## A readable reason a road could not be laid, for the toast.
 func _road_block_reason(from_cell: int, to_cell: int) -> String:
 	if str(cells[from_cell]["res"]) == "water" or str(cells[to_cell]["res"]) == "water":
-		return "Wasser blockiert den Weg"
+		return "Water blocks the way"
 	var fx: int = from_cell % map_size
 	var fy: int = from_cell / map_size
 	var tx: int = to_cell % map_size
@@ -1039,10 +1049,10 @@ func _road_block_reason(from_cell: int, to_cell: int) -> String:
 		var y := int(round(float(fy) + float(ty - fy) * t))
 		var index := cell_index(x, y)
 		if str(cells[index]["res"]) == "water":
-			return "Wasser blockiert den Weg"
+			return "Water blocks the way"
 		if int(cells[index]["building"]) >= 0 and index != from_cell and index != to_cell:
-			return "Ein Gebäude steht im Weg"
-	return "Kein freier Weg — die Fläche ist eingekesselt"
+			return "A building is in the way"
+	return "No free path — the area is enclosed"
 
 
 func _node_at(cell: int) -> int:
@@ -1110,14 +1120,14 @@ func add_flag(cell: int) -> bool:
 		return false
 	var map_cell: Dictionary = cells[cell]
 	if int(map_cell["building"]) >= 0 or str(map_cell["res"]) == "water":
-		_notify("Hier kann keine Flagge stehen")
+		_notify("No banner can stand here")
 		return false
 	if int(map_cell["flag"]) >= 0:
-		_notify("Hier steht schon eine Flagge")
+		_notify("A banner already stands here")
 		return false
 	var edge := _nearest_road(cell, FLAG_NEAR)
 	if edge.is_empty():
-		_notify("Keine Straße in der Nähe zum Unterteilen")
+		_notify("No nearby road to split")
 		return false
 	_split_road(edge, _ensure_flag(cell))
 	return true
@@ -1234,8 +1244,11 @@ func edge_throughput(edge_id: int) -> float:
 func _drop_node(node_id: int) -> void:
 	if node_id < 0 or node_id >= nodes.size():
 		return
-	for edge_id in (nodes[node_id]["edges"] as Array).duplicate():
-		_remove_edge(int(edge_id))
+	# `_remove_edge` renumbers the node lists, so take the lowest id still on
+	# this node instead of walking a snapshot that goes stale after the first
+	# removal.
+	while not (nodes[node_id]["edges"] as Array).is_empty():
+		_remove_edge(int((nodes[node_id]["edges"] as Array)[0]))
 	var queue: Array[int] = [node_id]
 	while not queue.is_empty():
 		var index: int = queue.pop_back()
@@ -1245,10 +1258,6 @@ func _drop_node(node_id: int) -> void:
 		if bool(nodes[index]["flag"]):
 			cells[int(nodes[index]["cell"])]["flag"] = -1
 		nodes.remove_at(index)
-		for i in nodes.size():
-			nodes[i]["edges"] = (nodes[i]["edges"] as Array).filter(
-				func(edge_id: int) -> bool: return edge_id != index
-			)
 	_routes_dirty = true
 
 
@@ -1258,6 +1267,17 @@ func _remove_edge(edge_id: int) -> void:
 	edges.remove_at(edge_id)
 	for i in edges.size():
 		edges[i]["id"] = i
+	# An edge id is its array index, so every node's list has to follow the
+	# shift down. Without this a node keeps the id of a different road and the
+	# network routes over streets that no longer exist.
+	for node in nodes:
+		var kept: Array[int] = []
+		for other in node["edges"]:
+			var id := int(other)
+			if id == edge_id:
+				continue
+			kept.append(id - 1 if id > edge_id else id)
+		node["edges"] = kept
 	_reset_traffic()
 
 
@@ -1739,20 +1759,20 @@ func route_advice(entry: Dictionary) -> String:
 	# Träger. Ihm eine Priorität zu raten wäre eine Lüge, also sagt der Bericht
 	# das auch so — und der Optimierer lässt ihn in Ruhe.
 	if str(entry["kind"]) == "link":
-		return "Anliegerstrecke zwischen Haus und Fahne — ein Träger, nicht teilbar."
+		return "Collector route between house and banner — one carrier, not divisible."
 	if bool(entry["jammed"]):
-		var hint := "Stau: %d Waren warten an dieser Strecke." % waiting
+		var hint := "Queue: %d goods are waiting on this route." % waiting
 		if int(entry["cell"]) >= 0:
-			return "%s Eine Extra-Fahne bringt %d Träger." % [hint, int(entry["gain"])]
+			return Loc.f("%s An extra banner brings %d carriers.", [hint, int(entry["gain"])])
 		return hint
 	var want := priority_for(good)
 	if want > int(entry["priority"]):
-		return "„%s“ kommt hier an, aber Priorität %d ist zu niedrig." % [
+		return Loc.f("“%s” arrives here, but priority %d is too low.", [
 			good_name(good), int(entry["priority"]),
-		]
-	return "Läuft: %.0f Felder, %d Träger, Priorität %d." % [
+		])
+	return Loc.f("Running: %.0f tiles, %d carriers, priority %d.", [
 		float(entry["length"]), int(entry["carriers"]), int(entry["priority"]),
-	]
+	])
 
 
 ## Der eine Handgriff des Vorschlags „Handelsweg optimieren".
@@ -1799,7 +1819,7 @@ func optimize_trade_routes() -> Array[String]:
 		flags += 1
 		var halves := carriers_of(_edge_between(int(entry["a"]), mid)) \
 			+ carriers_of(_edge_between(mid, int(entry["b"])))
-		done.append("Fahne bei (%d, %d) — die Strecke trägt jetzt %d Träger." % [
+		done.append("Banner at (%d, %d) — the route now carries %d." % [
 			cell % map_size, cell / map_size, halves,
 		])
 
@@ -1819,15 +1839,15 @@ func optimize_trade_routes() -> Array[String]:
 				continue
 			set_road_priority(int(edge["id"]), want)
 			raised += 1
-			done.append("Priorität %d → %d auf der Strecke mit „%s“." % [
+			done.append("Priority %d → %d on the route with “%s”." % [
 				int(entry["priority"]), want, good_name(str(entry["top"])),
 			])
 
 	if flags <= 0 and raised <= 0:
 		if measured_carriers() < MEASURE_MIN:
-			done.append("Noch zu wenig Verkehr gemessen — die Strecken bleiben, wie sie sind.")
+			done.append("Too little traffic measured — the routes stay as they are.")
 		else:
-			done.append("Nichts zu tun: die Strecken tragen schon, was sie sollen.")
+			done.append("Nothing to do: the routes already carry what they should.")
 	_notify(_route_summary(flags, raised, done))
 	return done
 
@@ -1870,13 +1890,13 @@ func _ensure_flag_quiet(cell: int) -> bool:
 ## Karte weiß, was passiert ist.
 func _route_summary(flags: int, raised: int, done: Array[String]) -> String:
 	if flags <= 0 and raised <= 0:
-		return done[0] if not done.is_empty() else "Die Handelswege sind in Ordnung."
+		return done[0] if not done.is_empty() else "The trade routes are fine."
 	var parts: Array[String] = []
 	if flags > 0:
-		parts.append("eine Fahne" if flags == 1 else "%d Fahnen" % flags)
+		parts.append("one banner" if flags == 1 else "%d Fahnen" % flags)
 	if raised > 0:
-		parts.append("eine Priorität" if raised == 1 else "%d Prioritäten" % raised)
-	return "Handelswege optimiert: " + " und ".join(parts) + "."
+		parts.append("one priority" if raised == 1 else "%d priorities" % raised)
+	return "Trade routes optimised: " + " and ".join(parts) + "."
 
 
 # --- ticking ----------------------------------------------------------------
@@ -1902,6 +1922,18 @@ func tick(delta_raw: float) -> void:
 	_tick_food(delta)
 	_tick_military(delta)
 	_check_victory()
+
+
+## The settler permanently assigned to `building_id`, if there is one. A site
+## without an id owns nobody — -1 is what an idle settler carries, so matching it
+## would hand the first free pair of hands to a building that does not exist.
+func _worker_of(building_id: int) -> Dictionary:
+	if building_id < 0:
+		return {}
+	for serf in serfs:
+		if str(serf["owner"]) == "player" and int(serf["building"]) == building_id:
+			return serf
+	return {}
 
 
 ## An idle settler who can take `tool` — either already holding it, or free and
@@ -1943,8 +1975,20 @@ func _tick_construction(delta: float) -> void:
 		# Levelling needs a Schaufel, raising the walls needs a Hammer.
 		var tool := "shovel" if state == "levelling" else "hammer"
 		var duration := LEVEL_TIME if state == "levelling" else BUILD_TIME
-		var worker := _find_worker_for(tool)
-		if worker.is_empty() or not _equip(worker, tool):
+		# The settler already reserved for this site keeps it; only a site
+		# without one goes looking for a free pair of hands.
+		var worker := _worker_of(int(building["id"]))
+		if worker.is_empty():
+			worker = _find_worker_for(tool)
+			if worker.is_empty():
+				building["status"] = state
+				continue
+			# Reserve the settler for the site. `_find_worker_for` skips everyone
+			# who already has a building, so without this the same idle settler
+			# is handed to every unfinished site in one tick and all of them
+			# advance at once.
+			worker["building"] = int(building["id"])
+		if not _equip(worker, tool):
 			building["status"] = state
 			continue
 		worker["state"] = "work"
@@ -2136,7 +2180,7 @@ func _most_wanted_tool() -> String:
 ## Queues a tool for the Schlosserei. Returns false when the queue is full.
 func request_tool(tool: String) -> bool:
 	if tool_queue.size() >= 6:
-		_notify("Werkzeugschlange ist voll")
+		_notify("Tool queue is full")
 		return false
 	tool_queue.append(tool)
 	return true
@@ -2336,7 +2380,12 @@ func store_report() -> Dictionary:
 			refused[GOODS[i]] = count
 	var filler := ""
 	var filler_amount := 0
+	# Only the goods that occupy slots: planks, stone, food and tools take no
+	# capacity at all, so naming one of them as the biggest space eater would be
+	# advice about a good that never blocks anything.
 	for good in GOODS:
+		if _is_free_good(good):
+			continue
 		var amount := int(store.get(good, 0))
 		if amount > filler_amount:
 			filler_amount = amount
@@ -2724,11 +2773,11 @@ func _entry(severity: int, code: String, title: String, detail: String, good: St
 ## nächste Maschine. Der Ratgeber sagt genau das.
 func _tool_entry(good: String, ids: Array, kinds: Array) -> Dictionary:
 	var forge := _has_kind("toolsmith")
-	var fix := "Die Schlosserei schmiedet jedes Werkzeug aus 1 Eisen + 1 Baumstamm."
+	var fix := "The toolshop forges every tool from 1 iron + 1 log."
 	if not forge:
-		fix = "Baue eine Schlosserei — sie schmiedet jedes Werkzeug aus 1 Eisen + 1 Baumstamm."
+		fix = "Build a toolshop — it forges every tool from 1 iron + 1 log."
 	var entry := _entry(
-		SEV_WARNING, "noTool", "Werkzeug fehlt: „%s“" % good_name(good),
+		SEV_WARNING, "noTool", "Tool missing: “%s”" % good_name(good),
 		"Still: %s. %s" % [_list_text(kinds), fix], good, _first_id(ids), _cell_of(ids), ids.size()
 	)
 	entry["fix"] = "queueTool" if forge else "build:toolsmith"
@@ -2742,20 +2791,20 @@ func _input_entry(good: String, ids: Array, kinds: Array) -> Dictionary:
 	var name := str(spec_of(kind)["name"]) if kind != "" else good_name(good)
 	var fix := ""
 	if kind == "":
-		fix = "Auf der Karte kann niemand %s herstellen." % good_name(good)
+		fix = "Nobody on the map can produce %s." % good_name(good)
 	elif not _has_kind(kind):
-		fix = "Baue eine „%s“ und schließe sie an die Straße an." % name
+		fix = "Build a “%s” and connect it to a road." % name
 		if not _can_pay(kind):
 			# Sonst tippt der Spieler auf den Vorschlag und bekommt nur
 			# "Zu wenig Bauholz" — der Ratgeber soll den Grund selbst nennen.
-			fix += " Dafür fehlt der Burg noch Bauholz (%d) bzw. Stein (%d)." % [
+			fix += Loc.f(" The castle is still short %d planks or %d stone.", [
 				maxi(0, int(spec_of(kind)["cost"]["planks"]) - int(store.get("planks", 0))),
 				maxi(0, int(spec_of(kind)["cost"]["stone"]) - int(store.get("stone", 0))),
-			]
+			])
 	elif _is_stalled(kind):
-		fix = "Die „%s“ steht selbst still — behebe zuerst ihren Grund." % name
+		fix = "The “%s” is itself idle — fix its cause first." % name
 	else:
-		fix = "Die „%s“ liefert, aber die Ware kommt nicht an: auf der Strecke fehlen Fahnen." % name
+		fix = "The “%s” delivers, but the goods do not arrive: the route is missing banners." % name
 	var entry := _entry(
 		SEV_WARNING, "noInput", "Es fehlt: %s" % good_name(good),
 		"Still: %s. %s" % [_list_text(kinds), fix], good, _first_id(ids), _cell_of(ids), ids.size()
@@ -2769,8 +2818,8 @@ func _input_entry(good: String, ids: Array, kinds: Array) -> Dictionary:
 
 func _link_entry(ids: Array, kinds: Array) -> Dictionary:
 	var entry := _entry(
-		SEV_WARNING, "notConnected", "Nicht angeschlossen: „%s“" % str(kinds[0]),
-		"Ohne Straße liefert „%s“ nichts. Baue eine Straße von der Burg bis hierher." % str(kinds[0]),
+		SEV_WARNING, "notConnected", "Not connected: “%s”" % str(kinds[0]),
+		"Without a road the “%s” delivers nothing. Build a road from the castle to here." % str(kinds[0]),
 		"", _first_id(ids), _cell_of(ids), ids.size()
 	)
 	entry["fix"] = "road:%d" % _first_id(ids)
@@ -2781,8 +2830,8 @@ func _link_entry(ids: Array, kinds: Array) -> Dictionary:
 ## auflöst — deshalb der niedrigste Grad, aber ein Bauplatz-Lager hilft.
 func _worker_entry(ids: Array, kinds: Array) -> Dictionary:
 	var entry := _entry(
-		SEV_HINT, "noWorker", "Keine Siedler frei",
-		"Still: %s. Baue ein Lager für 6 weitere Siedler, oder warte die laufenden Arbeiten ab." % _list_text(kinds),
+		SEV_HINT, "noWorker", "No settlers free",
+		"Idle: %s. Build a storehouse for 6 more settlers, or wait for the running jobs." % _list_text(kinds),
 		"", _first_id(ids), _cell_of(ids), ids.size()
 	)
 	entry["fix"] = "build:warehouse"
@@ -2794,10 +2843,10 @@ func _worker_entry(ids: Array, kinds: Array) -> Dictionary:
 func _resource_entry(ids: Array, kinds: Array, kind: String) -> Dictionary:
 	var res := str(RES_NAMES.get(str(spec_of(kind)["requires"]), ""))
 	var entry := _entry(
-		SEV_WARNING, "noResource", "Lagerstätte leer: %s" % res,
-		"Still: %s. Die Ader ist erschöpft — setze eine neue „%s“ auf eine andere Stelle." % [
+		SEV_WARNING, "noResource", "Deposit empty: %s" % res,
+		Loc.f("Idle: %s. The seam is exhausted — set a new “%s” somewhere else.", [
 			_list_text(kinds), str(spec_of(kind)["name"]),
-		],
+		]),
 		"", _first_id(ids), _cell_of(ids), ids.size()
 	)
 	entry["fix"] = "build:%s" % kind
@@ -2808,8 +2857,8 @@ func _resource_entry(ids: Array, kinds: Array, kind: String) -> Dictionary:
 ## stehen still, und jeder Siedler hungert.
 func _food_entry() -> Dictionary:
 	var entry := _entry(
-		SEV_CRITICAL, "noFood", "Die Siedler hungern",
-		"Nahrung: 0. Minen und Vieh stehen still, jeder Siedler verliert Kraft. Baue eine Farm und eine Bäckerei — oder eine Fischerhütte an offenes Wasser.",
+		SEV_CRITICAL, "noFood", "The settlers are starving",
+		"Food: 0. Mines and livestock stand idle and every settler loses strength. Build a farm and a bakery — or a fisher’s hut on open water.",
 		"bread", -1, -1, maxi(1, hungry_serfs())
 	)
 	entry["fix"] = "book:food"
@@ -2822,17 +2871,17 @@ func _food_entry() -> Dictionary:
 ## blockiert jeden Ausweg, den die anderen Ratschläge anbieten.
 func _no_build_entry(list: Array[Dictionary]) -> Dictionary:
 	var cheapest := _cheapest_build()
-	var fix := "Behebe zuerst den Stillstand in dieser Liste, dann weiterbauen."
+	var fix := "Fix the idle entries in this list first, then keep building."
 	for entry in list:
 		if str(entry["code"]) == "noInput" and str(entry["good"]) == "logs":
-			fix = "Zuerst Stämme zum Schreiner schaffen — nur daraus wird wieder Bauholz."
+			fix = "Get logs to the carpenter first — only that becomes planks again."
 			break
 	return _entry(
-		SEV_CRITICAL, "noBuild", "Die Burg kann nichts mehr bauen",
-		"Die Burg hat %d Bauholz und %d Stein; das billigste Gebäude, ein „%s“, kostet %d Bauholz. %s" % [
+		SEV_CRITICAL, "noBuild", "The castle cannot build anything more",
+		Loc.f("The castle has %d planks and %d stone; the cheapest building, a “%s”, costs %d planks. %s", [
 			int(store.get("planks", 0)), int(store.get("stone", 0)),
 			str(spec_of(cheapest)["name"]), int(spec_of(cheapest)["cost"]["planks"]), fix,
-		],
+		]),
 		"planks", -1, -1, 1
 	)
 
@@ -2873,9 +2922,9 @@ func _jam_entry(cell: int) -> Dictionary:
 		waiting = (nodes[node_id]["queue"] as Array).size()
 	var entry := _entry(
 		SEV_HINT, "congestion", "%d Waren stauen sich" % waiting,
-		"An der Fahne (%d, %d) wartet Ware auf einen Träger. Eine Extra-Fahne teilt die Strecke und hebt den Durchsatz." % [
+		Loc.f("Goods are waiting for a carrier at the banner (%d, %d). An extra banner splits the route and raises throughput.", [
 			cell % map_size, cell / map_size,
-		],
+		]),
 		"", -1, cell, waiting
 	)
 	entry["fix"] = "flag:%d" % cell
@@ -2915,29 +2964,29 @@ func _store_entry(report: Dictionary) -> Dictionary:
 	# Der Platzfresser ist die eigentliche Nachricht: an *ihm* kann der Spieler
 	# etwas ändern, ohne ein zweites Lager zu bauen.
 	var filler := str(report["filler"])
-	var detail := "Die Burg nimmt keine Lagerware mehr an: %d von %d Plätzen belegt. Abgewiesen: %s." % [
+	var detail := Loc.f("The castle no longer takes warehouse goods: %d of %d slots taken. Turned away: %s.", [
 		used, capacity, ", ".join(names),
-	]
+	])
 	if filler != "":
-		detail += " Der größte Platzfresser ist „%s“ (%d Stück)" % [
+		detail += Loc.f(" The biggest space eater is “%s” (%d)", [
 			good_name(filler), int(store.get(filler, 0)),
-		]
+		])
 		if orphan_goods().has(filler):
-			detail += ", und niemand auf der Karte verbraucht sie — höre auf, mehr davon zu bauen."
+			detail += ", and nobody on the map uses them — stop building more."
 		else:
 			detail += "."
 	if _has_kind("warehouse"):
-		detail += " Jedes weitere Lager gäbe %d Plätze." % WAREHOUSE_STORE
+		detail += " Every additional storehouse would give %d slots." % WAREHOUSE_STORE
 	else:
-		detail += " Ein Lager gäbe %d weitere Plätze und %d Siedler." % [
+		detail += Loc.f(" A storehouse would give %d more slots and %d settlers.", [
 			WAREHOUSE_STORE, WAREHOUSE_SERFS,
-		]
-	detail += " Bauholz, Stein, Nahrung und Werkzeug nimmt die Burg immer an."
+		])
+	detail += " Planks, stone, food and tools are always accepted by the castle."
 	# Wie viele Waren blockiert werden, entscheidet über die Dringlichkeit: eine
 	# Kammer, in der nur das Korn fehlt, ist eine andere als eine, in der
 	# überhaupt nichts mehr ankommt.
 	var entry := _entry(
-		SEV_WARNING, "storeFull", "Lager voll: %d von %d Plätzen" % [used, capacity],
+		SEV_WARNING, "storeFull", Loc.f("Storehouse full: %d of %d slots", [used, capacity]),
 		detail, str(report["top"]), castle_id, _castle_cell(),
 		maxi(1, (report["refused"] as Dictionary).size()),
 	)
@@ -3031,7 +3080,7 @@ func _list_text(kinds: Array) -> String:
 	if parts.size() == 1:
 		return "„%s“" % parts[0]
 	var last := parts[parts.size() - 1]
-	return "%s und „%s“" % ["„%s“" % ", ".join(parts.slice(0, parts.size() - 1)), last]
+	return Loc.f("%s and “%s”", ["„%s“" % ", ".join(parts.slice(0, parts.size() - 1)), last])
 
 
 # --- military ---------------------------------------------------------------
@@ -3090,7 +3139,7 @@ func send_knights(target_id: int, count: int) -> bool:
 		return false
 	var send := mini(count, knights)
 	if send <= 0:
-		_notify("Keine Ritter bereit")
+		_notify("No knights ready")
 		return false
 	knights -= send
 	attacks.append({"target": target_id, "sent": send, "arrived": 0, "timer": 0.0})
@@ -3112,16 +3161,17 @@ func _conquer(target: Dictionary, attack: Dictionary) -> void:
 		if rival_castles == 0:
 			won = true
 	else:
-		_notify("%s erobert — jetzt an die Straße anschließen!" % spec_of(str(target["kind"]))["name"])
+		_notify("%s captured — connect it to a road now!" % spec_of(str(target["kind"]))["name"])
 	refresh_territory()
 	_routes_dirty = true
 
 
 func _check_victory() -> void:
+	# Conquest is one-directional in this ruleset: the player takes rival
+	# buildings, nothing ever takes a player castle, so there is no loss to
+	# detect. `won` is set by `_conquer` when the last rival castle falls.
 	if won or lost:
 		return
-	if castle_id >= 0 and str(buildings[castle_id]["owner"]) == "rival":
-		lost = true
 
 
 # --- score ------------------------------------------------------------------

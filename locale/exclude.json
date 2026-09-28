@@ -7,9 +7,13 @@
     "Entscheidung, kein Versehen — eine neue Zeile bedeutet, dass jemand geprüft",
     "hat, was der String im Spiel tut.",
     "\"MAX\" steht als Kürzel in einer 16-px-Zeile über einem Wert; ein übersetzter",
-    "Ausdruck passt dort nicht und ist als Kürzel in Spielen ohnehin üblich."
+    "Ausdruck passt dort nicht und ist als Kürzel in Spielen ohnehin üblich.",
+    "English note for the two lines above: \"MAX\" is a label over a value and",
+    "\"2048\" is the game's own name — the number of a puzzle, not a word anyone",
+    "translates, and a catalogue entry would invite somebody to try."
   ],
   "text": [
+    "2048",
     "MAX"
   ],
   "keys": []

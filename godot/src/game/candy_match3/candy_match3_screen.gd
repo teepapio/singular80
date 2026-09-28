@@ -237,7 +237,7 @@ func _apply_level(level: Dictionary) -> void:
 	_build_blockers()
 	_rebuild_pieces()
 	_title_label.text = str(level["title"])
-	_world_label.text = "%s %s" % [str(def["icon"]), str(def["name"])]
+	_world_label.text = Loc.f("%s %s", [str(def["icon"]), str(def["name"])])
 	mode = MODE_SELECT
 	_refresh()
 
@@ -376,7 +376,7 @@ func _apply_palette() -> void:
 		material.albedo_color = tint
 		material.emission = tint
 		material.emission_energy_multiplier = 0.55 if palette_mode == CandyMatch3.PALETTE_CONTRAST else 0.35
-	_palette_button.text = "◐ Weltpalette" if palette_mode == CandyMatch3.PALETTE_CONTRAST else "◑ Kontrast"
+	_palette_button.text = Loc.t("candy.palette_world") if palette_mode == CandyMatch3.PALETTE_CONTRAST else Loc.t("candy.palette_contrast")
 
 
 func _make_piece(cell: int, drop_from: float) -> void:
@@ -582,10 +582,10 @@ func _build_hud() -> void:
 	column.add_child(_goals_box)
 
 	_undo_button = _tool_button("↩ Undo", Vector2(150, 52), 24, _undo)
-	_hint_button = _tool_button("💡 Hinweis", Vector2(160, 52), 206, _show_hint)
-	_palette_button = _tool_button("◑ Kontrast", Vector2(170, 52), 374, _toggle_palette)
+	_hint_button = _tool_button(Loc.t("candy.hint_button"), Vector2(160, 52), 206, _show_hint)
+	_palette_button = _tool_button(Loc.t("candy.palette_contrast"), Vector2(170, 52), 374, _toggle_palette)
 	_tool_button("☰ Level", Vector2(140, 52), 552, _show_level_select)
-	_tool_button("🔁 Neustart", Vector2(170, 52), 700, _restart_level)
+	_tool_button(Loc.t("candy.restart_button"), Vector2(170, 52), 700, _restart_level)
 
 	_toast_label = Ui.label("", 16, UiTheme.TEXT, true)
 	_toast_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
@@ -716,7 +716,7 @@ func _rebuild_level_select(active: String = "") -> void:
 	_select_body.add_child(daily_row)
 	var daily_button := Ui.button(
 		Loc.f("📅  Daily level %s   —   %s", ["★".repeat(daily_stars) + "☆".repeat(3 - daily_stars),
-			"Serie: %d Tage" % streak,]),
+			"Streak: %d days" % streak,]),
 		Vector2(0, 52), UiTheme.ACCENT, func() -> void: _start_level(daily))
 	daily_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	daily_row.add_child(daily_button)
@@ -738,14 +738,14 @@ func _rebuild_level_select(active: String = "") -> void:
 	var bonus := CandyMatch3.world_bonus(stars_here)
 	var bonus_text: Array = []
 	if int((bonus as Dictionary)["moves"]) > 0:
-		bonus_text.append("+%d Züge" % int((bonus as Dictionary)["moves"]))
+		bonus_text.append("+%d moves" % int((bonus as Dictionary)["moves"]))
 	if int((bonus as Dictionary)["undos"]) > 0:
 		bonus_text.append("+%d Undo" % int((bonus as Dictionary)["undos"]))
 	if bool((bonus as Dictionary)["bomb"]):
-		bonus_text.append("Start-Farbbombe")
-	var milestone_text := "Alle Belohnungen freigeschaltet"
+		bonus_text.append(Loc.t("candy.start_colour_bomb"))
+	var milestone_text := Loc.t("candy.all_rewards")
 	if not upcoming.is_empty():
-		milestone_text = "Noch %d bis: %s" % [int((upcoming as Dictionary)["stars"]) - stars_here, str((upcoming as Dictionary)["label"])]
+		milestone_text = Loc.f("%d more until: %s", [int((upcoming as Dictionary)["stars"]) - stars_here, str((upcoming as Dictionary)["label"])])
 	var track := Ui.hbox(4)
 	for milestone in CandyMatch3.WORLD_MILESTONES:
 		var reached: bool = stars_here >= int((milestone as Dictionary)["stars"])
@@ -937,7 +937,7 @@ func _show_combo_partners(cell: int) -> void:
 			combo_label = CandyMatch3.combo_name(CandyMatch3.combo_kind(specials[cell], specials[other]))
 	if biggest == 0:
 		return
-	_toast("Kombination möglich: %s" % combo_label)
+	_toast("Combo available: %s" % combo_label)
 
 
 func _clear_combo() -> void:
@@ -1024,7 +1024,7 @@ func _undo() -> void:
 	_clear_combo()
 	mode = MODE_SELECT
 	Sfx.select()
-	_toast("Zug zurückgenommen")
+	_toast("Move undone")
 	_refresh()
 
 
@@ -1033,20 +1033,20 @@ func _show_hint() -> void:
 		return
 	var swaps := CandyMatch3.find_valid_swaps(state["board"], 1)
 	if swaps.is_empty():
-		_toast("Kein Zug möglich — das Brett wird gemischt.")
+		_toast("No move possible — the board is being shuffled.")
 		return
 	_clear_combo()
 	var swap: Dictionary = swaps[0]
 	hint_cells = PackedInt32Array([int((swap as Dictionary)["a"]), int((swap as Dictionary)["b"])])
 	hint_until = clock + 2.6
-	_toast("Tipp: die leuchtenden Bonbons tauschen")
+	_toast("Tip: swap the glowing candies")
 
 
 func _toggle_palette() -> void:
 	palette_mode = CandyMatch3.PALETTE_CLASSIC if palette_mode == CandyMatch3.PALETTE_CONTRAST else CandyMatch3.PALETTE_CONTRAST
 	Game.set_number("candy_palette", 1.0 if palette_mode == CandyMatch3.PALETTE_CONTRAST else 0.0)
 	_apply_palette()
-	_toast("Kontrastpalette aktiv" if palette_mode == CandyMatch3.PALETTE_CONTRAST else "Weltpalette aktiv")
+	_toast(Loc.t("candy.palette_on_contrast") if palette_mode == CandyMatch3.PALETTE_CONTRAST else Loc.t("candy.palette_on_world"))
 
 
 ## The end of the run, won or lost: the result screen names the peaks of the
@@ -1073,7 +1073,7 @@ func _finish_move() -> void:
 	if not CandyMatch3.has_valid_swap(state["board"]):
 		if CandyMatch3.shuffle_board(state["board"], state["rng"], int((state["level"] as Dictionary)["colors"])):
 			_rebuild_pieces()
-			_toast("Kein Zug mehr — das Brett wird gemischt.")
+			_toast("No moves left — the board is being shuffled.")
 	mode = MODE_SELECT
 
 
@@ -1108,7 +1108,7 @@ func _show_result(won: bool) -> void:
 	if won:
 		Sfx.level_up()
 		if not unlocked.is_empty():
-			_toast("Belohnung freigeschaltet: %s" % ", ".join(PackedStringArray(unlocked)), 3.4)
+			_toast(Loc.f("Reward unlocked: %s", [", ".join(PackedStringArray(unlocked))]), 3.4)
 	else:
 		Sfx.game_over()
 	var layer := Control.new()
@@ -1122,7 +1122,7 @@ func _show_result(won: bool) -> void:
 	var column := Ui.vbox(10)
 	center.add_child(column)
 	var daily_key := str(level.get("dailyKey", ""))
-	column.add_child(Ui.title("Daily level done!" if daily_key != "" and won else ("Level geschafft!" if won else "Keine Züge mehr"), 40,
+	column.add_child(Ui.title(Loc.t("candy.daily_done") if daily_key != "" and won else (Loc.t("candy.level_done") if won else Loc.t("candy.no_moves_left")), 40,
 		Color("facc15") if won else Color("f87171")))
 	if won:
 		column.add_child(Ui.label("★".repeat(stars) + "☆".repeat(3 - stars), 32, Color("facc15")))
@@ -1169,9 +1169,9 @@ func _build_moments(column: VBoxContainer) -> void:
 		var name_label := Ui.label(str(moment["label"]), 15, UiTheme.TEXT_DIM)
 		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(name_label)
-		var value := "%s %s" % [Ui.format_number(int(moment["value"])), str(moment["unit"])]
+		var value := Loc.f("%s %s", [Ui.format_number(int(moment["value"])), str(moment["unit"])])
 		if int(moment.get("move", 0)) > 0:
-			value += "  ·  Zug %d" % int(moment["move"])
+			value += "  ·  Move %d" % int(moment["move"])
 		row.add_child(Ui.label(value, 15, UiTheme.TEXT))
 	if gap.is_empty():
 		box.add_child(Ui.label("★ All three stars", 16, Color("86efac")))

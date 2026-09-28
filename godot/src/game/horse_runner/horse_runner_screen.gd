@@ -17,6 +17,9 @@ const NO_CHAIN := "—"
 const FLASH_TIME := 0.28
 const SCORE_COLOR := Color("facc15")
 const FLASH_COLOR := Color("fde047")
+## How often the three HUD labels are rebuilt. Everything above them still runs
+## every frame; only the formatted strings wait.
+const HUD_INTERVAL := 0.05
 
 var distance := 0.0
 var score := 0
@@ -56,6 +59,7 @@ var _over_layer: Control
 var _shake := 0.0
 var _flash := 0.0
 var _flashing := false
+var _hud_timer := 0.0
 
 
 func _ready_world() -> void:
@@ -256,10 +260,10 @@ func _build_ui() -> void:
 	hud_root.add_child(column)
 	var title := Ui.label("♞  HORSE COURSE 3D", 22, UiTheme.TEXT, true)
 	column.add_child(title)
-	_score_label = _value(column, "Strecke", "0 m", SCORE_COLOR)
-	_points_label = _value(column, "Punkte", "0", SCORE_COLOR)
-	_speed_label = _value(column, "Tempo", "0.0", UiTheme.TEXT)
-	_chain_label = _value(column, "Kette", NO_CHAIN, Color("f97316"))
+	_score_label = _value(column, Loc.t("horse_runner.route"), "0 m", SCORE_COLOR)
+	_points_label = _value(column, "Points", "0", SCORE_COLOR)
+	_speed_label = _value(column, Loc.t("horse_runner.speed"), "0.0", UiTheme.TEXT)
+	_chain_label = _value(column, Loc.resolve("Chain"), NO_CHAIN, Color("f97316"))
 
 	var hint := Ui.label("Stick or ◀ ▶ to switch lane · ▲ jump", 15, UiTheme.TEXT_DIM)
 	_hint(hint, -164)
@@ -336,9 +340,16 @@ func _update_world(delta: float) -> void:
 	_follow(dt)
 	_update_flash(dt)
 
-	_score_label.text = "%d m" % int(distance)
+	# At 20 Hz. The distance readout is the one thing here that moves every
+	# frame, and a metre counter that ticks twenty times a second still reads as
+	# continuous; three formatted strings sixty times a second do not need to.
+	_hud_timer -= dt
+	if _hud_timer > 0.0:
+		return
+	_hud_timer = HUD_INTERVAL
+	_score_label.text = Loc.f("%d m", [int(distance)])
 	_points_label.text = Ui.format_number(score)
-	_speed_label.text = "%.1f" % speed
+	_speed_label.text = Loc.decimal(speed, 1)
 
 
 ## Lets the score row light up for a moment when a graze paid out.
@@ -410,7 +421,7 @@ func _graze() -> void:
 	points += bonus
 	_flash = FLASH_TIME
 	Sfx.kill()
-	_chain_label.text = "%d · %s" % [chain, Ui.format_number(bonus)]
+	_chain_label.text = Loc.f("%d · %s", [chain, Ui.format_number(bonus)])
 	if chain == 1 or chain % 5 == 0:
 		notify(Loc.f("SO CLOSE  ×%d   +%s", [chain, Ui.format_number(bonus)]), 1.3)
 
@@ -424,7 +435,7 @@ func _expire_chain(step: float) -> void:
 		return
 	chain = maxi(0, chain - lost)
 	since_graze = fmod(since_graze, HorseRunner.CHAIN_HOLD)
-	_chain_label.text = ("%d · %s" % [chain, Ui.format_number(HorseRunner.chain_bonus(chain))]) if chain > 0 else NO_CHAIN
+	_chain_label.text = (Loc.f("%d · %s", [chain, Ui.format_number(HorseRunner.chain_bonus(chain))]) if chain > 0 else NO_CHAIN)
 
 
 func _spawn_row(difficulty: Dictionary) -> void:

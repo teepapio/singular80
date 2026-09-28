@@ -24,7 +24,10 @@ func run(kit: TestKit, tree: SceneTree = null) -> void:
 	_router = tree.root.get_node_or_null("/root/Router")
 	_screen_script = load("res://src/game/crystal3d/crystal_jumper_screen.gd")
 	if _router == null or _screen_script == null:
-		t.suite("Crystal Tower — Screen")
+		# The real screen suite below is called "Crystal Tower — Screen"; this early
+		# exit reports the same thing from the same place and needs a name of its
+		# own, or a red run names two suites for one failure.
+		t.suite("Crystal Tower — Screen fehlt")
 		t.check(false, "Der Crystal-Screen laesst sich oeffnen")
 		t.suite_done()
 		t.close_suite()

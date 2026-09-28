@@ -48,6 +48,12 @@ const manifestPath = join(projectRoot, 'scripts', 'scopes.mjs');
 let cached: Manifest | null = null;
 
 /**
+ * What a scope owns, as a comparable string — the sorted list of its `own`
+ * globs. Built once from the manifest, dropped with the manifest cache.
+ */
+let ownership: Map<string, string> | null = null;
+
+/**
  * Loads the manifest synchronously.
  *
  * `scripts/scopes.mjs` is plain ESM without type declarations, so it cannot be
@@ -96,6 +102,7 @@ export function loadManifest(): Manifest {
 /** Test seam: forget the cached manifest (used after changing the repo layout). */
 export function resetManifestCache(): void {
   cached = null;
+  ownership = null;
 }
 
 /** The whole layout, as the dashboard shows it. */
@@ -342,6 +349,30 @@ export interface ScopedRun {
 const BROAD_SCOPES = new Set<string>(Object.values(CATEGORY_SCOPES));
 
 /**
+ * The file set a scope owns, or null when the manifest cannot answer for it —
+ * an id it does not know, or a scope that owns nothing at all.
+ *
+ * Reading this from the manifest instead of from the scope *name* is what makes
+ * the answer honest. Two scopes that own the same files are the same owner twice,
+ * whatever they are called: `scripts/scopes.mjs` builds a variant scope by
+ * copying its base and only relabelling it, so `crystal3d`,
+ * `crystal3d-christmas` and `crystal3d-halloween` claim byte-identical file sets
+ * and would happily run three agents into one directory. Comparing the strings
+ * `crystal3d-christmas` and `crystal3d-halloween` finds nothing to complain about.
+ */
+function ownedFiles(scopeId: string): string | null {
+  if (ownership) return ownership.get(scopeId) ?? null;
+  const manifest = loadManifest();
+  if (manifest.status !== 'ok') return null;
+  ownership = new Map();
+  for (const [id, scope] of manifest.buildScopes()) {
+    const own = [...scope.own].sort().join('\n');
+    if (own) ownership.set(id, own);
+  }
+  return ownership.get(scopeId) ?? null;
+}
+
+/**
  * May two runs share the working tree at the same time?
  *
  * Comparing the two scope lists for *any* common id looks right and is useless
@@ -361,6 +392,9 @@ const BROAD_SCOPES = new Set<string>(Object.values(CATEGORY_SCOPES));
  *    not know) → the tree to itself too. Guessing "probably fine" for a run
  *    nobody can place is how a half-finished registry line lands in a stranger's
  *    commit.
+ *  - two primaries that own the *same files* → the tree to themselves. The names
+ *    differ, the manifest does not: a variant scope is its base with a new
+ *    label, and three agents in one game directory is one lost merge.
  *  - otherwise → parallel. Exclusive ownership of every concrete file goes to
  *    exactly one scope, so two different games cannot both own the same file.
  *
@@ -377,6 +411,13 @@ export function scopesConflict(a: ScopedRun, b: ScopedRun): boolean {
   if (!primaryA || !primaryB) return true;
   if (primaryA === primaryB) return true;
   if (BROAD_SCOPES.has(primaryA) || BROAD_SCOPES.has(primaryB)) return true;
+  // Neither the name nor the comment decides this: the manifest does. An id it
+  // does not know is as unplaceable as a run with no scope at all, and two
+  // scopes with the same file set are one owner.
+  const filesA = ownedFiles(primaryA);
+  const filesB = ownedFiles(primaryB);
+  if (filesA === null || filesB === null) return true;
+  if (filesA === filesB) return true;
   return false;
 }
 

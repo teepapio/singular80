@@ -32,6 +32,15 @@ func _ready() -> void:
 func _bootstrap_backend() -> void:
 	if not Game.has_server():
 		return
+	# Start the content fetch BEFORE probing, then await it only if the server
+	# answered. Probing and fetching are independent requests, and `Api` hands out
+	# one lock for both — so fetching first and probing second leaves the lock
+	# free by the time `flush_queue` needs it. Doing it the other way round let the
+	# retry timer `Api._ready` armed win the lock, and the queued suggestions were
+	# then flushed into a request that returned without sending.
+	# `reload_remote` is a coroutine and returns void, so it is started, not awaited
+	# into a value.
+	Content.reload_remote()
 	if await Api.probe():
 		await Content.reload_remote()
 	Api.flush_queue()

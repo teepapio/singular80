@@ -7,6 +7,9 @@ extends Node3D
 ## Subclasses build in `_ready_world()` and per-frame logic in `_update_world()`.
 
 const HUD_HEIGHT := 56
+## Draw order inside `hud_root`, see `Screen.CHROME_Z`.
+const CHROME_Z := 10
+const MODAL_Z := 20
 
 var screen_id: String = ""
 var data: Dictionary = {}
@@ -20,6 +23,8 @@ var fill: DirectionalLight3D
 var elapsed: float = 0.0
 
 var _loading_label: Label
+## Actions an on-screen button pressed and has not released yet.
+var _held_actions: Array[StringName] = []
 
 
 func _ready() -> void:
@@ -98,41 +103,12 @@ func _build_hud_layer() -> void:
 	hud_root.theme = UiTheme.shared()
 	hud.add_child(hud_root)
 
-	var bar := HBoxContainer.new()
-	bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	bar.offset_bottom = HUD_HEIGHT
-	bar.offset_left = 10
-	bar.offset_right = -10
-	bar.add_theme_constant_override("separation", 8)
+	# One builder for both base classes, see `Ui.top_bar`. The only difference
+	# is the entry point into the suggestion dialog: a 3D screen has no `Control`
+	# to hand `SuggestDialog.open`.
+	var bar := Ui.top_bar(HUD_HEIGHT, self, func() -> void: SuggestDialog.open_world(self))
+	bar.z_index = CHROME_Z
 	hud_root.add_child(bar)
-
-	var brand := Ui.label("SINGULAR 80", 20, UiTheme.ACCENT, true)
-	brand.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	brand.custom_minimum_size = Vector2(190, 0)
-	bar.add_child(brand)
-
-	var spacer := Ui.spacer()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.add_child(spacer)
-
-	bar.add_child(Ui.button(Loc.t("ui.back_to_lobby"), Vector2(120, 42), UiTheme.PANEL_LIGHT, func() -> void:
-		Sfx.select()
-		Router.to_lobby()
-	))
-	bar.add_child(Ui.button(Loc.t("ui.suggestion"), Vector2(150, 42), UiTheme.PANEL_LIGHT, func() -> void:
-		SuggestDialog.open_world(self)
-	))
-	# Language in the top bar as well — see `Screen._build_top_bar`.
-	bar.add_child(Ui.button(Loc.t("ui.settings_short"), Vector2(60, 42), UiTheme.PANEL_LIGHT, func() -> void:
-		Sfx.select()
-		SettingsDialog.open(self)
-	))
-	var mute: Button
-	mute = Ui.button(_mute_label(), Vector2(110, 42), UiTheme.PANEL_LIGHT, func() -> void:
-		Game.toggle_muted()
-		mute.text = _mute_label()
-	)
-	bar.add_child(mute)
 
 	_loading_label = Ui.title(Loc.t("ui.loading"), 26, UiTheme.TEXT_DIM)
 	_loading_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -140,8 +116,42 @@ func _build_hud_layer() -> void:
 	hud_root.add_child(_loading_label)
 
 
-func _mute_label() -> String:
-	return Loc.t("ui.sound_on") if not Game.muted else Loc.t("ui.sound_off")
+## Releases every action that an on-screen button pressed.
+##
+## `Router.go_to` frees the screen, and a button that is still held never gets
+## its `button_up` — the action then stays pressed for the rest of the session
+## and the next screen starts with a permanently held "fire", "jump" or "dash".
+func _exit_tree() -> void:
+	for action in _held_actions:
+		Input.action_release(action)
+	_held_actions.clear()
+
+
+## Full-screen modal layer used for pause and game-over states.
+## The 2D twin is `Screen.modal()`. Crystal jumper, Metro and Siedler each
+## grew their own layer for this, three incompatible spellings of one idea.
+func modal() -> Control:
+	var layer := Control.new()
+	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.set_meta("modal", true)
+	layer.z_index = MODAL_Z
+	hud_root.add_child(layer)
+	return layer
+
+
+## Removes every modal layer created by `modal()`.
+func close_modals() -> void:
+	for child in hud_root.get_children():
+		if child.has_meta("modal"):
+			child.queue_free()
+
+
+func has_modal() -> bool:
+	for child in hud_root.get_children():
+		if child.has_meta("modal"):
+			return true
+	return false
 
 
 func hide_loading() -> void:
@@ -226,9 +236,18 @@ func add_action_button(text: String, radius: float = 62.0, action: StringName = 
 	node.add_theme_stylebox_override("pressed", UiTheme.flat(UiTheme.ACCENT.darkened(0.25), Color.WHITE, int(radius * 0.5)))
 	if not action.is_empty():
 		# Holding the button feeds the same InputMap action, so game code reads
-		# one source only.
-		node.button_down.connect(func() -> void: Input.action_press(action))
-		node.button_up.connect(func() -> void: Input.action_release(action))
+		# one source only. The press is remembered, because `button_up` does not
+		# arrive if the screen is freed while the button is held — `_exit_tree`
+		# releases what is left.
+		node.button_down.connect(func() -> void:
+			Input.action_press(action)
+			if not _held_actions.has(action):
+				_held_actions.append(action)
+		)
+		node.button_up.connect(func() -> void:
+			Input.action_release(action)
+			_held_actions.erase(action)
+		)
 	if on_press.is_valid():
 		node.pressed.connect(on_press)
 	hud_root.add_child(node)

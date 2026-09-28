@@ -50,6 +50,12 @@ export type PortableRun = Omit<RunRecord, 'prompt' | 'logPath'> & { logPath: str
 
 export interface BackupVote {
   suggestionId: number;
+  /**
+   * Hashed, never the raw device id (`Store.hashVoterId`). This file is meant to
+   * be committed to a public repository, and a raw id would let anyone read the
+   * file work out which suggestions came from the same device. Dedupe keeps
+   * working because the hash is the identity.
+   */
   voterId: string;
   createdAt: number;
 }

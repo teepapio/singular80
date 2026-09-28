@@ -12,7 +12,7 @@ Backend.
 
 > **Achtung, `git push` ist Pflicht, nicht Kür:** Ein Commit, der nur lokal
 > existiert, ist für den Besitzer verloren — er sieht ihn nie, und dieser Zweig
-> hier hat 54 Commits, 387 Dateien und rund 50.000 Zeilen angesammelt, ohne dass
+> hier hat 101 Commits, 1269 Dateien und rund 76.000 Zeilen angesammelt, ohne dass
 > eines davon auf GitHub ankam. Details und die Branch-Frage unten.
 
 ## Nach dem Commit: pushen
@@ -120,9 +120,9 @@ genauso eine Übersetzung wie `fr.json`, und es ist die, die der Besitzer
 ausgeliefert bekommt. Stand heute:
 
 ```
-de  Deutsch    100.0 %   605/605 übersetzt  ·  69 gleich  ·  0 offen  (keys 60/60, text 545/545)
-en  Quelle   674 Einträge
-fr  Français   100.0 %   613/613 übersetzt  ·  61 gleich  ·  0 offen  (keys 62/62, text 551/551)
+de  Deutsch    100.0 %   918/918 übersetzt  ·  123 gleich  ·  0 offen  (keys 217/217, text 701/701)
+en  Quelle   1041 Einträge
+fr  Français   100.0 %   927/927 übersetzt  ·  114 gleich  ·  0 offen  (keys 216/216, text 711/711)
 ```
 
 **Es gibt zwei Arten von Schlüssel, und die Wahl ist nicht Geschmack.** `keys`
@@ -200,9 +200,12 @@ kann:
   Zeile dort ist eine bewusste Entscheidung, kein Versehen.
 
 **Es gibt zwei Suiten, und sie prüfen verschiedene Dinge.**
-`godot/tests/test_loc.gd` (sieben Suites: Kataloge, Auflösung, Platzhalter,
-Plural, Zahlen, Wechsel, Oberfläche) prüft die *Laufzeit*. `tests/locale.test.ts`
-(28 Tests) prüft die *Daten und den Extraktor*. Die zweite Suite gibt es, weil
+`godot/tests/test_loc.gd` (16 Suites: die sieben klassischen — Kataloge,
+Auflösung, Platzhalter, Plural, Zahlen, Wechsel, Oberfläche — plus Idempotenz
+gesamt, Pluralformen, Spielerdatei, Vorlagenvertrag, Platzhalterverworfen,
+Abfrage, Zahlenränder, Kaltstart, Übersetzungen) prüft die *Laufzeit*.
+`tests/locale.test.ts` (28 Tests) prüft die *Daten und den Extraktor*. Die zweite
+Suite gibt es, weil
 die erste beweist, dass der Motor richtig läuft, und **nichts** bemerken würde,
 wenn ein Katalog einen Commit hinterher ist, eine Übersetzung einen Platzhalter
 verloren hat oder ein Filter plötzlich Mesh-Kennungen als Sätze einreiht.
@@ -610,7 +613,7 @@ godot/
 │   │   │   ├── arena_runs.gd        Wellenvorschau, Boss-Ansage, Kill-Ketten
 │   │   │   ├── lobby.gd             Geometrie der 3D-Lobby
 │   │   │   ├── candy_match3.gd      Match-3: Züge, Spezialbonbons, 6 Welten × 40 Level
-│   │   │   ├── inventory.gd         generisches Inventarsystem
+│   │   │   ├── item_inventory.gd    generisches Inventarsystem
 │   │   │   └── …                    Karten, 2048, Merge, Kristall, Drache …
 │   │   └── ui/                Screen/WorldScreen-Basis, Theme, Widgets,
 │   │                          VirtualStick, Kartenrenderer, Dialoge und
@@ -653,7 +656,8 @@ Kamera-Follow und Touch-Steuerung mit.
 Level-Schlüssel ist die globale Levelnummer (`"7"`), das Tageslevel `"daily:JJJJ-MM-TT"`.
 `CandyMatch3.world_stars(levels, welt_id)` zählt die Sterne einer Welt, und
 `world_bonus(stars)` übersetzt sie in Extras (Züge, Undo, Start-Farbbombe).
-`star_max` im `GameRegistry`-Eintrag sagt der Lobby, wie viele Sterne es gibt.
+Sterne zählt der Lobby aus `CandyMatch3.total_level_count()`; ein `star_max`
+-Feld im Registry-Eintrag gab es und wurde entfernt, weil nichts es gelesen hat.
 
 ### Vorschläge
 
