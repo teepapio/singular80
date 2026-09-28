@@ -1,7 +1,6 @@
 class_name DragonRpg
 extends RefCounted
 ## Logic for the 3D action-RPG "Drachen-RPG".
-## Port of `src/game/dragonRpg.ts`.
 
 const BOSS_EVERY := 5
 
@@ -30,8 +29,8 @@ const WEAPONS: Array[Dictionary] = [
 ]
 
 ## Rarity drives both the drop weighting and the loot's look in the world.
-## Order matters: later entries are strictly better, which is what
-## `loot_score` ranks by.
+## Order matters: later entries are strictly better, which is what `loot_score`
+## ranks by.
 const RARITIES: Array[Dictionary] = [
 	{"id": "common", "name": "Gewöhnlich", "color": Color("94a3b8"), "weight": 62, "glow": 0.0},
 	{"id": "uncommon", "name": "Ungewöhnlich", "color": Color("4ade80"), "weight": 26, "glow": 0.5},
@@ -120,7 +119,7 @@ class Stats:
 		copy.crit_mult = crit_mult
 		return copy
 
-	## Returns a new stats object with the permanent level-up bonuses applied.
+## Returns a new stats object with the permanent level-up bonuses applied.
 	func leveled_up() -> Stats:
 		var next := clone()
 		next.max_hp = max_hp + 14.0
@@ -143,32 +142,30 @@ static func xp_to_next(level: int) -> int:
 	return roundi(8.0 + float(l) * 6.0 + float(l) * float(l) * 1.5)
 
 
-# --- Drachenflucht ----------------------------------------------------------
+# --- the escape burst ------------------------------------------------------
 
-## Tuning of the escape burst. It has to be strong enough to outrun the fastest
-## dragon of a late wave, otherwise the button is decoration: from wave 18 on a
-## Sturmdrache is quicker than the player, so walking away is not an option.
+## Tuning of the escape burst. It has to outrun the fastest dragon of a late wave,
+## otherwise the button is decoration: from wave 18 on a Sturmdrache is quicker
+## than the player, so walking away is not an option.
 const DASH_DURATION := 0.24
 const DASH_COOLDOWN := 1.15
 const DASH_SPEED_MULT := 2.6
-## The invulnerability outlives the burst on purpose — the frames right after
-## the last one are exactly the ones in which a dragon would catch up.
+## The invulnerability outlives the burst on purpose — the frames right after the
+## last one are exactly those in which a dragon would catch up.
 const DASH_IFRAMES := 0.38
 
 
-## Ground distance a dash covers, which is `move_speed` × the burst time. The
-## tests compare it against a dragon's speed to prove the escape works.
+## Ground distance a dash covers: `move_speed` x the burst time. The tests compare
+## it against a dragon's speed to prove the escape works.
 static func dash_distance(move_speed: float) -> float:
 	return maxf(0.0, move_speed) * DASH_SPEED_MULT * DASH_DURATION
 
 
-## Direction of a panic dash.
-##
-## `wanted` is the stick, `to_threat` points from the player to the nearest
-## dragon. The stick wins; a player who does not touch it still flees straight
-## away from the dragon, which is what makes the button usable while both thumbs
-## are busy. `fallback` (the facing) closes the last gap so the result is never
-## the zero vector.
+## Direction of a panic dash. `wanted` is the stick, `to_threat` points from the
+## player to the nearest dragon. The stick wins; a player who does not touch it
+## still flees straight away from the dragon, which is what makes the button
+## usable with both thumbs busy. `fallback` (the facing) closes the last gap so
+## the result is never the zero vector.
 static func dash_direction(wanted: Vector2, to_threat: Vector2, fallback: Vector3) -> Vector3:
 	if wanted.length() > 0.05:
 		return Vector3(wanted.x, 0.0, wanted.y).normalized()
@@ -183,9 +180,8 @@ static func dash_direction(wanted: Vector2, to_threat: Vector2, fallback: Vector
 
 class Dash:
 	extends RefCounted
-	## One escape slot: the burst itself plus the cooldown that follows. The
-	## screen only asks `step()` where to go and `iframes()` whether a dragon may
-	## still land a hit.
+	## One escape slot: the burst plus the cooldown that follows. The screen only
+	## asks `step()` where to go and `iframes()` whether a dragon may still land a hit.
 
 	var cooldown_left: float = 0.0
 	var time_left: float = 0.0
@@ -196,8 +192,8 @@ class Dash:
 	func ready() -> bool:
 		return time_left <= 0.0 and cooldown_left <= 0.0
 
-	## Starts the burst. Returns false when the cooldown is still running or when
-	## there is no direction to flee to at all.
+	## Starts the burst. False when the cooldown still runs or there is no direction
+	## to flee to at all.
 	func start(wanted: Vector3) -> bool:
 		if not ready():
 			return false
@@ -217,9 +213,9 @@ class Dash:
 		time_left = maxf(0.0, time_left - dt)
 		iframe_left = maxf(0.0, iframe_left - dt)
 
-	## Displacement for this frame — zero while the player walks normally, which
-	## is what lets the screen fall back to its own movement. Never overshoots
-	## the burst, however long the frame was.
+	## Displacement for this frame — zero while the player walks normally, which is
+	## what lets the screen fall back to its own movement. Never overshoots the
+	## burst, however long the frame was.
 	func step(dt: float, move_speed: float) -> Vector3:
 		if time_left <= 0.0:
 			return Vector3.ZERO
@@ -280,20 +276,18 @@ static func loot_by_id(id: String) -> Dictionary:
 	return LOOT_TABLE[0]
 
 
-## Effective drop weight of one table row at a given luck level.
-##
-## Rarity 0 keeps its base weight; every step above multiplies it by
-## `1 + luck * index²`, so luck never *reduces* a chance.
+## Effective drop weight of one table row at a given luck level. Rarity 0 keeps
+## its base weight; every step above multiplies by `1 + luck * index²`, so luck
+## never *reduces* a chance.
 static func lottery_weight(entry: Dictionary, luck: float = 0.0) -> float:
 	var index := rarity_index(str(entry.get("rarity", "common")))
 	var factor: float = 1.0 + clampf(luck, 0.0, 1.0) * float(index) * float(index)
 	return float(entry.get("weight", 0.0)) * factor
 
 
-## Weighted random loot entry.
-##
-## `luck` (0.0–1.0) shifts weight towards the better rarities: a boss at 1.0
-## drops almost exclusively epic or legendary, trash at 0.0 almost never does.
+## Weighted random loot entry. `luck` (0.0-1.0) shifts weight towards the better
+## rarities: a boss at 1.0 drops almost exclusively epic or legendary, trash at 0.0
+## almost never does.
 static func roll_loot(luck: float = 0.0) -> Dictionary:
 	var weights: Array[float] = []
 	var total := 0.0
@@ -309,15 +303,14 @@ static func roll_loot(luck: float = 0.0) -> Dictionary:
 	return LOOT_TABLE[0]
 
 
-## How good a drop is, for "you already have something better" comparisons.
-## Value dominates, rarity breaks ties.
+## How good a drop is, for "you already have something better" comparisons. Value
+## dominates, rarity breaks ties.
 static func loot_score(entry: Dictionary) -> float:
 	var rarity := rarity_of(entry)
 	return float(entry.get("value", 0)) + float(rarity_index(str(rarity["id"]))) * 10.0
 
 
 ## Compare a fresh drop against the best item of the same kind already taken.
-##
 ## Returns `"upgrade"`, `"downgrade"` or `"same"`; the HUD turns that into the
 ## green up-arrow / red down-arrow next to the pickup.
 static func compare_drop(fresh: Dictionary, best_so_far: Dictionary) -> String:

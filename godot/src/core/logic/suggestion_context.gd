@@ -1,11 +1,8 @@
 class_name SuggestionContext
 extends RefCounted
-## Where a suggestion came from.
-##
-## The player should never have to type "this is about Tetris" — the game knows.
-## Every screen therefore carries a label, and the text that is finally sent gets
-## that label in front, so the dashboard can group ideas by origin without the
-## author having to think about it.
+## Where a suggestion came from. The player should never have to type "this is
+## about Tetris" — the game knows: every screen carries a label, which is put in
+## front of the submitted text so the dashboard can group ideas by origin.
 
 ## Screens that are not playable games still deserve a label.
 const SCREEN_LABELS := {
@@ -23,7 +20,7 @@ const MAX_PREFIX := 48
 const UNKNOWN := "Spiel"
 
 
-## The German label for a screen id, taken from the game registry when the screen
+## The German label for a screen id, from the game registry when the screen
 ## belongs to a game.
 static func for_screen(screen_id: String) -> String:
 	if screen_id == "":
@@ -35,10 +32,9 @@ static func for_screen(screen_id: String) -> String:
 	return str(label) if label != null else screen_id
 
 
-## The label for a context that may be a screen id or free text.
-##
-## A free text is passed through unchanged (trimmed and shortened), which is what
-## the mesh gallery uses for "Mesh-Galerie · Drachen".
+## The label for a context that may be a screen id or free text. Free text is
+## passed through unchanged (trimmed and shortened), which is what the mesh
+## gallery uses for "Mesh-Galerie · Drachen".
 static func resolve(context: String) -> String:
 	var text := context.strip_edges()
 	if text == "":

@@ -1,10 +1,9 @@
 extends Screen
 ## List lobby — a flat overview of every game, grouped by the same categories the
-## 3D lobby uses. Reachable from the 3D lobby ("Liste") and used as a fallback
-## when 3D is unavailable.
+## 3D lobby uses. Reachable from the 3D lobby ("Liste") and the fallback when
+## 3D is unavailable.
 ##
-## The layout is container based, so it stays centred and readable on a phone in
-## landscape as well as on a desktop.
+## Container based, so it stays centred and readable in phone landscape.
 
 const COLUMNS := 5
 const COLUMN_WIDTH := 232.0
@@ -34,7 +33,7 @@ func _draw_background() -> void:
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	layer.add_child(background)
 
-	# Drifting motes, the same ambience the browser lobby had.
+	# Drifting motes, matching the browser lobby's ambience.
 	for i in 40:
 		var dot := Ui.rect(Color(0.220, 0.741, 0.973, randf_range(0.08, 0.3)))
 		dot.size = Vector2.ONE * float(randi_range(2, 5))
@@ -200,18 +199,15 @@ func _build_footer() -> void:
 	)
 	row.add_child(_muted_button)
 
-	# As in the main menu: the language spelled out. This screen is the flat
-	# fallback for the 3D lobby and is used exactly when 3D is unavailable, so the
-	# setting must not live behind 3D.
+	# As in the main menu: the language spelled out. This screen is the fallback
+	# used exactly when 3D is unavailable, so the setting must not live behind 3D.
 	row.add_child(Ui.button(Loc.t("ui.language_button"), Vector2(190, 48), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		SettingsDialog.open(self)
 	))
 
-	# Die Server-Adresse gehört auf den Hauptbildschirm, nicht in das Menü eines
-	# einzelnen Spiels: wer hier „Vorschlag“ tippt und keine Adresse eingetragen
-	# hat, sieht die Idee sonst in `user://` verschwinden, ohne etwas zu
-	# bemerken. Der Dialog ist derselbe wie im Arena-Menü.
+	# The server address belongs on a main screen, not in one game's menu:
+	# without an address a suggestion vanishes into `user://` unnoticed.
 	_server_button = Ui.button(ServerDialog.label(), Vector2(230, 48), UiTheme.PANEL_LIGHT, func() -> void:
 		ServerDialog.open(self)
 		_refresh_server_button.call_deferred()
@@ -223,10 +219,8 @@ func _build_footer() -> void:
 	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(footer)
 
-	# Der ehrliche Zustand: wie viele Vorschläge gerade auf eine Zustellung
-	# warten. Vorher stand diese Zahl nirgends, obwohl `Api` sie seit Jahren
-	# sendet — ein Vorschlag, der liegen bleibt, sah einfach aus, als wäre er
-	# angekommen.
+	# How many suggestions wait for delivery. Without this a stuck suggestion
+	# looks exactly like one that arrived.
 	_pending_label = Ui.label("", 14, UiTheme.TEXT_MUTED)
 	_pending_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_pending_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -235,7 +229,7 @@ func _build_footer() -> void:
 	_on_pending_changed(Api.pending_count())
 
 
-## Zeigt den Wartestand, mit dem Zusatz, der die Ursache nennt.
+## Shows the waiting count plus the reason for it.
 func _on_pending_changed(count: int) -> void:
 	if not is_instance_valid(_pending_label):
 		return
@@ -244,8 +238,8 @@ func _on_pending_changed(count: int) -> void:
 		_pending_label.visible = false
 		return
 	_pending_label.visible = true
-	# Ohne Adresse ist die Diagnose eindeutig — sie zu verschweigen hieße, dem
-	# Spieler eine Datenlücke zu zeigen, wo er nur eine Einstellung ändern muss.
+	# Without an address the cause is unambiguous, and hiding it would show the
+	# player a data gap where only a setting needs changing.
 	_pending_label.text = Loc.t("ui.pending_reason", {
 		"pending": Api.pending_hint(),
 		"reason": Loc.t("ui.pending_no_server") if not Game.has_server() else Loc.t("ui.pending_unreachable"),

@@ -15,10 +15,10 @@ const TABLEAU_Y := 230.0
 const TABLEAU_BOTTOM := 616.0
 const BASE_DY := 32.0
 const MIN_DY := 10.0
-## Was ein Tipp kostet. Ein Tipp nimmt dem Spieler eine Entscheidung ab, also
-## soll er Punkte kosten — sonst löst man das Spiel mit der Taste ab.
+## A hint removes a decision, so it costs points — otherwise one key solves
+## the game.
 const HINT_COST := 25
-## Wie lange der Tipp aufleuchtet, in Sekunden.
+## Seconds the hint stays lit.
 const HINT_LIFE := 5.0
 const CONTROLS := "Karten antippen und dann ein Ziel wählen  ·  A = sichere Karten ablegen  ·  U = zurück  ·  R = neu  ·  F1 = Tipp"
 
@@ -31,10 +31,9 @@ var score := 0
 var highscore := 0
 var won := false
 var history: Array = []
-## Wie oft in diesem Durchgang gefragt wurde — der Zähler macht den Tipp zu
-## etwas, das man sich überlegt, statt etwas, das man hortet.
+## Hints asked for this deal, so the counter shows the tip is rationed.
 var hints_used := 0
-## Der aktuell leuchtende Vorschlag und seine Restlaufzeit.
+## The lit hint and the seconds it has left.
 var hint_move: Dictionary = {}
 var hint_life := 0.0
 var _hint_cursor := 0
@@ -140,7 +139,7 @@ func new_deal() -> void:
 
 func _process(delta: float) -> void:
 	super(delta)
-	# Der Tipp pulsiert, solange er steht — und nur dann wird neu gezeichnet.
+	# The hint pulses while it stands — the only reason to redraw here.
 	if hint_life > 0.0:
 		hint_life = maxf(0.0, hint_life - delta)
 		if hint_life <= 0.0:
@@ -160,9 +159,8 @@ func _process(delta: float) -> void:
 		return
 
 
-## "A" ist im Projekt keiner Eingabe-Action zugeordnet, deshalb kommt der
-## Buchstabe hier an — die Taste stand schon immer in der Hilfezeile, vorher
-## konnte sie aber gar nichts auslösen.
+## "A" is bound to no input action in the project, so the letter is handled
+## here — the help line has always advertised it.
 func _unhandled_input(event: InputEvent) -> void:
 	if won or not (event is InputEventKey):
 		return
@@ -405,7 +403,7 @@ func auto_move() -> void:
 
 
 func _push_history() -> void:
-	# Jede Änderung am Brett räumt den Tipp weg — er zeigte auf alte Felder.
+	# Any board change clears the hint — it pointed at cells that have moved.
 	_clear_hint()
 	history.append({
 		"freeCells": free_cells.duplicate(),
@@ -419,11 +417,9 @@ func _push_history() -> void:
 		history.pop_front()
 
 
-## Zeigt den einen Zug, der jetzt am meisten bringt, und lässt ihn aufleuchten.
-## Fragen kostet Punkte: der Tipp nimmt dem Spieler eine Entscheidung ab, und
-## ohne Preis löst man die Partie mit der Taste. Am Brett ändert er nichts — nur
-## am Punktestand, und `undo()` erstattet ihn nicht wieder, sonst ließe sich der
-## Preis per Tipp/Zurück zurücksetzen.
+## Shows the single move that gains the most and lights it up. Asking costs
+## points and `undo()` does not refund them — otherwise hint/undo/hint would
+## make the price free. The board itself is untouched.
 func hint() -> void:
 	if won:
 		return
@@ -454,8 +450,8 @@ func undo() -> void:
 	free_cells = (snapshot["freeCells"] as Array).duplicate()
 	foundations = (snapshot["foundations"] as Array).duplicate(true)
 	columns = (snapshot["columns"] as Array).duplicate(true)
-	# Ein Tipp, den man schon gesehen hat, bleibt bezahlt: sonst ließe sich die
-	# Punktekosten durch undo/zurück/undo endlos zurücksetzen.
+	# Restoring the previous hint count keeps the cost paid, so undo/redo/undo
+	# cannot cycle the points back in.
 	var paid := maxi(0, hints_used - int(snapshot.get("hints", hints_used)))
 	moves = int(snapshot["moves"])
 	score = maxi(0, int(snapshot["score"]) - paid * HINT_COST)

@@ -1,7 +1,6 @@
 class_name Checkers
 extends RefCounted
 ## Rules and AI for the Dame (international draughts) subgame.
-## Port of `src/game/checkers.ts`.
 ##
 ## The board is a flat array of 64 squares (`index = row * 8 + col`):
 ##   0 = empty, 1 = player man, 2 = player king, -1 = opponent man, -2 = opponent king.
@@ -227,24 +226,23 @@ static func has_moves(board: PackedInt32Array, side: int) -> bool:
 	return false
 
 
-# --- Schlagzug-Analyse -------------------------------------------------------
-# Alles, was der Bildschirm zum Anzeigen und für den Hinweis braucht: welcher
-# Stein wie viele Steine schlägt, welcher Schlagzug der stärkste ist und welche
-# Steine überhaupt ziehen dürfen. Reine Abfragen — sie verändern nichts und
-# werden einmal pro Stellung gerechnet, nicht pro Bild.
+# --- capture analysis ------------------------------------------------------
+# What the screen needs for display and for the hint: which piece captures how
+# many, which capture is strongest, and which pieces may move at all. Pure
+# queries — they change nothing and are computed once per position, not per frame.
 
 
-## Rang einer Kette: mehr Steine schlägt eine Dame, bei Gleichstand das
-## niedrigere Feld. Fest sortiert, damit derselbe Aufbau immer denselben
-## Tipp ergibt und die Markierung nicht springt.
+## Rank of a chain: more pieces captured wins, on a tie the lower square. Fixed
+## sort order, so the same position always yields the same hint and the marker
+## does not jump around.
 static func _chain_rank(board: PackedInt32Array, turn: Dictionary) -> int:
 	var steps: Array = turn["steps"]
 	var from := int((steps[0] as Array)[0])
 	return int(turn["captures"]) * 10000 + (1000 if is_king(board[from]) else 0) + CELL_COUNT - from
 
 
-## Jeder schlagende Stein mit seiner stärksten Kette, stärkster zuerst.
-## Einträge: `{"from": int, "captures": int, "steps": Array}`.
+## Every capturing piece with its strongest chain, strongest first. Entries:
+## `{"from": int, "captures": int, "steps": Array}`.
 static func capture_candidates(board: PackedInt32Array, side: int) -> Array:
 	var chains: Dictionary = {}
 	var ranks: Dictionary = {}
@@ -266,7 +264,7 @@ static func capture_candidates(board: PackedInt32Array, side: int) -> Array:
 	return out
 
 
-## Der stärkste Schlagzug der Seite — oder `{}`, wenn es keinen gibt.
+## The strongest capture available to the side — or `{}` when there is none.
 static func best_capture(board: PackedInt32Array, side: int) -> Dictionary:
 	var candidates := capture_candidates(board, side)
 	if candidates.is_empty():
@@ -275,8 +273,8 @@ static func best_capture(board: PackedInt32Array, side: int) -> Dictionary:
 	return {"steps": top["steps"], "captures": int(top["captures"])}
 
 
-## Alle Felder der Seite, von denen ein legaler Zug ausgeht. Beantwortet die
-## Frage "welche Steine dürfen ziehen?", wenn nichts zu schlagen ist.
+## All squares of the side from which a legal move exists. Answers "which pieces
+## may move?" when nothing can be captured.
 static func movable_squares(board: PackedInt32Array, side: int) -> Array:
 	var out: Array = []
 	for square in CELL_COUNT:

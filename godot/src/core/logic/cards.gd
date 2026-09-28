@@ -1,7 +1,9 @@
 class_name Cards
 extends RefCounted
 ## Shared deck helpers for the card subgames.
-## Port of `src/game/cards.ts`.
+##
+## Ranks are stored as indices 0..12 where 0 = "A" ... 12 = "K".
+## Suits are indices 0..3: spades, hearts, diamonds, clubs.
 ##
 ## Ranks are stored as indices 0..12 where 0 = "A" ... 12 = "K".
 ## Suits are indices 0..3: spades, hearts, diamonds, clubs.
@@ -48,13 +50,13 @@ static func color_for_suit(suit: int) -> Color:
 	return RED if is_red_suit(suit) else BLACK_SUIT
 
 
-# ══ FreeCell ═══════════════════════════════════════════════════════════════
-# Alles ab hier gehört allein `godot/src/game/freecell`. Die Deck-Helfer oben
-# bleiben das, was Poker benutzt. Die FreeCell-Regeln stehen hier statt im
-# Screen, damit sie ohne Szene prüfbar sind — der Screen zeichnet nur noch.
+# == FreeCell =================================================================
+# Everything below belongs to `godot/src/game/freecell` alone; the deck helpers
+# above stay what Poker uses. The FreeCell rules live here instead of in the
+# screen so they are testable without a scene — the screen only draws.
 
 
-## Wie viele der vier freien Zellen leer sind.
+## How many of the four free cells are empty.
 static func freecell_free_count(free_cells: Array) -> int:
 	var count := 0
 	for cell in free_cells:
@@ -63,7 +65,7 @@ static func freecell_free_count(free_cells: Array) -> int:
 	return count
 
 
-## Wie viele der acht Stapel gerade leer sind.
+## How many of the eight columns are currently empty.
 static func freecell_empty_count(columns: Array) -> int:
 	var count := 0
 	for column in columns:
@@ -72,7 +74,7 @@ static func freecell_empty_count(columns: Array) -> int:
 	return count
 
 
-## Die Karten ab `start` bilden eine absteigende Folge mit wechselnder Farbe.
+## The cards from `start` on form a descending sequence of alternating colour.
 static func freecell_sequence(cards: Array, start: int) -> bool:
 	if start < 0 or start >= cards.size():
 		return false
@@ -84,18 +86,18 @@ static func freecell_sequence(cards: Array, start: int) -> bool:
 	return true
 
 
-## Die berühmte Supermove-Kapazität: wie viele Karten auf `target` passen, wenn
-## die freien Zellen und Leerstapel zur Verfügung stehen. Auf einen leeren
-## Stapel zählt der Stapel selbst nicht mit.
+## The famous supermove capacity: how many cards fit on `target` with the free
+## cells and empty columns at hand. Moving onto an empty column does not count
+## that column itself.
 static func freecell_capacity(free_cells: Array, columns: Array, target: int) -> int:
 	var target_empty := target >= 0 and target < columns.size() and (columns[target] as Array).is_empty()
 	var shifts := maxi(0, freecell_empty_count(columns) - (1 if target_empty else 0))
 	return (freecell_free_count(free_cells) + 1) * int(pow(2.0, float(shifts)))
 
 
-## Die Karte darf gefahrlos auf ihr eigenes Fundament: ihr Ziel ist dran und
-## kein gegenüberliegendes Fundament ist weiter hinten. Wer sie liegen lässt,
-## verliert sonst die Option, das andere vorzuziehen.
+## The card may safely go to its own foundation: its target is on it and no
+## foundation of the other colour is further behind. Leaving it lying there
+## costs the option of playing the other one first.
 static func freecell_safe(foundations: Array, card: Card) -> bool:
 	if card == null or card.suit < 0 or card.suit >= foundations.size():
 		return false
@@ -111,16 +113,15 @@ static func freecell_safe(foundations: Array, card: Card) -> bool:
 	return true
 
 
-## Die sinnvollen nächsten Züge, bester zuerst: sichere Karten nach Hause, dann
-## was eine Spalte freilegt, dann was eine Folge zusammenbaut, und zuletzt das
-## Beiseitelegen einer Karte, damit überhaupt etwas zu sagen ist. Leer heißt,
-## dass kein sinnvoller Zug mehr offen ist. Jeder Vorschlag ist ein legaler Zug
-## — das ist die Zusage, die der Tipp dem Spieler gibt.
+## The sensible next moves, best first: safe cards home, then what frees a column,
+## then what builds a sequence, and last parking a card so there is something to
+## say at all. Empty means no sensible move is left. Every suggestion is a legal
+## move — that is the promise the tip makes to the player.
 static func freecell_suggest(free_cells: Array, foundations: Array, columns: Array, limit: int = 6) -> Array:
 	var out: Array = []
 
-	# 1. Nach Hause. Eine sichere Karte zu legen ist nie ein Fehler, und sie
-	#    gibt die Zelle und den Stapel wieder frei.
+	# 1. Home. Playing a safe card is never a mistake and it frees the cell and
+	#    the column again.
 	for i in free_cells.size():
 		var cell: Variant = free_cells[i]
 		if cell == null or not freecell_safe(foundations, cell):
@@ -138,8 +139,8 @@ static func freecell_suggest(free_cells: Array, foundations: Array, columns: Arr
 		out.append(_freecell_move({"zone": "col", "index": c, "start": column.size() - 1},
 				{"zone": "foundation", "index": top.suit}, "safe", 400 + top.rank))
 
-	# 2. Karten aus den Zellen legen: auf eine passende Karte darunter oder in
-	#    einen leeren Stapel, der dadurch wieder beweglich wird.
+	# 2. Move cards out of the cells: onto a matching card below, or into an empty
+	#    column that thereby becomes movable again.
 	for i in free_cells.size():
 		var cell: Variant = free_cells[i]
 		if cell == null:
@@ -152,12 +153,12 @@ static func freecell_suggest(free_cells: Array, foundations: Array, columns: Arr
 							{"zone": "col", "index": d, "empty": false}, "build", 180, 1,
 							cell, target[target.size() - 1]))
 				continue
-			# Irgendein leerer Stapel tut es — einer als Rat genügt.
+			# Any empty column will do — one is advice enough.
 			out.append(_freecell_move({"zone": "cell", "index": i, "start": 0},
 					{"zone": "col", "index": d, "empty": true}, "shift", 190))
 			break
 
-	# 3. Folgen verschieben.
+	# 3. Move sequences.
 	for c in columns.size():
 		var column: Array = columns[c]
 		for s in column.size():
@@ -172,8 +173,8 @@ static func freecell_suggest(free_cells: Array, foundations: Array, columns: Arr
 					continue
 				if count > freecell_capacity(free_cells, columns, d):
 					continue
-				# s == 0 heißt: die Folge ist der ganze Stapel, er wird leer.
-				# Der beste Zug im Spiel, weil ein leerer Stapel alles erlaubt.
+				# s == 0 means the sequence is the whole column, which becomes empty:
+				# the best move in the game, because an empty column allows anything.
 				if s == 0:
 					out.append(_freecell_move({"zone": "col", "index": c, "start": 0},
 							{"zone": "col", "index": d, "empty": false}, "build", 300, count,
@@ -183,9 +184,9 @@ static func freecell_suggest(free_cells: Array, foundations: Array, columns: Arr
 							{"zone": "col", "index": d, "empty": false}, "build", 200 + count * 12, count,
 							column[s], target[target.size() - 1]))
 
-	# 4. Die unterste Karte eines Stapels in eine freie Zelle legen. Legt sie
-	#    eine Folge frei, ist das der eigentliche Gewinn — sonst bleibt es ein
-	#    Zug, denn ein Tipp, der schweigt, hilft niemandem.
+	# 4. Move the bottom card of a column into a free cell. If that frees a
+	#    sequence, that is the real gain — otherwise it is still a move, because a
+	#    tip that says nothing helps nobody.
 	for c in columns.size():
 		var column: Array = columns[c]
 		var last := column.size() - 1
@@ -205,7 +206,7 @@ static func freecell_suggest(free_cells: Array, foundations: Array, columns: Arr
 	return out
 
 
-## Ein Vorschlag als ein Satz für die Hinweiszeile.
+## One suggestion as a sentence for the hint line.
 static func freecell_hint_text(move: Dictionary) -> String:
 	var from: Dictionary = move["from"]
 	var to: Dictionary = move["to"]
@@ -224,7 +225,7 @@ static func freecell_hint_text(move: Dictionary) -> String:
 	return "%s passt auf %s in Spalte %d%s" % [what, str(move["onto"]), int(to["index"]) + 1, str(move.get("note", ""))]
 
 
-## Passt die Karte auf die andere (Farbe und Wurfhöhe müssen stimmen).
+## Does the card fit on the other one (suit and rank must both match)?
 static func _freecell_fits(card: Card, onto: Card) -> bool:
 	return onto.rank == card.rank + 1 and is_red_card(onto) != is_red_card(card)
 

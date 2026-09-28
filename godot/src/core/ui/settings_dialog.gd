@@ -2,30 +2,17 @@ class_name SettingsDialog
 extends RefCounted
 ## Settings: language, sound, touch controls and the server address.
 ##
-## There was no settings screen before. `muted` was flipped by a button in the
-## header of every screen, `server_url` through a dialog in *one* game's menu,
-## and `touch_controls` — read in several places and written in none — not at all.
-## For a setting that can only be reached by a detour, that is the worst shape a
-## setting can have.
+## Every setting is reachable from here; `touch_controls` in particular was read
+## in several places and written in none.
 ##
-## ## The language now, the screen later
-##
-## `Loc.set_code` takes effect at once: every caption created from now on is in
-## the new language, and the number separators change with it. What does *not*
-## take effect at once is the screen behind the dialog — its captions were built
-## long ago. Rebuilding a running game would mean losing the round, so `Router`
-## only rebuilds when `rebuild_safe()` allows it (lobby, menus, galleries), and
-## the dialog says up front that the new language otherwise appears on the next
-## screen change.
-##
-## Built like `SuggestDialog` and `ServerDialog`: a static overlay, `Ui` helpers,
-## no hand-rolled tree.
+## `Loc.set_code` takes effect at once for new captions, but not for the screen
+## behind the dialog. Rebuilding a running game would lose the round, so
+## `Router` rebuilds only when `rebuild_safe()` allows it and the dialog says so.
 
 static var _layer: CanvasLayer = null
 static var _tree: SceneTree = null
-## After a language change the screen should be rebuilt — but only once the dialog
-## is gone. A dialog that vanishes in the middle of the fade is worse than one
-## that waits a second.
+## After a language change the screen should be rebuilt — but only once the
+## dialog is gone. A dialog vanishing mid-fade is worse than one that waits.
 static var _rebuild := false
 
 
@@ -85,15 +72,14 @@ static func _build(tree: SceneTree) -> void:
 
 	# --- language --------------------------------------------------------
 	column.add_child(Ui.label(Loc.t("ui.language"), 17, UiTheme.TEXT_DIM, true))
-	# Buttons rather than a dropdown: on a phone a button is as big as a finger,
-	# and every language is visible at once. With three catalogues that is a
-	# shorter route than a popup menu.
+	# Buttons rather than a dropdown: on a phone a button is as big as a finger
+	# and every language is visible at once.
 	var languages := Loc.available()
 	for entry in languages:
 		var code := str(entry["code"])
 		column.add_child(_language_button(code, code == Loc.code()))
 	# With no readable catalogue there is nothing to pick, and an empty list looks
-	# like a fault. In that case `Loc` has not translated anything either.
+	# like a fault. `Loc` has not translated anything either in that case.
 	if languages.is_empty():
 		column.add_child(Ui.label(Loc.t("ui.no_languages"), 15, UiTheme.WARNING))
 
@@ -171,7 +157,7 @@ static func _choose(code: String) -> void:
 		return
 	_rebuild = true
 	# Rebuild the dialog right away so the language buttons are in the new
-	# language. Without this it would read "Deutsch" next to "✓ English".
+	# language — otherwise it reads "Deutsch" next to "✓ English".
 	var tree := _tree
 	_release()
 	_build(tree)

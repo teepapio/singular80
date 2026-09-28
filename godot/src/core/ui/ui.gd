@@ -2,20 +2,9 @@ class_name Ui
 extends RefCounted
 ## Small factory helpers for building consistent UI trees in code.
 ##
-## Every screen in the game composes its interface from these so spacing,
-## colours and font sizes stay identical across all thirteen subgames.
-##
-## ## Language
-##
 ## `label`, `title`, `value_label` and `button` run their text through
-## `Loc.resolve()`. That is why being multi-language is decided in *one* place: a
-## German caption created through `Ui.label` is translatable without the call
-## site knowing anything about it. Whatever `Loc.resolve` does not know comes
-## back unchanged, so the call is free of risk and a new German sentence does not
-## fall off a cliff.
-##
-## Callers who want a key rather than a sentence write `Ui.label(Loc.t("ui.play"))`
-## — that is the case when one German sentence needs two translations.
+## `Loc.resolve()`, so being multi-language is decided in one place. Callers
+## that want a key rather than a sentence write `Ui.label(Loc.t("ui.play"))`.
 
 const FONT := "res://assets/fonts/DejaVuSans.ttf"
 const FONT_BOLD := "res://assets/fonts/DejaVuSans-Bold.ttf"
@@ -165,9 +154,7 @@ static func format_time(ms: float) -> String:
 
 ## Thousands separator for the active language.
 ##
-## This used to be hard-coded to `.` — right for German, wrong for English and
-## French, and with a digit between the groups it is not even readable
-## (`1.234.567` instead of `1,234,567`). `Loc` reads the separators from the
-## catalogue, so it is decided in this one place and not at the 46 call sites.
+## `Loc` reads the separators from the catalogue; a hard-coded `.` would be wrong
+## for English and French, and unreadable where a group is four digits wide.
 static func format_number(value: int) -> String:
 	return Loc.number(value)

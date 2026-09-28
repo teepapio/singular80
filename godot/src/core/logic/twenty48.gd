@@ -1,7 +1,6 @@
 class_name Twenty48
 extends RefCounted
 ## Pure 2048 rules.
-## Port of `src/game/twenty48.ts`.
 ##
 ## `slide` returns the resulting board plus a detailed plan of how every tile
 ## moved, which the scene turns into animations. `merged` guarantees a tile

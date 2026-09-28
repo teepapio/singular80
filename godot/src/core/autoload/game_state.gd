@@ -37,10 +37,9 @@ var arena_weapon: String = "pistol"
 var arena_mode: String = "classic"
 var server_url: String = ""
 var touch_controls: bool = true
-## The language the player chose, e.g. `"en"`. Empty means "no choice yet", and
-## `Loc` then goes by the device language. Deliberately not a `Loc` field: the
-## catalogues and the formatting belong to `Loc`, this file only holds what goes
-## into `user://singular80.cfg`.
+## The language the player chose, e.g. `"en"`. Empty means "no choice yet" and
+## `Loc` then goes by the device language. Not a `Loc` field: this file holds
+## only what belongs into `user://singular80.cfg`.
 var language: String = ""
 
 var _highscores: Dictionary = {}
@@ -124,9 +123,8 @@ func set_language(code: String) -> void:
 	save_settings()
 
 
-## The on-screen stick and action buttons. Read by every screen that shows a
-## world or a playfield; before this setter existed the flag could only be
-## hand-edited in `user://singular80.cfg`.
+## The on-screen stick and action buttons, read by every screen that shows a
+## world or a playfield.
 func set_touch_controls(value: bool) -> void:
 	touch_controls = value
 	save_settings()

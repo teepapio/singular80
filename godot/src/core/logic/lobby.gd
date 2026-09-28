@@ -1,12 +1,9 @@
 class_name Lobby
 extends RefCounted
-## Layout of the walkable 3D lobby.
-## Port of `src/game/lobby.ts`.
-##
-## The lobby is a circular plaza: game categories sit on a ring around a central
-## campfire, and each category plaza holds one pedestal per game. Keeping the
-## geometry here (instead of in the scene) keeps it testable and free of magic
-## numbers in the render code.
+## Layout of the walkable 3D lobby: a circular plaza with the game categories on
+## a ring around a central campfire, one pedestal per game inside each plaza.
+## Geometry lives here rather than in the scene, so it stays testable and the
+## render code carries no magic numbers.
 
 const LOBBY_WALK_RADIUS := 40.0
 const CATEGORY_RING_RADIUS := 24.0
@@ -15,14 +12,14 @@ const PEDESTAL_ORBIT := 3.6
 const PEDESTAL_TRIGGER := 2.5
 const MINIMAP_WORLD_RADIUS := LOBBY_WALK_RADIUS + 6.0
 
-## The mesh gallery sits between the hub and the plaza ring, on the axis the
-## player enters through, so it is the first thing they meet.
+## The mesh gallery sits on the axis the player enters through, between hub and
+## plaza ring, so it is the first thing they meet.
 const GALLERY_DISTANCE := 13.0
 const GALLERY_TRIGGER := 3.0
 
 
-## One plaza per category, evenly distributed on a ring. The first plaza sits
-## at the "north" side of the hub so the camera sees a plaza straight ahead.
+## One plaza per category, evenly on a ring. The first plaza sits north of the
+## hub so the camera sees a plaza straight ahead.
 static func zone_layout() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var count := GameRegistry.CATEGORIES.size()
@@ -38,8 +35,8 @@ static func zone_layout() -> Array[Dictionary]:
 	return out
 
 
-## Offsets of the pedestals inside one plaza: a single game stands at the
-## centre, several games form an even ring.
+## Pedestal offsets inside one plaza: a lone game stands at the centre, several
+## form an even ring.
 static func pedestal_offsets(count: int, orbit: float = PEDESTAL_ORBIT) -> Array[Vector2]:
 	var offsets: Array[Vector2] = []
 	if count <= 0:
@@ -53,7 +50,7 @@ static func pedestal_offsets(count: int, orbit: float = PEDESTAL_ORBIT) -> Array
 	return offsets
 
 
-## Clamps a position to the walkable circle around the hub.
+## Clamps a position into the walkable circle around the hub.
 static func clamp_to_lobby(x: float, z: float, radius: float = LOBBY_WALK_RADIUS) -> Vector2:
 	var length := sqrt(x * x + z * z)
 	if length <= radius or length == 0.0:
@@ -62,7 +59,7 @@ static func clamp_to_lobby(x: float, z: float, radius: float = LOBBY_WALK_RADIUS
 	return Vector2(x * scale, z * scale)
 
 
-## World position of the mesh gallery portal, opposite the first plaza.
+## World position of the mesh gallery portal, a quarter turn from the first plaza.
 static func gallery_position() -> Vector2:
 	var layout := zone_layout()
 	if layout.is_empty():

@@ -1,10 +1,8 @@
 class_name MeshReviewScreen
 extends Screen
-## Die Seite zwischen Galerie und Dashboard.
-##
-## Hier steht, welche Meshes vorgemerkt wurden, was an ihnen kaputt ist und was
-## der fertige Vorschlag daraus macht. Der Text ist bereits ausgefüllt — der
-## Spieler muss nichts tippen, außer dort nachschärfen, wo er will.
+## The page between the gallery and the dashboard: which meshes are marked,
+## what is wrong with them, and the finished suggestion text. The player only
+## edits it where they want to sharpen it.
 
 const MAX_NOTE := 400
 
@@ -16,8 +14,7 @@ var _selected := 0
 
 
 ## The list always comes from `MeshGallery`, never from a copy: the gallery can
-## add to it while this screen is open, and a stale copy would silently drop
-## that work.
+## add to it while this screen is open, and a stale copy would drop that work.
 func _marks() -> Dictionary:
 	return MeshGallery.shared_marks()
 

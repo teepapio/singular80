@@ -1,14 +1,11 @@
 class_name MeshGalleryScreen
 extends WorldScreen
-## Die begehbare Mesh-Galerie.
+## A round room with one pedestal per mesh. The player walks around, switches
+## between three detail levels, marks a mesh as "needs work" with a note, and
+## everything collected goes to the dashboard as one finished suggestion.
 ##
-## Ein runder Raum mit einem Sockel je Mesh. Der Spieler läuft herum, schaltet
-## zwischen drei Detailstufen um, markiert ein Mesh als "muss verbessert werden"
-## und schreibt dazu eine Notiz. Alles Gesammelte geht als ein einziger
-## Vorschlag an das Dashboard — der Text ist bereits ausgefüllt.
-##
-## Die Geometrie und der Vorschlagstext stehen in `MeshGallery`, damit sie ohne
-## Bildschirm getestet werden können.
+## The geometry and the suggestion text live in `MeshGallery`, so they are
+## testable without a screen.
 
 const MOVE_SPEED := 7.5
 const CAMERA_HEIGHT := 9.6
@@ -210,7 +207,7 @@ func _build_panels() -> void:
 	left.add_child(group_row)
 	for group in AssetRegistry.GROUPS:
 		var group_id_value: String = str(group["id"])
-		# Eine Sammlung ohne Meshes wäre eine Sackgasse — sie kommt gar nicht erst.
+		# An empty collection would be a dead end, so it gets no button.
 		if AssetRegistry.keys_in_group(group_id_value).is_empty():
 			continue
 		var button := Ui.button(Loc.f("%s %s", [[str(group["icon"]), str(group["name"])]]), Vector2(112, 28), UiTheme.PANEL_LIGHT, func() -> void:
@@ -411,9 +408,8 @@ func _rebuild_meshes() -> void:
 			continue
 		sign.text = AssetRegistry.display_name(key)
 		sign.modulate = AssetRegistry.color_of(key)
-		# Fehlt die gewählte Stufe für dieses einzelne Mesh, nimmt er die
-		# nächstfeinere, die es gibt — sonst stünde hier ein Low-Poly-Mesh unter
-		# der Aufschrift „Hoch“.
+		# If this one mesh misses the chosen level, fall back to the finest that
+		# exists — otherwise a low-poly mesh stands under the label "Hoch".
 		var use_tier := AssetRegistry.best_available(key, tier)
 		var node := WorldScreen.mesh(AssetRegistry.tier_path_of(key, use_tier), AssetRegistry.color_of(key))
 		if node == null:
@@ -490,9 +486,8 @@ func _tier_in_collection(tier_id: String) -> bool:
 
 func _refresh_panel() -> void:
 	var keys := visible_keys()
-	# Ist die gewählte Stufe in diesem Build gar nicht vorhanden, fällt sie auf
-	# die nächstfeinere vorhandene zurück — sonst zeigt die Galerie überall die
-	# Low-Fassung, beschriftet mit einer anderen.
+	# A level this build does not have at all falls back to the finest that
+	# exists — otherwise the gallery shows low meshes under another label.
 	if not _tier_in_collection(tier):
 		for candidate in AssetRegistry.TIERS:
 			if AssetRegistry.TIERS.find(candidate) > AssetRegistry.TIERS.find(tier):
@@ -532,8 +527,8 @@ func _refresh_info() -> void:
 		return
 	_mark_button.disabled = false
 	_info_name.text = "%s  %s" % [AssetRegistry.group_of(key).substr(0, 1).to_upper(), AssetRegistry.display_name(key)]
-	# Beschriftung und Dreieckszahl gehören zur Stufe, die wirklich steht — sonst
-	# behauptet ein schlanker Build „1.000 Dreiecke“ über einem 200er-Mesh.
+	# Label and triangle count must match the level that actually stands there,
+	# or a slim build claims "1.000 Dreiecke" over a 200-triangle mesh.
 	var shown := AssetRegistry.best_available(key, tier)
 	var shown_label := str(AssetRegistry.TIER_LABELS[shown])
 	if shown != tier:

@@ -1,10 +1,8 @@
 extends Node
 ## Owns the screen stack: the 3D world host, the 2D UI host and the transitions
-## between them.
-##
-## Every game is a script that builds its own visual tree, so switching screens
-## is just "free the old node, instantiate the new one". 3D screens (subclasses
-## of `WorldScreen`) go into `world_host`, 2D screens into `screen_host`.
+## between them. Screens build their own tree, so a switch is just "free the old
+## node, instantiate the new one".
+## 3D screens go into `world_host`, 2D screens into `screen_host`.
 
 signal screen_changed(screen_id: String)
 
@@ -40,17 +38,15 @@ const SCREEN_SCRIPTS := {
 
 ## Screens that can be rebuilt without losing anything.
 ##
-## A language change re-renders the current screen so the player sees the new
-## language right away instead of after the next navigation. That is only free
-## for a menu: rebuilding a running game throws the round away, and no setting is
-## worth that. Everything not listed here — every playfield, every result screen
-## — keeps its state and picks the new language up on the next switch.
+## A language change re-renders the current screen so the new language shows up
+## right away. Free for a menu; for a playfield it would throw the round away,
+## and no setting is worth that. Everything not listed picks the new language up
+## on the next switch.
 const REBUILD_SAFE: Array[String] = [
 	"lobby", "lobby_list", "main_menu", "mesh_gallery", "mesh_review",
 	"pang_menu", "dragonflight", "dragonflight_hatchery",
 ]
 
-## Set for one frame after a switch so games can react to the change.
 var current_id: String = ""
 var current_screen: Node = null
 ## True while a fade or screen swap is in flight. `go_to` ignores requests during

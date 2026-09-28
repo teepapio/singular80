@@ -2,10 +2,9 @@ class_name WorldScreen
 extends Node3D
 ## Base class of every 3D subgame.
 ##
-## Owns the environment, the follow camera and the 2D HUD layer, so the four
-## 3D games (lobby, crystal jumper, merge board, horse run, dragon RPG) only
-## have to describe their own world. Touch controls are provided by
-## `touch_controls()`.
+## Owns the environment, the follow camera and the 2D HUD layer; touch controls
+## come from `add_stick()` / `add_action_button()`.
+## Subclasses build in `_ready_world()` and per-frame logic in `_update_world()`.
 
 const HUD_HEIGHT := 56
 
@@ -123,8 +122,7 @@ func _build_hud_layer() -> void:
 	bar.add_child(Ui.button(Loc.t("ui.suggestion"), Vector2(150, 42), UiTheme.PANEL_LIGHT, func() -> void:
 		SuggestDialog.open_world(self)
 	))
-	# See `Screen._build_top_bar`: the language is reachable from every screen so
-	# nobody has to walk back to the menu for it.
+	# Language in the top bar as well — see `Screen._build_top_bar`.
 	bar.add_child(Ui.button(Loc.t("ui.settings_short"), Vector2(60, 42), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		SettingsDialog.open(self)
@@ -197,15 +195,13 @@ func follow_camera(target: Vector3, height: float, distance: float, lerp_speed: 
 ## Adds a thumb stick anchored to a screen corner. Returns it so the game can
 ## read `value` every frame.
 ##
-## The corner inset goes through `offset_*` and never through `position`:
-## `position` is measured from the parent origin as soon as the control is in
-## the tree, so a negative offset meant as "24 px above the bottom edge" lands
-## 24 px *below the top* edge instead — off screen, where the stick can neither
-## be seen nor touched. `offset_*` is always relative to the anchor.
+## The corner inset goes through `offset_*` and never through `position`: in the
+## tree `position` is measured from the parent origin, so a negative offset
+## meant as "24 px above the bottom edge" lands below the *top* edge instead —
+## off screen, where the stick can neither be seen nor touched.
 ##
-## `Control` re-clamps its size to the minimum whenever an offset pair is
-## momentarily inconsistent, so the wanted size is read once up front and the
-## leading edges are written before the trailing ones.
+## `Control` re-clamps its size when an offset pair is momentarily inconsistent,
+## so the wanted size is read once up front and leading edges are written first.
 func add_stick(corner: String = "bottom_left", label_text: String = "") -> VirtualStick:
 	var stick := VirtualStick.new()
 	stick.label_text = label_text

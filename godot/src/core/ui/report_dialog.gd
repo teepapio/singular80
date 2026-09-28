@@ -1,20 +1,17 @@
 class_name ReportDialog
 extends RefCounted
-## In-App-Meldung für einen beanstandeten Vorschlag.
+## In-app report for a flagged suggestion.
 ##
-## Google Play verlangt für nutzergenerierte Inhalte einen Meldeweg *im Spiel*.
-## Vorschläge sind zwar nur über das Hauptmenü sichtbar, aber genau dort steht
-## der Meldeknopf — wer etwas beanstanden kann, meldet es ohne Umweg.
+## Google Play requires a reporting path *in the game* for user-generated
+## content; the report button sits where the suggestions are listed.
 ##
-## Zwei Wege, weil `mailto:` auf Android nicht verlässlich öffnet: das Mail
-## wird zusätzlich in die Zwischenablage gelegt, sodass niemand tippen muss.
-## Aufbau wie `SuggestDialog`: statische Overlay-Funktion, `Ui`-Helfer, kein
-## Handgerüst.
+## `mailto:` does not reliably open on Android, so the mail is additionally
+## copied to the clipboard. Static overlay, `Ui` helpers, like `SuggestDialog`.
 
 static var _layer: CanvasLayer = null
 
 
-## Meldet den Vorschlag mit der angegebenen Nummer und Text.
+## Reports the suggestion with the given number and text.
 static func open(parent: Control, id: int, text: String) -> void:
 	if _layer != null and is_instance_valid(_layer):
 		return
@@ -90,8 +87,8 @@ static func _build(tree: SceneTree, id: int, text: String) -> void:
 	column.add_child(status)
 
 	if not AppLegal.is_configured():
-		# Ehrlich bleiben: ohne Adresse geht keine Meldung raus, und das ist
-		# besser als eine Adresse, an die niemand zuhört.
+		# Honest: without an address no report goes out, and that beats an
+		# address nobody listens to.
 		status.add_theme_color_override("font_color", UiTheme.WARNING)
 		status.text = Loc.t("ui.report_unconfigured")
 
@@ -112,7 +109,7 @@ static func _build(tree: SceneTree, id: int, text: String) -> void:
 			close()
 			return
 		Sfx.select()
-		# Android öffnet mailto: nicht überall. Die Kopie bleibt der Weg.
+		# Android does not open mailto: everywhere. The copy is the fallback.
 		DisplayServer.clipboard_set(AppLegal.report_message(
 			id, text, _selected(reasons), note.text))
 		status.add_theme_color_override("font_color", UiTheme.WARNING)

@@ -2,11 +2,9 @@ class_name VirtualStick
 extends Control
 ## On-screen thumb stick.
 ##
-## Every action game in the app is fully playable with this stick plus the
-## on-screen buttons — keyboard and gamepad input is merged in by the owning
-## screen, so a phone, a tablet and a desktop all work without mode switching.
-## The base recentres to wherever the finger lands, which makes it usable on
-## any screen size.
+## The owning screen merges in keyboard and gamepad, so phone, tablet and
+## desktop all work without mode switching.
+## The base recentres to wherever the finger lands, which fits any screen size.
 
 signal moved(vector: Vector2)
 

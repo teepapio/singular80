@@ -2,16 +2,15 @@ class_name SuggestDialog
 extends RefCounted
 ## The in-game suggestion form.
 ##
-## Posts to `POST /api/suggestions` through `Api`, exactly like the browser
-## overlay did, and falls back to a local queue when the device is offline so a
-## player never loses an idea.
+## Posts to `POST /api/suggestions` through `Api`, falling back to a persistent
+## local queue when the device is offline so a player never loses an idea.
 
 const MAX_LENGTH := 2000
 const QueueClass := preload("res://src/core/logic/suggestion_queue.gd")
 
 static var _layer: CanvasLayer = null
-## Hängt am Autoload, solange der Dialog offen ist, und wird in `close()` wieder
-## gelöst — sonst riefe ein späterer Vorschlag in ein zerstörtes Label.
+## Stays on the autoload while the dialog is open and is released again in
+## `close()` — otherwise a later suggestion would write into a destroyed label.
 static var _warning_hook: Callable = Callable()
 
 
@@ -44,8 +43,8 @@ static func close() -> void:
 	_layer = null
 
 
-## Schreibt den Wartestand in die Zeile. Ohne Warteschlange verschwindet sie
-## ganz, statt „0 Vorschläge warten auf Netz“ zu behaupten.
+## Writes the pending count into the line. Without a queue it disappears
+## entirely rather than claiming "0 Vorschläge warten auf Netz".
 static func _show_waiting(label: Label) -> void:
 	var text := QueueClass.pending_hint(Api.pending_count())
 	label.text = text
@@ -78,8 +77,8 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 
 	column.add_child(Ui.title(Loc.t("ui.suggest_title"), 32, UiTheme.ACCENT))
 
-	# The origin is filled in from the active screen, so the player only has to
-	# write *what* should change, never where.
+	# The origin is filled in from the active screen, so the player writes *what*
+	# should change, never where.
 	var source := context.strip_edges()
 	if source == "":
 		source = SuggestionContext.for_screen(Router.current_id)
@@ -93,8 +92,8 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 	hint.custom_minimum_size = Vector2(640, 0)
 	column.add_child(hint)
 
-	# Was noch auf Netz wartet, gehört sichtbar in den Dialog: ein Spieler, der
-	# drei Ideen schon gesendet hat, soll sie nicht für verloren halten.
+	# What is still waiting for the network belongs visibly in the dialog: a
+	# player who has sent three ideas must not consider them lost.
 	var waiting := Ui.label("", 16, UiTheme.ACCENT)
 	waiting.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	waiting.custom_minimum_size = Vector2(640, 0)
@@ -114,9 +113,8 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 	name_edit.custom_minimum_size = Vector2(640, 46)
 	column.add_child(name_edit)
 
-	# Die Nutzungsbedingungen stehen als Hinweis daneben und sperren nichts mehr:
-	# das Kästchen vor dem Absenden ist entfernt. Wer nicht zustimmt, sendet
-	# trotzdem — die Bedingungen sind damit eine Information, keine Bedingung.
+	# Terms are a notice and block nothing: there is no consent checkbox. They
+	# are information, not a condition.
 	var terms := Ui.label(Loc.t("ui.suggest_terms", {"url": AppLegal.terms_url()}), 14, UiTheme.TEXT_MUTED)
 	terms.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	terms.custom_minimum_size = Vector2(640, 0)
@@ -126,11 +124,10 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status.custom_minimum_size = Vector2(640, 48)
 	column.add_child(status)
-	# Die Warteschlange nennt hier ihre Gründe — offline gespeichert, oder
-	# ältester Vorschlag wegen der Obergrenze verworfen. Ohne diesen Kanal
-	# verschwände der Verlust still, und genau das wollte die Warteschlange
-	# vermeiden. `last_warning` hält den Grund für den Absender fest, der ihn
-	# sonst mit seinem eigenen Text überschreiben würde.
+	# The queue names its reasons here — stored offline, or the oldest suggestion
+	# dropped by the cap. Without this channel that loss would be silent.
+	# `last_warning` pins the reason for the sender, who would otherwise
+	# overwrite it with his own text.
 	var last_warning := {"text": ""}
 	_warning_hook = func(reason: String) -> void:
 		last_warning["text"] = reason
@@ -165,14 +162,14 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 		send.text = Loc.t("ui.suggest_sending")
 		last_warning["text"] = ""
 		var author := name_edit.text.strip_edges().substr(0, 60)
-		# "Anonym" is a value for the backend, not screen text: it ends up on the
-		# dashboard next to other suggestions. Translating it would mint the same
-		# name in two languages.
+		# "Anonym" is a value for the backend, not screen text: it shows up on the
+		# dashboard next to other suggestions, and translating it would mint the
+		# same name in two languages.
 		var view := await Api.submit_suggestion(text, author if author != "" else "Anonym", source)
 		if view.is_empty():
 			status.add_theme_color_override("font_color", UiTheme.WARNING)
-			# Ein konkreter Grund aus der Warteschlange schlägt den allgemeinen
-			# Satz: „ältester Vorschlag verworfen“ ist wichtiger als „gespeichert“.
+			# A concrete reason from the queue beats the general sentence:
+			# "oldest suggestion dropped" matters more than "stored".
 			var reason := str(last_warning.get("text", ""))
 			status.text = reason if reason != "" else Loc.t("ui.suggest_queued")
 			send.text = Loc.t("ui.suggest_stored")
@@ -184,8 +181,8 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 		var cluster := int(view.get("clusterSize", 1))
 		var extra := ""
 		if cluster > 1:
-			extra = Loc.f("ui.suggest_cluster", [cluster])
-		status.text = Loc.f("ui.suggest_thanks", [int(view.get("id", 0)), extra])
+			extra = Loc.t("ui.suggest_cluster", {"count": str(cluster)})
+		status.text = Loc.t("ui.suggest_thanks", {"id": str(int(view.get("id", 0))), "extra": extra})
 		send.text = Loc.t("ui.suggest_sent")
 		_show_waiting(waiting)
 	)

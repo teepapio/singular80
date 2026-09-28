@@ -16,8 +16,8 @@ const INITIAL_ITEMS := 10
 const PARTICLE_COUNT := 260
 const PARTICLE_TOP := 22.0
 const PARTICLE_AREA := 44.0
-## How long a tip keeps pulsing, and how long the player has to sit still on an
-## almost full board before the screen offers the merge on its own.
+## How long a tip keeps pulsing, and how long the player must idle on a nearly
+## full board before the screen offers the merge on its own.
 const HINT_LIFETIME := 4.0
 const HINT_IDLE := 6.0
 const HINT_PULSE := 0.13
@@ -242,8 +242,8 @@ func _build_ui() -> void:
 	clear_button.position = Vector2(636, -64)
 	hud_root.add_child(clear_button)
 
-	# The tip line sits above the buttons and answers the only question the
-	# button raises: what does it point at, and is it worth pressing?
+	# The tip line answers the question the button raises: what it points at,
+	# and whether it is worth pressing.
 	_hint_label = Ui.label("", 19, UiTheme.TEXT_DIM)
 	_hint_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	_hint_label.position = Vector2(0, -138)
@@ -257,8 +257,8 @@ func _build_ui() -> void:
 	hud_root.add_child(_instruction_label)
 
 
-## The one line that explains the rules. It follows the merge mode, because a
-## tip in 5er mode that promises three items is worse than no tip.
+## The rules line follows the merge mode: a 5er tip promising three items is
+## worse than no tip.
 func _instruction_text() -> String:
 	if required == Merge3D.MERGE_5:
 		return "Items antippen — 5 gleiche ergeben 2 Items der nächsten Stufe"
@@ -289,11 +289,9 @@ func _toggle_mode() -> void:
 
 # --- Tipp --------------------------------------------------------------------
 
-## Marks the most valuable merge on the board and selects it, so one more tap
-## on "Verschmelzen" finishes the move. Hunting three equal items by eye on a
-## 6x6 board that keeps filling is the tedious half of this game, and this is
-## the half nobody enjoys; the decision that remains is which merge to take,
-## and the tip line says what the one it picked is worth.
+## Marks the most valuable merge on the board and selects it, so one more tap on
+## "Verschmelzen" finishes the move. What the tip leaves to the player is *which*
+## merge to take, and the tip line says what the one it picked is worth.
 ##
 ## `loud` is false for the automatic tip: a message and a sound every few
 ## seconds would be worse than the silence it is trying to break.
@@ -365,8 +363,8 @@ func _remove_item_node(cell: int) -> void:
 	var view: Dictionary = items[cell]
 	var node: Node3D = view["node"]
 	# Detach instead of freeing: the pool hands the node straight back to
-	# `_add_item_node`, and a node that is queued for deletion but re-added in
-	# the same frame is gone while it is still on the board.
+	# `_add_item_node`, and a node queued for deletion but re-added in the same
+	# frame is gone while it is still on the board.
 	remove_child(node)
 	tier_pool[clampi(int(view["tier"]), 1, tier_pool.size()) - 1].append(node)
 	items.erase(cell)
@@ -419,7 +417,7 @@ func _toggle_cell(cell: int) -> void:
 	else:
 		next.append(cell)
 	selected = next
-	# A tap of the player's own ends the tip: from here on the selection is his.
+	# The player's own tap ends the tip — from here the selection is his.
 	_clear_hint()
 	Sfx.select()
 	_refresh()
@@ -464,8 +462,8 @@ func _update_world(delta: float) -> void:
 			if Merge3D.is_game_over(board):
 				_end_run()
 		elif _should_auto_hint():
-			# The board is nearly closed and nobody merged for a while: hand the
-			# player the merge instead of letting the next spawn end the run.
+			# A nearly closed board and a long time without a merge: hand the
+			# player the merge before the next spawn ends the run.
 			since_merge = 0.0
 			_show_hint(false)
 
@@ -506,8 +504,7 @@ func _refresh() -> void:
 	_score_label.text = Ui.format_number(score)
 	_best_label.text = Ui.format_number(maxi(highscore, score))
 	_used_label.text = "%d/%d" % [used, board.size()]
-	# The counter turns red while the board is closing: the pressure is the
-	# whole tension of the game, and a number nobody notices is no tension.
+	# Red while the board closes: a number nobody notices is no tension.
 	_used_label.add_theme_color_override("font_color",
 		UiTheme.DANGER if Merge3D.is_pressing(board) else UiTheme.TEXT)
 	if selected.is_empty():

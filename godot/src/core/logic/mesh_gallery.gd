@@ -1,11 +1,9 @@
 class_name MeshGallery
 extends RefCounted
-## Layout and bookkeeping for the walk-in mesh gallery.
-##
-## The gallery is a room the player walks through: pedestals in a ring, one mesh
-## each, and a wall of signs that can be opened at any time. Everything that
-## decides *where* something stands and *what* the final suggestion says lives
-## here so it can be unit tested without a viewport.
+## Layout and bookkeeping for the walk-in mesh gallery: pedestals in a ring, one
+## mesh each, and a wall of signs that opens at any time.
+## Everything deciding *where* something stands and *what* the final suggestion
+## says lives here, so it can be unit tested without a viewport.
 
 # --- room -------------------------------------------------------------------
 
@@ -29,7 +27,7 @@ const NEAR_DISTANCE := 4.2
 const CONTEXT := "Mesh-Galerie"
 
 ## The player's list of meshes to improve. It outlives the gallery screen,
-## because it is the input of the suggestion the player writes afterwards.
+## because it is the input to the suggestion written afterwards.
 static var marks: Dictionary = {}
 
 
@@ -47,8 +45,7 @@ static func pedestal_position(index: int) -> Vector3:
 	return Vector3(cos(angle) * RING_RADIUS, PEDESTAL_HEIGHT * 0.5, sin(angle) * RING_RADIUS)
 
 
-## Which pedestal is nearest to `from`, or -1 when the player is too far from
-## every one of them.
+## Which pedestal is nearest `from`, or -1 when the player is too far from all.
 static func nearest_pedestal(keys: Array[String], from: Vector3) -> int:
 	var best := -1
 	var best_distance := NEAR_DISTANCE
@@ -156,7 +153,7 @@ static func set_note(marks: Dictionary, key: String, note: String) -> Dictionary
 	return {"entries": entries, "order": (marks.get("order", []) as Array).duplicate()}
 
 
-## Remembers which detail level the player was looking at when they marked it.
+## Remembers which detail level the player was looking at when marking it.
 static func set_tier(marks: Dictionary, key: String, tier: String) -> Dictionary:
 	if not is_marked(marks, key):
 		return marks
@@ -174,10 +171,9 @@ static func clear_marks() -> Dictionary:
 
 # --- the suggestion ---------------------------------------------------------
 
-## The pre-filled suggestion body for the marked meshes.
-##
-## The player wrote the "what"; the gallery contributes the "which mesh, at which
-## detail level, and why", so nobody has to spell out `rpg/dragon_lord` by hand.
+## The pre-filled suggestion body for the marked meshes. The player wrote the
+## "what"; the gallery contributes the "which mesh, at which detail level, and
+## why", so nobody has to spell out `rpg/dragon_lord` by hand.
 static func draft(marks: Dictionary) -> String:
 	var order: Array = marks.get("order", [])
 	if order.is_empty():
@@ -186,9 +182,8 @@ static func draft(marks: Dictionary) -> String:
 	for key in order:
 		var entry: Dictionary = (marks.get("entries", {}) as Dictionary).get(key, {})
 		var tier := str(entry.get("tier", "low"))
-		# The level the player was looking at is part of the complaint: a 10 000
-		# triangle version of a bad shape is a different problem than a 400
-		# triangle one.
+	# The level the player was looking at is part of the complaint: a 10 000
+	# triangle version of a bad shape is a different problem than a 400 triangle one.
 		var head := "%s — %s, Stufe %s (%s Dreiecke)" % [
 			AssetRegistry.display_name(key), key,
 			str(AssetRegistry.TIER_LABELS.get(tier, tier)), AssetRegistry.tri_text(key, tier),

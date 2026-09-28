@@ -1,25 +1,18 @@
 class_name ServerDialog
 extends RefCounted
-## Eingabedialog für die Adresse des Singular-80-Backends.
+## Input dialog for the Singular 80 backend address.
 ##
-## Der Dialog lag vorher fest in `main_menu_screen.gd` des Arena-Spiels. Das war
-## der einzige Weg, sie zu erreichen — wer Tetris spielt und einen Vorschlag
-## abschickt, kam am Hauptbildschirm nicht daran vorbei, und die Idee blieb in
-## `user://` liegen. Genau das ist der Fehler, den diese Datei behebt: die
-## Adresse ist jetzt eine geteilte UI wie der Vorschlagsdialog, und der
-## Hauptbildschirm bietet sie an.
-##
-## Nach dem Speichern wird nicht nur die Adresse gesetzt: eine wartende
-## Warteschlange wird sofort angestoßen. Sonst wartet sie bis zu `BACKOFF_MAX`
-## Sekunden, obwohl die Adresse jetzt längst stimmt.
+## A shared UI like `SuggestDialog`, reachable from every screen and not just
+## from one game's menu.
+## Saving also wakes the suggestion queue; otherwise it idles out its backoff
+## even though the address is now right.
 
 ## Opens the dialog on `host` and applies the new address on confirm.
 static func open(host: Node) -> void:
 	var dialog := AcceptDialog.new()
-	# Godot's `AcceptDialog` brings its own buttons, whose captions live in
-	# `TranslationServer`. They are not in play here: `Loc` does not register its
-	# catalogues under Godot's `ok`/`cancel` names, and a button that says "OK" in
-	# every language is the smallest crack in this dialog.
+	# `AcceptDialog` brings its own buttons, whose captions come from
+	# `TranslationServer`. `Loc` does not register its catalogues under Godot's
+	# `ok`/`cancel` names, and an "OK" in every language is the smallest crack here.
 	dialog.ok_button_text = Loc.t("ui.ok")
 	dialog.title = Loc.t("ui.server_title")
 	dialog.dialog_hide_on_ok = true
@@ -44,11 +37,9 @@ static func open(host: Node) -> void:
 
 ## Sets the address and everything that has to follow it.
 ##
-## `Api.wake()` is the part that is easy to forget and expensive to skip: without
-## it a queue that has been waiting out its backoff sits there for up to
-## `BACKOFF_MAX` seconds — five minutes — although the address was right in front
-## of the player the whole time. Their idea is in `user://` and they were told it
-## is "gespeichert"; the moment the address is known, it should go out.
+## `Api.wake()` is the easy part to forget and expensive to skip: without it a
+## waiting queue sits out its backoff — up to `BACKOFF_MAX`, five minutes —
+## although the address was correct the whole time.
 static func apply(url: String) -> void:
 	Game.set_server_url(url)
 	Content.reload_remote.call_deferred()
@@ -57,10 +48,10 @@ static func apply(url: String) -> void:
 
 ## The caption of the button that opens this dialog.
 ##
-## `Loc.t` with a `{state}` placeholder rather than `"… %s" % url`: the address is
-## substituted *after* the template has been translated, so a language that puts
-## the word in front of the colon still reads correctly. The address itself stays
-## untranslated, which is the point — `192.168.1.20:8787` is not prose.
+## `Loc.t` with a `{state}` placeholder rather than `"… %s" % url`: the address
+## is substituted *after* translation, so a language that puts the word in front
+## of the colon still reads right. The address itself stays untranslated —
+## `192.168.1.20:8787` is not prose.
 static func label() -> String:
 	return Loc.t("ui.server_caption", {
 		"state": Loc.t("ui.server_offline") if not Game.has_server() else Game.server_url,

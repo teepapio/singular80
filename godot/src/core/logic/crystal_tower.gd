@@ -1,7 +1,6 @@
 class_name CrystalTower
 extends RefCounted
 ## Logic for the "Crystal Jumper 3D" tower climb and its themed editions.
-## Port of `src/game/crystalTower.ts`.
 
 const MAX_CRYSTAL_TIER := 5
 const MAX_LEVEL := 6
@@ -142,8 +141,8 @@ static func tier_for_floor(floor: int, floors: int) -> int:
 
 
 ## Plans the full merge cascade: three crystals of a tier become one of the next
-## tier, repeatedly, starting at the lowest tier. `steps` lists the individual
-## merges so the scene can animate them one by one.
+## tier, repeatedly, from the lowest tier up. `steps` lists the individual merges
+## so the scene can animate them one by one.
 static func plan_merges(counts: Array) -> Dictionary:
 	var result: Array = []
 	for n in counts:
@@ -173,7 +172,7 @@ static func inventory_value(counts: Array) -> int:
 	return value
 
 
-# --- Flusskette -------------------------------------------------------------
+# --- Flusskette (flow chain) -----------------------------------------------
 ##
 ## Pickups in quick succession build a chain, and every crystal of the chain is
 ## worth its own value again per step. Climb without hesitating and the score
@@ -188,9 +187,8 @@ static func next_flow(elapsed_ms: float, last_ms: float, chain: int) -> int:
 	return 1
 
 
-## Remaining lifetime of the chain in ms (0 = expired). A chain of one has no
-## bar: a single pickup is not a flow yet, so the HUD stays quiet until the
-## second one.
+## Remaining lifetime of the chain in ms (0 = expired). A chain of one has no bar:
+## a single pickup is not a flow yet, so the HUD stays quiet until the second one.
 static func flow_left_ms(elapsed_ms: float, last_ms: float, chain: int) -> float:
 	if chain < 2:
 		return 0.0

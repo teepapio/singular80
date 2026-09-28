@@ -1,32 +1,23 @@
 extends Node
-## Brücke zwischen der App und der Android-Testfarm.
+## Bridge between the app and the Android test farm.
 ##
-## Normalerweise ist dieses Autoload **inert**: es prüft beim Start, ob es mit
-## `--devfarm` gestartet wurde, und beendet sich sonst sofort. Im
-## ausgelieferten Spiel kostet es damit eine leere Zeile und keine Allokation
-## pro Frame.
+## Inert unless started with `--devfarm`: it then talks to the farm over HTTP and
+## executes commands. The farm drives the app through the same inputs a player
+## uses — `tap` sends an `InputEventScreenTouch`, `key` presses an InputMap
+## action, `goto` calls the router — so there is no test channel bypassing the
+## game.
 ##
-## Gestartet mit dem Schalter hört es sich bei der Farm über HTTP an und führt
-## Befehle aus. Das ist der Grund, warum echtes Gameplay-Testen automatisierbar
-## ist: die Farm steuert die App durch dieselben Eingaben, die auch ein Spieler
-## benutzt — `tap` schickt einen `InputEventScreenTouch`, `key` drückt eine
-## Input-Action, `goto` ruft den Router. Es gibt also keinen Testkanal, der am
-## Spiel vorbeiführt und deshalb etwas anderes prüft als das, was ausgeliefert
-## wird.
-##
-## Der Weg über den Host läuft über `10.0.2.2`, das ist die Host-Schleife aus
-## Sicht des Emulators. Auf einem echten Gerät trägt `config.json` stattdessen
-## die LAN-Adresse.
+## The default `10.0.2.2` is the host loop as seen from an emulator; on a real
+## device `config.json` carries the LAN address instead.
 
-## Nur wenn diese Variable gesetzt ist, passiert irgendetwas.
+## Nothing happens unless this variable is set.
 const FLAG := "--devfarm"
 
-## Wie lange die App auf einen Befehl wartet, bevor sie neu fragt. Kürzer
-## heißt schnellerer Befehlsdurchsatz, länger bedeutet weniger Leerlauf im
-## Emulator.
+## How long the app waits for a command before asking again. Shorter means
+## higher command throughput, longer less idle spinning in the emulator.
 const POLL_TIMEOUT_SECONDS := 20.0
 
-## Wie lange auf die Farm gewartet wird, bevor es als Einzelversuch gilt.
+## How long to wait for the farm before the attempt counts as a single try.
 const CONNECT_TIMEOUT_SECONDS := 12.0
 
 var _bridge := ""
@@ -38,8 +29,8 @@ var _tries := 0
 
 func _ready() -> void:
 	if not OS.get_cmdline_user_args().has(FLAG) and not OS.get_cmdline_args().has(FLAG):
-		# Ohne den Schalter sofort wieder verschwinden. `queue_free` im
-		# Autoload führt sonst zu einer Fehlermeldung bei jedem Start.
+		# Disappear at once without the flag: `queue_free` on an autoload would
+		# error on every single start.
 		_active = false
 		set_process(false)
 		return
@@ -59,8 +50,8 @@ func _run() -> void:
 	while _active:
 		if not await _register():
 			_tries += 1
-			# Endlos versuchen wäre nur verschwendete Akku: die Farm kommt
-				# manchmal später hoch als die App.
+			# Retrying forever would only waste battery: the farm sometimes comes
+			# up later than the app.
 			if _tries > 20:
 				print("[devfarm] Farm nicht erreichbar, gebe auf")
 				return
@@ -74,7 +65,7 @@ func _run() -> void:
 			await _execute(command)
 
 
-## Meldet sich an und holt die Adresse der Farm.
+## Registers and gets the farm's address.
 func _register() -> bool:
 	var body := JSON.stringify({
 		"device": OS.get_name(),
@@ -92,7 +83,7 @@ func _register() -> bool:
 	return _id != ""
 
 
-## Wartet auf den nächsten Befehl. Leer heißt: abmelden und neu anmelden.
+## Waits for the next command. Empty means: deregister and register again.
 func _next_command() -> Dictionary:
 	var result := await _request("/next?id=%s" % _id, HTTPClient.METHOD_GET, "")
 	if result.is_empty():
@@ -117,9 +108,8 @@ func _request(path: String, method: int, body: String) -> String:
 	return str(done[3])
 
 
-## Führt einen Befehl aus. Unbekanntes wird als Fund gemeldet, nicht
-## verschluckt — ein stillschweigend ignorierter Befehl sieht in der Farm aus wie
-## ein Fehler im Spiel.
+## Runs a command. An unknown one is reported as a finding, not swallowed — a
+## silently ignored command looks like a game bug in the farm.
 func _execute(command: Dictionary) -> void:
 	if _busy:
 		await _event("busy", {"op": str(command.get("op", "?"))})
@@ -149,8 +139,8 @@ func _execute(command: Dictionary) -> void:
 			_tap(Vector2(float(args.get("x", 0.0)), float(args.get("y", 0.0))), float(args.get("hold", 0.05)))
 			await get_tree().create_timer(float(args.get("after", 0.25))).timeout
 		"tap_button":
-			# Tippt den Knopf, dessen Beschriftung passt — die Farm kennt keine
-			# Bildschirmkoordinaten, und die stimmen zwischen Geräten nicht.
+			# Taps the button whose caption matches: the farm knows no screen
+			# coordinates, and those differ between devices anyway.
 			await _tap_named(str(args.get("text", "")), get_tree())
 		"key":
 			var action := str(args.get("action", ""))
@@ -188,14 +178,13 @@ func _current_screen_id() -> String:
 	return Router.current_id if Router != null else ""
 
 
-## Ein echter Tipp, genau wie ihn der Finger erzeugt.
+## A real tap, exactly the one a finger produces.
 ##
-## Zwei Dinge, die hier lange gedauert haben und deshalb festgehalten sind:
-## Der Weg geht über `push_input` und **nicht** über `Input.parse_input_event` —
-## letzterer landet nicht im GUI des Viewports, ein damit geschickter Klick
-## bewegt also gar nichts. Und es kommen **beide** Ereignisse: erst der Touch
-## und daraus, über `pointing/emulate_mouse_from_touch`, der Klick, auf den ein
-## `Button` überhaupt hört. Genau das schickt ein Gerät auch.
+## The path goes through `push_input`, **not** `Input.parse_input_event`: the
+## latter never reaches the viewport's GUI, so a click sent that way moves
+## nothing. And **both** events are sent: the touch first, then the click derived
+## from it via `pointing/emulate_mouse_from_touch` — which is what a `Button`
+## listens to at all. A device sends exactly this.
 func _tap(point: Vector2, hold: float) -> void:
 	var viewport := get_viewport()
 	_push(viewport, _touch(point, true))
@@ -225,7 +214,7 @@ func _mouse(point: Vector2, pressed: bool) -> InputEventMouseButton:
 	return event
 
 
-## Tippt den ersten Knopf, dessen Beschriftung `needle` enthält.
+## Taps the first button whose caption contains `needle`.
 func _tap_named(needle: String, tree: SceneTree) -> void:
 	var screen := _current_screen()
 	if not (screen is Control):
@@ -245,12 +234,11 @@ func _tap_named(needle: String, tree: SceneTree) -> void:
 	await _event("error", {"message": "Kein Knopf mit '%s' gefunden." % needle})
 
 
-## Spielt eine Weile lang sinnvollen Input, um das Spiel zu treiben.
+## Plays sensible input for a while, to drive the game.
 ##
-## Absichtlich **kein** Zufallsturm: die Aktionen stammen aus dem InputMap des
-## gerade geöffneten Spiels, also genau die Eingaben, die dort etwas bewirken.
-## Ein Sturm aus beliebigen Tasten findet nichts und produziert nur Rauschen im
-## Bericht.
+## Deliberately **not** a random key storm: the actions come from the open game's
+## InputMap, so they are the inputs that actually do something there. A storm of
+## arbitrary keys finds nothing and only adds noise to the report.
 func _soak(seconds: float, seed_value: int, args: Dictionary) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value if seed_value != 0 else int(Time.get_ticks_msec())
@@ -269,7 +257,7 @@ func _soak(seconds: float, seed_value: int, args: Dictionary) -> void:
 	await _event("soak", {"performed": performed, "seconds": seconds})
 
 
-## Die Aktionen, die im Spiel etwas bewirken — der Kern des InputMap.
+## The actions that do something in-game — the core of the InputMap.
 func _default_actions() -> Array:
 	var out: Array = ["ui_accept", "ui_left", "ui_right", "ui_down", "dash", "fire"]
 	return out
@@ -282,8 +270,8 @@ func _screenshot() -> void:
 		return
 	var out := "user://devfarm-shot.png"
 	image.save_png(out)
-	# Die Datei liegt im Datenverzeichnis der App, das über adb erreichbar ist
-	# (`/data/data/<paket>/files`). Die Farm zieht sie und löscht sie danach.
+	# The file lands in the app's data directory, reachable through adb
+	# (`/data/data/<package>/files`); the farm pulls it and deletes it after.
 	var absolute := ProjectSettings.globalize_path(out)
 	await _event("shot", {"path": absolute, "size": [image.get_width(), image.get_height()]})
 

@@ -1,29 +1,23 @@
 class_name AppLegal
 extends RefCounted
-## Rechts- und Meldewege der App an einer Stelle.
-##
-## Google Play verlangt für die Vorschlagsfunktion zwei Dinge, die früher
-## nirgends standen: die Spieler müssen die Nutzungsbedingungen **akzeptieren,
-## bevor** sie etwas abschicken, und sie müssen **beanstandeten Inhalt melden
-## können**, ohne das Spiel zu verlassen. Beides hängt an denselben Adressen —
-## deshalb liegen sie hier, statt in zwei Bildschirmen verteilt zu sein.
-##
-## Reine Logik, ohne Renderer, damit die Suite sie ohne Fenster prüfen kann.
+## The app's legal and reporting addresses in one place.
+## Google Play demands two things of the suggestion feature: the player must
+## **accept the terms before** sending anything, and must be able to **report
+## objectionable content** without leaving the game. Both hang on the same
+## addresses, which is why they live here and not in two screens.
+## Pure logic, no renderer, so the suite can check it without a window.
 
-## Öffentliche Seiten. `googleplay/config/app.json` → `urls`.
+## Public pages. `googleplay/config/app.json` -> `urls`.
 const TERMS_URL := "https://example.invalid/terms"
 const PRIVACY_URL := "https://example.invalid/privacy"
-## Postfach, in das Meldungen gehen.
+## Mailbox the reports go to.
 const MODERATION_MAIL := "moderation@example.invalid"
 
-## Die Gründe aus §4 der Nutzungsbedingungen, in derselben Reihenfolge. Der
-## Spieler wählt einen, damit die Meldung sofort eingeordnet werden kann und
-## nicht nur „finde ich nicht gut".
-##
-## Diese Liste ist **deutsch und bleibt es**: sie geht unverändert in die
-## Meldung an die Moderation, und die ist ein internes Dokument, kein Spieltext.
-## Übersetzt wird nur, was der Spieler im Menü liest — dafür sind die
-## Schlüssel in `REASON_LOC_KEYS` da.
+## The reasons from §4 of the terms, in the same order. The player picks one, so
+## the report is classified on arrival and is not just "I don't like it".
+## This list is **German and stays that way**: it goes into the report to the
+## moderation address unchanged, and that is an internal document, not game text.
+## Only what the player reads in the menu is translated — hence `REASON_LOC_KEYS`.
 const REASONS: Array[String] = [
 	"Beleidigung oder Hassrede",
 	"Personenbezogene Daten Dritter",
@@ -47,7 +41,7 @@ const REASON_LOC_KEYS: Array[String] = [
 	"legal.reason.other",
 ]
 
-## Kürzt für Anzeige und Mail, ohne den Sinnezusammenhang zu zerreißen.
+## Shortens for display and mail without tearing the meaning apart.
 const MAX_QUOTE := 240
 
 
@@ -71,14 +65,14 @@ static func moderation_mail() -> String:
 	return MODERATION_MAIL
 
 
-## Noch nicht ausgefüllt? Dann darf der Vorschlagsdialog den Absenden-Button
-## nicht freigeben — lieber ein ehrlicher Hinweis als eine erfundene Adresse.
+## Not filled in yet? Then the suggestion dialog must not enable its send button
+## — an honest notice beats an invented address.
 static func is_configured() -> bool:
 	return not TERMS_URL.contains("example.invalid") and not MODERATION_MAIL.contains("example.invalid")
 
 
-## Die im Konfigurationsfeld fehlenden Adressen, für die Fehlermeldung und
-## die Endprüfung im Play-Projekt.
+## The addresses still missing from the config, for the error message and the
+## final check in the Play project.
 static func missing() -> PackedStringArray:
 	var out := PackedStringArray()
 	if TERMS_URL.contains("example.invalid"):
@@ -97,11 +91,11 @@ static func quote(text: String) -> String:
 	return flat.substr(0, MAX_QUOTE) + "…"
 
 
-## Betreffzeile der Meldung. Die ID steht vorn, damit sich Meldungen im Postfach
-## sortieren lassen, ohne den Text zu lesen.
+## Subject line of the report. The id comes first so reports sort in the mailbox
+## without anyone reading the body.
 ##
-## Deliberately German and with no catalogue: this text goes to a human being in
-## a mailbox, not to the interface. Translating it would create a second language
+## Deliberately German and with no catalogue: this text goes to a human being in a
+## mailbox, not to the interface. Translating it would create a second language
 ## somebody has to maintain without a single player ever seeing it.
 static func report_subject(id: int) -> String:
 	return "Melde: Vorschlag #%d aus Singular 80" % id
@@ -122,8 +116,8 @@ static func report_body(id: int, text: String, reason: String, note: String) -> 
 	return "\n".join(parts)
 
 
-## `mailto:`-URL. Auf Android öffnet das nicht immer einen Composer — der Dialog
-## bietet deshalb zusätzlich die Zwischenablage an.
+## `mailto:` URL. On Android that does not always open a composer, which is why
+## the dialog also offers the clipboard.
 static func report_mailto(id: int, text: String, reason: String, note: String) -> String:
 	return "mailto:%s?subject=%s&body=%s" % [
 		MODERATION_MAIL.uri_encode(),
@@ -132,7 +126,7 @@ static func report_mailto(id: int, text: String, reason: String, note: String) -
 	]
 
 
-## Der Text, der in die Zwischenablage wandert — identisch mit dem Mail-Body,
-## damit ein Meldende, das keine Mail-App hat, nichts tippen muss.
+## The text that goes to the clipboard — identical to the mail body, so a
+## reporter without a mail app has nothing to type.
 static func report_message(id: int, text: String, reason: String, note: String) -> String:
 	return report_body(id, text, reason, note)

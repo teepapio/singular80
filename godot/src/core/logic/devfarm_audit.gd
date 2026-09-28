@@ -1,45 +1,31 @@
 class_name DevFarmAudit
 extends RefCounted
-## Prüft, ob ein Knopf wirklich erreichbar ist — und ob er etwas tut.
-##
-## Zwei Fehler, die ein headless Test und ein Screenshot beide übersehen:
-##
-## 1. **Zugedeckt.** Ein Control mit `MOUSE_FILTER_STOP` oder `PASS`, das
-##    später im Baum hängt und über dem Knopf liegt, schluckt jeden Tipp. Der
-##    Knopf ist sichtbar, richtig positioniert und tot.
-## 2. **Nicht verdrahtet.** `Ui.button()` verbindet nur
-##    `if on_press.is_valid()`. Fehlt der Callback, ist der Knopf ebenfalls tot
-##    — und `pressed` feuert nie, egal was man antippt.
-##
-## Die Prüfung geht den Weg, den auch der Finger geht.
-##
-## Zwei Dinge haben hier eine Weile gedauert und sind deshalb festgehalten:
-##
-## - **Eingaben kommen über `Viewport.push_input`, nicht über
-##   `Input.parse_input_event`.** Letzteres landet nicht im GUI des Viewports;
-##   ein damit geschickter Klick bewegt gar nichts. Die Farm benutzt
-##   `push_input`.
-## - **Ein reines `InputEventScreenTouch` löst bei einem `Button` nichts aus.**
-##   Controls verstehen keine rohen Touch-Events; erst die Maus-Emulation aus
-##   `project.godot` macht daraus einen Klick, und die passiert in der
-##   Plattformschicht, nicht beim Einspeisen. Der Audit schickt deshalb
-##   **beides** — genau so, wie es auf dem Gerät ankommt.
-##
-## Für die Deckung wird **Godots eigener Treffertest** benutzt
-## (`gui_get_hovered_control` nach einer Mausbewegung). Eine selbst
-## nachgebaute Trefferlogik driftet irgendwann von der des Engines weg und
-## meldet dann genau das Gegenteil der Wahrheit.
+## Whether a button is really reachable, and really does something.
+## Catches the two failures a headless test and a screenshot both miss:
+## **covered** (a later sibling Control with MOUSE_FILTER_STOP swallows every
+## tap) and **not wired** (`Ui.button()` only connects `if on_press.is_valid()`,
+## so a missing callback leaves `pressed` silent).
+## Two things that cost time to find, so they are written down:
+##  - Input goes through `Viewport.push_input`, never `Input.parse_input_event`,
+##    which never reaches the viewport GUI and moves nothing.
+##  - A bare `InputEventScreenTouch` triggers nothing on a `Button`; only the
+##    mouse emulation from `project.godot` turns it into a click, and that runs
+##    in the platform layer, not at push time. Hence the audit sends **both**,
+##    the way a device delivers them.
+## Coverage uses Godot's own hit test (`gui_get_hovered_control` after a mouse
+## move); a hand-rolled one eventually drifts and reports the opposite of truth.
 
-## Wie lange nach dem Bauen gewartet wird, bevor die Rects stimmen.
+## Frames to wait after building before the rects are settled.
 const SETTLE_FRAMES := 3
 
 
-## Ein Fund. `kind` ist maschinenlesbar, `message` auf Deutsch.
+## One finding. `kind` is machine-readable, `message` is German (the player
+## reads it in the farm report).
 static func finding(kind: String, severity: String, where: String, message: String) -> Dictionary:
 	return {"kind": kind, "severity": severity, "where": where, "message": message}
 
 
-## Sucht alle bedienbaren Controls unterhalb von `root`.
+## All operable controls below `root`.
 static func interactive_controls(root: Node) -> Array[Control]:
 	var out: Array[Control] = []
 	var stack: Array[Node] = [root]
@@ -54,10 +40,8 @@ static func interactive_controls(root: Node) -> Array[Control]:
 	return out
 
 
-## Prüft einen Bildschirm und liefert die Funde.
-##
-## Wartet selbst, bis die Layout-Werte stimmen — deshalb ist sie eine
-## Coroutine und muss mit `await` aufgerufen werden.
+## Audits a screen and returns the findings. Waits itself until the layout
+## values are settled, which is why it is a coroutine and needs `await`.
 static func audit_screen(screen: Control, tree: SceneTree) -> Array[Dictionary]:
 	var findings: Array[Dictionary] = []
 	if screen == null or not is_instance_valid(screen):
@@ -101,11 +85,9 @@ static func audit_screen(screen: Control, tree: SceneTree) -> Array[Dictionary]:
 	return findings
 
 
-## Welches Control läge an diesem Punkt obenauf?
-##
-## Godot beantwortet das selbst: eine Mausbewegung auf den Punkt, dann
-## `gui_get_hovered_control()`. Das ist dieselbe Logik, nach der auch ein
-## Klick im Spiel entscheidet — nachzubauen wäre eine zweite Wahrheit.
+## Which control would be on top at this point? Godot answers that itself: move
+## the mouse there and ask `gui_get_hovered_control()`. Same logic a real click
+## uses — rebuilding it here would be a second truth.
 static func _control_at_point(viewport: Viewport, point: Vector2) -> Control:
 	var motion := InputEventMouseMotion.new()
 	motion.position = point
@@ -115,11 +97,9 @@ static func _control_at_point(viewport: Viewport, point: Vector2) -> Control:
 	return viewport.gui_get_hovered_control() as Control
 
 
-## Schickt Tipp und Klick auf `point` und meldet, ob `pressed` kam.
-##
-## Beides, weil es ein Gerät auch tut: erst der Touch, und daraus — über
-## `pointing/emulate_mouse_from_touch` — der Klick, auf den ein `Button`
-## überhaupt hört.
+## Sends tap and click at `point`, reports whether `pressed` arrived. Both,
+## because a device does both: the touch first and, through
+## `pointing/emulate_mouse_from_touch`, the click a `Button` listens to.
 static func _fires(viewport: Viewport, control: BaseButton, point: Vector2) -> bool:
 	var fired := [false]
 	var on_pressed := func() -> void: fired[0] = true
@@ -158,15 +138,15 @@ static func _mouse(point: Vector2, pressed: bool) -> InputEventMouseButton:
 	return event
 
 
-## Liegt der Knopf wenigstens teilweise im Fenster?
+## Is the button at least partly inside the window?
 static func _off_window(rect: Rect2, viewport: Viewport) -> bool:
 	var window := Rect2(Vector2.ZERO, viewport.get_visible_rect().size)
 	return not window.intersects(rect)
 
 
-## Zwei Controls hängen zusammen, wenn das eine Vorfahr des anderen ist: eine
-## Beschriftung *über* ihrem Knopf ist kein Problem, eine Karte *darunter* auch
-## nicht — nur ein Control, das weder Vorfahr noch Nachfahr ist, verdeckt.
+## Two controls are related when one is an ancestor of the other: a label *over*
+## its button is no problem, nor is a card *under* it — only a control that is
+## neither ancestor nor descendant covers the button.
 static func _related(a: Control, b: Control) -> bool:
 	var current: Node = a
 	while current != null:

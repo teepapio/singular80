@@ -57,9 +57,9 @@ var _hands := 0
 
 
 func _ready_game() -> void:
-	# No `styles` in the options: the engine assigns seat 1 the rock, seat 2
-	# the wild one and seat 3 the bluffer by itself. Fixed order, so after a few
-	# hands one knows who plays how.
+	# No `styles` in the options: the engine assigns seat 1 the rock, seat 2 the
+	# wild one and seat 3 the bluffer by itself. The order is fixed, so a player
+	# learns who plays how.
 	table = Holdem.HoldemGame.new({
 		"playerCount": PLAYER_COUNT,
 		"startingChips": STARTING_CHIPS,
@@ -131,8 +131,7 @@ func _build_ui() -> void:
 	_raise_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(_raise_label)
 
-	# Legend of the three types. It vanishes once the type sits at the table
-	# and its name says enough.
+	# The legend fades once every seat shows its type, where the name is enough.
 	_legend_label = Ui.label(Holdem.legend(), 14, Color("94a3b8"))
 	_legend_label.position = LEGEND_POS
 	_legend_label.size = LEGEND_SIZE
@@ -204,8 +203,8 @@ func _act(action: Dictionary) -> void:
 	_refresh()
 
 
-## Drives the computer seats until it is the human's turn again (or the hand
-## ends). Each decision is spaced out so the action stays readable.
+## Drives the computer seats until the human's turn again (or the hand ends).
+## Each decision is spaced out so the action stays readable.
 func _run_ai_turns() -> void:
 	busy = true
 	while not table.hand_over and table.active_index != 0:
@@ -258,9 +257,9 @@ func _refresh() -> void:
 		var player: Holdem.Player = table.players[i]
 		var read: Dictionary = table.style_read(i)
 		var style_name := str(read["label"])
-		# The type goes with the name, not the status field: the status is what is
-		# happening right now, the type is what holds for good. The type's color
-		# makes the table readable at a glance.
+		# The type goes with the name, not the status field: status is what happens
+		# now, the type is what holds for good. Its colour makes the table readable
+		# at a glance.
 		var name_label := _name_labels[i] as Label
 		name_label.text = "%s  %s%s" % [
 			player.name,

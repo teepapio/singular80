@@ -2,14 +2,9 @@ class_name Screen
 extends Control
 ## Base class of every 2D subgame.
 ##
-## Provides the persistent top bar (back to lobby, suggestion form, sound
-## toggle) and two layout helpers:
-##  - `content_layer()` fills the whole window — used by menu-style screens
-##  - `stage()` is the fixed 1280x720 design area, centred — used by the games
-##    whose playfield must keep its exact proportions on every device
-##
-## The stretched canvas plus anchor presets make every screen adapt to phone
-## and tablet aspect ratios without extra work.
+## Provides the persistent top bar plus two layout helpers: `content_layer()`
+## fills the window (menus), `stage()` is the centred 1280x720 playfield.
+## Subclasses build their interface in `_ready_game()`, never in `_ready`.
 
 const BAR_HEIGHT := 52
 const DESIGN := Vector2(1280, 720)
@@ -98,10 +93,8 @@ func _build_top_bar() -> Control:
 	bar.add_child(Ui.button(Loc.t("ui.suggestion"), Vector2(150, 40), UiTheme.PANEL_LIGHT, func() -> void:
 		SuggestDialog.open(self)
 	))
-	# The language has to be reachable from *every* screen, not just the lobby:
-	# someone playing Tetris who taps "English" should not have to go back to the
-	# menu first. This gear is the same dialog the lobby opens, and `⚙` is in
-	# DejaVu Sans — an emoji would render as an empty box.
+	# Language is reachable from every screen, so nobody has to walk back to a
+	# menu for it. `⚙` is in DejaVu Sans — an emoji would render as an empty box.
 	bar.add_child(Ui.button(Loc.t("ui.settings_short"), Vector2(60, 40), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		SettingsDialog.open(self)
@@ -131,9 +124,8 @@ func stage() -> Control:
 
 ## Shows a transient message in the middle of the screen.
 ##
-## The text goes through `Loc.resolve` like every other caption: a toast is the one
-## place where a sentence appears without a `Ui.*` call in sight, and an
-## untranslated one would be the most conspicuous text in the game.
+## Text goes through `Loc.resolve` like every other caption: a toast is the one
+## place where a sentence appears without a `Ui.*` call in sight.
 func show_toast(text: String, seconds: float = 2.2) -> void:
 	if _toast == null:
 		return

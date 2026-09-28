@@ -1,9 +1,6 @@
 extends Screen
-## Arena main menu: start weapon, difficulty mode, backend address and the
-## implemented-suggestion ticker. Port of `scenes/MainMenuScene.ts`.
-##
-## The layout is a centred container column so it adapts from a phone in
-## landscape to a desktop window.
+## Arena main menu: start weapon, difficulty mode, backend address, ticker for
+## implemented suggestions. Port of `scenes/MainMenuScene.ts`.
 
 const WEAPON_WIDTH := 176.0
 const WEAPON_HEIGHT := 68.0
@@ -108,9 +105,9 @@ func _build_content() -> void:
 	))
 	_server_button = Ui.button(_server_label(), Vector2(230, 50), UiTheme.PANEL_LIGHT, _toggle_server)
 	actions.add_child(_server_button)
-	# The language is spelled out here rather than hiding behind the gear in the
-	# header: this is the screen a new player sees first, and a language they
-	# cannot find is a language they never get.
+	# The language sits here instead of behind the gear in the header: this is the
+	# first screen a new player sees, and a language they cannot find is one they
+	# never change.
 	actions.add_child(Ui.button(Loc.t("ui.language_button"), Vector2(190, 50), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		SettingsDialog.open(self)
@@ -123,12 +120,10 @@ func _build_content() -> void:
 	help.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(help)
 
-	# Die Laufzeile zeigt den gerade umgesetzten Vorschlag — und genau dort
-	# steht der Meldeknopf. Google Play verlangt für nutzergenerierten Inhalt
-	# einen Meldeweg *im Spiel*; ein Vorschlag ist für den Spieler nur hier
-	# sichtbar, also kann er auch nur hier melden. Der Knopf liest den
-	# aktuellen Ticker-Stand im Moment des Klicks, nicht beim Aufbau, weil die
-	# Laufzeile alle 4,5 Sekunden weiterschaltet.
+	# The ticker shows the implemented suggestion that Google Play requires a
+	# reporting path for, and a suggestion is visible to the player only here, so
+	# the report button has to be here too. It reads the ticker at click time, not
+	# at build time: the ticker advances every 4.5 s.
 	var ticker_row := Ui.hbox(8)
 	ticker_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	_ticker = Ui.label("", 13, Color(0.290, 0.871, 0.502))
@@ -167,8 +162,7 @@ func _weapon_row() -> Control:
 	return row
 
 
-## One start-weapon card. A PanelContainer keeps the two labels sized correctly
-## no matter how long the description is.
+## PanelContainer, so both labels stay sized correctly however long the text is.
 func _weapon_card(weapon: Dictionary) -> Control:
 	var id := str(weapon["id"])
 	var card := PanelContainer.new()
@@ -256,8 +250,8 @@ func _server_label() -> String:
 
 func _toggle_server() -> void:
 	ServerDialog.open(self)
-	# Der Dialog schließt sich vor dem nächsten Frame; der Knopf bekommt seinen
-	# Text danach über `_refresh_server_button`, sonst stünde hier noch der alte.
+	# The dialog closes before the next frame, so the label is refreshed after it
+	# instead of here, where it would still show the old address.
 	_refresh_server_button.call_deferred()
 
 
@@ -298,12 +292,11 @@ func _show_ticker() -> void:
 			detail = summary
 	if detail.length() > 90:
 		detail = detail.substr(0, 90) + "…"
-	_ticker.text = Loc.f("ui.ticker_item", [int(item.get("id", 0)), detail])
+	_ticker.text = Loc.t("ui.ticker_item", {"id": str(int(item.get("id", 0))), "detail": detail})
 
 
-## Meldet den Vorschlag, den die Laufzeile gerade zeigt. Ohne Laufzeile gibt es
-## nichts zu melden — dann sagt der Knopf das auch, statt ein leeres Fenster
-## zu öffnen.
+## Reports whatever the ticker shows right now. With no ticker there is nothing to
+## report, and the button says so rather than opening an empty dialog.
 func _report_current() -> void:
 	Sfx.select()
 	if _ticker_items.is_empty():

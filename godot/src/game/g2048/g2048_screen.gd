@@ -1,13 +1,12 @@
 class_name Game2048Screen
 extends Screen
 ## 2048 — sliding tile puzzle with a one-move preview, undo, keyboard, gamepad
-## and swipe input.
-## Port of `scenes/Game2048Scene.ts`.
+## and swipe input. Port of `scenes/Game2048Scene.ts`.
 ##
-## The tile that follows the next move is already on the board, drawn with a
-## dashed frame. It rides along with the slide like any other tile and becomes
-## permanent with that move, so the player plans one step ahead instead of
-## reacting to a spawn. Rules and the ghost live in `Twenty48`.
+## The tile the next move spawns is already on the board as a dashed ghost, so
+## the player plans one step ahead instead of reacting to a spawn. It rides
+## along with the slide and becomes permanent with that move. Rules and ghost
+## live in `Twenty48`.
 
 const TILE := 118.0
 const GAP := 14.0
@@ -17,7 +16,7 @@ const BOARD_X := 150.0
 const BOARD_Y := 108.0
 const MOVE_TIME := 0.11
 const SWIPE_MIN := 28.0
-## Centre of the ghost tile in the score panel, mirroring the one on the board.
+## Centre of the ghost tile in the score panel, mirroring the board's.
 const NEXT_CENTER := Vector2(975, 396)
 const NEXT_SIZE := 68.0
 
@@ -40,8 +39,7 @@ var board: Array = []
 var score := 0
 var highscore := 0
 var best := 2
-## The tile the next move adds, already visible on the board. Empty when the
-## board is too full to promise one.
+## The tile the next move adds. Empty when the board is too full for one.
 var pending: Dictionary = {}
 var history: Dictionary = {}
 var won := false
@@ -101,15 +99,15 @@ func _build_ui() -> void:
 	next_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(next_note)
 
-	# Its own control, because the board view is painted *under* the panel — the
-	# preview has to be a sibling that comes after it.
+	# Its own control, because the board view paints *under* the panel — the
+	# preview must be a later sibling.
 	_next_view = NextView.new()
 	_next_view.screen = self
 	_next_view.position = NEXT_CENTER - Vector2(NEXT_SIZE, NEXT_SIZE) * 0.5
 	_next_view.size = Vector2(NEXT_SIZE, NEXT_SIZE)
 	layer.add_child(_next_view)
 
-	# Controls live under the board, where the panel used to waste the width.
+	# Controls under the board, where the panel was wasting the width.
 	var controls := Ui.label("← ↑ → ↓  ·  W A S D  ·  Wischen   verschieben\nU / Z   rückgängig        R   neu starten        ESC   Pause", 13, Color("94a3b8"))
 	controls.position = Vector2(146, 658)
 	controls.size = Vector2(560, 46)
@@ -175,8 +173,8 @@ func _process(delta: float) -> void:
 		_move(Twenty48.UP)
 	elif Input.is_action_just_pressed("move_down"):
 		_move(Twenty48.DOWN)
-	# Not only after a move: the ghost can be the tile that blocks the last one,
-	# so a player can reach a dead board without ever completing a move.
+	# Also after a rejected move: the ghost can be the tile that blocks the last
+	# one, so a dead board is reachable without ever completing a move.
 	_check_end()
 	_refresh()
 
@@ -199,13 +197,13 @@ func _move(dir: String) -> void:
 	_refresh()
 
 
-## Win and loss are decided about the board the player is *looking at* — the
-## tiles plus the ghost — because that is the position they have to move in.
+## Win and loss are decided on the board the player is looking at — tiles plus
+## ghost — because that is the position they have to move in.
 func _check_end() -> void:
 	if _modal_open():
 		return
-	# `won` only silences the win dialog, not the loss one: after "keep playing"
-	# the run has to be able to end.
+	# `won` silences only the win dialog: after "keep playing" the run must still
+	# be able to end.
 	if not won and Twenty48.has_value(board, Twenty48.WIN_VALUE):
 		_on_win()
 		return
@@ -320,9 +318,8 @@ func _swipe(delta: Vector2) -> void:
 		_move(Twenty48.DOWN if delta.y > 0.0 else Twenty48.UP)
 
 
-## Dashed frame with a translucent fill and a value the player can read at a
-## glance — it is the number they have to plan around. Shared by the ghost on the
-## board and its twin in the score panel.
+## Dashed frame, translucent fill, readable value — it is the number the player
+## has to plan around. Shared by the board ghost and its twin in the score panel.
 static func ghost_tile(view: CanvasItem, rect: Rect2, value: int) -> void:
 	var style: Dictionary = STYLES.get(value, SUPER) if STYLES.has(value) else SUPER
 	view.draw_rect(rect, Color(style["bg"], 0.8))
@@ -330,8 +327,8 @@ static func ghost_tile(view: CanvasItem, rect: Rect2, value: int) -> void:
 	centred_text(view, rect, str(value), 40, style["fg"])
 
 
-## Frame as dashes. A ghost must be unmistakable at a glance — a player who
-## merges the wrong tile loses a turn.
+## Frame as dashes: a ghost must be unmistakable, merging the wrong tile costs
+## the player a turn.
 static func dashed(view: CanvasItem, rect: Rect2, color: Color, width: float, dash: float) -> void:
 	var x := rect.position.x
 	var y := rect.position.y
@@ -420,8 +417,8 @@ class BoardView:
 				HORIZONTAL_ALIGNMENT_LEFT, -1, size, style["fg"])
 
 
-## The ghost tile next to the score, so its size is readable while the eye is on
-## the numbers. Its own control, because it has to be painted over the panel.
+## The ghost next to the score, so its size reads while the eye is on the
+## numbers. Its own control, painted over the panel.
 class NextView:
 	extends Control
 	var screen: Game2048Screen

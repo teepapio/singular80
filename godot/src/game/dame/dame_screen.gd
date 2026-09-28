@@ -13,9 +13,9 @@ const AI_DELAY := 0.26
 var board: PackedInt32Array = Checkers.create_initial_board()
 var side := Checkers.WHITE
 var selected := -1
-## The squares a selection may land on, and the turn each of them stands for.
-## Both are kept side by side: the target is only the end of a capture chain,
-## the turn is what actually gets played.
+## The squares a selection may land on, and the turn each stands for. Both are
+## kept: a target is only the end of a capture chain, the turn is what is
+## actually played.
 var legal_targets: Array = []
 var legal_turns: Array = []
 var forced_from := -1
@@ -28,11 +28,11 @@ var game_over := false
 var wins := 0
 var ai_timer := 0.0
 var show_legal := true
-## Capture marks for the hint side, recomputed once per position: one
-## `{"from", "captures"}` per capturing stone for the red board badges.
+## Capture marks for the hint side, one `{"from", "captures"}` per capturing
+## stone, recomputed once per position for the red board badges.
 var capture_marks: Array = []
-## The chain the hint currently shows, and the squares it marks as movable
-## when nothing can be captured.
+## The chain the hint shows, and the squares it marks as movable when nothing
+## can be captured.
 var hint_steps: Array = []
 var hint_moves: Array = []
 var _status := ""
@@ -184,9 +184,9 @@ func _refresh() -> void:
 
 
 # --- Making captures visible -----------------------------------------------
-# The player should never have to guess whether a capture is due. Every stone
-# that can capture wears its count on the board, and the hint lays out the
-# strongest capture with its path.
+# The player never has to guess whether a capture is due: every stone that can
+# capture wears its count, and the hint lays out the strongest chain with its
+# path, so the marked move can be tapped right away.
 
 ## The side marks and hints belong to: whoever is to move in two-player mode,
 ## always the human in single-player.
@@ -215,9 +215,8 @@ func _clear_hint() -> void:
 	_status = ""
 
 
-## The hint picks the strongest capture and draws its path; if nothing can be
-## captured, it marks the stones that may move. Either way the player can tap
-## the marked move at once.
+## Picks the strongest capture and draws its path, or marks the movable stones
+## when nothing can be captured.
 func show_hint() -> void:
 	if game_over:
 		return
@@ -298,7 +297,7 @@ func _handle_click(square: int) -> void:
 			_play_turn(legal_turns[match_index], false)
 			return
 
-	# Otherwise treat the click as a new selection — the old hint is void now.
+	# Otherwise a new selection — the old hint is void now.
 	_clear_hint()
 	if Checkers.side_of(board[square]) != side:
 		_clear_selection()
@@ -326,8 +325,8 @@ func _handle_click(square: int) -> void:
 	legal_turns = []
 	for turn in chain:
 		var steps: Array = turn["steps"]
-		# The target is where the chain ends; the turn itself stays intact, so a
-		# two-jump chain is played in full instead of only its last jump.
+		# The target is where the chain ends; the whole turn is kept, so a
+		# two-jump chain plays in full instead of only its last jump.
 		legal_targets.append(steps[steps.size() - 1])
 		legal_turns.append(turn)
 	Sfx.select()
@@ -342,8 +341,8 @@ func _play_turn(turn: Dictionary, by_ai: bool) -> void:
 	board = Checkers.apply_turn(board, turn)
 	_clear_selection()
 	_clear_hint()
-	# `generate_turns` always yields complete chains — the turn ends here.
-	# Leaving `forced_from` set would block the side that moves next.
+	# `generate_turns` yields complete chains — the turn ends here. Leaving
+	# `forced_from` set would block the side that moves next.
 	forced_from = -1
 	Sfx.hit()
 	if not _finish_turn(by_ai):

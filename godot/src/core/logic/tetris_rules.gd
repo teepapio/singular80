@@ -1,16 +1,12 @@
 class_name TetrisRules
 extends RefCounted
 ## Scoring, T-Spin detection, rotation (Super Rotation System) and board-threat
-## rules for Tetris.
-##
-## The screen owns the animation; everything that decides *whether a move was
-## skilful, what it is worth and where a piece may turn* lives here so it can be
-## unit tested without a viewport.
-##
+## rules for Tetris. The screen owns the animation; everything that decides
+## *whether a move was skilful, what it is worth and where a piece may turn*
+## lives here so it can be unit tested without a viewport.
 ## Reference: the modern Tetris Guideline scoring model (T-Spin via the
-## three-corner rule, Back-to-Back for difficult clears, combo for consecutive
-## line clears, Perfect Clear for a completely wiped well) and its Super
-## Rotation System (four rotation states, per-piece kick tables).
+## three-corner rule, Back-to-Back for difficult clears, combo, Perfect Clear)
+## and its Super Rotation System (four states, per-piece kick tables).
 
 ## `TetrisScreen.PIECES` index of the T piece.
 const T_PIECE_TYPE := 5
@@ -51,7 +47,8 @@ const CRITICAL_RATIO := 0.82
 
 
 ## True when a T-Spin counts as such: the last move was a rotation, the piece is
-## a T, and at least three of the four corners of the T's 3×3 box are occupied.
+## a T, and at least three of the four corners of the T's 3x3 box are occupied.
+## `corners` is a 2x2 array of booleans, laid out filled/empty, filled/empty.
 ## `corners` is a 2×2 array of booleans, laid out filled/empty, filled/empty.
 static func is_t_spin(piece_type: int, last_move_was_rotation: bool, corners: Array) -> bool:
 	if not last_move_was_rotation or piece_type != T_PIECE_TYPE:
@@ -78,7 +75,7 @@ static func is_t_spin_mini(corners: Array) -> bool:
 	return corner_count(corners) == 2
 
 
-## Corner occupancy of a T's 3×3 box, as a 2×2 array of booleans.
+## Corner occupancy of a T's 3x3 box, as a 2x2 array of booleans.
 ##
 ## `filled_at(x, y)` answers whether a board cell is occupied. Cells outside the
 ## well and above the ceiling count as occupied, which is what makes wall kicks
@@ -92,7 +89,7 @@ static func t_corners(x: int, y: int, filled_at: Callable) -> Array:
 
 ## Score a completed line clear.
 ##
-## `lines` 0–4, `level` the current level, `combo` the number of *previous*
+## `lines` 0-4, `level` the current level, `combo` the number of *previous*
 ## consecutive clears, `back_to_back` the current B2B chain length, `tspin` the
 ## spin kind ("none", "mini" or "full").
 ##
@@ -188,9 +185,9 @@ static func is_perfect_clear(board: Array) -> bool:
 ##
 ## `lines` is the size of the clear that emptied the well (at least one), `level`
 ## the current level and `back_to_back` the chain that came in. A Perfect Clear
-## always counts as a difficult clear, so it opens or extends that chain — a
-## Quad Perfect Clear directly after another difficult clear is worth the most
-## of anything in the game.
+## always counts as a difficult clear, so it opens or extends that chain — a Quad
+## Perfect Clear directly after another difficult clear is worth the most of
+## anything in the game.
 static func perfect_clear(lines: int, level: int, back_to_back: int) -> Dictionary:
 	var count: int = clampi(lines, 1, 4)
 	var b2b_quad := count == 4 and back_to_back > 0
@@ -274,15 +271,15 @@ static func preview_count(value: int) -> int:
 # --- Rotation: the Super Rotation System -------------------------------------
 #
 # A piece has four states, 0 (the one it spawns in), R, 2 and L, and a turn is
-# never just "rotate and hope": the guideline shifts the piece by a table of
-# five offsets and takes the first one that fits. Those offsets are the whole
-# reason a T-Spin is possible at all — a T that rotates flush into a wall has to
-# be *lifted* out of it, and only the table knows by how much. Without them the
-# T-Spin scoring, the Back-to-Back chain and the spin preview in the HUD are
+# never just "rotate and hope": the guideline shifts the piece through a table of
+# five offsets and takes the first that fits. Those offsets are the reason a
+# T-Spin is possible at all — a T that rotates flush into a wall has to be
+# *lifted* out of it, and only the table knows by how much. Without them the
+# T-Spin scoring, the Back-to-Back chain and the HUD spin preview are
 # unreachable code.
 #
-# The tables are published with y pointing **up**; the board counts its rows
-# down, so `kicks()` flips the sign on the way out.
+# The tables are published with y pointing **up**; the board counts its rows down,
+# so `kicks()` flips the sign on the way out.
 
 ## The four rotation states, in turn order. Every piece spawns in 0.
 const STATE_0 := 0
@@ -347,7 +344,7 @@ static func cell_count(matrix: Array) -> int:
 	return count
 
 
-## The state a turn out of `state` leads to: 0 → R → 2 → L → 0 clockwise, and
+## The state a turn out of `state` leads to: 0 -> R -> 2 -> L -> 0 clockwise, and
 ## back the other way anticlockwise.
 static func next_state(state: int, clockwise: bool) -> int:
 	return posmod(state + (1 if clockwise else 3), 4)

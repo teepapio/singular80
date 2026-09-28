@@ -1,10 +1,9 @@
 class_name ArenaRuns
 extends RefCounted
 ## Wave forecasting, boss telegraphs, kill chains and the dash for the Arena.
-##
 ## Everything here is a pure function of elapsed time, the content pack and the
 ## kill feed, so the HUD can *anticipate* instead of only reacting. The single
-## exception is `dash_press()`, which is the one place a finger turns into
+## exception is `dash_press()`, the one place a finger turns into input.
 ## input.
 
 const WAVE_DURATION := 30.0
@@ -59,8 +58,8 @@ static func eligible(defs: Array, wave: int) -> Array[Dictionary]:
 ## The `count` most likely enemies of the next wave, ordered by weight.
 ##
 ## Shuffle-bag drafting is what the spawner effectively does, so previewing the
-## heaviest entries communicates the wave's character without pretending to
-## know the exact order.
+## heaviest entries communicates the wave's character without pretending to know
+## the exact order.
 static func wave_preview(defs: Array, wave: int, count: int = PREVIEW_COUNT) -> Array[Dictionary]:
 	var pool := eligible(defs, wave)
 	pool.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
@@ -76,8 +75,8 @@ static func wave_preview(defs: Array, wave: int, count: int = PREVIEW_COUNT) -> 
 
 ## The boss that a wave would spawn, or an empty dictionary.
 ##
-## When several are unlocked the most recently added one wins, because that is
-## the fight the player is actually building up to.
+## When several are unlocked the most recently added one wins, because that is the
+## fight the player is actually building up to.
 static func boss_preview(defs: Array, wave: int) -> Dictionary:
 	var best: Dictionary = {}
 	var best_unlock := -1
@@ -109,7 +108,8 @@ static func boss_threat(countdown: float) -> int:
 ## Feed a kill into the chain state.
 ##
 ## `state` is `{"chain": int, "last_kill": float}`. Returns the new state plus
-## the awarded bonus XP and whether the chain just grew past a milestone (used
+## the awarded bonus XP and whether the chain just grew past a milestone (used for
+## the HUD flash).
 ## for the HUD flash).
 static func register_kill(state: Dictionary, now: float, base_xp: int) -> Dictionary:
 	var chain: int = int(state.get("chain", 0))
@@ -124,8 +124,8 @@ static func register_kill(state: Dictionary, now: float, base_xp: int) -> Dictio
 	}
 
 
-## Drops the chain once the window has expired, so a dead streak disappears
-## from the HUD instead of lingering.
+## Drops the chain once the window has expired, so a dead streak disappears from
+## the HUD instead of lingering.
 static func decay(state: Dictionary, now: float) -> Dictionary:
 	if int(state.get("chain", 0)) == 0:
 		return state
@@ -164,14 +164,14 @@ static func color_of(def: Dictionary) -> Color:
 ## How many offers one level-up presents.
 const DRAFT_SIZE := 3
 
-## Rarity weights of the draft. The arena screen used to keep its own copy of
-## this table; one table means the pool that is drawn and the pool that is
-## previewed can never drift apart.
+## Rarity weights of the draft. The arena screen used to keep its own copy of this
+## table; one table means the pool that is drawn and the pool that is previewed can
+## never drift apart.
 const RARITY_WEIGHT := {"common": 10.0, "uncommon": 6.0, "rare": 3.0, "epic": 1.5}
 
-## What each stat serves. The axis decides how much a relative gain counts: in
-## a survival run damage ends it long before tempo runs out, so an offensive
-## card is worth more than an equally large gain in comfort.
+## What each stat serves. The axis decides how much a relative gain counts: in a
+## survival run damage ends it long before tempo runs out, so an offensive card is
+## worth more than an equally large gain in comfort.
 ##
 ## The keys are the stat names of `PlayerStats`. The upgrade pack spells them
 ## `maxHp` and `xpMult`; `stat_key()` is what makes the two spellings one.
@@ -201,24 +201,24 @@ const AXIS_LABEL := {
 
 const AXIS_WEIGHT := {"angriff": 1.0, "zaehigkeit": 0.7, "ertrag": 0.6}
 
-## A flat armour reduction has no percentage to compare against, so the damage
-## of an average body hit stands in for one.
+## A flat armour reduction has no percentage to compare against, so the damage of
+## an average body hit stands in for one.
 const TOUCH_DAMAGE := 10.0
 
-## Regeneration pays over time rather than per hit; a minute is the horizon a
-## level decision is made in.
+## Regeneration pays over time rather than per hit; a minute is the horizon a level
+## decision is made in.
 const AMOUNT_PERIOD := 60.0
 
-## Not every bullet that pierces finds a second body behind the first, so a
-## pierce step is damped instead of counting as a whole extra shot.
+## Not every bullet that pierces finds a second body behind the first, so a pierce
+## step is damped instead of counting as a whole extra shot.
 const PIERCE_SHARE := 0.3
 
 ## A relative gain of this much fills the effect bar on the card completely.
 const EFFECT_FULL := 0.3
 
-## The fallback cards, used when the pool of upgrades runs out. Each heals a
-## growing share of what is missing, so even a fallback draft offers a choice
-## instead of three identical buttons.
+## The fallback cards, used when the pool of upgrades runs out. Each heals a growing
+## share of what is missing, so even a fallback draft offers a choice instead of
+## three identical buttons.
 const REPAIR_SHARE := [0.3, 0.5, 0.75]
 const REPAIR_NAME := ["Reparatur", "Notversorgung", "Feldlazarett"]
 const REPAIR_RARITY := ["common", "uncommon", "rare"]
@@ -227,9 +227,9 @@ const REPAIR_RARITY := ["common", "uncommon", "rare"]
 ## The stat name in the spelling `PlayerStats` uses.
 ##
 ## The upgrade pack writes `maxHp`, the stat block holds `max_hp`, and
-## `PlayerStats.apply_upgrade` silently drops everything it does not
-## recognise — which is most of the pack. Both spellings mean the same number,
-## so the draft reads either and hands the stat block the name it knows.
+## `PlayerStats.apply_upgrade` silently drops everything it does not recognise —
+## which is most of the pack. Both spellings mean the same number, so the draft
+## reads either and hands the stat block the name it knows.
 static func stat_key(upgrade: Dictionary) -> String:
 	return str(upgrade.get("stat", "")).to_snake_case()
 
@@ -241,8 +241,8 @@ static func applied_form(upgrade: Dictionary) -> Dictionary:
 	return out
 
 
-## The axis a stat serves; an unknown stat is treated as an offensive card,
-## because that is the axis the draft must never under-rank.
+## The axis a stat serves; an unknown stat is treated as an offensive card, because
+## that is the axis the draft must never under-rank.
 static func axis_of(upgrade: Dictionary) -> String:
 	return str(STAT_AXIS.get(stat_key(upgrade), "angriff"))
 
@@ -253,10 +253,10 @@ static func axis_label(upgrade: Dictionary) -> String:
 
 ## One offer per stat, in the order the pool lists them.
 ##
-## Two cards that raise the same number are not a decision, they are the same
-## card twice — so the draft keeps a single representative per stat. Of two
-## candidates for the same stat the one with fewer stacks wins, because that is
-## the one the player has taken least often.
+## Two cards that raise the same number are not a decision, they are the same card
+## twice — so the draft keeps a single representative per stat. Of two candidates
+## for the same stat the one with fewer stacks wins, because that is the one the
+## player has taken least often.
 static func one_per_stat(pool: Array, stacks: Dictionary = {}) -> Array[Dictionary]:
 	var chosen: Array[Dictionary] = []
 	var at_of: Dictionary = {}
@@ -267,8 +267,8 @@ static func one_per_stat(pool: Array, stacks: Dictionary = {}) -> Array[Dictiona
 			at_of[stat] = chosen.size()
 			chosen.append(entry)
 			continue
-		# Two cards for one stat: the one taken least often wins, because that
-		# is the one the draft has the least reason to repeat.
+		# Two cards for one stat: the one taken least often wins, because that is the
+		# one the draft has the least reason to repeat.
 		var at: int = int(at_of[stat])
 		if _stacks_of(entry, stacks) < _stacks_of(chosen[at], stacks):
 			chosen[at] = entry
@@ -279,12 +279,12 @@ static func _stacks_of(upgrade: Dictionary, stacks: Dictionary) -> int:
 	return int(stacks.get(str(upgrade.get("id", "")), 0))
 
 
-## Draws `count` offers out of `candidates`, weighted by rarity, removing what
-## it picked so no card can appear twice.
+## Draws `count` offers out of `candidates`, weighted by rarity, removing what it
+## picked so no card can appear twice.
 ##
-## The rolls are passed in rather than pulled from `randf()` here: a weighted
-## pick is the one thing a test cannot predict otherwise, and a screen that
-## wants randomness just fills the array with `randf()`.
+## The rolls are passed in rather than pulled from `randf()` here: a weighted pick
+## is the one thing a test cannot predict otherwise, and a screen that wants
+## randomness just fills the array with `randf()`.
 static func weighted_draft(candidates: Array, count: int, rolls: PackedFloat32Array) -> Array[Dictionary]:
 	var picks: Array[Dictionary] = []
 	var available: Array = candidates.duplicate()
@@ -309,9 +309,9 @@ static func weighted_draft(candidates: Array, count: int, rolls: PackedFloat32Ar
 	return picks
 
 
-## A heal card for slot `slot`, scaled to what the player is actually missing.
-## Three different amounts, because "you may pick one of three identical
-## buttons" is the one draft that is not a decision.
+## A heal card for slot `slot`, scaled to what the player is actually missing. Three
+## different amounts, because "you may pick one of three identical buttons" is the
+## one draft that is not a decision.
 static func repair_offer(stats: PlayerStats, slot: int) -> Dictionary:
 	var index: int = clampi(slot, 0, REPAIR_SHARE.size() - 1)
 	var missing: float = maxf(0.0, stats.max_hp - stats.hp)
@@ -330,9 +330,9 @@ static func repair_offer(stats: PlayerStats, slot: int) -> Dictionary:
 	}
 
 
-## How much a number grew, in its own unit. A stat that sits at zero has no
-## relative size, so it counts as one full step — the guard exists so a
-## degenerate stat cannot divide a whole draft by zero.
+## How much a number grew, in its own unit. A stat that sits at zero has no relative
+## size, so it counts as one full step — the guard exists so a degenerate stat
+## cannot divide a whole draft by zero.
 static func _rel(after: float, before: float) -> float:
 	if absf(before) < 0.0001:
 		return 1.0
@@ -344,14 +344,14 @@ static func hit_damage(armor: float) -> float:
 	return maxf(1.0, TOUCH_DAMAGE - armor)
 
 
-## The damage of an average shot with crits folded in — the one unit both crit
-## stats speak in, so a chance and a multiplier can be compared.
+## The damage of an average shot with crits folded in — the one unit both crit stats
+## speak in, so a chance and a multiplier can be compared.
 static func _crit_power(crit_chance: float, crit_mult: float) -> float:
 	return 1.0 + clampf(crit_chance, 0.0, 0.9) * maxf(0.0, crit_mult - 1.0)
 
 
-## The worth of one offer in the one unit the draft compares in: how much
-## bigger the number that matters becomes, damped by what the axis is worth.
+## The worth of one offer in the one unit the draft compares in: how much bigger the
+## number that matters becomes, damped by what the axis is worth.
 static func effect_value(upgrade: Dictionary, stats: PlayerStats) -> float:
 	var stat := stat_key(upgrade)
 	var amount := float(upgrade.get("amount", 0.0))
@@ -360,9 +360,8 @@ static func effect_value(upgrade: Dictionary, stats: PlayerStats) -> float:
 		"max_hp":
 			gain = _rel(stats.max_hp + amount, stats.max_hp)
 		"hp":
-			# A heal is worth what it repairs, and nothing where there is
-			# nothing left to repair — which is exactly the judgement the
-			# player has to make at a level-up.
+			# A heal is worth what it repairs, and nothing where there is nothing left to
+			# repair — which is exactly the judgement the player has to make at a level-up.
 			gain = (minf(stats.max_hp, stats.hp + amount) - stats.hp) / maxf(1.0, stats.max_hp)
 		"damage_mult":
 			gain = _rel(stats.damage_mult + amount, stats.damage_mult)
@@ -376,9 +375,9 @@ static func effect_value(upgrade: Dictionary, stats: PlayerStats) -> float:
 		"projectile_speed":
 			gain = _rel(stats.projectile_speed + amount, maxf(1.0, stats.projectile_speed))
 		"hp_regen":
-			# Regen is a per-second trickle and has no size of its own to be
-			# relative to, so a minute of it is measured against the health
-			# pool — the only thing it competes with.
+			# Regen is a per-second trickle and has no size of its own to be relative to,
+			# so a minute of it is measured against the health pool — the only thing it
+			# competes with.
 			gain = amount * AMOUNT_PERIOD / maxf(1.0, stats.max_hp)
 		"armor":
 			gain = 1.0 - hit_damage(stats.armor + amount) / hit_damage(stats.armor)
@@ -404,8 +403,8 @@ static func effect_ratio(value: float) -> float:
 	return clampf(value / EFFECT_FULL, 0.0, 1.0)
 
 
-## Index of the strongest offer, or -1 for an empty draft. Ties keep the first
-## card, so the marked card is always one the player can actually pick.
+## Index of the strongest offer, or -1 for an empty draft. Ties keep the first card,
+## so the marked card is always one the player can actually pick.
 static func best_offer_index(offers: Array, stats: PlayerStats) -> int:
 	var best := -1
 	var best_value := -1.0
@@ -431,9 +430,8 @@ static func draft_headline(offers: Array, stats: PlayerStats) -> String:
 	]
 
 
-## The two numbers the player compares, and the word that says what they
-## measure. This is the answer to "was passiert eigentlich" — "+15 % Schaden"
-## alone does not say whether that is 1.5 or 15 damage.
+## The two numbers the player compares, and the word that says what they measure.
+## Without it "+15 % Schaden" alone does not say whether that is 1.5 or 15 damage.
 static func effect_text(upgrade: Dictionary, stats: PlayerStats, weapon: Dictionary = {}) -> String:
 	var stat := stat_key(upgrade)
 	var amount := float(upgrade.get("amount", 0.0))
@@ -489,8 +487,8 @@ static func _i(value: float) -> int:
 # --- dash --------------------------------------------------------------------
 
 ## The input action a finger and a key share. The dash rule itself lives in
-## `mechanics/dash_mechanic.gd` and listens to exactly this action; the arena
-## only supplies the button and the feedback, so the rule stays in one place.
+## `mechanics/dash_mechanic.gd` and listens to exactly this action; the arena only
+## supplies the button and the feedback, so the rule stays in one place.
 const DASH_ACTION := "dash"
 
 ## How long the after-image of a dash lingers, in seconds.
@@ -500,8 +498,8 @@ const DASH_TRAIL_TIME := 0.36
 const DASH_TRAIL_STEPS := 3
 
 
-## The one side effect in this module: a finger becomes the very same input a
-## key produces. It lives here rather than in the button so the promise "a thumb
+## The one side effect in this module: a finger becomes the very same input a key
+## produces. It lives here rather than in the button so the promise "a thumb
 ## dashes exactly like the space bar" is something a test can check.
 static func dash_press(held: bool) -> void:
 	if held:
@@ -511,8 +509,8 @@ static func dash_press(held: bool) -> void:
 
 
 ## 0 means "ready", 1 means "just dashed": the sweep a cooldown ring draws.
-## `cooldown` comes from the mechanic, so tuning the dash there moves the ring
-## with it instead of leaving a second number behind to drift.
+## `cooldown` comes from the mechanic, so tuning the dash there moves the ring with
+## it instead of leaving a second number behind to drift.
 static func dash_cooldown_ratio(remaining: float, cooldown: float) -> float:
 	return clampf(remaining / maxf(0.01, cooldown), 0.0, 1.0)
 

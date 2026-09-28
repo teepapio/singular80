@@ -12,9 +12,8 @@ func _ready() -> void:
 	DisplayServer.screen_set_orientation(DisplayServer.SCREEN_LANDSCAPE)
 
 	# Before anything else: load the language. `Ui` translates every caption as it
-	# is created, and the first screen is created right now — without this call the
-	# lobby header would be in the device language and the rest in the stored one,
-	# which looks like a bug and is not.
+	# is created and the first screen is created right now — without this call the
+	# lobby header would be in the device language and the rest in the stored one.
 	Loc.boot()
 
 	Content.reload()

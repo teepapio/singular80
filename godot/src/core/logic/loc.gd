@@ -1,61 +1,25 @@
 class_name Loc
 extends RefCounted
-## Sprache, Übersetzungen und locale-abhängige Formatierung.
-##
-## ## Zwei Sorten Schlüssel
-##
-## Der Katalog `res://assets/locale/<code>.json` kennt beide, und die
-## Reihenfolge der Auflösung ist fest:
-##
-##  1. `keys` — handgeschriebene Kennungen wie `ui.back_to_lobby`. Sie sind
-##     stabil, wenn der deutsche Satz sich umformuliert, und sie erlauben eine
-##     Übersetzung pro Kontext. Im Code: `Loc.t("ui.back_to_lobby")`.
-##  2. `text` — der deutsche Quellstring *als* Schlüssel, z. B. `"◀ Lobby"`.
-##     Damit bekommt jede vorhandene Beschriftung eine Übersetzung, ohne dass
-##     650 Aufrufstellen umgeschrieben werden müssen. Im Code entsteht sie
-##     nirgends: `Ui.label`, `Ui.button`, `Ui.title`, `notify` und `show_toast`
-##     schicken ihren Text durch `resolve()`.
-##
-## Fehlt eine Übersetzung, gilt die Kette **aktive Sprache → `de` → der
-## Schlüssel selbst**. Ein Spieler sieht also immer einen Satz, nie
-## `ui.back_to_lobby` und nie eine leere Zeile. Welche Sprache wie weit
-## übersetzt ist, sagt `coverage()`.
-##
-## ## `resolve()` ist idempotent
-##
-## `Ui.label(Loc.t("ui.play"))` ist ein sehr wahrscheinlicher Aufruf. Würde
-## `resolve()` das Ergebnis erneut übersetzen, hinge die Anzeige davon ab, ob
-## ein übersetzter Satz zufällig selbst ein Quellstring ist — „Lobby" ist im
-## Französischen „Lobby", im Deutschen aber ein Quellstring. Deshalb merkt sich
-## `_values` jede Zeichenkette, die der Katalog *herausgibt*, und `resolve()`
-## gibt sie unverändert zurück. Ein zweiter Durchlauf ist damit eine
-## No-Op, und die Frage stellt sich nicht mehr.
-##
-## ## Zahlen
-##
-## `Ui.format_number` ging fest von `.` als Tausendertrennzeichen aus — in
-## Deutsch richtig, überall sonst falsch. `Loc.number` liest die Trennzeichen aus
-## dem Katalog, deshalb steht `1.234` in Deutsch und `1,234` in Englisch da.
-##
-## ## Persistenz
-##
-## `Loc` besitzt keine `ConfigFile`. Die bleibt bei `Game` (`user://singular80.cfg`),
-## damit es eine Datei und nicht zwei gibt; `Loc` schreibt über
-## `Game.set_language`. Fehlt das Autoload — im `--script`-Testlauf — bleibt die
-## Auswahl im Speicher, und das ist genau richtig: ein Test soll die Sprache
-## wechseln können, ohne die Spielerdatei anzufassen.
+## Language, translation lookup, locale-aware number formatting.
+## Two key kinds, in order: `keys` (ids like `ui.back_to_lobby`) and `text` (the
+## German source string as its own key, which is what `Ui.label` & co. pass to
+## `resolve()` — so existing labels translate without rewriting 650 call sites).
+## Invariant: `resolve()` is idempotent, because `_values` holds every string a
+## catalogue emits. A missing translation falls back active -> `de` -> the key.
+## Number separators come from the catalogue (`1.234` de, `1,234` en).
+## No `ConfigFile` here: persistence goes through `Game.set_language`.
 
 const DIR := "res://assets/locale"
-## Sprache, in der der Quelltext im Code steht. Sie ist der Rückfall für alle
-## anderen und muss deshalb immer einen Katalog haben.
+## Language the source text is written in. Fallback for every other language,
+## so it must always have a catalogue.
 const SOURCE := "de"
 
 static var _booted := false
 static var _code := ""
 static var _keys: Dictionary = {}
 static var _text: Dictionary = {}
-## Jede Zeichenkette, die der aktive Katalog herausgibt. Das ist der Grund, warum
-## `resolve()` zweimal hintereinander dasselbe liefert.
+## Every string the active catalogue emits. This is why two `resolve()`
+## calls in a row return the same string.
 static var _values: Dictionary = {}
 static var _numbers: Dictionary = {"decimal": ".", "group": ",", "percent": " %"}
 static var _catalogues: Dictionary = {}
@@ -67,11 +31,10 @@ static var _specifiers: Dictionary = {}
 const _MISSING := "__loc_missing__"
 
 
-# --- Start -------------------------------------------------------------------
+# --- Start ------------------------------------------------------------------
 
-## Lädt die Kataloge und setzt die Sprache, die der Spieler gewählt hat — beim
-## ersten Start die des Geräts. Idempotent, weil sich `Ui` auch ohne den
-## ausdrücklichen Aufruf von `main.gd` die Sprache holen können muss.
+## Loads the catalogues and applies the chosen language (the device's on first
+## start). Idempotent: `Ui` may need the language without `main.gd` calling it.
 static func boot() -> void:
 	if _booted:
 		return
@@ -88,12 +51,12 @@ static func boot() -> void:
 	if _catalogues.has(SOURCE):
 		_apply(SOURCE)
 		return
-	# Kein Katalog lesbar: der Schlüssel *ist* der deutsche Quelltext, also ist
-	# das Verhalten exakt das von vor der Mehrsprachigkeit.
+	# No readable catalogue: the key *is* the German source text, so behaviour
+	# is exactly what it was before multi-language.
 	_code = SOURCE
 
 
-func _ensure() -> void:
+static func _ensure() -> void:
 	if not _booted:
 		boot()
 
@@ -105,42 +68,49 @@ static func _load_all() -> void:
 		push_warning("Loc: %s nicht lesbar — das Spiel bleibt in der Quellsprache." % DIR)
 		return
 	# The source language first: it supplies the sentences every translation is
-	# measured against. `DirAccess` does not sort, and an alphabet with `en`
-	# before `de` would take every translation unchecked.
-	var files := dir.get_files()
-	files.sort_custom(func(a: String, b: String) -> bool:
-		var rank := func(name: String) -> int:
-			return 0 if name == "%s.json" % SOURCE else 1
-		return rank.call(a) < rank.call(b))
-	for file in files:
-		if not file.ends_with(".json"):
-			continue
-		var raw := FileAccess.get_file_as_string("%s/%s" % [DIR, file])
-		var parsed: Variant = JSON.parse_string(raw)
-		if not (parsed is Dictionary):
-			push_warning("Loc: %s ist kein Objekt und wird übersprungen." % file)
-			continue
-		var catalogue: Dictionary = parsed
-		var code := str(catalogue.get("code", file.trim_suffix(".json")))
-		if code == "":
-			continue
-		_catalogues[code] = {
-			"name": str(catalogue.get("name", code)),
-			"native": str(catalogue.get("native", catalogue.get("name", code))),
-			"keys": _checked(code, catalogue.get("keys", {})),
-			"text": _checked(code, catalogue.get("text", {})),
-			"numbers": catalogue.get("numbers", {}) if catalogue.get("numbers", {}) is Dictionary else {},
-		}
+	# measured against. `DirAccess` neither sorts nor guarantees an order, and an
+	# alphabet with `en` before `de` would take every translation unchecked.
+	_load_catalogue("%s.json" % SOURCE, dir)
+	for file in dir.get_files():
+		if file != "%s.json" % SOURCE:
+			_load_catalogue(file, dir)
 	_register_translations()
 
 
+static func _load_catalogue(file: String, dir: DirAccess) -> void:
+	if not file.ends_with(".json"):
+		return
+	var raw := FileAccess.get_file_as_string("%s/%s" % [DIR, file])
+	var parsed: Variant = JSON.parse_string(raw)
+	if not (parsed is Dictionary):
+		push_warning("Loc: %s ist kein Objekt und wird übersprungen." % file)
+		return
+	var catalogue: Dictionary = parsed
+	var code := str(catalogue.get("code", file.trim_suffix(".json")))
+	if code == "":
+		return
+	var numbers: Variant = catalogue.get("numbers", {})
+	_catalogues[code] = {
+		"name": str(catalogue.get("name", code)),
+		"native": str(catalogue.get("native", catalogue.get("name", code))),
+		"keys": _checked(code, catalogue.get("keys", {}), true),
+		"text": _checked(code, catalogue.get("text", {}), false),
+		"numbers": numbers if numbers is Dictionary else {},
+	}
+
+
+## The `{name}` placeholders of a text, sorted, so two texts can be compared.
+static func _placeholders(text: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	var pattern := RegEx.new()
+	pattern.compile("\\{[a-z_][a-z0-9_]*\\}")
+	for found in pattern.search_all(text):
+		out.append(found.get_string())
+	out.sort()
+	return out
+
+
 ## How many `%` placeholders a text has — `%%` does not count as one.
-##
-## A translator who drops a placeholder does not produce a bad sentence, they
-## produce an exception in the middle of a game: `String % Array` aborts when the
-## counts disagree. A translation with the wrong count is therefore **dropped**
-## and the German original is used instead. A sentence in the wrong language is
-## an annoyance; a crashed game is a bug report, filed by a player.
 static func _count_specifiers(text: String) -> int:
 	var count := 0
 	var i := 0
@@ -160,8 +130,16 @@ static func _count_specifiers(text: String) -> int:
 	return count
 
 
-## Drops translations whose placeholder count differs from the German original.
-static func _checked(code: String, section: Variant) -> Dictionary:
+## Drops translations whose placeholders no longer match the German original.
+## A dropped placeholder is not a bad sentence, it is a crash mid-game:
+## `String % Array` aborts when the counts disagree, and a `{name}` with no
+## argument leaves a hole. A wrong-language sentence is an annoyance; a crashed
+## game is a bug report filed by a player.
+## The two halves are checked differently on purpose: a `text` entry is a German
+## template formatted with `%` by `Loc.f`, a `keys` entry is filled from named
+## arguments with `{name}` by `Loc.t`. Counting `%` in a `{name}` sentence would
+## find nothing and accept everything.
+static func _checked(code: String, section: Variant, named: bool) -> Dictionary:
 	if not (section is Dictionary):
 		return {}
 	var out: Dictionary = {}
@@ -171,24 +149,32 @@ static func _checked(code: String, section: Variant) -> Dictionary:
 			out[key] = value
 			continue
 		if code == SOURCE:
-			_specifiers[key] = _count_specifiers(value)
+			_specifiers[key] = _signature(value, named)
 			out[key] = value
 			continue
-		if not _specifiers.has(key) or _count_specifiers(value) == int(_specifiers[key]):
+		if not _specifiers.has(key) or _signature(value, named) == str(_specifiers[key]):
 			out[key] = value
 			continue
-		push_warning("Loc: '%s' in %s has a different placeholder count than the German text and stays unused."
+		push_warning("Loc: '%s' in %s has different placeholders than the German text and stays unused."
 			% [key, code])
 	return out
 
 
-## Meldet die Kataloge auch Godots `TranslationServer`.
-##
-## Damit funktioniert `tr("ui.play")` und, wichtiger, `Control` übersetzt seinen
-## Text bei `set_locale` von selbst neu — was dynamisch gesetzte Beschriftungen
-## (der Ton-Knopf, eine Statuszeile) ohne Sonderbehandlung mitnimmt. Die
-## bevorzugte Schreibweise im Code bleibt `Loc.t`, weil nur sie die
-## Rückfallkette und die Platzhalter kennt.
+## What a text has to keep intact to be substitutable.
+static func _signature(text: String, named: bool) -> String:
+	if named:
+		return ",".join(_placeholders(text))
+	var parts := PackedStringArray()
+	for index in _count_specifiers(text):
+		parts.append("s")
+	return ",".join(parts)
+
+
+## Also hands the catalogues to Godot's `TranslationServer`, so `tr("ui.play")`
+## works and — more importantly — `Control` re-translates itself on
+## `set_locale`, which picks up dynamically set labels (the sound button, a
+## status line) with no special handling. `Loc.t` stays the preferred spelling in
+## code: only it knows the fallback chain and the placeholders.
 static func _register_translations() -> void:
 	if _registered:
 		return
@@ -207,8 +193,8 @@ static func _add_message(translation: Translation, key: String, value: Variant) 
 	if value is String:
 		translation.add_message(key, value)
 	elif value is Dictionary:
-		# Pluralformen als `key/one`, `key/other` — `tr()` kennt keine
-		# Pluralregeln, deshalb bekommen sie je eine eigene Kennung.
+		# Plural forms become `key/one`, `key/other`: `tr()` knows no plural rules,
+		# so each form gets its own id.
 		for form in value:
 			translation.add_message("%s/%s" % [key, form], str(value[form]))
 
@@ -218,7 +204,12 @@ static func _apply(code: String) -> void:
 	_code = code
 	_keys = catalogue.get("keys", {})
 	_text = catalogue.get("text", {})
-	_numbers = {"decimal": ".", "group": ",", "percent": " %", **catalogue.get("numbers", {})}
+	# Defaults first, then the catalogue on top of them: a language that only
+	# overrides the decimal point keeps a sane thousands separator.
+	_numbers = {"decimal": ".", "group": ",", "percent": " %"}
+	var numbers: Dictionary = catalogue.get("numbers", {})
+	for name in numbers:
+		_numbers[name] = numbers[name]
 	_values = {}
 	for section in [_keys, _text]:
 		for value in section.values():
@@ -234,9 +225,9 @@ static func _collect_values(value: Variant, into: Dictionary) -> void:
 			_collect_values(nested, into)
 
 
-# --- Sprache wählen ----------------------------------------------------------
+# --- Choosing a language ----------------------------------------------------
 
-## Die aktive Sprache, z. B. `"en"`.
+## The active language, e.g. `"en"`.
 static func code() -> String:
 	_ensure()
 	return _code
@@ -246,9 +237,8 @@ static func is_source() -> bool:
 	return code() == SOURCE
 
 
-## Alle Sprachen mit Katalog, nach eigenem Namen sortiert — die Sprachauswahl
-## zeigt den Namen in der Sprache, die sie bezeichnet („Deutsch", „English",
-## „Français"), nicht „de".
+## All languages with a catalogue, sorted by their own name — the picker shows
+## "Deutsch", "English", "Français" rather than the code.
 static func available() -> Array[Dictionary]:
 	_ensure()
 	var out: Array[Dictionary] = []
@@ -278,11 +268,10 @@ static func native_name(code: String) -> String:
 	return str(catalogue.get("native", code))
 
 
-## Wechselt die Sprache, merkt sie sich und stellt Godot darauf ein.
-##
-## Akzeptiert auch, was das Gerät meldet: `"fr_FR"` findet den Katalog `fr`.
-## Ein unbekannter Code ändert nichts und liefert `false` — stillschweigend auf
-## eine andere Sprache zu fallen wäre schlimmer als eine Meldung.
+## Switches language, remembers it and points Godot at it.
+## Accepts what the device reports: `"fr_FR"` finds the `fr` catalogue. An
+## unknown code changes nothing and returns `false` — silently falling back to
+## another language would be worse than a message.
 static func set_code(code: String) -> bool:
 	_ensure()
 	var wanted := code
@@ -296,7 +285,7 @@ static func set_code(code: String) -> bool:
 	return true
 
 
-## Die vom Spieler gespeicherte Wahl, oder `""`.
+## The player's stored choice, or `""`.
 static func stored_code() -> String:
 	var game := _game()
 	if game != null and game.has_method("language"):
@@ -304,7 +293,7 @@ static func stored_code() -> String:
 	return ""
 
 
-## Die Sprache des Geräts, auf zwei Buchstaben gebracht (`de`).
+## The device language, reduced to two letters (`de`).
 static func system_code() -> String:
 	var locale := OS.get_locale()
 	if locale == "":
@@ -325,14 +314,12 @@ static func _persist(code: String) -> void:
 		game.call("set_language", code)
 
 
-# --- Übersetzen --------------------------------------------------------------
+# --- Translating ------------------------------------------------------------
 
-## Übersetzt eine Kennung, z. B. `Loc.t("ui.back_to_lobby")`.
-##
-## `args` ersetzt `{platzhalter}` in der Übersetzung. Das ist `String.format`
-## aus zwei Gründen nicht vorzuziehen: die Reihenfolge der Argumente ist in
-## anderen Sprachen anders, und ein fehlendes Argument ist bei `%s` ein Absturz
-## mitten im Spiel statt eines Satzes mit einer Lücke.
+## Translates an id, e.g. `Loc.t("ui.back_to_lobby")`.
+## `args` fills `{placeholders}` in the translation, in preference to
+## `String.format` for two reasons: argument order differs per language, and a
+## missing argument with `%s` crashes mid-game instead of leaving a gap.
 static func t(key: String, args: Dictionary = {}) -> String:
 	if key == "":
 		return ""
@@ -340,7 +327,7 @@ static func t(key: String, args: Dictionary = {}) -> String:
 	return _interpolate(_raw(key), args)
 
 
-## Wie `t`, wählt aber die Pluralform passend zur Zahl.
+## Like `t`, but picks the plural form that fits the number.
 static func tn(key: String, count: int, args: Dictionary = {}) -> String:
 	if key == "":
 		return ""
@@ -351,8 +338,8 @@ static func tn(key: String, count: int, args: Dictionary = {}) -> String:
 	return _interpolate(_raw(key, float(count)), filled)
 
 
-## Übersetzt einen deutschen Quelltext. Wird von `Ui` und den Basisklassen
-## benutzt; im Spielcode ruft man `t`.
+## Translates a German source text. Used by `Ui` and the base classes; game code
+## calls `t`.
 static func resolve(value: String) -> String:
 	if value == "":
 		return ""
@@ -366,7 +353,6 @@ static func resolve(value: String) -> String:
 
 
 ## Translates a **template** and substitutes the values afterwards.
-##
 ## `Ui.label("Bestwert: %s" % best)` is untranslatable in that order: the string is
 ## formatted first and labelled second, so the catalogue would have to hold a
 ## finished sentence with the name already inside it. `Loc.f` reverses the order
@@ -375,9 +361,7 @@ static func resolve(value: String) -> String:
 ##     Loc.f("Bestwert: %s", [best])
 ##
 ## The template keeps its `%` placeholders, so a translation has to carry them
-## over unchanged. That is checked when the catalogue is read (`_checked`),
-## because a forgotten placeholder would otherwise be a crash rather than a
-## sentence.
+## over unchanged — checked when the catalogue is read (`_checked`).
 static func f(template: String, values: Array) -> String:
 	_ensure()
 	return resolve(template) % values
@@ -393,8 +377,8 @@ static func _raw(key: String, count: float = 0.0) -> String:
 		return _pick(_keys[key], count)
 	if _text.has(key):
 		return _pick(_text[key], count)
-	# Rückfall auf die Quellsprache: eine halb übersetzte Sprache soll an den
-	# Stellen Deutsch zeigen, an denen sie noch nichts hat — nicht den Schlüssel.
+	# Fall back to the source language: a half-translated language shows German
+	# where it has nothing yet, not the key.
 	var source: Dictionary = _catalogues.get(SOURCE, {})
 	var source_keys: Dictionary = source.get("keys", {})
 	var source_text: Dictionary = source.get("text", {})
@@ -405,7 +389,7 @@ static func _raw(key: String, count: float = 0.0) -> String:
 	return key
 
 
-## Ein Eintrag ist entweder eine Zeichenkette oder eine Liste von Pluralformen.
+## An entry is either a string or a list of plural forms.
 static func _pick(value: Variant, count: float) -> String:
 	if value is String:
 		return value
@@ -421,13 +405,11 @@ static func _pick(value: Variant, count: float) -> String:
 	return ""
 
 
-## CLDR, so weit die Katalogsprachen kommen.
-##
-## Deutsch, Englisch und Spanisch haben nur `one` bei genau einer Sache. Das
-## Französische zählt auch die Null zum Singular — „0 point", nicht „0 points" —
-## und genau daran scheitern die meisten Übersetzungen. Für Sprachen mit `few`
-## und `many` (Slawisch, Polnisch) gehört hier je eine Regel hinein; `other` ist
-## der Rückfall, deshalb bricht eine fehlende Form nichts.
+## CLDR, as far as the catalogue languages reach.
+## German, English and Spanish have `one` only at exactly one thing. French also
+## counts zero as singular — "0 point", not "0 points" — and that is where most
+## translations go wrong. Languages with `few`/`many` (Slavic, Polish) need a
+## rule each; `other` is the fallback, so a missing form breaks nothing.
 static func _plural_category(count: float) -> String:
 	if _code.begins_with("fr"):
 		return "one" if (is_equal_approx(count, 1.0) or is_zero_approx(count)) else "other"
@@ -443,17 +425,17 @@ static func _interpolate(text: String, args: Dictionary) -> String:
 	return out
 
 
-# --- Zahlen ------------------------------------------------------------------
+# --- Numbers ----------------------------------------------------------------
 
-## `1234` → `1.234` (deutsch) bzw. `1,234` (englisch).
+## `1234` -> `1.234` (German) resp. `1,234` (English).
 static func number(value: int) -> String:
 	_ensure()
 	var negative := value < 0
 	return ("-" if negative else "") + _grouped(str(absi(value)))
 
 
-## `1.5` → `1,5`. Die Tausendertrennung bleibt, denn eine Punktzahl über 1000
-## kommt in jedem Spiel vor.
+## `1.5` -> `1,5`. Thousands stay grouped: a score above 1000 happens in every
+## game.
 static func decimal(value: float, digits: int = 1) -> String:
 	_ensure()
 	var text := String.num(value, digits)
@@ -467,7 +449,7 @@ static func decimal(value: float, digits: int = 1) -> String:
 	return ("-" if negative else "") + out
 
 
-## `0.42` → `42 %`.
+## `0.42` -> `42 %`.
 static func percent(ratio: float, digits: int = 0) -> String:
 	return decimal(ratio * 100.0, digits) + str(_numbers.get("percent", " %"))
 
@@ -486,11 +468,11 @@ static func _grouped(digits: String) -> String:
 	return out
 
 
-# --- Deckung -----------------------------------------------------------------
+# --- Coverage ---------------------------------------------------------------
 
-## Anteil der Schlüssel, die in `code` übersetzt sind (0.0 … 1.0). Ein
-## übersetzter Eintrag ist einer, der sich vom deutschen Quelltext unterscheidet
-## — ein eingetragener, aber unveränderter Wert zählt nicht als fertig.
+## Share of keys translated in `code` (0.0 ... 1.0). An entry counts as translated
+## only if it differs from the German source — an entry filled in but left
+## unchanged is not done.
 static func coverage(code: String) -> float:
 	_ensure()
 	var source: Dictionary = _catalogues.get(SOURCE, {})
@@ -511,8 +493,8 @@ static func coverage(code: String) -> float:
 	return float(done) / float(total) if total > 0 else 1.0
 
 
-## Die Schlüssel, die in `code` noch auf Deutsch stehen. Für Tests und für die
-## Sprachauswahl, die sagen darf, wie weit eine Sprache ist.
+## Keys still German in `code`. For tests, and for the language picker, which may
+## say how far a language has got.
 static func missing(code: String) -> PackedStringArray:
 	_ensure()
 	var source: Dictionary = _catalogues.get(SOURCE, {})
@@ -528,8 +510,7 @@ static func missing(code: String) -> PackedStringArray:
 	return out
 
 
-## Leert den Zwischenspeicher. Nur für Tests: im Spiel wird die Sprache
-## ein einziges Mal geladen.
+## Clears the caches. Tests only: in the game the language loads exactly once.
 static func reset() -> void:
 	_booted = false
 	_registered = false
