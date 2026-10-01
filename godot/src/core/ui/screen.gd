@@ -86,7 +86,7 @@ func _build() -> void:
 
 
 func _build_top_bar() -> Control:
-	return Ui.top_bar(BAR_HEIGHT, self, func() -> void: SuggestDialog.open(self))
+	return Ui.top_bar(BAR_HEIGHT, self, func() -> void: SuggestDialog.open(self), GameRegistry.companions_of(screen_id))
 
 
 ## Container for adaptive, full-window layouts (menus, lobbies).

@@ -60,6 +60,22 @@ const CATEGORIES: Array[Dictionary] = [
 	},
 ]
 
+## One extra button in the top bar of a screen, next to "◀ Lobby", "Vorschlag",
+## "⚙" and the sound toggle: the companion view a game opens from inside itself.
+##
+## It is declared here rather than built by the screen because the bar belongs to
+## the two base classes, and a screen that wanted a second button had no way to
+## say so without editing `Ui.top_bar`. The Crystal Jumper is the case this was
+## written for: its merge was a button on the summit panel, which opens once per
+## finished tower, so a player asking where the merge is found nothing. One line
+## per screen — `label` is the caption, `screen` the route to open, `payload`
+## what that screen needs to know.
+const COMPANIONS := {
+	"crystal3d": {"label": "Merge", "screen": "crystal_forge", "payload": {"theme": "classic", "back": "crystal3d"}},
+	"crystal3d_christmas": {"label": "Merge", "screen": "crystal_forge", "payload": {"theme": "christmas", "back": "crystal3d_christmas"}},
+	"crystal3d_halloween": {"label": "Merge", "screen": "crystal_forge", "payload": {"theme": "halloween", "back": "crystal3d_halloween"}},
+}
+
 const GAMES: Array[Dictionary] = [
 	{
 		"id": "arena",
@@ -253,6 +269,14 @@ static func games_in_category(id: String) -> Array[Dictionary]:
 		if str(game.get("category", "")) == id:
 			out.append(game)
 	return out
+
+
+## The top-bar companions of a screen, ready to hand to `Ui.top_bar`: a screen
+## without one gets an empty list, so the base classes pass the answer on
+## unconditionally.
+static func companions_of(screen_id: String) -> Array:
+	var entry: Variant = COMPANIONS.get(screen_id)
+	return [entry] if entry is Dictionary else []
 
 
 ## Screen id for a game id, with a safe fallback to the arena.
