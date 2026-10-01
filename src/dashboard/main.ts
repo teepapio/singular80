@@ -27,6 +27,15 @@ import {
   type QueueSummary,
 } from './queueControls';
 import { describeRunActivity, formatDuration, lastEventTimestamp, needsRunCleanup } from './runActivity';
+import {
+  effortOptions,
+  findChoice,
+  groupModelChoices,
+  joinModelSetting,
+  splitModelSetting,
+  type ModelChoice,
+  type ModelList,
+} from './models';
 
 type Tab = 'queue' | 'new' | 'top' | 'cluster' | 'done';
 
@@ -65,6 +74,14 @@ interface DashboardState {
   backup: BackupState | null;
   /** True while an operator order is being sent, so the button cannot double-fire. */
   taskSending: boolean;
+  /** What `opencode` can run on this machine, from `/api/models`. */
+  models: ModelChoice[];
+  /** False when the effort levels are missing because the catalog was unreadable. */
+  modelCatalog: boolean;
+  /** One fetch per page: the list does not change while the panel is open. */
+  modelsLoaded: boolean;
+  /** Why the model list is empty, so the field can say it instead of "lädt". */
+  modelListError: string | null;
   /**
    * Last failure of a *background* load, `null` while everything works. It is
    * shown once in the top bar and never as a toast: the page refreshes itself
@@ -120,6 +137,10 @@ const state: DashboardState = {
   splitFor: null,
   backup: null,
   taskSending: false,
+  models: [],
+  modelCatalog: false,
+  modelsLoaded: false,
+  modelListError: null,
   loadError: null,
 };
 
@@ -1170,6 +1191,84 @@ async function retryRun(runId: string): Promise<void> {
   }
 }
 
+/**
+ * The two dropdowns of the settings dialog: which model, and how hard it thinks.
+ *
+ * The model list comes from `/api/models`, which answers with what `opencode
+ * models` reports on this machine plus the effort levels from opencode's public
+ * catalog. It is fetched once per page: opening the dialog must not spawn a
+ * process, and a list of thirty-odd models does not change while the panel is
+ * open.
+ *
+ * An effort level that the chosen model does not support is a failed run, not a
+ * slower one — opencode exits with `Variant unavailable for …` — which is why the
+ * effort options come from the model and not from a fixed list of levels.
+ */
+function renderModelSelects(storedValue: string): void {
+  const modelSelect = $('#setting-model') as HTMLSelectElement;
+  const effortSelect = $('#setting-effort') as HTMLSelectElement;
+  const { model, effort } = splitModelSetting(storedValue);
+  const groups = groupModelChoices(state.models, model);
+  const options = [
+    `<option value=""${model === '' ? ' selected' : ''}>Standard — opencode wählt selbst</option>`,
+    ...groups.map(
+      (group) =>
+        `<optgroup label="${escapeAttr(group.provider)}">${group.options
+          .map((option) => `<option value="${escapeAttr(option.value)}"${option.value === model ? ' selected' : ''}>${escapeHtml(option.label)}</option>`)
+          .join('')}</optgroup>`,
+    ),
+  ];
+  modelSelect.innerHTML = options.join('');
+  // A model the owner picked but the list does not know: the effort levels are
+  // unknown, and offering any would be offering a guess.
+  const choice = findChoice(state.models, model);
+  // Three states, told apart: still loading, failed, or loaded. "lädt" that never
+  // ends is a lie, and a failed load has to be visible — otherwise the owner sees
+  // an empty box and blames the dialog.
+  $('#model-state').textContent =
+    state.models.length > 0
+      ? !state.modelCatalog
+        ? 'Katalog nicht erreichbar — Modell wählbar, Anstrengung nicht.'
+        : choice && choice.efforts.length === 0
+          ? `${choice.name} hat keine Anstrengungsstufen.`
+          : ''
+      : state.modelListError
+        ? `Modelliste nicht ladbar (${state.modelListError}) — der gespeicherte Wert bleibt erhalten.`
+        : 'Modellliste wird geladen …';
+  renderEffortSelect(choice, effort);
+}
+
+/** The effort options of one model. A level it does not have is never offered. */
+function renderEffortSelect(choice: ModelChoice | null, effort: string): void {
+  const effortSelect = $('#setting-effort') as HTMLSelectElement;
+  const options = effortOptions(choice);
+  const known = options.some((option) => option.value === effort);
+  effortSelect.innerHTML = options
+    .map((option) => `<option value="${escapeAttr(option.value)}"${option.value === effort && known ? ' selected' : ''}>${escapeHtml(option.label)}</option>`)
+    .join('');
+  effortSelect.disabled = (choice?.efforts.length ?? 0) === 0;
+  $('#effort-state').textContent = choice && choice.efforts.length > 0
+    ? 'Höher = mehr Nachdenken, mehr Kosten, längere Laufzeit.'
+    : '';
+}
+
+/** Fetches the model list once; a failure leaves the dropdowns as they are. */
+async function loadModelChoices(): Promise<void> {
+  if (state.modelsLoaded) return;
+  try {
+    const list = await api<ModelList>('/api/models');
+    state.models = list.models;
+    state.modelCatalog = list.catalog;
+    state.modelListError = null;
+    state.modelsLoaded = true;
+  } catch (err) {
+    // The dialog stays usable and says so: the stored value stays in the field,
+    // and the note under it names the reason instead of leaving "wird geladen".
+    state.modelListError = errorText(err);
+    state.modelsLoaded = true;
+  }
+}
+
 async function loadSettings(): Promise<void> {
   const settings = await api<{
     discordWebhook: string;
@@ -1191,7 +1290,7 @@ async function loadSettings(): Promise<void> {
   ($('#setting-webhook') as HTMLInputElement).placeholder = settings.webhookConfigured
     ? `konfiguriert (${settings.discordWebhook})`
     : 'https://discord.com/api/webhooks/…';
-  ($('#setting-model') as HTMLInputElement).value = settings.model;
+  renderModelSelects(settings.model);
   ($('#setting-instructions') as HTMLTextAreaElement).value = settings.extraInstructions;
   ($('#setting-autoapprove') as HTMLInputElement).checked = settings.autoApprove;
   ($('#setting-autoscore') as HTMLInputElement).value = String(settings.autoApproveScore);
@@ -1659,13 +1758,29 @@ function setupUi(): void {
   });
   const dialog = $('#settings-dialog') as HTMLDialogElement;
   $('#open-settings').addEventListener('click', async () => {
+    // The list in the background: the dialog opens with the stored value and
+    // fills in, instead of the owner waiting for `opencode models` and a catalog.
+    void loadModelChoices().then(() => {
+      const current = joinModelSetting(
+        ($('#setting-model') as HTMLSelectElement).value,
+        ($('#setting-effort') as HTMLSelectElement).value,
+      );
+      renderModelSelects(current);
+    });
     await loadSettings();
     dialog.showModal();
   });
   $('#close-settings').addEventListener('click', () => dialog.close());
+  $('#setting-model').addEventListener('change', (event) => {
+    const id = (event.target as HTMLSelectElement).value;
+    renderEffortSelect(findChoice(state.models, id), '');
+  });
   $('#save-settings').addEventListener('click', async () => {
     const body: Record<string, unknown> = {
-      model: ($('#setting-model') as HTMLInputElement).value.trim(),
+      model: joinModelSetting(
+        ($('#setting-model') as HTMLSelectElement).value,
+        ($('#setting-effort') as HTMLSelectElement).value,
+      ),
       extraInstructions: ($('#setting-instructions') as HTMLTextAreaElement).value,
       autoApprove: ($('#setting-autoapprove') as HTMLInputElement).checked,
       autoApproveScore: Number(($('#setting-autoscore') as HTMLInputElement).value) || 0,

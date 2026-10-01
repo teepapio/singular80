@@ -13,6 +13,7 @@ import * as discord from './discord';
 import * as telegram from './telegram';
 import { TelegramBot } from './telegramBot';
 import { findOpencodeBinary, Runner } from './runner';
+import { catalogAvailable, listModelChoices } from './models';
 import {
   backupPath,
   backupStatus,
@@ -858,6 +859,20 @@ export function createApp(options: AppOptions): FastifyInstance {
       telegramConfigured: Boolean(token && chat),
       telegramTokenSet: Boolean(token),
       telegramChatSet: Boolean(chat),
+    };
+  });
+
+  // The models the settings dialog offers, with the effort levels each one
+  // accepts. Cached in `server/models.ts`, so opening the dialog does not spawn
+  // `opencode` or download the catalog every time.
+  app.get('/api/models', async () => {
+    const models = await listModelChoices();
+    return {
+      models,
+      // False means the catalog could not be read: the models are real, the effort
+      // levels are missing, and the dialog says so instead of offering a choice
+      // that would fail the run.
+      catalog: catalogAvailable(),
     };
   });
 

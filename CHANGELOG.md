@@ -26,3 +26,4 @@ session. Written by the runner on success, or by
 ## 2026-10-01
 
 - **edi:** Die OpenCode-Sitzung läuft wieder im Panel rechts statt in einem Terminalfenster; die Konsole zeigt die Ausgabe des Laufs Zeile für Zeile.
+- **edi:** Modell und Anstrengung lassen sich im Dashboard auswählen statt tippen: echte Liste aller Modelle mit Kontext und Preis, und je Modell nur die Anstrengungsstufen, die es wirklich hat.

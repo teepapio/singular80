@@ -848,6 +848,34 @@ Datei kommt als `cancelled` an). Der Prompt jedes Runs steht **nicht** in der
 Datei: er ist aus Empfehlung und Einstellungen ableitbar und wird beim Import neu
 gebaut.
 
+**Modell und Anstrengung: zwei Quellen, und eine falsche Stufe ist ein Fehler.**
+`GET /api/models` (`server/models.ts`) beantwortet die beiden Auswahllisten im
+Einstellungsdialog, und sie kommen aus zwei verschiedenen Orten:
+
+- **Welche Modelle es gibt:** `opencode models`. Das ist opencodes eigene Antwort
+  auf dieser Maschine, mit den Zugangsdaten des Besitzers — die Liste kann kein
+  Modell nennen, das er nicht fahren kann.
+- **Welche Anstrengungsstufen ein Modell hat:** der öffentliche Katalog
+  `https://models.opencode.ai/api.json`, den opencode selbst lädt (die URL steht
+  im Binary, neben dem Code, der daraus die Varianten bildet). Pro Modell trägt er
+  `reasoning_options[].values`; für `opencode-go/space-bunny-free` genau
+  `low, medium, high, xhigh, max`.
+
+**Gemessen am 2026-10-01, warum das getrennt sein muss:**
+`opencode run --model 'opencode/nemotron-3.5-lightning-free#low'` endet mit Exit 1
+und `Variant unavailable for opencode/nemotron-3.5-lightning-free: low` — auch
+für eine Stufe, die es gar nicht gibt (`#nope`), und für *jede* Stufe bei einem
+Modell ohne Stufen. Eine falsche Anstrengung ist also **kein langsamer Lauf,
+sondern ein toter Lauf vor dem ersten Token**. Eine fest Liste „niedrig/mittel/
+hoch" im Dialog wäre deshalb eine Liste von Weisen, den Run zu verlieren; die
+Stufen kommen aus dem Katalog, und ohne Katalog wird das Feld gesperrt, statt zu
+raten.
+
+Gespeichert wird weiterhin **ein** String (`provider/model#stufe`), weil der
+Runner genau das an `opencode run --model` gibt. Ohne Netz bleibt die
+Modellwahl benutzbar und nur die Stufenliste leer — beides ist in
+`tests/modelChoices.test.ts` festgeschrieben.
+
 ## Godot-Spiel
 
 ```
