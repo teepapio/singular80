@@ -182,17 +182,90 @@ def build_ice() -> bpy.types.Object:
     return core
 
 
+#: A disc that should face the camera is rotated a quarter turn about X, which
+#: lays it in the XZ plane with its axis along Y.
+#:
+#: Which way that axis has to point is measured, not remembered: a probe cube
+#: placed at Blender ``+Y`` exports to a glTF node with translation
+#: ``(0, 0, -1)``, so Blender ``-Y`` is Godot ``+Z`` -- and the Pang camera
+#: sits at ``PLAYER_Z`` looking down ``-Z``. The dial therefore faces Blender
+#: ``-Y``, and ``render_mesh_views.py``'s "front" cell photographs from Blender
+#: ``-Y`` as well, which is why that cell is what the player ends up seeing.
+_DIAL_FACING = (math.pi / 2.0, 0.0, 0.0)
+
+
 def build_clock() -> bpy.types.Object:
-    """Time bonus: a stopwatch."""
-    _torus("PangClockRim", 0.32, 0.07, (0.0, 0.0, 0.0), STEEL, 0.0, 0.25, 0.7, major_segments=16, minor_segments=6)
-    face = _cyl("PangClockFace", 16, 0.29, 0.07, (0.0, 0.0, 0.0), BONE, 0.0, 0.4, 0.1)
-    face.rotation_euler = (0.0, math.pi / 2.0, 0.0)
-    hand = _cyl("PangClockHand", 6, 0.026, 0.24, (0.0, 0.0, 0.05), GREEN, 0.0, 0.4, 0.2)
-    hand.rotation_euler = (0.0, math.pi / 2.0, 0.0)
-    for i, x in enumerate((-0.22, 0.22)):
-        _box(f"PangClockFoot{i}", (0.1, 0.12, 0.1), (x, 0.0, -0.32), STEEL_DARK, 0.0, 0.35, 0.6)
-    _cyl("PangClockCrown", 8, 0.085, 0.13, (0.0, 0.0, 0.4), GOLD, 0.2, 0.3, 0.6)
-    return bpy.data.objects["PangClockRim"]
+    """Time bonus: a pocket stopwatch, standing on edge with the dial towards the
+    camera.
+
+    Every part shares one axis (see ``_DIAL_FACING``): case, bezel, dial and
+    hands are concentric discs in the same XZ plane, which is what makes the
+    silhouette a circle. The previous version put the rim in the XY plane and
+    the dial on the X axis, so the two were perpendicular and it read as an egg
+    in a hoop. The crown sits *in* the case (its base is below the case's top
+    rim) instead of hovering above it, and there are no feet: a stopwatch pickup
+    is held up, it does not stand on the floor.
+
+    Laid out from photographs of pocket stopwatches (Wikimedia Commons): a round
+    case standing on edge, a bezel ring proud of a pale dial, thin dark hands
+    pivoting at the centre, a small sub-dial low on the face, and a crown at
+    twelve o'clock.
+    """
+    face = -0.07  # y of the dial's front surface; everything on the dial sits here
+
+    case = _cyl("PangClockCase", 20, 0.33, 0.20, (0.0, 0.06, 0.0), STEEL, 0.0, 0.42, 0.35)
+    case.rotation_euler = _DIAL_FACING
+    # The bezel is a ring around the same centre, sitting 0.015 in front of the
+    # dial so the dial reads as recessed rather than pasted on.
+    rim = _torus("PangClockRim", 0.345, 0.06, (0.0, -0.03, 0.0), STEEL_DARK, 0.0, 0.3, 0.6, major_segments=20, minor_segments=6)
+    rim.rotation_euler = _DIAL_FACING
+    # Radius 0.295 overlaps the bezel's inner tube (0.285), so no gap opens up
+    # between ring and dial at any angle.
+    dial = _cyl("PangClockDial", 20, 0.295, 0.07, (0.0, -0.035, 0.0), BONE, 0.0, 0.45, 0.05)
+    dial.rotation_euler = _DIAL_FACING
+
+    # Twelve chapter ticks on a 0.25 radius, each one turned to point at the
+    # centre. theta is measured from twelve o'clock and grows clockwise, which is
+    # what a rotation of +theta about Y does to a mark placed at +Z.
+    for i in range(12):
+        theta = i * math.pi / 6.0
+        _box(
+            f"PangClockTick{i}",
+            (0.018, 0.03, 0.05),
+            (math.sin(theta) * 0.25, face - 0.008, math.cos(theta) * 0.25),
+            STEEL_DARK,
+            0.0,
+            0.35,
+            0.4,
+            rotation=(0.0, theta, 0.0),
+        )
+
+    # The hands are needles that grow out of the pivot rather than through it,
+    # which is what ``_pivot_cyl`` is for: the object's origin stays the middle
+    # of the dial, so the rotation below aims the hand. Twelve and six make one
+    # straight line through the hub, which is what makes the face read as a
+    # clock; the short one stops clear of the sub-dial below it.
+    for name, length, theta in (("PangClockHandLong", 0.21, 0.0), ("PangClockHandShort", 0.075, math.pi)):
+        hand = _pivot_cyl(name, 0.013, length, (0.0, 0.0, length / 2.0), (0.0, face - 0.010, 0.0), STEEL_DARK, 0.0, 0.4, 0.3)
+        hand.rotation_euler = (0.0, theta, 0.0)
+    hub = _cyl("PangClockHub", 8, 0.032, 0.028, (0.0, face - 0.022, 0.0), STEEL_DARK, 0.0, 0.35, 0.5)
+    hub.rotation_euler = _DIAL_FACING
+
+    # The sub-dial is what stops the pale circle from reading as a blank plate.
+    # Low and centred, like the pocket stopwatch, with a clear gap on both sides:
+    # below the short hand's tip and above the six o'clock tick.
+    sub = _cyl("PangClockSub", 12, 0.055, 0.018, (0.0, face - 0.006, -0.165), STONE, 0.0, 0.5, 0.1)
+    sub.rotation_euler = _DIAL_FACING
+    sub_hand = _pivot_cyl("PangClockSubHand", 0.007, 0.038, (0.0, 0.0, 0.019), (0.0, face - 0.021, -0.165), STEEL_DARK, 0.0, 0.4, 0.3)
+    sub_hand.rotation_euler = (0.0, math.radians(35.0), 0.0)
+
+    # The crown rises out of the case's top rim: the case is a drum standing on
+    # edge, so its outline peaks at z = 0.33 and the crown's base is at 0.325,
+    # five thousandths inside it. Nothing floats.
+    _cyl("PangClockCrown", 8, 0.075, 0.12, (0.0, 0.0, 0.385), GOLD, 0.18, 0.3, 0.7)
+    loop = _torus("PangClockLoop", 0.065, 0.02, (0.0, 0.0, 0.51), GOLD_DARK, 0.1, 0.3, 0.7, major_segments=12, minor_segments=6)
+    loop.rotation_euler = _DIAL_FACING
+    return case
 
 
 def build_heart() -> bpy.types.Object:
