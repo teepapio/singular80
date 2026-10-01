@@ -221,6 +221,50 @@ export async function sendTest(_dashboardUrl: string): Promise<{ ok: boolean; er
   return sendMessage('Singular 80: Telegram ist verbunden.');
 }
 
+// --- Identifying the bot -------------------------------------------------------
+
+export interface BotIdentity {
+  id: number;
+  username: string;
+}
+
+/** Cached, because it is asked once per start and never changes while it runs. */
+let botIdentity: BotIdentity | null = null;
+
+/**
+ * Who this token belongs to.
+ *
+ * Needed because a chat id is not an address you can hand to a client: in a
+ * private chat `TELEGRAM_CHAT_ID` is the **user's** id (Telegram hands a bot the
+ * user's id as the chat id), so asking a user session for that number resolves to
+ * `InputPeerSelf` — the owner reading their own Saved Messages. Measured, not
+ * guessed: the inbox connected happily and silently read the wrong chat.
+ *
+ * The bot's own id and username are the address that does work.
+ */
+export async function getBotIdentity(): Promise<BotIdentity> {
+  if (botIdentity) return botIdentity;
+  const res = await fetch(`${API}/bot${token()}/getMe`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`getMe: Telegram ${res.status}`);
+  const data = (await res.json().catch(() => null)) as
+    | { ok?: boolean; result?: { id?: number; username?: string } }
+    | null;
+  const id = data?.result?.id;
+  const username = data?.result?.username;
+  if (!data?.ok || !id || !username) throw new Error('getMe: unerwartete Antwort');
+  botIdentity = { id, username };
+  return botIdentity;
+}
+
+/** Only for tests: the cache is module state, and one test must not feed another. */
+export function resetBotIdentityCache(): void {
+  botIdentity = null;
+}
+
 // --- Commands from the chat --------------------------------------------------
 
 /** A Telegram bot polls `getUpdates`; only one poller is allowed. */

@@ -2,10 +2,12 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { EventEmitter } from 'node:events';
 import { TelegramClient } from 'telegram';
+import type { EntityLike } from 'telegram/define';
 import { StringSession } from 'telegram/sessions';
 import type { SuggestionView } from '../src/shared/types';
 import { classify } from '../src/shared/sorting';
 import type { Store } from './db';
+import { getBotIdentity } from './telegram';
 
 /**
  * Pulls player suggestions out of the owner's Telegram chat.
@@ -196,7 +198,7 @@ export class TelegramInbox {
   private async drain(client: TelegramClient): Promise<void> {
     const chatId = (process.env.TELEGRAM_CHAT_ID ?? '').trim();
     if (!chatId) return;
-    const entity = await client.getInputEntity(chatId);
+    const entity = await this.resolveChat(client);
     const limit = this.state.lastId > 0 ? { minId: this.state.lastId, limit: 100 } : { limit: 100 };
     let newest = this.state.lastId;
     let imported = 0;
@@ -210,6 +212,32 @@ export class TelegramInbox {
       this.saveState();
     }
     if (imported) console.log(`[telegram-inbox] ${imported} Vorschlag/Vorschläge übernommen.`);
+  }
+
+  /**
+   * The chat to read, as an address a user client understands.
+   *
+   * `TELEGRAM_CHAT_ID` cannot be used directly and using it was a silent bug:
+   * Telegram hands a bot the **user's** id as the chat id, so a user session
+   * asked for that number resolves to `InputPeerSelf` — the owner's own Saved
+   * Messages. The inbox connected, reported nothing wrong, and read the wrong
+   * chat. The bot's own username is the address that resolves to the bot's chat.
+   *
+   * The dialog list is the fallback: the bot's id appears there as the peer of the
+   * chat, and matching on it survives a rename of the bot's *display* name.
+   */
+  private async resolveChat(client: TelegramClient): Promise<EntityLike> {
+    const bot = await getBotIdentity();
+    try {
+      return await client.getInputEntity(bot.username);
+    } catch {
+      // The username is not in the entity cache — usually a chat the account has
+      // since left, or a rename. The dialog list still knows the peer by id.
+      for await (const dialog of client.iterDialogs({})) {
+        if (String(dialog.id) === String(bot.id) && dialog.entity) return dialog.entity;
+      }
+      throw new Error('Chat nicht gefunden — Bot-Name im Dashboard prüfen');
+    }
   }
 
   /**

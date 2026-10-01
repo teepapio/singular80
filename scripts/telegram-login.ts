@@ -66,7 +66,8 @@ async function main(): Promise<void> {
   const { apiId, apiHash } = requireCredentials();
   mkdirSync(dataDir, { recursive: true });
 
-  const client = new TelegramClient(new StringSession(readSession()), apiId, apiHash, {
+  const session = new StringSession(readSession());
+  const client = new TelegramClient(session, apiId, apiHash, {
     connectionRetries: 3,
   });
 
@@ -92,7 +93,22 @@ async function main(): Promise<void> {
       // The token arrives as bytes; Telegram wants it base64url-encoded, and that
       // string is the entire payload of the QR code.
       qrCode: async (code) => {
-        const url = `https://t.me/loginurl?token=${code.token.toString('base64url')}`;
+        // `tg://login?token=…`, exactly as Telegram documents it (core.telegram.org/api/qr-login).
+// There is no `t.me/login` web route — Telegram reads that first path segment as
+// a username and answers "user name not found". A `tg://` link also cannot be
+// tapped open; the code has to be *scanned* by the Telegram app, which is why
+// the QR below is the real way in and the printed address is only a fallback.
+const url = `tg://login?token=${code.token.toString('base64url')}`;
+        // The token is written out as well as printed: it changes every minute,
+        // and a page that shows the *current* one can be left open on the desktop
+        // while the phone scans it. A camera reads a drawn code far more reliably
+        // than it reads one made of terminal characters.
+        try {
+          mkdirSync(dataDir, { recursive: true });
+          writeFileSync(join(dataDir, 'telegram-login-url.txt'), url);
+        } catch {
+          // Only a convenience; the code is on the screen either way.
+        }
         // Drawn in the terminal, because the alternative is typing a 60-character
         // URL on the phone — and the phone is what has the Telegram app on it.
         qrcode.generate(url, { small: true }, (qr: string) => {
@@ -123,10 +139,24 @@ async function main(): Promise<void> {
     },
   );
 
-  // `StringSession.save()` persists the session into itself; there is no return
-  // value to write — the serialized form is read back from the session.
-  client.session.save();
-  writeFileSync(sessionPath, String(client.session));
+  // `save()` **returns** the serialized session — it does not write a file, and
+  // there is no `toString` to fall back on. `String(client.session)` produces the
+  // 15 characters `[object Object]`, which is not a session and is not refused
+  // until the next start tries to parse it.
+  const serialized = session.save();
+  writeFileSync(sessionPath, serialized);
+
+  // Read it straight back through the class that has to accept it. A login that
+  // saved nothing usable is worse than one that failed: it looks finished, and the
+  // only symptom appears at the next server start, an hour later, as "session not
+  // authorized".
+  try {
+    new StringSession(readFileSync(sessionPath, 'utf8'));
+  } catch (err) {
+    console.error(`Sitzung gespeichert, aber nicht lesbar: ${(err as Error).message}`);
+    process.exitCode = 1;
+    return;
+  }
   const me = await client.getMe();
   await client.disconnect();
   console.log(`Angemeldet als ${me?.firstName ?? '?'}. Sitzung gespeichert: ${sessionPath}`);
