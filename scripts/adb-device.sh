@@ -26,12 +26,46 @@ list_devices() {
   done
 }
 
+# The product string of an attached Xiaomi by USB id, e.g. "2 Xiaomi 11T Pro".
+# The workstation has a Pad 5 and an 11T Pro, and both show up as the same
+# RNDIS device — so this is what separates "plug the tablet in" (an action only
+# the owner can take) from "switch USB debugging on" (an action at the device).
+usb_product() {
+  lsusb -v -d "$1" 2>/dev/null | sed -n 's/.*iProduct *\(.*\)/\1/p' | head -1
+}
+
 cmd="${1:-devices}"
 [ $# -gt 0 ] && shift
 
 case "$cmd" in
   devices)
-    list_devices
+    # Silence here would read as "no problem": an empty list and a working
+    # device look the same on stdout. So an empty result states its cause, and
+    # the cause decides who has to act — the owner plugs the tablet in, or
+    # switches USB debugging on at whichever device is attached.
+    found=$(list_devices)
+    if [ -z "$found" ]; then
+      if usb_product 2717:ff80 >/dev/null 2>&1 || lsusb | grep -qi xiaomi; then
+        product=$(usb_product 2717:ff80); product=${product:-unbekanntes Gerät}
+        cat >&2 <<MSG
+Kein adb-Gerät erreichbar, aber am Kabel hängt: $product
+
+Es ist angesteckt, exponiert aber nur USB-Tethering (RNDIS) statt der
+adb-Schnittstelle. Am Gerät: Entwickleroptionen → USB-Debugging einschalten,
+dann den RSA-Dialog bestätigen. Ist das ein 11T Pro und gefragt war das
+Pad 5, dann zusätzlich das Tablet anstecken.
+MSG
+      else
+        cat >&2 <<'MSG'
+Kein adb-Gerät erreichbar, und nichts Xiaomi hängt am USB-Bus.
+
+Das Tablet (Xiaomi Pad 5) ist nicht angesteckt. Bitte einstecken und am
+Gerät USB-Debugging einschalten, dann den RSA-Dialog bestätigen.
+MSG
+      fi
+      exit 1
+    fi
+    printf '%s\n' "$found"
     exit 0
     ;;
   wait)

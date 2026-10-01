@@ -4,6 +4,11 @@ Godot-4-Spiel (Android) + Fastify-Backend + Web-Dashboard. Die App läuft offlin
 komplett; mit konfigurierter Server-Adresse holt sie Content und Vorschläge vom
 Backend.
 
+> **Hinweis zu den Werkzeugen:** Das Shell-Werkzeug heißt hier `shell`,
+> nicht `bash`. Jeder Befehl, der im Terminal ausgeführt werden soll,
+> wird über `shell` aufgerufen (z. B. `shell: "npm run typecheck"`).
+> Ein Aufruf als `bash` wird mit einer Fehlermeldung abgelehnt.
+
 > **Eigene HTML-Seiten im Firefox des Besitzers zeigen:** Das Browser-Werkzeug des
 > Agenten braucht ein verbundenes Desktop-Fenster und lehnt `file://` ab. Der Weg,
 > der immer geht, ist ein statischer Server auf `127.0.0.1` plus das Firefox, das
@@ -621,6 +626,41 @@ Wenn eine Eingabe auf dem Gerät nicht ankommt: erst `project.godot` unter
 `[input_devices]` lesen, dann in `res://log/touch/` nach Screenshots schauen,
 dann auf dem Gerät messen (`adb` + Logcat). Für das Anhängen von Bildern und
 das Auswerten von Logcat gibt es die Agenten `apk` und `device-debug`.
+
+### Fehlendes Gerät: den Besitzer zum Einstecken bitten
+
+**Kein Gerät über adb ist kein Grund aufzugeben — es ist ein Satz an den
+Besitzer.** Er ist nebenan, das Kabel liegt in der Schublade, und er kann in
+fünf Sekunden sagen, ob das Tablet wirklich dran ist. Deshalb wird die
+Ursache benannt und das Einstecken verlangt, statt sie zu vermuten.
+
+Dabei sind drei Fälle zu unterscheiden, denn sie verlangen verschiedene
+Handgriffe, und der häufigste ist nicht der, den man zuerst vermutet:
+
+| `lsusb` zeigt | Bedeutung | Was der Besitzer tun muss |
+| --- | --- | --- |
+| nichts | Gerät nicht angesteckt | **Tablet einstecken** |
+| `2717:ff80 … (RNDIS)` | dran, aber nur USB-Tethering exponiert | **USB-Debugging am Gerät einschalten**, RSA-Dialog bestätigen |
+| `2717:ff40 …` | dran, nur MTP, kein adb | dito |
+
+Gemessen hat das den Besitzer einmal irritiert: `adb devices` war leer, und die
+nächste Schlussfolgerung wäre „Tablet nicht angesteckt" gewesen. Es war aber
+ein **11T Pro** am Kabel (nicht das Pad 5) und ohne aktiviertes USB-Debugging —
+ein Einstecken hätte nichts geändert. Deshalb wird `lsusb` gelesen, **nicht**
+`adb devices` allein: `adb devices` sagt nur „nichts da" und unterscheidet die
+drei Fälle nicht.
+
+Zur Unterscheidung der beiden Xiaomi-Geräte im eigenen Log genügt das Produkt:
+
+```bash
+lsusb | grep -i xiaomi                       # hängt es überhaupt dran?
+lsusb -v -d 2717:ff80 | grep iProduct        # welches Gerät ist es?
+```
+
+Das Tablet ist das **Pad 5** (2560×1600, `sw711dp`), das Telefon der **11T Pro**.
+`scripts/adb-device.sh` sagt beides in der Fehlermeldung und ist der Weg für
+jede adb-Aufgabe — es ist nicht auf `PATH`, deshalb ein leeres `adb devices` nie
+als Beweis für ein fehlendes Gerät gilt.
 
 
 ## Befehle
