@@ -61,6 +61,8 @@ interface Harness {
   suggestion: (text: string) => Suggestion;
   enqueue: (text: string) => RunRecord;
   running: () => RunRecord[];
+  /** Every `queue:state` the runner emitted, for "tut ja nichts" assertions. */
+  queueEvents: number;
 }
 
 function harness(settings: Partial<Settings> = {}): Harness {
@@ -75,11 +77,12 @@ function harness(settings: Partial<Settings> = {}): Harness {
   // files the owner's own runner is working on at that moment.
   const projectRoot = mkdtempSync(join(tmpdir(), 'singular80-lanes-repo-'));
   tempDirs.push(projectRoot);
+  const harnessState = { queueEvents: 0 };
   const runner = new Runner(store, {
     projectRoot,
     dataDir,
     contentDir: join(root, 'content'),
-    callbacks: {},
+    callbacks: { onQueueState: () => (harnessState.queueEvents += 1) },
   });
   runners.push(runner);
   const suggestion = (text: string): Suggestion =>
@@ -100,6 +103,9 @@ function harness(settings: Partial<Settings> = {}): Harness {
       return runner.enqueue(s, store.getSettings(), [s]);
     },
     running: () => store.listRuns(50).filter((r) => r.status === 'running'),
+    get queueEvents() {
+      return harnessState.queueEvents;
+    },
   };
 }
 
@@ -220,4 +226,48 @@ describe('Parallele Spuren', () => {
     expect(h.running().length).toBe(1);
     expect(h.store.listRuns(10).filter((r) => r.status === 'queued').length).toBe(1);
   }, SLOW);
+describe('Die Warteschlange wartet nicht auf ein Ereignis', () => {
+  /**
+   * Gemeldet am 2026-10-01: „ein Auftrag in der Warteschlange startet nicht,
+   * obwohl mehrere Spuren frei sind". `pump()` lief nur, wenn etwas passierte —
+   * ein Enqueue, ein Finalize, eine abgelaufene Wartezeit. Ein verpasster
+   * Wake-Timer und die Schlange stand still, bis der Server neu startete.
+   *
+   * Der Test simuliert genau das: die Spur wird von aussen frei gemacht, ohne
+   * dass der Runner etwas davon erfaehrt bekommt. Nur der Supervisor-Tick darf
+   * den Auftrag noch starten.
+   */
+  it('startet einen wartenden Auftrag beim Tick, auch ohne Ereignis', async () => {
+    const h = harness({ maxParallelRuns: 1 });
+    const first = h.enqueue('Tetris: mehr Bälle am Stück');
+    await waitFor(() => h.running().length === 1, 8000, 'erster Run');
+    const second = h.enqueue('Pang: die Bälle sollen schneller fliegen');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(h.running().length).toBe(1);
+
+    // Die Spur ist weg, ohne dass finalize/pump/enqueue etwas davon weiss — so
+    // sieht ein verpasster Wake-Timer von innen aus.
+    (h.runner as unknown as { activeIds: Set<string> }).activeIds.clear();
+    expect(h.store.getRun(second.id)!.status).toBe('queued');
+
+    // Ein Tick, und der zweite Auftrag laeuft. Der erste laeuft weiter — er
+    // wurde ja nicht beendet, nur aus der Lane-Buchhaltung gekippt.
+    h.runner.tick();
+    await waitFor(() => h.store.getRun(second.id)!.status === 'running', 8000, 'Start nach Tick');
+    expect(h.runner.activeRuns().map((r) => r.id)).toContain(second.id);
+  }, SLOW);
+
+  it('rührt die Schlange nicht an, wenn nichts wartet', async () => {
+    // Der Tick läuft alle zwei Sekunden für immer; er darf ohne Arbeit kein
+    // Bus-Ereignis und keinen Datenbankzugriff erzeugen.
+    const h = harness({ maxParallelRuns: 2 });
+    h.enqueue('Tetris: mehr Bälle am Stück');
+    await waitFor(() => h.running().length === 1, 8000, 'erster Run');
+    const before = h.queueEvents;
+    h.runner.tick();
+    h.runner.tick();
+    expect(h.queueEvents).toBe(before);
+  }, SLOW);
+});
+
 });

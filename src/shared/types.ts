@@ -148,6 +148,13 @@ export interface RunRecord {
   suggestionId: number;
   status: RunStatus;
   sessionId: string | null;
+  /**
+   * OpenCode session this run continues, when the owner pressed "Fortsetzen".
+   * The previous run's session id, carried over so `opencode run --session` picks
+   * the conversation up where it stopped instead of starting from nothing. Null
+   * for every run that starts fresh.
+   */
+  resumesSession: string | null;
   /** 1-based lane the run occupies while it is executing, null while it waits in
    * the queue. Persisted, so a run adopted after a server restart keeps the
    * slot the operator already sees.

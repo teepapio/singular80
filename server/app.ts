@@ -837,6 +837,22 @@ export function createApp(options: AppOptions): FastifyInstance {
     return { ok: true, run };
   });
 
+  // Continues a finished run in its own session. Unlike the retry it ignores the
+  // commit guard: finishing half-done work is the reason it exists.
+  app.post('/api/runs/:id/resume', async (req, reply) => {
+    if (!runner) return reply.code(503).send({ error: 'Runner ist deaktiviert' });
+    const id = (req.params as { id: string }).id;
+    const result = runner.resume(id);
+    if (!result.ok) {
+      const status = /nicht gefunden/.test(result.error ?? '') ? 404 : 409;
+      return reply.code(status).send({ error: result.error });
+    }
+    const run = result.run!;
+    const view = viewOf(run.suggestionId);
+    if (view) emit({ type: 'suggestion:updated', suggestion: view });
+    return { ok: true, run };
+  });
+
   app.get('/api/settings', async () => {
     const settings = store.getSettings();
     const token = (process.env.TELEGRAM_BOT_TOKEN ?? '').trim();

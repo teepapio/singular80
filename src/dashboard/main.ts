@@ -719,7 +719,15 @@ function renderRuns(): void {
         const badge = attemptLabel(run);
         const wait =
           run.notBefore && run.notBefore > Date.now() ? ` · startet in ${formatCountdown(run.notBefore - Date.now())}` : '';
-        const waitReason = blocked.has(run.id) ? 'wartet auf eine freie Spur' : 'wartet';
+        // Two different waits, and the owner has to be able to tell them apart:
+        // a run waiting for a free lane is one click away, a run waiting out a
+        // retry backoff is not. "wartet" alone is what made both look broken.
+        const inBackoff = run.notBefore != null && run.notBefore > Date.now();
+        const waitReason = inBackoff
+          ? 'wartet auf die Wartezeit'
+          : blocked.has(run.id)
+            ? 'wartet auf eine freie Spur'
+            : 'wartet';
         // What is actually queued. The run id, the cost and the scope line said
         // how the runner works, not what it is about to do, and the owner
         // recognises a task by its text.
@@ -815,13 +823,24 @@ function renderRunHistory(): string {
         </div>
         <div class="run-sub run-task" title="${escapeHtml(text)}">${escapeHtml(text)}</div>
         <div class="run-sub">${run.finishedAt ? timeAgo(run.finishedAt) : ''}${
-          run.retryOf ? ' · ↻ wiederholt' : ''
+          run.retryOf ? (run.resumesSession ? ' · ▶ fortgesetzt' : ' · ↻ wiederholt') : ''
         }</div>
         ${audit ? `<div class="run-audit">📁 ${escapeHtml(audit)}</div>` : ''}
         <div class="card-actions">
           ${
             run.status === 'failed' || run.status === 'cancelled'
               ? `<button data-action="retry-run" data-run="${escapeAttr(runKey(run.id))}" data-focus-key="retry:${escapeAttr(runKey(run.id))}">↻ Wiederholen</button>`
+              : ''
+          }
+          ${
+            // Fortsetzen keeps the session: the agent still knows what it read and
+            // wrote, which is the whole difference after a time limit. Without a
+            // session there is nothing to continue, so the button is not offered
+            // rather than failing on click.
+            run.status === 'failed' || run.status === 'cancelled'
+              ? run.sessionId
+                ? `<button data-action="resume-run" data-run="${escapeAttr(runKey(run.id))}" data-focus-key="resume:${escapeAttr(runKey(run.id))}" title="Setzt die OpenCode-Sitzung fort, statt neu anzufangen">▶ Fortsetzen</button>`
+                : ''
               : ''
           }
         </div>
@@ -1526,6 +1545,13 @@ async function act(action: string, id: number, runId?: string, button?: HTMLButt
       }
       await api(`/api/runs/${runId}/cancel`, { method: 'POST', body: JSON.stringify({}) });
       toast('Run abgebrochen');
+    } else if (action === 'resume-run') {
+      const result = await api<{ run: RunRecord }>(`/api/runs/${runId}/resume`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      toast(`Setzt den Run für #${result.run.suggestionId} in seiner Sitzung fort`, 'success');
+      await refreshAll();
     } else if (action === 'retry-run') {
       if (!runId) {
         toast('Run ohne Kennung — der Knopf gehört auf eine Run-Karte.', 'error');

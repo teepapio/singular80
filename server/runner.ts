@@ -242,6 +242,7 @@ export function buildPrompt(
   projectRoot: string,
   scopes: string[] = [],
   attempt = 1,
+  options: { resumesSession?: string | null } = {},
 ): string {
   const siblings = cluster.filter((s) => s.id !== suggestion.id);
   const siblingBlock = siblings.length
@@ -262,6 +263,13 @@ export function buildPrompt(
     attempt > 1
       ? `\nDIES IST WIEDERHOLUNGSVERSUCH ${attempt}: Der vorherige Versuch ist fehlgeschlagen. Prüfe zuerst das Run-Log und den Arbeitsbaum, mache nicht blind dasselbe noch einmal, und committe nur, was tatsächlich neu ist.\n`
       : '';
+  // A continuation is not a second attempt at the same thing: the session carries
+  // everything the agent already read and wrote, and the owner pressed the button
+  // because the run hit the time limit halfway. Saying "the previous attempt
+  // failed" here would send it back to the beginning.
+  const resumeBlock = options.resumesSession
+    ? `\nDU SETZT EINE SITZUNG FORT (Sitzung ${options.resumesSession}): Der Agent hatte angefangen und wurde unterbrochen, meist durch die Zeitgrenze. Der bisherige Stand steht in dieser Sitzung und im Repository. Lies zuerst das Run-Log der vorherigen Sitzung, prüfe \`git status\` und \`git log\`, und mache dort weiter, wo es aufhörte — nicht neu anfangen, nicht zurücksetzen. Was schon committet ist, bleibt; committe nur, was seitdem dazugekommen ist.\n`
+    : '';
   return `Du arbeitest im Repository "${projectRoot}" (Godot-Spiel "Singular 80" für Android mit Fastify-Backend und Web-Dashboard).
 
 AUFGABE: Setze den folgenden spieler-eingereichten Vorschlag um.
@@ -270,7 +278,7 @@ Vorschlag #${suggestion.id} [Kategorie: ${suggestion.category}, Stimmen: ${sugge
 """
 ${suggestion.text}
 """
-${siblingBlock}${scopeBlock}${retryBlock}REGELN:
+${siblingBlock}${scopeBlock}${retryBlock}${resumeBlock}REGELN:
 1. Arbeite ausschließlich in diesem Repository. Lies zuerst AGENTS.md für Struktur und Erweiterungspunkte.
 2. Das Spiel liegt in godot/ (GDScript, Godot 4.5). Server/Dashboard unter server/ und src/ sind Web-only und bleiben unverändert.
 3. Bevorzuge reine Datenänderungen in content/*.json (Gegner, Waffen, Upgrades, Modi, Mechaniken) — sie werden beim Start der App geladen und wirken ohne Neubau.
@@ -541,6 +549,8 @@ export class Runner {
       notBefore: number | null;
       timeoutMs: number;
       maxAttempts: number;
+      /** OpenCode session to continue, see `resumesSession` in `RunRecord`. */
+      resumesSession?: string | null;
     },
   ): RunRecord {
     const settings = this.store.getSettings();
@@ -556,12 +566,15 @@ export class Runner {
       suggestionId: suggestion.id,
       status: 'queued',
       sessionId: null,
+      resumesSession: options.resumesSession ?? null,
       lane: null,
       // Set when the run starts, and only then: a queued run has no checkout
       // yet, and a run that never gets a lane must not claim one.
       worktreePath: null,
       worktreeBranch: null,
-      prompt: buildPrompt(suggestion, cluster, settings, this.options.projectRoot, prediction.scopes, options.attempt),
+      prompt: buildPrompt(suggestion, cluster, settings, this.options.projectRoot, prediction.scopes, options.attempt, {
+        resumesSession: options.resumesSession ?? null,
+      }),
       exitCode: null,
       cost: null,
       tokensInput: null,
@@ -635,6 +648,50 @@ export class Runner {
       notBefore: null,
       timeoutMs: policy.timeoutMinutes * 60_000,
       maxAttempts: Math.max(record.attempt + 1, policy.retryLimit + 1),
+    });
+    return { ok: true, run };
+  }
+
+  /**
+   * Continues a finished run in its own OpenCode session.
+   *
+   * The owner asked for this after runs hit the hard time limit: a retry starts
+   * the agent from nothing and spends the new budget re-reading the repository,
+   * while a continuation hands it back the session it was working in. Two guards
+   * differ from `retry` on purpose:
+   *
+   *  - **A commit does not block it.** The whole point is to finish work that was
+   *    already started and partly committed; refusing that would leave the owner
+   *    with no way forward but a fresh attempt.
+   *  - **It needs a session.** Without one there is nothing to continue, and the
+   *    honest answer is "use Wiederholen" rather than a run that starts fresh and
+   *    calls itself a continuation.
+   */
+  resume(runId: string): { ok: boolean; run?: RunRecord; error?: string } {
+    const record = this.store.getRun(runId);
+    if (!record) return { ok: false, error: 'Run nicht gefunden' };
+    if (record.status === 'queued' || record.status === 'running') {
+      return { ok: false, error: 'Run ist noch nicht abgeschlossen' };
+    }
+    if (!record.sessionId) {
+      return { ok: false, error: 'Für diesen Run gibt es keine Sitzung zum Fortsetzen — bitte „Wiederholen“.' };
+    }
+    const suggestion = this.store.getSuggestion(record.suggestionId);
+    if (!suggestion) return { ok: false, error: 'Vorschlag nicht gefunden' };
+    if (this.isBusyForSuggestion(suggestion)) {
+      return { ok: false, error: 'Für diesen Vorschlag läuft bereits ein Run.' };
+    }
+    const policy = this.policy();
+    const run = this.createRun(suggestion, this.clusterOf(suggestion), {
+      attempt: record.attempt + 1,
+      retryOf: record.id,
+      notBefore: null,
+      timeoutMs: policy.timeoutMinutes * 60_000,
+      // One more try than the attempt number: a continuation may fail too, and it
+      // should be able to use the retry budget rather than being the run that
+      // exhausts it.
+      maxAttempts: Math.max(record.attempt + 1, policy.retryLimit + 1),
+      resumesSession: record.sessionId,
     });
     return { ok: true, run };
   }
@@ -1004,14 +1061,24 @@ export class Runner {
   }
 
   /**
-   * Supervisor tick: enforces the hard timeout of every running run.
+   * Supervisor tick: enforces the hard timeout of every running run, and keeps the
+   * queue honest.
    *
    * A timer per run would be the obvious implementation and the wrong one — a
    * run adopted after a restart has no timer, and the timeout has to survive the
-   * restart. A deadline derived from `startedAt` and checked against the clock
-   * is stateless, so a fresh server process applies exactly the same budget to
-   * the run it inherited. Exposed for tests, which call it directly instead of
+   * restart. A deadline derived from `startedAt` and checked against the clock is
+   * stateless, so a fresh server process applies exactly the same budget to the
+   * run it inherited. Exposed for tests, which call it directly instead of
    * waiting out a real timeout.
+   *
+   * **The queue is pumped here too**, and that is not tidiness. `pump()` used to
+   * run only when something happened — an enqueue, a finalize, a retry backoff
+   * expiring — so every one of those had to be perfect. One missed wake timer and
+   * a queued run sat there with free lanes and nobody asked the queue again; the
+   * owner saw exactly that ("wartet ein Auftrag, obwohl mehrere Spuren frei sind").
+   * A run that is due and a lane that is free is a fact, and this tick is where
+   * facts get looked at. The check costs two comparisons when there is nothing to
+   * do.
    */
   tick(now: number = Date.now()): RunRecord[] {
     const expired: RunRecord[] = [];
@@ -1024,6 +1091,7 @@ export class Runner {
       expired.push(this.store.getRun(record.id) ?? record);
     }
     if (expired.length > 0) this.pump();
+    else if (this.queue.length > 0 && this.activeIds.size < this.capacity()) this.pump();
     return expired;
   }
 
@@ -1068,6 +1136,10 @@ export class Runner {
   /** The argv of a run whose output the runner parses. */
   private pipedArgs(record: RunRecord): string[] {
     const args = ['run', '--format', 'json', '--auto', '--title', `Vorschlag #${record.suggestionId}`];
+    // A continuation keeps the conversation: `--session` is the documented way to
+    // continue a specific one (`opencode run --help`), and it is what makes
+    // "Fortsetzen" different from a retry — the agent still knows what it read.
+    if (record.resumesSession) args.push('--session', record.resumesSession);
     if (this.store.getSettings().model.trim()) args.push('--model', this.store.getSettings().model.trim());
     args.push(record.prompt);
     return args;
@@ -1196,6 +1268,17 @@ export class Runner {
     } catch {
       this.pushEvent(entry.record.id, { t: Date.now(), kind: 'info', text: line.slice(0, 500) });
       return;
+    }
+    // The session id sits at the top level of *every* line opencode writes
+    // (`"sessionID":"ses_…"`), and it is the one thing a timed-out run has to
+    // keep for "Fortsetzen" to mean anything. It used to be read only from the
+    // `step_finish` detail, which never carried it — measured on 2026-10-01, every
+    // one of three runs that hit the 30-minute limit had `sessionId === null`, and
+    // a continuation without a session is a fresh run wearing a different name.
+    const sessionId = typeof parsed.sessionID === 'string' ? parsed.sessionID : '';
+    if (sessionId && entry.record.sessionId !== sessionId) {
+      entry.record.sessionId = sessionId;
+      this.store.updateRun(entry.record);
     }
     const mapped = mapOpencodeEvent(parsed);
     for (const event of mapped) {
@@ -1436,7 +1519,12 @@ export class Runner {
     const chainStart = this.chainStart(record);
     if (chainStart === null) return null;
     const commit = commitSince(chainStart, this.options.projectRoot, record.suggestionId, record.worktreeBranch);
-    return commit === null ? null : `es gibt bereits einen Commit (${commit}) für Vorschlag #${record.suggestionId}`;
+    return commit === null
+      ? null
+      : // The message has to name the way out. Without it the owner pressed
+        // "Wiederholen", got a refusal he cannot act on, and concluded the run was
+        // stuck — which is what a guard without an escape reads like.
+        `es gibt bereits einen Commit (${commit}) für Vorschlag #${record.suggestionId} — mit „Fortsetzen“ geht es weiter, ohne neu anzufangen`;
   }
 
   /** Start time of the first attempt in this run's chain, i.e. `createdAt` of the root. */

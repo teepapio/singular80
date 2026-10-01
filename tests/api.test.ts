@@ -198,6 +198,31 @@ describe('POST /api/runs/:id/retry', () => {
     expect(res.status).toBe(404);
   });
 
+  it('lehnt das Fortsetzen ohne Sitzung ehrlich ab', async () => {
+    const api = await boot();
+    const id = await newSuggestion(api, 'Siedler: Handelsweg optimieren');
+    const started = await api.post<{ run: RunRecord }>(`/api/suggestions/${id}/implement`, {});
+    await api.post<{ run: RunRecord }>(`/api/runs/${started.body.run.id}/cancel`, {});
+    const res = await api.post<{ error: string }>(`/api/runs/${started.body.run.id}/resume`, {});
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('Wiederholen');
+  });
+
+  it('lehnt das Fortsetzen eines laufenden Runs ab', async () => {
+    const api = await boot();
+    const id = await newSuggestion(api, 'Siedler: Handelsweg optimieren');
+    const started = await api.post<{ run: RunRecord }>(`/api/suggestions/${id}/implement`, {});
+    const res = await api.post<{ error: string }>(`/api/runs/${started.body.run.id}/resume`, {});
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('nicht abgeschlossen');
+  });
+
+  it('gibt 404 für einen unbekannten Run', async () => {
+    const api = await boot();
+    const res = await api.post<{ error: string }>('/api/runs/run_fehlt/resume', {});
+    expect(res.status).toBe(404);
+  });
+
   it('lehnt das Wiederholen eines laufenden Runs ab', async () => {
     const api = await boot();
     const id = await newSuggestion(api, 'Siedler: Handelsweg optimieren');
@@ -242,6 +267,9 @@ describe('Migration einer bestehenden Datenbank', () => {
       expect(old.timeoutMs).toBe(0);
       expect(old.scopes).toEqual([]);
       expect(old.note).toBeNull();
+      // Und die Spalte, mit der "Fortsetzen" erst funktioniert: ein alter Lauf hat
+      // keine Sitzung zum Fortsetzen, also `null` und nicht undefined.
+      expect(old.resumesSession).toBeNull();
       expect(store.getSettings().model).toBe('gpt-alt');
       expect(store.getQueuePaused()).toBe(false);
     } finally {
@@ -286,7 +314,9 @@ describe('Runner-Politik in den Einstellungen', () => {
       { runTimeoutMinutes: 99_999, retryLimit: 500, retryBackoffSeconds: -20 },
     );
     expect(res.body.runTimeoutMinutes).toBe(1440);
-    expect(res.body.retryLimit).toBe(5);
+    // Die Obergrenze fuer Wiederholungen ist 20, seit der Besitzer mehr Versuche
+    // wollte; 500 wird immer noch abgeschnitten.
+    expect(res.body.retryLimit).toBe(20);
     expect(res.body.retryBackoffSeconds).toBe(0);
   });
 

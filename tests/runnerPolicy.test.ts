@@ -47,7 +47,9 @@ case "$FAKE_RUNNER_MODE" in
     exit 1 ;;
   fail-provider)
     # The shape a real provider refusal has: type "error" with the error at the
-    # top level, a 4xx status and the reason inside a nested body.
+    # top level, a 4xx status and the reason inside a nested body. Every line also
+    # carries the sessionID, exactly as opencode writes it.
+    echo '{"type":"step-start","timestamp":1790879844593,"sessionID":"ses_stub1","snapshot":"abc"}'
     echo '{"type":"error","timestamp":1790879844594,"error":{"type":"provider.auth","message":"Error from provider (Console): This model is not available in your country","status":403,"response":{"body":"{\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"FreeTierError\\",\\"message\\":\\"This model is not available in your country\\"}}"}}}'
     exit 1 ;;
   fail-edit)
@@ -202,6 +204,7 @@ describe('Hartes Zeitlimit', () => {
       suggestionId: suggestion.id,
       status: 'running',
       sessionId: null,
+      resumesSession: null,
       worktreePath: null,
       worktreeBranch: null,
       lane: 1,
@@ -515,6 +518,87 @@ describe('Manuelles Wiederholen', () => {
     const run = h.runner.enqueue(suggestion, h.store.getSettings(), [suggestion]);
     await waitFor(() => h.store.getRun(run.id)!.status === 'failed', 8000, 'Fehlschlag');
     expect(h.runner.retry(run.id, { force: true }).ok).toBe(true);
+  }, SLOW);
+});
+
+describe('Fortsetzen', () => {
+  /**
+   * Der Besitzer wollte Laeufe, die an der Zeitgrenze gescheitert sind, von Hand
+   * fortsetzen. Ein Wiederholen startet den Agenten von vorn und verbraucht das
+   * neue Budget mit dem Wiederlesen des Repositorys; eine Fortsetzung gibt ihm die
+   * Sitzung zurueck (`opencode run --session`).
+   */
+  it('legt einen Lauf an, der die Sitzung des beendeten Laufs fortsetzt', async () => {
+    process.env.FAKE_RUNNER_MODE = 'fail-provider';
+    const h = harness({ retryLimit: 0 });
+    const suggestion = h.suggestion();
+    const run = h.runner.enqueue(suggestion, h.store.getSettings(), [suggestion]);
+    await waitFor(() => h.store.getRun(run.id)!.status === 'failed', 8000, 'Fehlschlag');
+    // Der Anbieter nennt die Sitzung im Strom; der Runner merkt sie sich.
+    const sessionId = 'ses_test123';
+    h.store.updateRun({ ...h.store.getRun(run.id)!, sessionId });
+
+    const result = h.runner.resume(run.id);
+    expect(result.ok).toBe(true);
+    const next = h.store.getRun(result.run!.id)!;
+    expect(next.resumesSession).toBe(sessionId);
+    expect(next.retryOf).toBe(run.id);
+    expect(next.attempt).toBe(run.attempt + 1);
+    expect(next.prompt).toContain('SETZT EINE SITZUNG FORT');
+    expect(next.prompt).toContain(sessionId);
+  }, SLOW);
+
+  it('kommt auch weiter, wenn der Lauf schon committet hat', async () => {
+    // Genau der Fall, aus dem der Besitzer heraus nach Fortsetzen gefragt hat: die
+    // Zeit ist abgelaufen, nachdem der Agent committet hat. Das Wiederholen
+    // verweigert das (Commit-Schutz), die Fortsetzung darf es nicht.
+    process.env.FAKE_RUNNER_MODE = 'fail-commit';
+    const h = harness({ retryLimit: 0 });
+    const suggestion = h.suggestion();
+    const run = h.runner.enqueue(suggestion, h.store.getSettings(), [suggestion]);
+    await waitFor(() => h.store.getRun(run.id)!.status === 'failed', 8000, 'Fehlschlag');
+    h.store.updateRun({ ...h.store.getRun(run.id)!, sessionId: 'ses_abc' });
+    expect(h.runner.retry(run.id).ok).toBe(false);
+    expect(h.runner.resume(run.id).ok).toBe(true);
+  }, SLOW);
+
+  it('merkt sich die Sitzung aus dem Strom, auch ohne step_finish', async () => {
+    // Ohne das war `sessionId` bei jedem Lauf null, und damit war "Fortsetzen"
+    // fuer genau die Laeufe ohne Bedeutung, fuer die der Besitzer es wollte: die
+    // an der Zeitgrenze. Die sessionID steht in jeder Zeile, nicht nur in der
+    // Zusammenfassung.
+    process.env.FAKE_RUNNER_MODE = 'fail-provider';
+    const h = harness({ retryLimit: 0 });
+    const suggestion = h.suggestion();
+    const run = h.runner.enqueue(suggestion, h.store.getSettings(), [suggestion]);
+    await waitFor(() => h.store.getRun(run.id)!.status === 'failed', 8000, 'Fehlschlag');
+    expect(h.store.getRun(run.id)!.sessionId).toBe('ses_stub1');
+  }, SLOW);
+
+  it('sagt ehrlich nein, wenn es keine Sitzung gibt', async () => {
+    process.env.FAKE_RUNNER_MODE = 'fail-edit';
+    const h = harness({ retryLimit: 0 });
+    const suggestion = h.suggestion();
+    const run = h.runner.enqueue(suggestion, h.store.getSettings(), [suggestion]);
+    await waitFor(() => h.store.getRun(run.id)!.status === 'failed', 8000, 'Fehlschlag');
+    const result = h.runner.resume(run.id);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Wiederholen');
+  }, SLOW);
+
+  it('gibt die Sitzung als --session an opencode weiter', async () => {
+    // Das Argument ist der ganze Unterschied; ohne es wäre die Fortsetzung ein
+    // normaler Lauf mit einem schoeneren Namen.
+    process.env.FAKE_RUNNER_MODE = 'fail-provider';
+    const h = harness({ retryLimit: 0 });
+    const suggestion = h.suggestion();
+    const run = h.runner.enqueue(suggestion, h.store.getSettings(), [suggestion]);
+    await waitFor(() => h.store.getRun(run.id)!.status === 'failed', 8000, 'Fehlschlag');
+    h.store.updateRun({ ...h.store.getRun(run.id)!, sessionId: 'ses_argtest' });
+    const resumed = h.runner.resume(run.id).run!;
+    const args = (h.runner as unknown as { pipedArgs: (r: typeof resumed) => string[] }).pipedArgs(resumed);
+    expect(args).toContain('--session');
+    expect(args[args.indexOf('--session') + 1]).toBe('ses_argtest');
   }, SLOW);
 });
 

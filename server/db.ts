@@ -28,7 +28,11 @@ export const DEFAULT_SETTINGS: Settings = {
 /** Upper bounds for the runner policy, so one bad request cannot stop every run. */
 export const SETTINGS_BOUNDS = {
   runTimeoutMinutes: { min: 0, max: 1440 },
-  retryLimit: { min: 0, max: 5 },
+  // 20, nicht 5: der Besitzer will öfter wiederholen lassen. Die Wartezeit wächst
+  // ohnehin (doppelt pro Versuch, gedeckelt bei `MAX_BACKOFF_MS`), also ist die
+  // Zahl hier eine Obergrenze und kein Versprechen, dass Versuch 20 noch etwas
+  // bringt — die Deckel sind das, was einen Endloslauf verhindert.
+  retryLimit: { min: 0, max: 20 },
   retryBackoffSeconds: { min: 0, max: 3600 },
   // 1 is the old serial queue and is always allowed; the ceiling is a machine
   // limit, not a taste question — every lane is a full opencode session.
@@ -82,6 +86,7 @@ interface RunRow {
   worktree_path: string | null;
   worktree_branch: string | null;
   lane: number | null;
+  resumes_session: string | null;
 }
 
 function rowToSuggestion(row: SuggestionRow): Suggestion {
@@ -190,6 +195,7 @@ function rowToRun(row: RunRow): RunRecord {
     scopeIssues: row.scope_issues ?? null,
     worktreePath: row.worktree_path ?? null,
     worktreeBranch: row.worktree_branch ?? null,
+    resumesSession: row.resumes_session ?? null,
   };
 }
 
@@ -448,6 +454,7 @@ export class Store {
       // from before worktrees existed reads back as.
       'ALTER TABLE runs ADD COLUMN worktree_path TEXT',
       'ALTER TABLE runs ADD COLUMN worktree_branch TEXT',
+      'ALTER TABLE runs ADD COLUMN resumes_session TEXT',
     ]) {
       try {
         this.db.exec(ddl);
@@ -740,8 +747,8 @@ export class Store {
   createRun(run: RunRecord) {
     this.db
       .prepare(
-        `INSERT INTO runs (id, suggestion_id, status, session_id, prompt, exit_code, cost, tokens_input, tokens_output, commit_hash, result_summary, created_at, started_at, finished_at, log_path, attempt, max_attempts, retry_of, not_before, timeout_ms, scope, note, scope_issues, lane, worktree_path, worktree_branch)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO runs (id, suggestion_id, status, session_id, prompt, exit_code, cost, tokens_input, tokens_output, commit_hash, result_summary, created_at, started_at, finished_at, log_path, attempt, max_attempts, retry_of, not_before, timeout_ms, scope, note, scope_issues, lane, worktree_path, worktree_branch, resumes_session)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -770,13 +777,14 @@ export class Store {
         run.lane,
         run.worktreePath,
         run.worktreeBranch,
+        run.resumesSession,
       );
   }
 
   updateRun(run: RunRecord) {
     this.db
       .prepare(
-        `UPDATE runs SET status = ?, session_id = ?, exit_code = ?, cost = ?, tokens_input = ?, tokens_output = ?, commit_hash = ?, result_summary = ?, started_at = ?, finished_at = ?, attempt = ?, max_attempts = ?, retry_of = ?, not_before = ?, timeout_ms = ?, scope = ?, note = ?, scope_issues = ?, lane = ?, worktree_path = ?, worktree_branch = ?
+        `UPDATE runs SET status = ?, session_id = ?, exit_code = ?, cost = ?, tokens_input = ?, tokens_output = ?, commit_hash = ?, result_summary = ?, started_at = ?, finished_at = ?, attempt = ?, max_attempts = ?, retry_of = ?, not_before = ?, timeout_ms = ?, scope = ?, note = ?, scope_issues = ?, lane = ?, worktree_path = ?, worktree_branch = ?, resumes_session = ?
          WHERE id = ?`,
       )
       .run(
@@ -801,6 +809,7 @@ export class Store {
         run.lane,
         run.worktreePath,
         run.worktreeBranch,
+        run.resumesSession,
         run.id,
       );
   }

@@ -22,6 +22,7 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
     suggestionId: 7,
     status: 'failed',
     sessionId: null,
+    resumesSession: null,
     lane: null,
     worktreePath: null,
     worktreeBranch: null,

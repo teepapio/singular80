@@ -863,6 +863,43 @@ Warteschlange folgt ihnen. `tests/apiRoutes.test.ts` prüft ausdrücklich, dass 
 API weder `score` noch `breakdown` schickt und die Einstellungen keine
 Auto-Genehmigung kennen — sonst käme die Zahl durch die Hintertür zurück.
 
+**Fortsetzen ist nicht Wiederholen.** Der Besitzer wollte Laeufe, die an der
+Zeitgrenze gescheitert sind, von Hand weiterfuehren — und der Unterschied ist
+sitzend, nicht kosmetisch:
+
+- **Wiederholen** (`POST /api/runs/:id/retry`, `Runner.retry`) startet einen neuen
+  Lauf, ein neues Log, ein neues Budget. Der Agent liest das Repository von vorn.
+  Der Commit-Schutz gilt: gibt es schon einen Commit fuer den Vorschlag, wird
+  verweigert — **und die Meldung sagt jetzt, dass „Fortsetzen" weitergeht**, weil
+  eine Sperre ohne Ausweg wie ein stuck Run aussieht.
+- **Fortsetzen** (`POST /api/runs/:id/resume`, `Runner.resume`) nimmt die
+  OpenCode-Sitzung des beendeten Laufs (`resumesSession`, Spalte
+  `runs.resumes_session`) und startet mit `--session <id>`. Der Agent weiss noch,
+  was er gelesen und geschrieben hat, und macht dort weiter, wo es aufhoerte. Der
+  Commit-Schutz gilt **nicht** — genau das ist der Zweck. Ohne Sitzung gibt es
+  nichts fortzusetzen, und die Route sagt das statt zu raten; im Panel erscheint
+  der Knopf dann gar nicht erst.
+
+**Die Sitzung stand in jeder Zeile und wurde nie gelesen.** `sessionID` steht auf
+jeder JSON-Zeile von `opencode run --format json`; der Runner las sie nur aus dem
+`step_finish`-Detail, das sie nie enthaelt. Gemessen am 2026-10-01: drei Laeufe an
+der Zeitgrenze, alle drei `sessionId === null` — Fortsetzen waere fuer genau die
+Laeufe wertlos gewesen, fuer die der Besitzer es wollte. `handleLine` merkt sie
+sich jetzt aus jeder Zeile. Fuer die 18 aelteren Laeufe wurde sie einmalig aus den
+eigenen Logs nachgetragen (`"sessionID":"(ses_[A-Za-z0-9_-]+)"` — der Trenner
+`-` gehoert zur Id, ein Muster ohne ihn liefert eine abgeschnittene, und
+`opencode session export` sagt dann „Session not found").
+
+**Die Warteschlange haengt nicht mehr an einem Ereignis.** `pump()` lief nur, wenn
+etwas passierte — ein Enqueue, ein Finalize, eine abgelaufene Wartezeit. Ein
+verpasster Wake-Timer, und ein Auftrag stand mit freien Spuren still, bis der
+Server neu startete (gemeldet am 2026-10-01). `tick()` ruft `pump()` jetzt auch
+dann, wenn ein Auftrag wartet und eine Spur frei ist: „faellig und frei" ist eine
+Tatsache, und der Tick ist der Ort, an dem Tatsachen angesehen werden. Der
+Warteschlangen-Eintrag unterscheidet ausserdem „wartet auf die Wartezeit" (ein
+Wiederholungsversuch in der Rueckfallzeit) von „wartet auf eine freie Spur" — beide
+sahen vorher gleich aus.
+
 **Direkte Aufträge.** `POST /api/tasks` (im Panel: „Direkter Auftrag an OpenCode")
 legt eine Empfehlung mit `source: 'operator'` an und stellt sie sofort in die
 Schlange — ohne Abstimmung, ohne Spieler, ohne Discord. Sie bleibt eine

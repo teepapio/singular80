@@ -70,6 +70,7 @@ function makeRun(suggestion: Suggestion, overrides: Partial<RunRecord> = {}): Ru
     suggestionId: suggestion.id,
     status: 'succeeded',
     sessionId: 'ses_1',
+    resumesSession: null,
     lane: 1,
     worktreePath: null,
     worktreeBranch: null,
