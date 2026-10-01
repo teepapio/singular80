@@ -11,9 +11,7 @@ permission:
   glob: allow
   list: allow
   shell:
-    "git diff*": allow
-    "git show*": allow
-    "git log*": allow
+    "*": allow
 ---
 
 You are a reviewer who has not seen this work described. You are given the diff

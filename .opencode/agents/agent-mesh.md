@@ -11,10 +11,7 @@ permission:
   glob: allow
   list: allow
   shell:
-    "git *": allow
-    "npm*": allow
-    "node*": allow
-    "blender*": allow
+    "*": allow
   edit:
     "*": allow
     "godot/assets/meshes/**": allow

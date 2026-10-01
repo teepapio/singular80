@@ -25,9 +25,7 @@ permission:
   edit:
     "scripts/grade/**": allow
   shell:
-    "godot*": allow
-    "node --check*": allow
-    "node scripts/test-game.mjs*": allow
+    "*": allow
 ---
 
 You are the grader for Singular 80. You decide what "done" means, and you decide

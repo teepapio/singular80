@@ -11,14 +11,7 @@ permission:
   glob: allow
   list: allow
   shell:
-    "git *": allow
-    "npm*": allow
-    "node*": allow
-    "godot*": allow
-    "adb*": allow
-    "./scripts/adb-device.sh*": allow
-    "blender*": allow
-    "java*": allow
+    "*": allow
   edit:
     "*": allow
     "godot/project.godot": allow

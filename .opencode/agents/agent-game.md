@@ -11,10 +11,7 @@ permission:
   glob: allow
   list: allow
   shell:
-    "git *": allow
-    "npm*": allow
-    "node*": allow
-    "godot*": allow
+    "*": allow
   edit:
     "*": allow
     # A registry line that vanishes is found weeks later, when a game will not

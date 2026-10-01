@@ -11,10 +11,7 @@ permission:
   glob: allow
   list: allow
   shell:
-    "git *": allow
-    "npm*": allow
-    "node*": allow
-    "godot*": allow
+    "*": allow
   edit:
     "*": allow
     "godot/src/core/ui/**": allow

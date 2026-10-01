@@ -11,8 +11,7 @@ permission:
   glob: allow
   list: allow
   shell:
-    "git log*": allow
-    "npm run scopes*": allow
+    "*": allow
   edit:
     ".opencode/agents/**": allow
     ".opencode/roles/**": allow

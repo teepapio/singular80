@@ -8,7 +8,7 @@ permission:
   "*": deny
   read: allow
   shell:
-    "npm*": allow
+    "*": allow
 ---
 
 You run the suites. You are not interested in the feature and you have no

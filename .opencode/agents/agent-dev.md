@@ -22,10 +22,7 @@ permission:
     "*": allow
     "scripts/grade/**": deny
   shell:
-    "git *": allow
-    "npm*": allow
-    "node*": allow
-    "godot*": allow
+    "*": allow
   edit:
     "godot/**": allow
     "content/**": allow

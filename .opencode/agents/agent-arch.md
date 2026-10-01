@@ -11,9 +11,7 @@ permission:
   glob: allow
   list: allow
   shell:
-    "git log*": allow
-    "git show*": allow
-    "npm run scopes*": allow
+    "*": allow
   edit:
     "docs/acceptance/**": allow
 ---

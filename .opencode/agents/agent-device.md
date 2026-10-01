@@ -23,9 +23,7 @@ permission:
     "docs/acceptance/**": allow
     "scripts/repro/**": allow
   shell:
-    "./scripts/adb-device.sh*": allow
-    "adb*": allow
-    "node*": allow
+    "*": allow
   edit:
     "scripts/repro/**": allow
 ---

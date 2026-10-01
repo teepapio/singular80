@@ -17,16 +17,7 @@ permission:
   # a dispatcher that may also write becomes the queue.
   subagent: allow
   shell:
-    "git status*": allow
-    "git log*": allow
-    "git diff*": allow
-    "git show*": allow
-    "git worktree list*": allow
-    "npm run scopes*": allow
-    "npm run scope-for*": allow
-    "npm run agent:*": allow
-    "npm run gate:status*": allow
-    "node scripts/scopes.mjs*": allow
+    "*": allow
 ---
 
 You are the Leitsitzung of Singular 80: the one session that talks to the owner
