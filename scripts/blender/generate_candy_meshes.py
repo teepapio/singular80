@@ -157,23 +157,120 @@ def _stem(name: str, height: float, leaves: int = 2) -> None:
 
 
 # --- candy world ------------------------------------------------------------
+#: Number of pleats around the bonbon's paper cup. Real wrappers are pleated,
+#: and the pleats are what give the skirt its ridged silhouette from the side.
+BONBON_PLEATS = 12
+
+
 def build_bonbon() -> bpy.types.Object:
-    """Piece 1 — a domed bonbon with a ridged swirl on top."""
-    _ico("BonbonShell", (0.6, 0.6, 0.44), (0.0, 0.0, 0.34), subdivisions=2)
-    _ico("BonbonFoot", (0.62, 0.62, 0.1), (0.0, 0.0, 0.0), subdivisions=2)
-    for i in range(3):
-        _torus(f"BonbonSwirl{i}", 0.14 + i * 0.14, 0.06, (0.0, 0.0, 0.66 - i * 0.02), flatten=0.55)
-    _ico("BonbonKnot", (0.08, 0.08, 0.1), (0.0, 0.0, 0.82))
+    """Piece 1 — a chocolate sphere in a pleated paper cup.
+
+    Reference photographs (Wikimedia Commons, "Chocolate truffle - Godiva",
+    "Bombom de nozes", "Chocolate truffle - Delacre") all show the same three
+    things, and all three are silhouette features rather than textures:
+
+    * the body is a **sphere**, not a dome. A dome is wider than it is tall and
+      reads as a rock; the truffle is as tall as it is wide, with one strong
+      specular highlight near the top — that only happens on a round surface.
+    * it sits in a **pleated paper cup** that is *wider at its own base than
+      the sphere is where the sphere meets it*, so the outline has a visible
+      step instead of running in one continuous curve.
+    * a small piped swirl or a nut on top, kept low. A tall spike turns the
+      silhouette into a chess pawn.
+    """
+    # Chocolate body: a sphere, pushed down so its lower third is swallowed by
+    # the cup. Centre at z=0.62 with r=0.5 puts the top at 1.12 and the bottom
+    # at 0.12, i.e. the visible part is a full round ball.
+    _ico("BonbonBody", (0.5, 0.5, 0.5), (0.0, 0.0, 0.62), subdivisions=2)
+    # A gentle flat on the very bottom: a sphere resting in a cup has a small
+    # contact patch, and it keeps the piece from looking like it floats.
+    _ico("BonbonBase", (0.42, 0.42, 0.16), (0.0, 0.0, 0.34), subdivisions=1)
+
+    # The paper cup: a flared skirt, narrow at the top where the chocolate
+    # emerges and wide at the bottom. Radius 0.62 at the base against the
+    # sphere's 0.5 is the step that makes the outline read as "in a cup".
+    _cone("BonbonCup", BONBON_PLEATS, 0.62, 0.46, 0.34, (0.0, 0.0, 0.17))
+    # Pleats: thin radial fins standing on the cone's sloped surface. They are
+    # what the eye reads as "paper wrapper" rather than "cone".
+    for i in range(BONBON_PLEATS):
+        angle = i * 2.0 * math.pi / BONBON_PLEATS
+        _at(
+            _ico(f"BonbonPleat{i}", (0.07, 0.22, 0.19), (0.0, 0.0, 0.0)),
+            (math.cos(angle) * 0.55, math.sin(angle) * 0.55, 0.17),
+            (math.pi / 7.0, 0.0, angle),
+        )
+    # The rolled rim of the cup, a little wider than the cup's top edge.
+    _torus("BonbonCupRim", 0.47, 0.055, (0.0, 0.0, 0.33), major_segments=12)
+
+    # A small nut on top rather than a piped swirl. Two flattened rings here
+    # read as a flat lid from the side — the piece looked like a mushroom — and
+    # the "Bombom de nozes" reference shows the real thing: one squat nut
+    # sitting in the chocolate's crown, no taller than a tenth of the ball.
+    _ico("BonbonNut", (0.15, 0.15, 0.11), (0.0, 0.0, 1.09), subdivisions=1)
+    _ico("BonbonNutTip", (0.07, 0.07, 0.06), (0.02, 0.0, 1.17), subdivisions=1)
     return _merge("CandyBonbon")
 
 
+#: Where the lolly's candy head sits. The head is a disc whose flat faces point
+#: along ±Y, so the match-3 board (which sees the piece from the side) looks at
+#: the swirl face rather than at the thin edge.
+LOLLY_HEAD_Z = 1.06
+LOLLY_HEAD_R = 0.5
+LOLLY_HEAD_T = 0.18
+
+
+def _lolly_face_ring(name: str, radius: float, minor: float, y: float, z: float) -> bpy.types.Object:
+    """A torus lying in the XZ plane — one ring of the swirl on the front face.
+
+    Blender's torus primitive is built around Z, so it is rotated a quarter turn
+    about X to face along Y.
+    """
+    ring = _torus(name, radius, minor, (0.0, 0.0, 0.0), major_segments=16, minor_segments=5)
+    return _at(ring, (0.0, y, z), (math.pi / 2.0, 0.0, 0.0))
+
+
 def build_lolly() -> bpy.types.Object:
-    """Piece 2 — a swirled lollipop disc on a stick."""
-    _cone("LollyDisc", 14, 0.58, 0.58, 0.16, (0.0, 0.0, 0.5))
-    _cone("LollyRim", 14, 0.6, 0.5, 0.1, (0.0, 0.0, 0.42))
-    for i in range(3):
-        _torus(f"LollySwirl{i}", 0.14 + i * 0.15, 0.055, (0.0, 0.0, 0.58), flatten=0.6)
-    _cone("LollyStick", 6, 0.06, 0.06, 0.72, (0.0, 0.0, -0.12))
+    """Piece 2 — a round swirl lollipop standing upright on a thin stick.
+
+    Reference photographs (Wikimedia Commons, "Transparent film wrapped swirl
+    lollipop", "Rock candy on a stick", "Lollipop in the package") show a
+    *disc* seen face-on with concentric spiral bands, on a stick roughly a
+    tenth of the head's width. The previous build had all of that lying flat
+    like a hockey puck on a toothpick, which is why it read as neither: a
+    lollipop is recognisable from its proportion, head-up and stick-down.
+    """
+    # The candy head: a disc rotated so its axis runs along Y.
+    head = _cone("LollyHead", 16, LOLLY_HEAD_R, LOLLY_HEAD_R, LOLLY_HEAD_T, (0.0, 0.0, 0.0))
+    _at(head, (0.0, 0.0, LOLLY_HEAD_Z), (math.pi / 2.0, 0.0, 0.0))
+    # A rim ring around the edge, slightly proud of the disc, as the pressed
+    # sugar shell of a real lollipop is.
+    _at(
+        _torus("LollyRim", LOLLY_HEAD_R, 0.07, (0.0, 0.0, 0.0), major_segments=16, minor_segments=5),
+        (0.0, 0.0, LOLLY_HEAD_Z),
+        (math.pi / 2.0, 0.0, 0.0),
+    )
+    # The spiral swirl, in relief on *both* faces. Real swirl sweets show the
+    # spiral from either side, and the board may present the piece from either
+    # one; because the piece is tinted with a single colour, the swirl has to be
+    # geometry standing proud of the face rather than a texture.
+    #
+    # The ring tube is deliberately much thinner than the gap between rings.
+    # A first attempt used 0.055 tubes on 0.088 spacing, so the four rings
+    # merged into one flat plate and the head read as a blank disc — the relief
+    # has to be separated by a visible groove to survive at 400 pixels.
+    for side in (1.0, -1.0):
+        for i in range(4):
+            radius = 0.38 - i * 0.09
+            _lolly_face_ring(
+                f"LollySwirl{'F' if side > 0 else 'B'}{i}",
+                radius,
+                0.038,
+                side * LOLLY_HEAD_T / 2.0,
+                LOLLY_HEAD_Z,
+            )
+    # The stick: thin (0.055 against a 1.0-wide head, about 1/18) and long, and
+    # tapered towards its bottom end the way a real wooden stick is.
+    _cone("LollyStick", 6, 0.045, 0.06, 1.28, (0.0, 0.0, LOLLY_HEAD_Z - 0.68))
     return _merge("CandyLolly")
 
 

@@ -1,777 +1,777 @@
 {
   "candy/bonbon": {
-    "high": 11571,
-    "low": 540,
-    "med": 1172
+    "high": 20993,
+    "low": 1802,
+    "med": 4074
   },
   "candy/chocolate": {
-    "high": 13568,
-    "low": 212,
-    "med": 1108
+    "high": 11984,
+    "low": 749,
+    "med": 1794
   },
   "candy/daisy": {
-    "high": 10642,
-    "low": 380,
-    "med": 1292
+    "high": 15096,
+    "low": 1292,
+    "med": 2954
   },
   "candy/gift": {
-    "high": 10435,
-    "low": 348,
-    "med": 1392
+    "high": 15104,
+    "low": 1268,
+    "med": 2813
   },
   "candy/gumdrop": {
-    "high": 13056,
-    "low": 204,
-    "med": 1055
+    "high": 10704,
+    "low": 669,
+    "med": 1524
   },
   "candy/heart": {
-    "high": 11602,
-    "low": 134,
-    "med": 1073
+    "high": 10128,
+    "low": 432,
+    "med": 1147
   },
   "candy/jellybean": {
-    "high": 11288,
-    "low": 240,
-    "med": 1248
+    "high": 13168,
+    "low": 823,
+    "med": 1852
   },
   "candy/lily": {
-    "high": 10812,
-    "low": 346,
-    "med": 1384
+    "high": 13184,
+    "low": 1120,
+    "med": 2664
   },
   "candy/lolly": {
-    "high": 10423,
-    "low": 484,
-    "med": 1130
+    "high": 67512,
+    "low": 5657,
+    "med": 12623
   },
   "candy/lotus": {
-    "high": 10204,
-    "low": 480,
-    "med": 1180
+    "high": 17679,
+    "low": 1522,
+    "med": 3409
   },
   "candy/rose": {
-    "high": 10058,
-    "low": 460,
-    "med": 1144
+    "high": 16749,
+    "low": 1455,
+    "med": 3185
   },
   "candy/sunflower": {
-    "high": 10635,
-    "low": 500,
-    "med": 1287
+    "high": 18437,
+    "low": 1583,
+    "med": 3603
   },
   "candy/tulip": {
-    "high": 11145,
-    "low": 240,
-    "med": 1238
+    "high": 12240,
+    "low": 765,
+    "med": 1690
   },
   "crystal": {
-    "high": 11424,
-    "low": 20,
-    "med": 1280
-  },
-  "crystal1": {
-    "high": 11424,
-    "low": 20,
-    "med": 1280
-  },
-  "crystal2": {
-    "high": 11424,
-    "low": 20,
-    "med": 1280
-  },
-  "crystal3": {
-    "high": 11227,
-    "low": 298,
-    "med": 1192
-  },
-  "crystal4": {
-    "high": 11180,
-    "low": 296,
-    "med": 1184
-  },
-  "crystal5": {
-    "high": 10863,
-    "low": 324,
-    "med": 1296
-  },
-  "fence": {
-    "high": 11429,
-    "low": 64,
-    "med": 1024
-  },
-  "flight/ballista": {
-    "high": 10538,
-    "low": 92,
-    "med": 1472
-  },
-  "flight/cloud": {
-    "high": 10403,
-    "low": 100,
-    "med": 1195
-  },
-  "flight/cloud_storm": {
-    "high": 10214,
-    "low": 118,
-    "med": 1116
-  },
-  "flight/dragon_cloud": {
-    "high": 10913,
-    "low": 368,
-    "med": 1472
-  },
-  "flight/dragon_solar": {
-    "high": 10387,
-    "low": 410,
-    "med": 1158
-  },
-  "flight/dragon_tide": {
-    "high": 10396,
-    "low": 404,
-    "med": 1149
-  },
-  "flight/dragon_void": {
-    "high": 10387,
-    "low": 410,
-    "med": 1158
-  },
-  "flight/egg": {
-    "high": 10371,
-    "low": 120,
-    "med": 1177
-  },
-  "flight/egg_crystal": {
-    "high": 14336,
-    "low": 56,
-    "med": 1197
-  },
-  "flight/egg_large": {
-    "high": 10083,
-    "low": 452,
-    "med": 1175
-  },
-  "flight/fireball": {
-    "high": 10371,
-    "low": 120,
-    "med": 1177
-  },
-  "flight/golem": {
-    "high": 12800,
-    "low": 200,
-    "med": 1028
-  },
-  "flight/harpy": {
-    "high": 10586,
-    "low": 122,
-    "med": 1182
-  },
-  "flight/imp": {
-    "high": 10106,
-    "low": 112,
-    "med": 1207
-  },
-  "flight/island": {
-    "high": 11977,
-    "low": 138,
-    "med": 1070
-  },
-  "flight/nest": {
-    "high": 12847,
-    "low": 148,
-    "med": 1064
-  },
-  "flight/pedestal": {
-    "high": 12288,
-    "low": 192,
-    "med": 1007
-  },
-  "flight/roost": {
-    "high": 11678,
-    "low": 60,
-    "med": 1292
-  },
-  "flight/totem": {
-    "high": 11377,
-    "low": 80,
-    "med": 1280
-  },
-  "flight/wyvern": {
-    "high": 13952,
-    "low": 218,
+    "high": 11009,
+    "low": 506,
     "med": 1134
   },
-  "halloween_candy": {
-    "high": 10423,
-    "low": 388,
-    "med": 1228
-  },
-  "halloween_ghost_pumpkin": {
-    "high": 11751,
-    "low": 1086,
-    "med": 1086
-  },
-  "halloween_mini_pumpkin": {
-    "high": 12513,
-    "low": 588,
-    "med": 1093
-  },
-  "halloween_pumpkin": {
-    "high": 12672,
-    "low": 792,
-    "med": 1030
-  },
-  "halloween_seed": {
-    "high": 11197,
-    "low": 330,
-    "med": 1320
-  },
-  "horse": {
-    "high": 10966,
-    "low": 336,
-    "med": 1344
-  },
-  "log": {
-    "high": 10156,
-    "low": 108,
-    "med": 1098
-  },
-  "metro/bridge": {
-    "high": 10147,
-    "low": 108,
-    "med": 1090
-  },
-  "metro/car": {
-    "high": 10536,
-    "low": 352,
-    "med": 1408
-  },
-  "metro/house": {
-    "high": 11728,
-    "low": 66,
-    "med": 1056
-  },
-  "metro/interchange": {
-    "high": 10641,
-    "low": 384,
-    "med": 1190
-  },
-  "metro/loco": {
-    "high": 10536,
-    "low": 352,
-    "med": 1408
-  },
-  "metro/park": {
-    "high": 10822,
-    "low": 88,
-    "med": 1408
-  },
-  "metro/passenger": {
-    "high": 10240,
-    "low": 40,
-    "med": 1028
-  },
-  "metro/station": {
-    "high": 12160,
-    "low": 140,
-    "med": 1087
-  },
-  "metro/tower": {
-    "high": 13201,
-    "low": 152,
-    "med": 1066
-  },
-  "metro/transfer_ring": {
-    "high": 10752,
-    "low": 672,
-    "med": 1037
-  },
-  "metro/tunnel_portal": {
-    "high": 10765,
-    "low": 76,
-    "med": 1216
-  },
-  "ornament": {
-    "high": 10083,
-    "low": 440,
-    "med": 1204
-  },
-  "pang/clock": {
-    "high": 11023,
-    "low": 324,
-    "med": 1296
-  },
-  "pang/harpoon": {
-    "high": 13056,
-    "low": 204,
-    "med": 1080
-  },
-  "pang/heart": {
-    "high": 11603,
-    "low": 66,
-    "med": 1056
-  },
-  "pang/ice": {
-    "high": 10484,
-    "low": 30,
-    "med": 1121
-  },
-  "pang/orb": {
-    "high": 10403,
-    "low": 100,
-    "med": 1195
-  },
-  "pang/platform": {
-    "high": 10843,
-    "low": 72,
-    "med": 1152
-  },
-  "pumpkin": {
-    "high": 11039,
-    "low": 316,
-    "med": 1264
-  },
-  "rock": {
-    "high": 11424,
-    "low": 20,
-    "med": 1280
-  },
-  "rpg/amulet": {
-    "high": 12028,
-    "low": 276,
-    "med": 1104
-  },
-  "rpg/armor": {
-    "high": 11332,
-    "low": 64,
-    "med": 1024
-  },
-  "rpg/axe": {
-    "high": 12800,
-    "low": 50,
-    "med": 1077
-  },
-  "rpg/barrel": {
-    "high": 11789,
-    "low": 548,
-    "med": 1104
-  },
-  "rpg/bone_pile": {
-    "high": 10936,
-    "low": 84,
-    "med": 1344
-  },
-  "rpg/boots": {
-    "high": 12288,
-    "low": 48,
-    "med": 1037
-  },
-  "rpg/bow": {
-    "high": 10617,
-    "low": 280,
-    "med": 1120
-  },
-  "rpg/broken_pillar": {
-    "high": 11685,
-    "low": 60,
-    "med": 1297
-  },
-  "rpg/bush": {
-    "high": 11548,
-    "low": 60,
-    "med": 1280
-  },
-  "rpg/campfire": {
-    "high": 11153,
-    "low": 78,
-    "med": 1248
-  },
-  "rpg/chest": {
-    "high": 11716,
-    "low": 60,
-    "med": 1297
-  },
-  "rpg/coin": {
-    "high": 11395,
-    "low": 64,
-    "med": 1024
-  },
-  "rpg/crate": {
-    "high": 12586,
-    "low": 36,
-    "med": 1046
-  },
-  "rpg/crown": {
-    "high": 10862,
-    "low": 312,
-    "med": 1248
-  },
-  "rpg/crystal_cluster": {
-    "high": 11166,
-    "low": 32,
-    "med": 1102
-  },
-  "rpg/dagger": {
-    "high": 12800,
-    "low": 50,
-    "med": 1077
-  },
-  "rpg/dead_tree": {
-    "high": 12288,
-    "low": 48,
+  "crystal1": {
+    "high": 11486,
+    "low": 259,
     "med": 1036
   },
-  "rpg/dragon_bone": {
-    "high": 10726,
-    "low": 392,
-    "med": 1389
+  "crystal2": {
+    "high": 13027,
+    "low": 149,
+    "med": 1050
   },
-  "rpg/dragon_crystal": {
-    "high": 10396,
-    "low": 404,
-    "med": 1149
+  "crystal3": {
+    "high": 14497,
+    "low": 1211,
+    "med": 2725
   },
-  "rpg/dragon_elder": {
-    "high": 10396,
-    "low": 404,
-    "med": 1149
+  "crystal4": {
+    "high": 13211,
+    "low": 1101,
+    "med": 2502
   },
-  "rpg/dragon_ember": {
-    "high": 10577,
-    "low": 384,
-    "med": 1357
+  "crystal5": {
+    "high": 15337,
+    "low": 1294,
+    "med": 2887
   },
-  "rpg/dragon_frost": {
-    "high": 10577,
-    "low": 384,
-    "med": 1357
+  "fence": {
+    "high": 11677,
+    "low": 238,
+    "med": 1287
   },
-  "rpg/dragon_gold": {
-    "high": 10486,
-    "low": 398,
-    "med": 1406
+  "flight/ballista": {
+    "high": 10687,
+    "low": 345,
+    "med": 1380
   },
-  "rpg/dragon_hatchling": {
-    "high": 10637,
+  "flight/cloud": {
+    "high": 11026,
+    "low": 322,
+    "med": 1288
+  },
+  "flight/cloud_storm": {
+    "high": 10498,
     "low": 378,
-    "med": 1338
+    "med": 1221
   },
-  "rpg/dragon_lord": {
-    "high": 10387,
-    "low": 410,
-    "med": 1158
+  "flight/dragon_cloud": {
+    "high": 34199,
+    "low": 2899,
+    "med": 6637
   },
-  "rpg/dragon_shadow": {
-    "high": 10408,
-    "low": 390,
-    "med": 1389
+  "flight/dragon_solar": {
+    "high": 35939,
+    "low": 3042,
+    "med": 6709
   },
-  "rpg/dragon_stone": {
-    "high": 10577,
-    "low": 384,
-    "med": 1357
+  "flight/dragon_tide": {
+    "high": 35826,
+    "low": 3025,
+    "med": 6663
   },
-  "rpg/dragon_storm": {
-    "high": 10726,
-    "low": 392,
-    "med": 1389
+  "flight/dragon_void": {
+    "high": 35915,
+    "low": 3042,
+    "med": 6680
   },
-  "rpg/dragon_venom": {
-    "high": 10408,
-    "low": 390,
-    "med": 1389
+  "flight/egg": {
+    "high": 10578,
+    "low": 380,
+    "med": 1275
   },
-  "rpg/dungeon_arch": {
-    "high": 11429,
-    "low": 64,
-    "med": 1024
+  "flight/egg_crystal": {
+    "high": 11456,
+    "low": 716,
+    "med": 1587
   },
-  "rpg/gem": {
+  "flight/egg_large": {
+    "high": 21140,
+    "low": 1755,
+    "med": 4044
+  },
+  "flight/fireball": {
+    "high": 10601,
+    "low": 380,
+    "med": 1277
+  },
+  "flight/golem": {
+    "high": 10960,
+    "low": 685,
+    "med": 1549
+  },
+  "flight/harpy": {
+    "high": 10280,
+    "low": 420,
+    "med": 1183
+  },
+  "flight/imp": {
+    "high": 10428,
+    "low": 367,
+    "med": 1468
+  },
+  "flight/island": {
+    "high": 10358,
+    "low": 477,
+    "med": 1103
+  },
+  "flight/nest": {
+    "high": 11618,
+    "low": 534,
+    "med": 1189
+  },
+  "flight/pedestal": {
+    "high": 10800,
+    "low": 675,
+    "med": 1498
+  },
+  "flight/roost": {
+    "high": 13696,
+    "low": 214,
+    "med": 1160
+  },
+  "flight/totem": {
     "high": 11171,
-    "low": 32,
-    "med": 1100
+    "low": 289,
+    "med": 1156
   },
-  "rpg/grass_tuft": {
-    "high": 10475,
-    "low": 30,
-    "med": 1112
+  "flight/wyvern": {
+    "high": 11840,
+    "low": 740,
+    "med": 1666
   },
-  "rpg/gravestone": {
-    "high": 11419,
-    "low": 64,
-    "med": 1024
+  "halloween_candy": {
+    "high": 14378,
+    "low": 1239,
+    "med": 2778
   },
-  "rpg/greatsword": {
-    "high": 12800,
-    "low": 50,
-    "med": 1077
+  "halloween_ghost_pumpkin": {
+    "high": 42201,
+    "low": 3605,
+    "med": 8203
   },
-  "rpg/helmet": {
-    "high": 13261,
-    "low": 38,
-    "med": 1060
+  "halloween_mini_pumpkin": {
+    "high": 21452,
+    "low": 1865,
+    "med": 4067
   },
-  "rpg/key": {
-    "high": 11282,
-    "low": 300,
-    "med": 1200
+  "halloween_pumpkin": {
+    "high": 29238,
+    "low": 2523,
+    "med": 5613
   },
-  "rpg/knight": {
-    "high": 11391,
-    "low": 330,
-    "med": 1320
+  "halloween_seed": {
+    "high": 12135,
+    "low": 1048,
+    "med": 2355
   },
-  "rpg/mushroom": {
-    "high": 10127,
-    "low": 108,
-    "med": 1178
+  "horse": {
+    "high": 14882,
+    "low": 1251,
+    "med": 2795
   },
-  "rpg/pine_tree": {
-    "high": 11455,
-    "low": 74,
-    "med": 1184
+  "log": {
+    "high": 10417,
+    "low": 407,
+    "med": 1181
   },
-  "rpg/portal_gate": {
-    "high": 10972,
-    "low": 316,
-    "med": 1264
+  "metro/bridge": {
+    "high": 10261,
+    "low": 407,
+    "med": 1166
   },
-  "rpg/potion_health": {
-    "high": 11684,
-    "low": 60,
-    "med": 1291
+  "metro/car": {
+    "high": 14290,
+    "low": 1214,
+    "med": 2678
   },
-  "rpg/potion_mana": {
-    "high": 11684,
-    "low": 60,
-    "med": 1291
+  "metro/house": {
+    "high": 11442,
+    "low": 255,
+    "med": 1020
   },
-  "rpg/ring": {
-    "high": 12028,
+  "metro/interchange": {
+    "high": 17750,
+    "low": 1470,
+    "med": 3374
+  },
+  "metro/loco": {
+    "high": 14249,
+    "low": 1214,
+    "med": 2662
+  },
+  "metro/park": {
+    "high": 10942,
+    "low": 310,
+    "med": 1240
+  },
+  "metro/passenger": {
+    "high": 12682,
+    "low": 145,
+    "med": 1044
+  },
+  "metro/station": {
+    "high": 11194,
+    "low": 514,
+    "med": 1156
+  },
+  "metro/tower": {
+    "high": 12168,
+    "low": 559,
+    "med": 1241
+  },
+  "metro/transfer_ring": {
+    "high": 30479,
+    "low": 2541,
+    "med": 5775
+  },
+  "metro/tunnel_portal": {
+    "high": 10911,
+    "low": 288,
+    "med": 1152
+  },
+  "ornament": {
+    "high": 17421,
+    "low": 1573,
+    "med": 3462
+  },
+  "pang/clock": {
+    "high": 15136,
+    "low": 1252,
+    "med": 2875
+  },
+  "pang/harpoon": {
+    "high": 12496,
+    "low": 781,
+    "med": 1758
+  },
+  "pang/heart": {
+    "high": 13952,
+    "low": 218,
+    "med": 1163
+  },
+  "pang/ice": {
+    "high": 10263,
+    "low": 105,
+    "med": 1145
+  },
+  "pang/orb": {
+    "high": 10979,
+    "low": 322,
+    "med": 1288
+  },
+  "pang/platform": {
+    "high": 11142,
     "low": 276,
     "med": 1104
   },
-  "rpg/rock_large": {
-    "high": 10240,
-    "low": 40,
-    "med": 1041
+  "pumpkin": {
+    "high": 13934,
+    "low": 1168,
+    "med": 2612
   },
-  "rpg/rock_small": {
-    "high": 11424,
-    "low": 20,
-    "med": 1280
-  },
-  "rpg/rune_stone": {
-    "high": 12586,
-    "low": 36,
-    "med": 1046
-  },
-  "rpg/scroll": {
-    "high": 11690,
-    "low": 60,
-    "med": 1298
-  },
-  "rpg/shield": {
-    "high": 11151,
-    "low": 296,
-    "med": 1184
-  },
-  "rpg/skull": {
-    "high": 11395,
-    "low": 72,
-    "med": 1152
-  },
-  "rpg/staff": {
-    "high": 11173,
-    "low": 296,
-    "med": 1184
-  },
-  "rpg/stalagmite": {
-    "high": 11751,
-    "low": 60,
-    "med": 1297
-  },
-  "rpg/stone_pillar": {
-    "high": 13312,
-    "low": 52,
-    "med": 1128
-  },
-  "rpg/sword": {
-    "high": 10835,
+  "rock": {
+    "high": 10963,
     "low": 70,
     "med": 1120
   },
-  "rpg/torch": {
-    "high": 12800,
-    "low": 50,
-    "med": 1078
+  "rpg/amulet": {
+    "high": 12262,
+    "low": 1022,
+    "med": 2318
   },
-  "ship": {
-    "high": 10240,
-    "low": 10,
+  "rpg/armor": {
+    "high": 13760,
+    "low": 215,
+    "med": 1159
+  },
+  "rpg/axe": {
+    "high": 12352,
+    "low": 193,
+    "med": 1043
+  },
+  "rpg/barrel": {
+    "high": 24560,
+    "low": 2049,
+    "med": 4595
+  },
+  "rpg/bone_pile": {
+    "high": 10795,
+    "low": 304,
+    "med": 1216
+  },
+  "rpg/boots": {
+    "high": 11584,
+    "low": 181,
+    "med": 1005
+  },
+  "rpg/bow": {
+    "high": 12524,
+    "low": 1047,
+    "med": 2223
+  },
+  "rpg/broken_pillar": {
+    "high": 14080,
+    "low": 220,
+    "med": 1179
+  },
+  "rpg/bush": {
+    "high": 12160,
+    "low": 190,
+    "med": 1012
+  },
+  "rpg/campfire": {
+    "high": 10871,
+    "low": 288,
+    "med": 1152
+  },
+  "rpg/chest": {
+    "high": 14464,
+    "low": 226,
+    "med": 1216
+  },
+  "rpg/coin": {
+    "high": 14464,
+    "low": 226,
+    "med": 1223
+  },
+  "rpg/crate": {
+    "high": 10015,
+    "low": 114,
+    "med": 1114
+  },
+  "rpg/crown": {
+    "high": 13589,
+    "low": 1139,
+    "med": 2581
+  },
+  "rpg/crystal_cluster": {
+    "high": 10379,
+    "low": 477,
+    "med": 1112
+  },
+  "rpg/dagger": {
+    "high": 12288,
+    "low": 192,
+    "med": 1042
+  },
+  "rpg/dead_tree": {
+    "high": 11136,
+    "low": 174,
+    "med": 1026
+  },
+  "rpg/dragon_bone": {
+    "high": 35268,
+    "low": 2984,
+    "med": 6577
+  },
+  "rpg/dragon_crystal": {
+    "high": 35858,
+    "low": 3025,
+    "med": 6893
+  },
+  "rpg/dragon_elder": {
+    "high": 35897,
+    "low": 3025,
+    "med": 6665
+  },
+  "rpg/dragon_ember": {
+    "high": 35036,
+    "low": 2960,
+    "med": 6782
+  },
+  "rpg/dragon_frost": {
+    "high": 35035,
+    "low": 2960,
+    "med": 6782
+  },
+  "rpg/dragon_gold": {
+    "high": 35432,
+    "low": 2999,
+    "med": 6892
+  },
+  "rpg/dragon_hatchling": {
+    "high": 34678,
+    "low": 2937,
+    "med": 6490
+  },
+  "rpg/dragon_lord": {
+    "high": 35892,
+    "low": 3042,
+    "med": 6710
+  },
+  "rpg/dragon_shadow": {
+    "high": 35244,
+    "low": 2980,
+    "med": 6574
+  },
+  "rpg/dragon_stone": {
+    "high": 34964,
+    "low": 2960,
+    "med": 6762
+  },
+  "rpg/dragon_storm": {
+    "high": 35243,
+    "low": 2984,
+    "med": 6580
+  },
+  "rpg/dragon_venom": {
+    "high": 35250,
+    "low": 2980,
+    "med": 6548
+  },
+  "rpg/dungeon_arch": {
+    "high": 11675,
+    "low": 238,
+    "med": 1288
+  },
+  "rpg/gem": {
+    "high": 10300,
+    "low": 103,
+    "med": 1216
+  },
+  "rpg/grass_tuft": {
+    "high": 10401,
+    "low": 100,
+    "med": 1183
+  },
+  "rpg/gravestone": {
+    "high": 11682,
+    "low": 238,
+    "med": 1292
+  },
+  "rpg/greatsword": {
+    "high": 12288,
+    "low": 192,
+    "med": 1042
+  },
+  "rpg/helmet": {
+    "high": 11713,
+    "low": 134,
+    "med": 1166
+  },
+  "rpg/key": {
+    "high": 13372,
+    "low": 1121,
+    "med": 2538
+  },
+  "rpg/knight": {
+    "high": 13975,
+    "low": 1175,
+    "med": 2634
+  },
+  "rpg/mushroom": {
+    "high": 10602,
+    "low": 364,
+    "med": 1456
+  },
+  "rpg/pine_tree": {
+    "high": 11810,
+    "low": 268,
+    "med": 1072
+  },
+  "rpg/portal_gate": {
+    "high": 13988,
+    "low": 1166,
+    "med": 2639
+  },
+  "rpg/potion_health": {
+    "high": 13632,
+    "low": 213,
+    "med": 1144
+  },
+  "rpg/potion_mana": {
+    "high": 13632,
+    "low": 213,
+    "med": 1144
+  },
+  "rpg/ring": {
+    "high": 12271,
+    "low": 1022,
+    "med": 2331
+  },
+  "rpg/rock_large": {
+    "high": 11504,
+    "low": 132,
+    "med": 1101
+  },
+  "rpg/rock_small": {
+    "high": 10965,
+    "low": 70,
+    "med": 1120
+  },
+  "rpg/rune_stone": {
+    "high": 10015,
+    "low": 114,
+    "med": 1114
+  },
+  "rpg/scroll": {
+    "high": 14144,
+    "low": 221,
+    "med": 1194
+  },
+  "rpg/shield": {
+    "high": 12907,
+    "low": 1084,
+    "med": 2415
+  },
+  "rpg/skull": {
+    "high": 11494,
+    "low": 238,
+    "med": 1266
+  },
+  "rpg/staff": {
+    "high": 13103,
+    "low": 1097,
+    "med": 2440
+  },
+  "rpg/stalagmite": {
+    "high": 14464,
+    "low": 226,
+    "med": 1231
+  },
+  "rpg/stone_pillar": {
+    "high": 10752,
+    "low": 168,
+    "med": 1037
+  },
+  "rpg/sword": {
+    "high": 11391,
+    "low": 255,
     "med": 1020
   },
-  "siedler/bakery": {
-    "high": 12126,
-    "low": 256,
-    "med": 1024
+  "rpg/torch": {
+    "high": 12224,
+    "low": 191,
+    "med": 1032
   },
-  "siedler/blacksmith": {
-    "high": 11411,
-    "low": 284,
-    "med": 1136
-  },
-  "siedler/castle": {
-    "high": 10997,
-    "low": 344,
-    "med": 1376
-  },
-  "siedler/coal_mine": {
-    "high": 10383,
-    "low": 412,
-    "med": 1200
-  },
-  "siedler/coal_node": {
-    "high": 10403,
-    "low": 100,
-    "med": 1195
-  },
-  "siedler/construction": {
-    "high": 14336,
-    "low": 224,
-    "med": 1182
-  },
-  "siedler/farm": {
-    "high": 10985,
-    "low": 512,
-    "med": 1138
-  },
-  "siedler/fish_spot": {
-    "high": 11330,
-    "low": 80,
-    "med": 1280
-  },
-  "siedler/fishery": {
-    "high": 11230,
-    "low": 300,
-    "med": 1200
-  },
-  "siedler/flag": {
-    "high": 11406,
-    "low": 80,
-    "med": 1280
-  },
-  "siedler/forester": {
-    "high": 12003,
-    "low": 276,
-    "med": 1104
-  },
-  "siedler/gold_mine": {
-    "high": 10383,
-    "low": 412,
-    "med": 1200
-  },
-  "siedler/gold_node": {
-    "high": 10403,
-    "low": 100,
-    "med": 1195
-  },
-  "siedler/iron_mine": {
-    "high": 10383,
-    "low": 412,
-    "med": 1200
-  },
-  "siedler/iron_node": {
-    "high": 10403,
-    "low": 100,
-    "med": 1195
-  },
-  "siedler/knight": {
-    "high": 12416,
-    "low": 194,
-    "med": 1019
-  },
-  "siedler/oak": {
-    "high": 11611,
-    "low": 60,
-    "med": 1286
-  },
-  "siedler/quarry": {
-    "high": 11801,
-    "low": 136,
+  "ship": {
+    "high": 13665,
+    "low": 39,
     "med": 1057
   },
+  "siedler/bakery": {
+    "high": 14464,
+    "low": 904,
+    "med": 2037
+  },
+  "siedler/blacksmith": {
+    "high": 12593,
+    "low": 1050,
+    "med": 2402
+  },
+  "siedler/castle": {
+    "high": 15214,
+    "low": 1271,
+    "med": 2886
+  },
+  "siedler/coal_mine": {
+    "high": 18108,
+    "low": 1517,
+    "med": 3408
+  },
+  "siedler/coal_node": {
+    "high": 11016,
+    "low": 322,
+    "med": 1288
+  },
+  "siedler/construction": {
+    "high": 13408,
+    "low": 838,
+    "med": 1898
+  },
+  "siedler/farm": {
+    "high": 21647,
+    "low": 1820,
+    "med": 4014
+  },
+  "siedler/fish_spot": {
+    "high": 10849,
+    "low": 273,
+    "med": 1092
+  },
+  "siedler/fishery": {
+    "high": 12938,
+    "low": 1087,
+    "med": 2396
+  },
+  "siedler/flag": {
+    "high": 11199,
+    "low": 289,
+    "med": 1156
+  },
+  "siedler/forester": {
+    "high": 11897,
+    "low": 1000,
+    "med": 2245
+  },
+  "siedler/gold_mine": {
+    "high": 18133,
+    "low": 1517,
+    "med": 3382
+  },
+  "siedler/gold_node": {
+    "high": 11016,
+    "low": 322,
+    "med": 1288
+  },
+  "siedler/iron_mine": {
+    "high": 18133,
+    "low": 1517,
+    "med": 3382
+  },
+  "siedler/iron_node": {
+    "high": 11016,
+    "low": 322,
+    "med": 1288
+  },
+  "siedler/knight": {
+    "high": 11136,
+    "low": 696,
+    "med": 1544
+  },
+  "siedler/oak": {
+    "high": 12992,
+    "low": 203,
+    "med": 1092
+  },
+  "siedler/quarry": {
+    "high": 10628,
+    "low": 489,
+    "med": 1126
+  },
   "siedler/sawmill": {
-    "high": 11300,
-    "low": 300,
-    "med": 1200
+    "high": 13404,
+    "low": 1121,
+    "med": 2562
   },
   "siedler/settler": {
-    "high": 10324,
-    "low": 102,
-    "med": 1142
+    "high": 10542,
+    "low": 375,
+    "med": 1500
   },
   "siedler/smelter": {
-    "high": 12032,
-    "low": 188,
-    "med": 1011
+    "high": 10784,
+    "low": 674,
+    "med": 1516
   },
   "siedler/stone_node": {
-    "high": 10403,
-    "low": 100,
-    "med": 1195
+    "high": 11016,
+    "low": 322,
+    "med": 1288
   },
   "siedler/toolsmith": {
-    "high": 10896,
-    "low": 312,
-    "med": 1248
+    "high": 14015,
+    "low": 1166,
+    "med": 2634
   },
   "siedler/warehouse": {
-    "high": 11534,
-    "low": 1024,
-    "med": 1024
+    "high": 45083,
+    "low": 3787,
+    "med": 8478
   },
   "siedler/watchtower": {
-    "high": 11653,
-    "low": 266,
-    "med": 1064
+    "high": 11945,
+    "low": 995,
+    "med": 2199
   },
   "siedler/windmill": {
-    "high": 11495,
-    "low": 242,
-    "med": 1272
+    "high": 14080,
+    "low": 880,
+    "med": 1966
   },
   "siedler/woodcutter": {
-    "high": 10874,
-    "low": 340,
-    "med": 1360
+    "high": 15452,
+    "low": 1285,
+    "med": 2933
   },
   "tree": {
-    "high": 11455,
-    "low": 74,
-    "med": 1184
+    "high": 11806,
+    "low": 268,
+    "med": 1072
   },
   "xmas_bauble": {
-    "high": 14144,
-    "low": 884,
-    "med": 1201
+    "high": 33592,
+    "low": 3058,
+    "med": 6798
   },
   "xmas_candy_cane": {
-    "high": 10368,
-    "low": 648,
-    "med": 1068
+    "high": 29854,
+    "low": 2501,
+    "med": 5600
   },
   "xmas_gingerbread_star": {
-    "high": 10715,
-    "low": 500,
-    "med": 1110
+    "high": 21142,
+    "low": 1779,
+    "med": 3912
   },
   "xmas_pinecone": {
-    "high": 12948,
-    "low": 608,
-    "med": 1094
+    "high": 22627,
+    "low": 1957,
+    "med": 4322
   },
   "xmas_star": {
-    "high": 12024,
-    "low": 560,
-    "med": 1112
+    "high": 24021,
+    "low": 2042,
+    "med": 4802
   }
 }

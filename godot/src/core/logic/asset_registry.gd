@@ -272,7 +272,7 @@ const SIEDLER_KEYS: Array[String] = [
 
 const TIERS: Array[String] = ["low", "med", "high"]
 
-## What the gallery calls the tiers, plus the triangle budget each one aims for.
+## What the gallery calls the tiers.
 ##
 ## The values are the **source language** and nothing else: a literal in
 ## `godot/src` is English, and a German fallback here showed up as "Mittel" on
@@ -286,6 +286,18 @@ const TIER_LABELS := {
 	"high": "High",
 }
 
+## The triangle budget each tier aims for.
+##
+## These are **floors, not the counts themselves**. The shipped `low` tier is
+## refined to a per-mesh target committed in `godot/assets/meshes/low_target.json`
+## (`scripts/blender/refine_low_meshes.py`), and `med`/`high` are then derived
+## from whatever that produced (`scripts/blender/generate_lod_meshes.py`), each
+## at least its floor here *and* at least a multiple of the low count. A flat
+## 1000 would make the middle tier coarser than the tier below it for a mesh
+## whose low tier costs more than that. The real numbers are measured into
+## `lod.json` and displayed per mesh — read those, not this, to learn a count.
+const TIER_BUDGET := {"low": 0, "med": 1000, "high": 10000}
+
 const TIER_LOC_KEY := {
 	"med": "gallery.tier.med",
 	"high": "gallery.tier.high",
@@ -295,8 +307,6 @@ const GALLERY_LOC_KEYS: Array[String] = [
 	"gallery.tier.med",
 	"gallery.tier.high",
 ]
-
-const TIER_BUDGET := {"low": 0, "med": 1000, "high": 10000}
 
 ## Written by the Blender LOD generator; `{"<key>": {"low": n, "med": n, "high": n}}`.
 const LOD_STATS := "%s/lod.json" % MESH_DIR
