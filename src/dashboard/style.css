@@ -467,13 +467,6 @@ button.chip {
   color: #fca5a5;
 }
 
-.score {
-  margin-left: auto;
-  font-weight: 700;
-  color: var(--accent);
-  font-size: 14px;
-}
-
 .card-text {
   margin: 10px 0 4px;
   font-size: 15px;
@@ -592,21 +585,6 @@ button.chip {
   font-size: 13px;
   color: var(--muted);
   line-height: 1.6;
-}
-
-.breakdown {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 6px;
-  margin-top: 6px;
-}
-
-.breakdown div {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 9px;
-  font-size: 12px;
 }
 
 .run-panel {

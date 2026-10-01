@@ -141,7 +141,6 @@ export function buildSuggestionEmbed(
   };
   const fields: Record<string, unknown>[] = [
     { name: 'Kategorie', value: CATEGORY_LABELS[suggestion.category], inline: true },
-    { name: 'Score', value: `${suggestion.score}`, inline: true },
     { name: 'Stimmen', value: `${suggestion.votes}`, inline: true },
   ];
   if (suggestion.clusterSize > 1) {

@@ -114,15 +114,6 @@ export interface CheckQueueState {
 }
 
 
-export interface ScoreBreakdown {
-  votes: number;
-  cluster: number;
-  recency: number;
-  category: number;
-  quality: number;
-  penalty: number;
-}
-
 export interface Suggestion {
   id: number;
   text: string;
@@ -147,8 +138,6 @@ export interface Suggestion {
 }
 
 export interface SuggestionView extends Suggestion {
-  score: number;
-  breakdown: ScoreBreakdown;
   clusterIds: number[];
   clusterSize: number;
   run: RunRecord | null;
@@ -234,8 +223,6 @@ export interface Settings {
   discordWebhook: string;
   model: string;
   extraInstructions: string;
-  autoApprove: boolean;
-  autoApproveScore: number;
   /**
    * Hard timeout per run in minutes. 0 = no timeout, i.e. a hung agent blocks
    * the queue forever, which is exactly what this setting exists to prevent.
@@ -246,9 +233,8 @@ export interface Settings {
   /** Base backoff in seconds before the first retry; doubles with every attempt. */
   retryBackoffSeconds: number;
   /**
-   * How many opencode sessions may run at once. An upper bound, not a promise: a
-   * run is only admitted to a free lane when its scope does not collide with a
-   * busy one, so lanes can sit idle while everything queued wants the same files.
+   * How many opencode sessions may run at once, and the only limit on it: scopes
+   * do not reserve a lane, so two runs in the same scope start side by side.
    */
   maxParallelRuns: number;
 }
@@ -276,9 +262,10 @@ export interface QueueState {
   /** Runs waiting to start, in the order they will start. */
   queue: RunRecord[];
   /**
-   * Queued runs that cannot start because a busy lane already claims their scope.
-   * Purely informational: explains an empty free lane instead of leaving a run
-   * "waiting" with no visible reason.
+   * Queued runs that cannot start because every lane is busy. Purely
+   * informational: explains an empty free lane instead of leaving a run "waiting"
+   * with no visible reason. A run whose scope collides with a busy one is *not*
+   * in here — scopes do not reserve a lane.
    */
   blockedRunIds: string[];
 }

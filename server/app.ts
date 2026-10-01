@@ -6,7 +6,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import type { BusEvent, RunRecord, Suggestion, SuggestionStatus, SuggestionView } from '../src/shared/types';
 import { OPERATOR_SOURCE } from '../src/shared/types';
-import { classify, countsTowardsCluster, decorate, decorateAll, findCanonical, scoreSuggestion, sortSuggestions, type SortMode } from '../src/shared/sorting';
+import { classify, countsTowardsCluster, decorate, decorateAll, findCanonical, sortSuggestions, type SortMode } from '../src/shared/sorting';
 import { ContentStore } from './content';
 import { Store } from './db';
 import * as discord from './discord';
@@ -126,7 +126,7 @@ export function createApp(options: AppOptions): FastifyInstance {
     const all = store.listSuggestions();
     const found = all.find((s) => s.id === id);
     if (!found) return null;
-    const view = decorate(found, all, Date.now());
+    const view = decorate(found, all);
     if (found.runId) view.run = store.getRun(found.runId);
     return view;
   };
@@ -242,7 +242,7 @@ export function createApp(options: AppOptions): FastifyInstance {
     // One pass over the whole list: `decorate` per row would rebuild the cluster
     // index per row, which is quadratic on a table this route polls every few
     // seconds.
-    const decorated = decorateAll(all, Date.now());
+    const decorated = decorateAll(all);
     let views = all.map((s, i) => {
       const v = decorated[i];
       if (s.runId) v.run = store.getRun(s.runId);
@@ -260,7 +260,7 @@ export function createApp(options: AppOptions): FastifyInstance {
       const needle = query.q.toLowerCase();
       views = views.filter((v) => v.text.toLowerCase().includes(needle));
     }
-    views = sortSuggestions(views, (query.sort as SortMode) ?? 'score');
+    views = sortSuggestions(views, (query.sort as SortMode) ?? 'top');
     return { suggestions: views, stats: statsOf(views) };
   });
 
@@ -306,13 +306,6 @@ export function createApp(options: AppOptions): FastifyInstance {
       // header makes the replay visible to the dashboard and to tests without
       // adding a field the client would have to know.
       return reply.header('X-Suggestion-Replay', '1').send(viewOf(suggestion.id)!);
-    }
-    if (settings.autoApprove) {
-      const clusterSize = canon ? canon.clusterIds.length + 1 : 1;
-      const { score } = scoreSuggestion(suggestion, Date.now(), clusterSize);
-      if (score >= settings.autoApproveScore) {
-        store.updateSuggestionStatus(suggestion.id, 'approved');
-      }
     }
     let view = viewOf(suggestion.id)!;
     const webhook = settings.discordWebhook || process.env.DISCORD_WEBHOOK_URL || '';
@@ -894,8 +887,6 @@ export function createApp(options: AppOptions): FastifyInstance {
     }
     if (typeof body.model === 'string') patch.model = body.model.trim();
     if (typeof body.extraInstructions === 'string') patch.extraInstructions = body.extraInstructions;
-    if (typeof body.autoApprove === 'boolean') patch.autoApprove = body.autoApprove;
-    if (typeof body.autoApproveScore === 'number') patch.autoApproveScore = body.autoApproveScore;
     // Runner policy. The store clamps these to its bounds, so a typo cannot
     // disable the timeout or ask for a thousand retries.
     for (const key of ['runTimeoutMinutes', 'retryLimit', 'retryBackoffSeconds', 'maxParallelRuns'] as const) {
@@ -952,7 +943,7 @@ export function createApp(options: AppOptions): FastifyInstance {
 
   app.get('/api/stats', async () => {
     const all = store.listSuggestions();
-    const views = decorateAll(all, Date.now());
+    const views = decorateAll(all);
     return { stats: statsOf(views), runs: store.listRuns(5) };
   });
 

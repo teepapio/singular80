@@ -3,11 +3,10 @@ import {
   CLUSTER_THRESHOLD,
   classify,
   decorate,
+  decorateAll,
   diceTrigram,
   findCanonical,
   overlapCoefficient,
-  qualityScore,
-  scoreSuggestion,
   similarity,
   sortSuggestions,
   tokenize,
@@ -97,55 +96,51 @@ describe('Ähnlichkeit & Cluster', () => {
       makeSuggestion(2, 'Neuer Slime Gegner', { canonicalId: 1 }),
       makeSuggestion(3, 'Andere Idee', { canonicalId: null }),
     ];
-    const view = decorate(all[0], all, Date.now());
+    const view = decorate(all[0], all);
     expect(view.clusterSize).toBe(2);
     expect(view.clusterIds.sort()).toEqual([1, 2]);
-    expect(view.breakdown.cluster).toBe(2);
   });
 });
 
-describe('Scoring ohne Tokens', () => {
-  it('belohnt Stimmen', () => {
-    const now = Date.now();
-    const base = scoreSuggestion(makeSuggestion(1, 'Füge einen neuen Gegner hinzu, der Blitze wirft'), now, 1);
-    const voted = scoreSuggestion(
-      makeSuggestion(1, 'Füge einen neuen Gegner hinzu, der Blitze wirft', { votes: 5 }),
-      now,
-      1,
-    );
-    expect(voted.score).toBeGreaterThan(base.score);
+describe('Reihenfolge ohne Score', () => {
+  /**
+   * There is no priority score any more. What is left has to rest on something
+   * the owner can see and argue with: the players' votes, then the cluster size,
+   * then the newest.
+   */
+  const all = [
+    makeSuggestion(1, 'Füge einen Slime Gegner hinzu', { votes: 1 }),
+    makeSuggestion(2, 'Neue Waffe: Railgun', { votes: 9 }),
+    makeSuggestion(3, 'Bitte die Musik leiser machen', { votes: 3 }),
+  ];
+  const views = decorateAll(all);
+
+  it('sortiert nach Stimmen, dann nach neu', () => {
+    expect(sortSuggestions(views, 'top').map((v) => v.id)).toEqual([2, 3, 1]);
   });
 
-  it('belohnt frische Vorschläge', () => {
-    const now = Date.now();
-    const fresh = scoreSuggestion(makeSuggestion(1, 'Ein neues Level mit Lava'), now, 1);
-    const old = scoreSuggestion(
-      makeSuggestion(2, 'Ein neues Level mit Lava', { createdAt: now - 1000 * 60 * 60 * 24 * 14 }),
-      now,
-      1,
-    );
-    expect(fresh.breakdown.recency).toBeGreaterThan(old.breakdown.recency);
-    expect(fresh.score).toBeGreaterThan(old.score);
+  it('eine unbekannte Sortierung fällt auf Stimmen zurück, nicht auf eine Zahl', () => {
+    // `sort=score` kann noch in einem alten Bookmark oder Tab stehen. Es gibt
+    // keinen Score mehr, und ein toter Parameter darf nicht die Liste leeren.
+    const sorted = sortSuggestions(views, 'score' as never);
+    expect(sorted.map((v) => v.id)).toEqual([2, 3, 1]);
   });
 
-  it('bestraft Spam', () => {
-    const spam = qualityScore('!!!!!');
-    const good = qualityScore('Füge bitte einen neuen Gegner mit einer besonderen Fähigkeit hinzu');
-    expect(spam.penalty).toBeGreaterThan(0);
-    expect(good.quality).toBeGreaterThan(spam.quality);
+  it('"new" ist die neueste zuerst', () => {
+    const now = Date.now();
+    const fresh = decorateAll([
+      makeSuggestion(1, 'Älterer Vorschlag', { createdAt: now - 60_000 }),
+      makeSuggestion(2, 'Neuerer Vorschlag', { createdAt: now }),
+    ]);
+    expect(sortSuggestions(fresh, 'new').map((v) => v.id)).toEqual([2, 1]);
   });
 
-  it('sortiert deterministisch nach Score', () => {
-    const now = Date.now();
-    const all = [
-      makeSuggestion(1, 'Füge einen Slime Gegner hinzu', { votes: 1 }),
-      makeSuggestion(2, 'Neue Waffe: Railgun', { votes: 9 }),
-      makeSuggestion(3, 'Bitte die Musik leiser machen', { votes: 3 }),
-    ];
-    const views = all.map((s) => decorate(s, all, now));
-    const sorted = sortSuggestions(views, 'score');
-    expect(sorted[0].id).toBe(2);
-    expect(sortSuggestions(views, 'top')[0].votes).toBe(9);
-    expect(sortSuggestions(views, 'new')[0].id).toBe(3);
+  it('"cluster" nimmt die größte Gruppe zuerst', () => {
+    const clustered = decorateAll([
+      makeSuggestion(1, 'Füge einen Slime Gegner hinzu'),
+      makeSuggestion(2, 'Neuer Slime Gegner', { canonicalId: 1 }),
+      makeSuggestion(3, 'Ganz andere Idee'),
+    ]);
+    expect(sortSuggestions(clustered, 'cluster')[0].clusterSize).toBe(2);
   });
 });

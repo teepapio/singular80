@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../server/db';
 import { Runner } from '../server/runner';
-import { freeLane, primaryScope, scopesConflict, sharedBroadScopes } from '../server/scopes';
+import { freeLane } from '../server/scopes';
 import type { RunRecord, Settings, Suggestion } from '../src/shared/types';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -113,66 +113,6 @@ async function waitFor(check: () => boolean, timeout = 8000, what = 'Bedingung')
   throw new Error(`Timeout beim Warten auf ${what}`);
 }
 
-describe('scopesConflict', () => {
-  const run = (id: string, scopes: string[]) => ({ id, scopes });
-
-  it('lässt zwei verschiedene Spiele nebeneinander laufen', () => {
-    expect(scopesConflict(run('a', ['tetris']), run('b', ['pang']))).toBe(false);
-  }, SLOW);
-
-  it('sperrt zwei Runs auf demselben Spiel', () => {
-    expect(scopesConflict(run('a', ['tetris']), run('b', ['tetris']))).toBe(true);
-  }, SLOW);
-
-  it('lässt zwei Spiele laufen, die beide nur die breite Kategorie ergänzt bekommen', () => {
-    // The documented leftover: `core`/`content` are supplement, not ownership. Comparing
-    // the full scope list would put the queue back to serial.
-    expect(scopesConflict(run('a', ['tetris', 'core']), run('b', ['pang', 'core']))).toBe(false);
-    expect(sharedBroadScopes(run('a', ['tetris', 'core']), run('b', ['pang', 'core']))).toEqual(['core']);
-  }, SLOW);
-
-  it('gibt einem Run, dessen ganzer Job der breite Scope ist, den Baum allein', () => {
-    expect(scopesConflict(run('a', ['core']), run('b', ['tetris']))).toBe(true);
-    expect(scopesConflict(run('a', ['content']), run('b', ['pang', 'content']))).toBe(true);
-    expect(sharedBroadScopes(run('a', ['tetris']), run('b', ['pang']))).toEqual([]);
-  }, SLOW);
-
-  it('nimmt den spezifischsten Scope als Besitzer', () => {
-    expect(primaryScope(['tetris', 'core'])).toBe('tetris');
-    expect(primaryScope(['core'])).toBe('core');
-    expect(primaryScope([])).toBeNull();
-  }, SLOW);
-
-  it('behandelt einen Run ohne bekannten Scope als Konflikt zu allem', () => {
-    // Nothing is known about where it writes — that must not be a free pass.
-    expect(scopesConflict(run('a', []), run('b', ['pang']))).toBe(true);
-    expect(scopesConflict(run('a', ['tetris']), run('b', []))).toBe(true);
-  }, SLOW);
-
-  it('behandelt denselben Run als Konflikt', () => {
-    expect(scopesConflict(run('a', ['tetris']), run('a', ['pang']))).toBe(true);
-  }, SLOW);
-
-  it('gibt einem Scope, den das Manifest nicht kennt, den Baum allein', () => {
-    // The name says nothing about the files. A run nobody can place is not a free
-    // pass — the comment above `scopesConflict` promises exactly this.
-    expect(scopesConflict(run('a', ['gibtsnicht']), run('b', ['pang']))).toBe(true);
-    expect(scopesConflict(run('a', ['tetris']), run('b', ['gibtsnicht']))).toBe(true);
-  }, SLOW);
-
-  it('sperrt zwei Varianten desselben Spiels, weil sie dieselben Dateien beanspruchen', () => {
-    // `scripts/scopes.mjs` builds a variant by copying its base scope, so
-    // `crystal3d`, `crystal3d-christmas` and `crystal3d-halloween` own byte-identical
-    // file sets. Comparing the ids finds nothing to complain about; comparing what
-    // they own does.
-    expect(scopesConflict(run('a', ['crystal3d-christmas']), run('b', ['crystal3d-halloween']))).toBe(true);
-    expect(scopesConflict(run('a', ['crystal3d-christmas']), run('b', ['crystal3d']))).toBe(true);
-    expect(scopesConflict(run('a', ['merge3d-christmas']), run('b', ['merge3d-halloween']))).toBe(true);
-    // And a variant next to a different game is still fine.
-    expect(scopesConflict(run('a', ['crystal3d-halloween']), run('b', ['tetris']))).toBe(false);
-  }, SLOW);
-});
-
 describe('freeLane', () => {
   it('vergibt die niedrigste freie Spur', () => {
     expect(freeLane([], 3)).toBe(1);
@@ -197,16 +137,27 @@ describe('Parallele Spuren', () => {
     expect(lanes).toEqual([1, 2, 3]);
   }, SLOW);
 
-  it('hält einen zweiten Run auf denselben Scope zurück', async () => {
+  it('startet auch zwei Runs mit demselben Scope gleichzeitig', async () => {
+    // Der Besitzer wollte das ausdrücklich: Spuren sind nicht mehr pro Scope
+    // reserviert, und `maxParallelRuns` ist die einzige Grenze. Was dabei
+    // zusammenläuft, sagt das Panel — der Scope-Audit bleibt.
     const h = harness({ maxParallelRuns: 3 });
     h.enqueue('Tetris: mehr Bälle am Stück');
     await waitFor(() => h.running().length === 1, 8000, 'erster Run');
     h.enqueue('Tetris: noch ein Feld mehr');
-    // The second Tetris run must not start, however many lanes are free.
+    await waitFor(() => h.running().length === 2, 8000, 'zweiter Tetris-Run');
+    expect(h.running().every((r) => r.scope === 'tetris')).toBe(true);
+    expect(h.runner.queueState().queue).toHaveLength(0);
+  }, SLOW);
+
+  it('meldet einen wartenden Run nur dann als blockiert, wenn alle Spuren belegt sind', async () => {
+    const h = harness({ maxParallelRuns: 1 });
+    h.enqueue('Tetris: mehr Bälle am Stück');
+    await waitFor(() => h.running().length === 1, 8000, 'erster Run');
+    h.enqueue('Tetris: noch ein Feld mehr');
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(h.running().length).toBe(1);
     const state = h.runner.queueState();
-    expect(state.queue.length).toBe(1);
+    expect(state.queue).toHaveLength(1);
     expect(state.blockedRunIds).toContain(state.queue[0].id);
   }, SLOW);
 

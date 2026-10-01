@@ -20,7 +20,7 @@ import type {
 import type { Store } from './db';
 import { appendChangelog } from './changelog';
 import { prepareRunWorktree } from './isolation';
-import { auditScope, freeLane, scopeForSuggestion, scopesConflict } from './scopes';
+import { auditScope, freeLane, scopeForSuggestion } from './scopes';
 
 export interface RunnerCallbacks {
   onStarted?: (run: RunRecord, suggestion: Suggestion) => void;
@@ -315,9 +315,9 @@ export class Runner {
   /**
    * Ids of the runs that currently hold a lane, in the order they took it. A set
    * and not a single id because the queue runs several opencode sessions at
-   * once: how many is the operator's setting (`maxParallelRuns`), and *which*
-   * run may take a free lane is decided by `scopesConflict`, so two agents never
-   * work on the same files.
+   * once: how many is the operator's setting (`maxParallelRuns`), and it is the
+   * only limit — scopes do not reserve a lane, so two agents may work on the same
+   * files at the same time. `S80_ISOLATE_RUNS=1` is what makes that safe.
    */
   private activeIds = new Set<string>();
   /** Persisted, not in memory: the queue survives a restart. */
@@ -890,23 +890,19 @@ export class Runner {
   /**
    * Fills every free lane, oldest queued run first.
    *
-   * A queued run may start when its retry backoff has expired and no busy lane
-   * already claims its scope (`scopesConflict`) — checked per run, not only for
-   * the head of the queue.
+   * A queued run may start when its retry backoff has expired. **Nothing else
+   * holds a lane back** — not its scope, not the scope of a running neighbour. The
+   * owner asked for parallel runs in the same scope, and the lane count
+   * (`maxParallelRuns`) is the only limit.
    *
-   * The head-of-queue-only rule this replaces was right for one lane and wrong
-   * for several: one Tetris run waiting out a backoff would have held the whole
-   * machine idle. So a run that may not start yet is *skipped*, not fatal — it
-   * keeps its place and the next run gets the lane. Skipping cannot loop forever:
-   * the loop walks a snapshot of the queue.
+   * A run that may not start yet is *skipped*, not fatal: it keeps its place and
+   * the next run gets the lane. Skipping cannot loop forever, because the loop
+   * walks a snapshot of the queue.
    */
   private pump(): void {
     if (this.paused) return;
     const capacity = this.capacity();
     const now = Date.now();
-    // What the busy lanes hold. Grown as lanes are filled, so two runs started
-    // by this very call already see each other.
-    const claimed = this.activeRecords();
     let wakeAt: number | null = null;
     let started = 0;
     for (const id of [...this.queue]) {
@@ -923,9 +919,7 @@ export class Runner {
         wakeAt = wakeAt === null ? notBefore : Math.min(wakeAt, notBefore);
         continue;
       }
-      if (claimed.some((run) => scopesConflict(run, entry.record))) continue;
       this.dropFromQueue(id);
-      claimed.push(entry.record);
       this.claimLane(entry);
       this.activeIds.add(entry.record.id);
       void this.start(entry);
@@ -948,12 +942,14 @@ export class Runner {
 
   /**
    * Why a queued run cannot start yet, or null when nothing stands in its way.
-   * Only lane occupancy counts: a run in its retry backoff is not "blocked", it
-   * is simply not due yet, and saying otherwise would put a wrong reason in front
-   * of the operator.
+   *
+   * Lane occupancy, and nothing else: a run whose scope collides with a running
+   * one is *not* blocked any more — the owner wants them side by side. A run in
+   * its retry backoff is not "blocked" either, it is simply not due yet, and
+   * saying otherwise would put a wrong reason in front of the operator.
    */
-  private blockedBy(record: RunRecord): boolean {
-    return this.activeRecords().some((run) => scopesConflict(run, record));
+  private blockedBy(_record: RunRecord): boolean {
+    return this.activeIds.size >= this.capacity();
   }
 
   /**

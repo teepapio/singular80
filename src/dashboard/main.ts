@@ -373,7 +373,7 @@ function visibleSuggestions(): SuggestionView[] {
       // Parents that were split into sub-tasks are containers, not runnable orders.
       const { parents } = splitIndex();
       list = list.filter((s) => (s.status === 'approved' || s.status === 'implementing') && !parents.has(s.id));
-      return sortSuggestions(list, 'score');
+      return sortSuggestions(list, 'top');
     }
     case 'new':
       list = list.filter((s) => s.status === 'new');
@@ -481,7 +481,6 @@ function renderCard(s: SuggestionView, children: number[]): string {
         <span>#${s.id}</span>
         <span>${escapeHtml(s.author)}</span>
         <span>${timeAgo(s.createdAt)}</span>
-        <span class="score" title="Prioritäts-Score (ohne KI berechnet)">Score ${s.score}</span>
       </div>
       <p class="card-text">${escapeHtml(s.text)}</p>
       ${run?.resultSummary && !settled ? `<p class="card-summary"><span class="summary-label">🤖 Umsetzung:</span> ${escapeHtml(run.resultSummary)}</p>` : ''}
@@ -536,16 +535,7 @@ function renderCard(s: SuggestionView, children: number[]): string {
       ${
         expanded
           ? `<div class="details">
-              <strong>Score-Zerlegung</strong>
-              <div class="breakdown">
-                <div>Stimmen: +${s.breakdown.votes}</div>
-                <div>Cluster: +${s.breakdown.cluster}</div>
-                <div>Frische: +${s.breakdown.recency.toFixed(1)}</div>
-                <div>Kategorie: +${s.breakdown.category}</div>
-                <div>Qualität: +${s.breakdown.quality}</div>
-                <div>Malus: −${s.breakdown.penalty}</div>
-              </div>
-              ${s.clusterIds.length > 1 ? `<div style="margin-top:8px"><strong>Cluster:</strong> ${s.clusterIds.map((id) => `#${id}`).join(', ')}</div>` : ''}
+              ${s.clusterIds.length > 1 ? `<div><strong>Cluster:</strong> ${s.clusterIds.map((id) => `#${id}`).join(', ')}</div>` : ''}
               ${run ? `<div style="margin-top:8px"><strong>Letzter Run:</strong> ${escapeHtml(run.id)} · ${escapeHtml(run.status)} · ${run.cost != null ? `$${run.cost.toFixed(4)}` : 'Kosten unbekannt'}${run.tokensInput != null ? ` · ${run.tokensInput}/${run.tokensOutput} Tokens` : ''}${attemptLabel(run) ? ` · ${escapeHtml(attemptLabel(run) as string)}` : ''}</div>` : ''}
               <div style="margin-top:8px"><strong>Quelle:</strong> ${escapeHtml(s.source)} · erstellt ${new Date(s.createdAt).toLocaleString('de-DE')}</div>
               ${s.clientKey ? `<div style="margin-top:8px"><strong>Client-Key:</strong> <code>${escapeHtml(s.clientKey)}</code> · ein Retry mit diesem Schlüssel legt keine zweite Zeile an</div>` : ''}
@@ -729,7 +719,7 @@ function renderRuns(): void {
         const badge = attemptLabel(run);
         const wait =
           run.notBefore && run.notBefore > Date.now() ? ` · startet in ${formatCountdown(run.notBefore - Date.now())}` : '';
-        const waitReason = blocked.has(run.id) ? 'wartet auf eine belegte Spur (gleicher Scope)' : 'wartet';
+        const waitReason = blocked.has(run.id) ? 'wartet auf eine freie Spur' : 'wartet';
         // What is actually queued. The run id, the cost and the scope line said
         // how the runner works, not what it is about to do, and the owner
         // recognises a task by its text.
@@ -1274,8 +1264,6 @@ async function loadSettings(): Promise<void> {
     discordWebhook: string;
     model: string;
     extraInstructions: string;
-    autoApprove: boolean;
-    autoApproveScore: number;
     runTimeoutMinutes: number;
     retryLimit: number;
     retryBackoffSeconds: number;
@@ -1292,8 +1280,6 @@ async function loadSettings(): Promise<void> {
     : 'https://discord.com/api/webhooks/…';
   renderModelSelects(settings.model);
   ($('#setting-instructions') as HTMLTextAreaElement).value = settings.extraInstructions;
-  ($('#setting-autoapprove') as HTMLInputElement).checked = settings.autoApprove;
-  ($('#setting-autoscore') as HTMLInputElement).value = String(settings.autoApproveScore);
   ($('#setting-timeout') as HTMLInputElement).value = String(settings.runTimeoutMinutes);
   ($('#setting-retries') as HTMLInputElement).value = String(settings.retryLimit);
   ($('#setting-backoff') as HTMLInputElement).value = String(settings.retryBackoffSeconds);
@@ -1782,8 +1768,6 @@ function setupUi(): void {
         ($('#setting-effort') as HTMLSelectElement).value,
       ),
       extraInstructions: ($('#setting-instructions') as HTMLTextAreaElement).value,
-      autoApprove: ($('#setting-autoapprove') as HTMLInputElement).checked,
-      autoApproveScore: Number(($('#setting-autoscore') as HTMLInputElement).value) || 0,
       runTimeoutMinutes: Number(($('#setting-timeout') as HTMLInputElement).value) || 0,
       retryLimit: Number(($('#setting-retries') as HTMLInputElement).value) || 0,
       retryBackoffSeconds: Number(($('#setting-backoff') as HTMLInputElement).value) || 0,

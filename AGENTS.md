@@ -803,20 +803,33 @@ als Beweis für ein fehlendes Gerät gilt.
 `server/runner.ts` startet für jeden Auftrag eine echte `opencode run`-Sitzung
 im gemeinsamen Arbeitsbaum. Drei Dinge sind inzwischen wichtig.
 
-**Spuren statt einer Schlange.** `maxParallelRuns` (Einstellungen im Dashboard,
-1–8, Vorgabe 3) ist die Zahl der gleichzeitigen Sitzungen. Eine wartende Arbeit
-startet nur, wenn eine Spur frei ist **und** kein laufender Run ihren Scope schon
-beansprucht — die Regel ist `scopesConflict` in `server/scopes.ts` und sie
-entscheidet nach dem *primären* Scope. Das ist Absicht und kein Versehen:
-`scopeForSuggestion` hängt an jeden Spielauftrag noch die breite Kategorie
-(`core`, `content`), und ein Vergleich der ganzen Scope-Liste würde Tetris und
-Pang deshalb wieder hintereinander einreihen.
+**Spuren statt einer Schlange — und keine Reservierung pro Scope.**
+`maxParallelRuns` (Einstellungen im Dashboard, 1–8, Vorgabe 3) ist die Zahl der
+gleichzeitigen Sitzungen und **die einzige Grenze**. Eine wartende Arbeit startet,
+sobald eine Spur frei ist; welcher Scope ihr gehört, spielt keine Rolle.
 
-Was das offen lässt, wird nicht versteckt: Zwei verschiedene Spiele *dürfen* beide
-auf `content/` oder `core/` zeigen. Der Scope-Audit meldet es pro Run
-(`shared: [...]`), und das Panel beschriftet ein solches Paar
-(`laneRisks` in `src/dashboard/queueControls.ts`). Ein Run ohne bekannten Scope
-oder mit breitem primären Scope bekommt den Baum immer allein.
+Bis zum 2026-10-01 gab es hier eine zweite Regel, `scopesConflict` in
+`server/scopes.ts`: gleicher primärer Scope, ein breiter Primär-Scope (`core`,
+`content`), zwei Scopes mit denselben Dateien oder ein unbekannter Scope bedeuteten
+„nur einer zur Zeit". Sie ist entfernt, auf Wunsch des Besitzers — er wollte
+ausdrücklich mehrere Aufträge auch im selben Scope parallel fahren, und die Regel
+hat verneint, ohne je zu sagen, was sie beschützte. Die Funktion ist weg, samt
+ihren Tests; `server/scopes.ts` sagt an ihrer Stelle, warum es sie nicht mehr gibt.
+
+Was das offen lässt, wird nicht versteckt, nur gemeldet statt verhindert:
+
+- **Zwei Agenten können dieselbe Datei anfassen.** Das ist das echte Risiko, und
+  die Antwort darauf ist `S80_ISOLATE_RUNS=1` — jeder Lauf in seinem Worktree, wo
+  nichts kollidieren kann, und `npm run gate` führt zusammen.
+- **Das Panel beschriftet jedes Paar**, das einen Scope teilt — auch zwei Läufe
+  im selben Spiel (`laneRisks` in `src/dashboard/queueControls.ts`, und die
+  breiten Scopes werden schwächer formuliert als die spezifischen).
+- **Der Scope-Audit läuft weiter.** Jeder Run bekommt seinen Scope im Prompt, und
+  die Dateien, die er angefasst hat, werden weiter gegen diesen Scope geprüft
+  (`shared: [...]`). Ohne Reservierung ist diese Prüfung die einzige, die noch
+  etwas sagt — sie darf darum nicht weg.
+- **„Blockiert" heißt jetzt „keine freie Spur"** und nichts mehr sonst. Ein Run,
+  dessen Scope mit einem laufenden kollidiert, ist nicht blockiert.
 
 **Scopes der Sprachschicht.** Der `core`-Scope besitzt
 `godot/src/core/logic/loc.gd`, `godot/src/core/ui/**` (also
@@ -832,6 +845,23 @@ gemeinsamen Baum; die Umschaltung gibt jedem Lauf seinen Worktree und seinen
 Zweig, und dann ist das Gate (`npm run gate`) der einzige Weg auf `main`. Beide
 Betriebsarten gelten nebeneinander, und die Umschaltung ist eine Entscheidung des
 Besitzers — der Grund und die Folgen stehen in „Ein Worktree je Agent".
+
+**Es gibt keine Prioritäts-Zahl mehr.** Am 2026-10-01 hat der Besitzer die
+Bewertung abschafft: `scoreSuggestion`, `qualityScore`, `recencyBonus`, die
+Kategorie-Gewichte, `ScoreBreakdown`, das Feld `score` in `SuggestionView`, die
+Score-Zeile in der Karte, die „Score-Zerlegung" im Detailbereich, das Score-Feld
+im Discord-Embed und die Einstellungen `autoApprove`/`autoApproveScore` (die
+Genehmigung nach Score). Was bleibt, ist sortierbar und nachvollziehbar:
+`sortSuggestions` kennt `top` (Stimmen, dann neu — die Voreinstellung), `new` und
+`cluster`. Ein alter Bookmark mit `?sort=score` fällt auf `top` zurück, statt die
+Liste leer zu liefern.
+
+Zwei Dinge, die dabei **nicht** mitgefallen sind und auch nicht fallen dürfen: das
+**Clustern** ähnlicher Vorschläge (`findCanonical`, `clusterIds`, `clusterSize`) und
+das **Abstimmen**. Ein Vorschlag hat weiter Stimmen, und die Reihenfolge der
+Warteschlange folgt ihnen. `tests/apiRoutes.test.ts` prüft ausdrücklich, dass die
+API weder `score` noch `breakdown` schickt und die Einstellungen keine
+Auto-Genehmigung kennen — sonst käme die Zahl durch die Hintertür zurück.
 
 **Direkte Aufträge.** `POST /api/tasks` (im Panel: „Direkter Auftrag an OpenCode")
 legt eine Empfehlung mit `source: 'operator'` an und stellt sie sofort in die

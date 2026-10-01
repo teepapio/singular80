@@ -239,7 +239,9 @@ describe('buildSuggestionEmbed', () => {
     expect(embed.url).toBe(`${URL_TEXT}#suggestion-7`);
     expect(typeof embed.color).toBe('number');
     const names = (embed.fields as unknown as { name: string }[]).map((f) => f.name);
-    expect(names).toEqual(['Kategorie', 'Score', 'Stimmen']);
+    // Kein Score-Feld mehr: der Besitzer hat die Bewertung abgeschafft, und eine
+    // Zahl, die niemand nachvollziehen kann, gehört nicht in Discord.
+    expect(names).toEqual(['Kategorie', 'Stimmen']);
     expect((embed.fields as unknown as { value: string }[])[0].value).toBe(CATEGORY_LABELS.mechanics);
   });
 
