@@ -3194,3 +3194,89 @@ func score() -> int:
 func _notify(text: String) -> void:
 	notice = text
 	notice_time = 2.6
+
+
+# --- map dragging -----------------------------------------------------------
+
+## Pointer bookkeeping for the 3D map: which fingers are down, where each one
+## went down, and whether a press has already turned into a drag.
+##
+## It sits here, with no nodes and no scene tree, because the *start* position
+## is the whole of the bug it exists to prevent. It is written once, in
+## `down()`, and only read in `step()`. The screen used to refresh it on every
+## move, which compares a position with itself: the slop is never crossed, the
+## drag flag stays false, and the camera pan in `siedler_screen.gd` is dead
+## code — the map could not be dragged with one finger. A second finger sets the
+## flag explicitly, which is why pinching to zoom kept working while dragging
+## did not.
+class Pointer:
+	extends RefCounted
+
+	## How far a pointer has to travel before its press counts as a drag rather
+	## than a tap. A release inside this radius still selects the cell under it.
+	const TAP_SLOP := 22.0
+
+	var _at: Dictionary = {}
+	var _start: Dictionary = {}
+	var _dragged := false
+
+	## How many pointers are down.
+	func count() -> int:
+		return _at.size()
+
+	## Whether a pointer is currently tracked.
+	func tracking(index: int) -> bool:
+		return _at.has(index)
+
+	## Where a pointer is now; `Vector2.ZERO` when it is not tracked.
+	func position_of(index: int) -> Vector2:
+		return _at.get(index, Vector2.ZERO)
+
+	## Where a pointer went down. It stays that for the whole press, however far
+	## the pointer travels.
+	func start_of(index: int) -> Vector2:
+		return _start.get(index, Vector2.ZERO)
+
+	## True once a pointer has left the slop radius.
+	func is_dragged() -> bool:
+		return _dragged
+
+	## Records a new position and returns the screen-space step since the previous
+	## one — the vector the camera has to follow. `Vector2.ZERO` for a pointer
+	## that is not tracked.
+	func step(index: int, position: Vector2) -> Vector2:
+		if not _at.has(index):
+			return Vector2.ZERO
+		var previous: Vector2 = _at[index]
+		_at[index] = position
+		if not _dragged and _start[index].distance_to(position) > TAP_SLOP:
+			_dragged = true
+		return position - previous
+
+	## A pointer goes down. A new press clears the drag flag; a second finger is
+	## followed by `begin_gesture()`.
+	func down(index: int, position: Vector2) -> void:
+		_at[index] = position
+		_start[index] = position
+		_dragged = false
+
+	## A pointer is released. Returns whether that was a tap; the caller has to
+	## read `position_of()` *before* this call, or the tap lands wherever the last
+	## drag happened to end.
+	func up(index: int) -> bool:
+		var was_tap := _at.has(index) and not _dragged
+		_at.erase(index)
+		_start.erase(index)
+		return was_tap
+
+	## A second finger turned the press into a pan/zoom gesture, so letting go of
+	## one of them must not read as a tap on the map.
+	func begin_gesture() -> void:
+		_dragged = true
+
+	## The first two tracked pointers, or an empty array while fewer are down.
+	func pair() -> Array:
+		var keys := _at.keys()
+		if keys.size() < 2:
+			return []
+		return [_at[keys[0]], _at[keys[1]]]

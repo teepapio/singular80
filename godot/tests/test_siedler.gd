@@ -38,6 +38,14 @@ func run(kit: TestKit) -> void:
 	t.close_suite()
 	_depot()
 	t.close_suite()
+	# No `t.suite()` of its own: a suite name has to be entered in
+	# `SCOPE_SUITES` of `scripts/scopes.mjs`, which belongs to the tooling scope
+	# and not to a game agent. Until the manifest carries a name for it, the
+	# checks below are counted under the suite that ran before them, which is
+	# better than a name nobody can select: an unregistered suite is silently
+	# skipped in every scoped run, and this one is the regression test for the
+	# map drag.
+	_map_pan()
 
 
 ## A game with a fixed seed, so every expectation stays stable.
@@ -1345,3 +1353,62 @@ func _depot() -> void:
 	_run(broke, 40.0)
 	t.check(int(broke.store.get("planks", 0)) > 0, "Die Siedlung kann also noch weiterbauen")
 	t.suite_done()
+
+
+# --- map dragging -----------------------------------------------------------
+
+## The start position is written once and never refreshed, so the slop radius is
+## actually crossed. The screen used to overwrite it on every move, which
+## compares a position with itself: the drag flag stayed false and the one-finger
+## pan was unreachable, while two-finger zoom kept working because that path sets
+## the flag itself.
+func _map_pan() -> void:
+	var pointers := Siedler.Pointer.new()
+
+	# The radius itself, because that is the line between "place a building" and
+	# "move the map": at it the press is still a tap, one pixel further a drag.
+	var edge := Siedler.Pointer.new()
+	edge.down(0, Vector2.ZERO)
+	edge.step(0, Vector2(Siedler.Pointer.TAP_SLOP, 0.0))
+	t.check(not edge.is_dragged(), "Genau am Radius ist es noch ein Tipp")
+	edge.step(0, Vector2(Siedler.Pointer.TAP_SLOP + 1.0, 0.0))
+	t.check(edge.is_dragged(), "Ein Pixel weiter ist es ein Zug")
+
+	# A press that stays put is a tap — placing a building may not break.
+	pointers.down(0, Vector2(400.0, 300.0))
+	t.check(not pointers.is_dragged(), "Ein Finger, der stillsteht, ist kein Ziehen")
+	var travelled := pointers.step(0, Vector2(408.0, 304.0))
+	t.equal(travelled, Vector2(8.0, 4.0), "Die Bewegung eines Fingers kommt als Schritt an")
+	t.check(not pointers.is_dragged(), "Acht Pixel sind unter der Toleranz")
+
+	# …and one that travels is a drag, and the start position survives the trip.
+	for i in range(1, 13):
+		travelled += pointers.step(0, Vector2(400.0 + 40.0 * i, 300.0))
+	t.check(pointers.is_dragged(), "Ein Finger, der weiter als die Toleranz wandert, zieht die Karte")
+	t.almost(travelled.x, 480.0, 0.01, "Die Kamera folgt dem Finger über die ganze Strecke")
+	t.equal(pointers.start_of(0), Vector2(400.0, 300.0),
+		"Der Startpunkt bleibt, wo der Finger hingelegt wurde")
+	t.equal(pointers.position_of(0), Vector2(880.0, 300.0), "Der Finger sitzt am Ende der Strecke")
+	t.check(not pointers.up(0), "Ein gezogener Finger ist kein Tippen")
+
+	# A second finger turns the press into a gesture, so letting go of one of
+	# them does not place a building on the map.
+	pointers.down(0, Vector2(500.0, 400.0))
+	pointers.down(1, Vector2(700.0, 400.0))
+	pointers.begin_gesture()
+	var fingers := pointers.pair()
+	t.equal(fingers.size(), 2, "Zwei Finger ergeben eine Geste")
+	t.equal(fingers[0], Vector2(500.0, 400.0), "Der erste Finger ist dabei")
+	t.equal(fingers[1], Vector2(700.0, 400.0), "Der zweite auch")
+	t.check(not pointers.up(1), "Das Loslassen eines Fingers legt nichts auf die Karte")
+	t.equal(pointers.count(), 1, "Der zweite Finger ist weg")
+	t.check(not pointers.up(0), "Und der erste bleibt ein Zug, kein Tipp")
+
+	# One finger is not a gesture, and an unknown pointer moves nothing.
+	var lone := Siedler.Pointer.new()
+	lone.down(0, Vector2(100.0, 100.0))
+	t.equal(lone.pair().size(), 0, "Ein einzelner Finger ist keine Geste")
+	t.equal(lone.step(7, Vector2(200.0, 200.0)), Vector2.ZERO, "Ein fremder Finger bewegt nichts")
+	t.check(lone.up(0), "Ein Finger, der nicht wanderte, ist ein Tipp")
+	t.check(not lone.tracking(0), "Danach ist er nicht mehr da")
+	t.check(not lone.up(0), "Und ein zweites Loslassen ist kein Tipp")

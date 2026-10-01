@@ -93,13 +93,15 @@ const CAM_MAX_DISTANCE := 100.0
 const CAM_PITCH := 0.9
 const CAM_YAW_STEP := 0.22
 const CAM_LIMIT := 26.0
-const TAP_SLOP := 22.0
 const PAN_SPEED := 0.05
 
 # --- touch ------------------------------------------------------------------
-var _pointers: Dictionary = {}
-var _pointer_start: Dictionary = {}
-var _dragged := false
+## Pointer bookkeeping, including the tap/drag threshold, lives in
+## `Siedler.Pointer`: it is pure logic without a scene tree, so the suite can
+## drive it. The screen used to keep the start position next to the current one
+## and refreshed it on every move — which compares a position with itself, never
+## crosses the threshold, and leaves the one-finger pan below unreachable.
+var _pointers := Siedler.Pointer.new()
 var _gesture := false
 var _gesture_span := 1.0
 var _gesture_angle := 0.0
@@ -373,7 +375,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion:
 		_hover_at((event as InputEventMouseMotion).position)
-		if _pointers.has(0):
+		if _pointers.tracking(0):
 			_pointer_move(0, (event as InputEventMouseMotion).position)
 		return
 	if event is InputEventKey and event.is_pressed():
@@ -406,38 +408,31 @@ func _key(key: InputEventKey) -> void:
 
 
 func _pointer_down(index: int, position: Vector2) -> void:
-	_pointers[index] = position
-	_pointer_start[index] = position
-	if _pointers.size() >= 2:
+	_pointers.down(index, position)
+	if _pointers.count() >= 2:
 		_begin_gesture()
-	else:
-		_gesture = false
-		_dragged = false
 
 
 func _pointer_move(index: int, position: Vector2) -> void:
-	if not _pointers.has(index):
+	if not _pointers.tracking(index):
 		return
-	var previous: Vector2 = _pointers[index]
-	_pointers[index] = position
-	_pointer_start[index] = position
-	if _pointer_start[index].distance_to(position) > TAP_SLOP:
-		_dragged = true
-	if _pointers.size() >= 2:
+	var screen_delta := _pointers.step(index, position)
+	if _pointers.count() >= 2:
 		_update_gesture()
-	elif _dragged:
-		_pan_by((previous - position) * PAN_SPEED * (cam_distance / CAM_MIN_DISTANCE))
+	elif _pointers.is_dragged():
+		_pan_by(-screen_delta * PAN_SPEED * (cam_distance / CAM_MIN_DISTANCE))
 	_hover_at(position)
 
 
 func _pointer_up(index: int) -> void:
 	# The position has to be read before the pointer is dropped, otherwise the
 	# tap lands wherever the last drag happened to end.
-	var was_tap: bool = _pointers.has(index) and not _dragged
-	var tapped := _screen_to_cell(_pointers[index]) if was_tap else -1
-	_pointers.erase(index)
-	_pointer_start.erase(index)
-	if _pointers.size() >= 2:
+	if not _pointers.tracking(index):
+		return
+	var was_tap := not _pointers.is_dragged()
+	var tapped := _screen_to_cell(_pointers.position_of(index)) if was_tap else -1
+	_pointers.up(index)
+	if _pointers.count() >= 2:
 		_begin_gesture()
 	else:
 		_gesture = false
@@ -469,24 +464,26 @@ func _screen_to_cell(screen_position: Vector2) -> int:
 
 
 func _begin_gesture() -> void:
-	var keys := _pointers.keys()
-	if keys.size() < 2:
+	var fingers := _pointers.pair()
+	if fingers.size() < 2:
 		return
-	var a: Vector2 = _pointers[keys[0]]
-	var b: Vector2 = _pointers[keys[1]]
+	var a: Vector2 = fingers[0]
+	var b: Vector2 = fingers[1]
 	_gesture = true
 	_gesture_span = maxf(a.distance_to(b), 1.0)
 	_gesture_angle = atan2(b.y - a.y, b.x - a.x)
 	_gesture_mid = (a + b) * 0.5
-	_dragged = true
+	_pointers.begin_gesture()
 
 
 func _update_gesture() -> void:
-	var keys := _pointers.keys()
-	if keys.size() < 2 or not _gesture:
+	if not _gesture:
 		return
-	var a: Vector2 = _pointers[keys[0]]
-	var b: Vector2 = _pointers[keys[1]]
+	var fingers := _pointers.pair()
+	if fingers.size() < 2:
+		return
+	var a: Vector2 = fingers[0]
+	var b: Vector2 = fingers[1]
 	var span := maxf(a.distance_to(b), 1.0)
 	var angle := atan2(b.y - a.y, b.x - a.x)
 	_zoom(_gesture_span / span)
