@@ -308,6 +308,9 @@ const staticScopes = {
       // before it can read the chat. Next to the baker because both are the
       // one-time setup around the same token set.
       'scripts/telegram-login.ts',
+      // The types for the QR renderer the login script draws with, for the same
+      // reason as `locale.d.mts`.
+      'scripts/qrcode-terminal.d.mts',
       'scripts/smoke.ts',
       'scripts/backup.ts',
       // Writes the session's line into CHANGELOG.md. It has to be a named file

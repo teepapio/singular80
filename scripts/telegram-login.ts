@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
+import qrcode from 'qrcode-terminal';
 
 /**
  * One-time login of the owner's Telegram account, so the server can read the chat
@@ -91,8 +92,14 @@ async function main(): Promise<void> {
       // The token arrives as bytes; Telegram wants it base64url-encoded, and that
       // string is the entire payload of the QR code.
       qrCode: async (code) => {
-        console.log(`  https://t.me/loginurl?token=${code.token.toString('base64url')}`);
-        console.log('');
+        const url = `https://t.me/loginurl?token=${code.token.toString('base64url')}`;
+        // Drawn in the terminal, because the alternative is typing a 60-character
+        // URL on the phone — and the phone is what has the Telegram app on it.
+        qrcode.generate(url, { small: true }, (qr: string) => {
+          console.log(qr);
+        });
+        console.log('  ↑ Mit der Kamera des Telefons scannen');
+        console.log(`  Oder diese Adresse auf dem Telefon öffnen:\n  ${url}\n`);
       },
       // Only reached if the account has a two-step password, which a QR login is
       // normally exempt from. Asked for interactively rather than from a variable,
