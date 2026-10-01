@@ -494,9 +494,10 @@ schloss sich mitten in seinem Satz.
 
 Ein Namensmuster ist keine Unterscheidung, sondern eine Vermutung. Gilt:
 
-- **Nur töten, was eine Datei benennt.** Der Runner schreibt seine pid nach
-  `run/terminal/<runId>.pid`; diese pids sind zweifelsfrei die eigenen. Abbrechen
-  läuft ohnehin über `POST /api/runs/:id/cancel`, und das ist der richtige Weg.
+- **Nur töten, was eine Datei benennt.** Der Runner schreibt die pid jedes
+  aktiven Laufs nach `data/active-runs.json` (`<runId>: <pid>`); diese pids sind
+  zweifelsfrei die eigenen. Abbrechen läuft ohnehin über
+  `POST /api/runs/:id/cancel`, und das ist der richtige Weg.
 - **Ein Muster, das `opencode`, `node`, `python` oder `npm` enthält, ist verboten.**
   Auf dieser Maschine laufen der Dienst des Besitzers, seine Fenster, der
   Dev-Server und Vite gleichzeitig; sie unterscheiden sich nicht über ihre

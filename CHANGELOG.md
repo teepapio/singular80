@@ -22,3 +22,7 @@ session. Written by the runner on success, or by
 - **edi:** Changelog-Zeile für Aufträge aus Telegram ergänzt, die nach einem Server-Neustart sonst verloren gingen
 - **#14** Ja. — `7191201`
 - **edi:** Agenten arbeiten auf getrennten Worktrees statt im gemeinsamen Ordner; ein Merge-Gate prüft, merged… <!-- session:600c9e410f7a -->
+
+## 2026-10-01
+
+- **edi:** Die OpenCode-Sitzung läuft wieder im Panel rechts statt in einem Terminalfenster; die Konsole zeigt die Ausgabe des Laufs Zeile für Zeile.

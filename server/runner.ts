@@ -20,18 +20,6 @@ import type {
 import type { Store } from './db';
 import { appendChangelog } from './changelog';
 import { prepareRunWorktree } from './isolation';
-import {
-  buildTerminalCommand,
-  buildTerminalSession,
-  clearTerminalState,
-  findByEnvMarker,
-  findTerminal,
-  isolateDataHome,
-  runMarker,
-  readExitFile,
-  readPidFile,
-  type TerminalSession,
-} from './terminal';
 import { auditScope, freeLane, scopeForSuggestion, scopesConflict } from './scopes';
 
 export interface RunnerCallbacks {
@@ -43,14 +31,6 @@ export interface RunnerCallbacks {
 }
 
 type RunnerChild = ChildProcessByStdio<null, Readable, Readable>;
-
-/** What a terminal run ended with: the exit code it left behind, and the verdict. */
-interface TerminalOutcome {
-  code?: number | null;
-  /** Set when the evidence decides the status; null code without it means "unknown". */
-  status?: RunRecord['status'];
-  note?: string;
-}
 
 interface RunEntry {
   record: RunRecord;
@@ -66,29 +46,6 @@ interface RunEntry {
   logOffset: number;
   /** Poll timer that watches an adopted run until its process exits. */
   timer: ReturnType<typeof setInterval> | null;
-  /**
-   * Set when the session runs in a terminal window. The emulator's own process
-   * exits as soon as the window opens, so the outcome arrives through
-   * `exitFile` instead of the close event.
-   */
-  terminal: TerminalSession | null;
-  /**
-   * Set in TUI mode: the emulator's process, whose descendants are the real
-   * session. No shell sits between the two, because a full-screen interface
-   * cannot be a background job.
-   */
-  terminalTuiPid: number | null;
-  /**
-   * Set once a terminal session was really there. The marker in the process
-   * environment takes a moment to appear, and a window that never came up must
-   * fall back to the piped run instead of being reported as finished — but a
-   * session that *was* there and is gone is an end, however it ended.
-   */
-  terminalSeen: boolean;
-  /** Changelog text when a terminal run produced no JSON summary. */
-  summaryFallback: string | null;
-  /** Argv of the piped run, kept so a failed terminal can fall back to it. */
-  pipedArgs: string[] | null;
 }
 
 const MAX_MEMORY_EVENTS = 4000;
@@ -112,9 +69,6 @@ const STUB_SUMMARY_CHARS = 8;
 
 /** How often an adopted (orphaned) run is checked for new log output and process exit. */
 const ORPHAN_POLL_MS = 3000;
-
-/** How long a terminal gets to show a real session before the run falls back. */
-const TERMINAL_VERIFY_MS = 4000;
 
 /** How often the supervisor enforces the hard timeout and the backoff wake-up. */
 const SUPERVISOR_MS = 2000;
@@ -383,23 +337,14 @@ export class Runner {
       contentDir: string;
       callbacks: RunnerCallbacks;
       /**
-       * Runs the session in a terminal window instead of the dashboard's log
-       * pane.
-       *
-       * **Opt-in, and it stays that way.** Making it the default was a mistake:
-       * the test suite builds a Runner around a fake `opencode` binary, and every
-       * one of those tests then opened a real window on the owner's desktop. The
-       * library does nothing unless the application asks for it.
-       */
-      terminalMode?: boolean;
-      /**
        * Give every run its own `git worktree` and its own branch, instead of
        * having all runs write into the shared tree.
        *
-       * **Opt-in, for the same reason `terminalMode` is, and for a stronger
-       * one:** it changes where every run's commits land, so a run's work is no
-       * longer on `main` when it finishes — the merge gate is what puts it
-       * there. Off means today's behaviour, byte for byte.
+       * **Opt-in, and it stays that way:** the test suite drives a fake
+       * `opencode` binary through a real repository, so isolation would rewrite
+       * where those tests' commits land. It also changes where a finished run's
+       * commits end up: on `agent/suggestion-<id>`, with `npm run gate` as the
+       * only way onto `main`. Off means the shared tree with the scope lanes.
        */
       isolateRuns?: boolean;
     },
@@ -515,11 +460,6 @@ export class Runner {
       pid: null,
       logOffset: 0,
       timer: null,
-      terminal: null,
-      terminalTuiPid: null,
-      terminalSeen: false,
-      summaryFallback: null,
-      pipedArgs: null,
     };
   }
 
@@ -1109,19 +1049,6 @@ export class Runner {
 
   /** SIGTERM, then SIGKILL after a grace period. Works for own and adopted children. */
   private terminate(entry: RunEntry): void {
-    // TUI mode: the session hangs below the emulator, so signalling one pid is
-    // not enough — the whole subtree has to go, or the interface keeps running
-    // with nobody watching it.
-    if (entry.terminalTuiPid !== null) {
-      // The emulator is already gone; the session is the marked process.
-      for (const pid of [...findByEnvMarker(runMarker(entry.record.id)), entry.terminalTuiPid]) {
-        try {
-          process.kill(pid, 'SIGTERM');
-        } catch {
-          /* already gone */
-        }
-      }
-    }
     const pid = entry.child?.pid ?? entry.pid;
     if (entry.child) entry.child.kill('SIGTERM');
     if (pid != null && !entry.child) {
@@ -1140,277 +1067,6 @@ export class Runner {
         /* already gone */
       }
     }, KILL_GRACE_MS).unref?.();
-  }
-
-  /** `tui` or `run`; `tui` is the default because the owner asked for it. */
-  private terminalMode(): 'tui' | 'run' {
-    return (process.env.S80_TERMINAL ?? 'tui').toLowerCase() === 'run' ? 'run' : 'tui';
-  }
-
-  /**
-   * The argv for the chosen terminal mode. `S80_TERMINAL=tui` or `run`, default
-   * `tui`.
-   */
-  private terminalArgs(bin: string, record: RunRecord): string[] {
-    const mode = this.terminalMode();
-    // `--standalone` is not optional and not a detail. Without it `opencode`
-    // connects to the **background service** — the one the owner's own opencode
-    // window is attached to. The run then does not stay in the terminal we opened
-    // for it: it appears there as another session, half-written prompts land in a
-    // window someone is working in, and two terminals show two halves of one job.
-    // A private server per run is the only way to keep them apart.
-    if (mode === 'run') {
-      return [bin, 'run', '--standalone', '--auto', '--title', `Vorschlag #${record.suggestionId}`, record.prompt];
-    }
-    return [bin, '--standalone', '--auto', '--prompt', record.prompt];
-  }
-
-  /**
-   * Opens the session in a terminal emulator, or returns null to let the caller
-   * fall back to the piped run.
-   *
-   * Two modes, because the two `opencode` commands are not interchangeable:
-   *
-   *  - `tui` (the default, what the owner asked for): bare `opencode --auto
-   *    --prompt`. A real OpenCode window that shows the work as it happens and
-   *    can be typed into.
-   *  - `run`: `opencode run` with its normal output — a short, readable log
-   *    instead of a full-screen interface.
-   *
-   * The TUI is the better window and the worse automation. When the agent has
-   * finished, it does not exit: it sits at a prompt waiting for the next
-   * instruction. So a run in the TUI ends when the window is closed, not when
-   * the work is done, and the owner has to close it. `S80_TERMINAL=run` trades
-   * the interface for a session that ends by itself, which is the right choice
-   * for a long queue nobody is watching.
-   *
-   * Without the JSON stream there is no summary, cost or session id either, so
-   * the changelog uses the suggestion's own text.
-   */
-  private openTerminal(entry: RunEntry, bin: string, pipedArgs: string[]): TerminalSession | null {
-    entry.pipedArgs = pipedArgs;
-    // Only when explicitly asked for, and never when switched off by hand.
-    if (this.options.terminalMode !== true) return null;
-    if (process.env.S80_TERMINAL === '0') return null;
-    const found = findTerminal();
-    if (!found) return null;
-    const { record } = entry;
-    const stateDir = join(this.options.projectRoot, 'run', 'terminal');
-    mkdirSync(stateDir, { recursive: true });
-    const title = `Singular 80 — #${record.suggestionId}`;
-    const command = this.terminalArgs(bin, record);
-    // The session's directory is the run's worktree, but the *bookkeeping* stays
-    // in the shared tree: the pid file has to be readable by the server, which
-    // does not care where the agent works.
-    const workdir = this.workdir(record);
-    const tui = this.terminalMode() === 'tui';
-    // TUI mode gets no wrapper: the interface has to be the foreground process of
-    // its own terminal or it freezes on the first write.
-    const session = tui
-      ? null
-      : buildTerminalSession({
-          bin: found.bin,
-          args: found.args,
-          title,
-          cwd: workdir,
-          command,
-          stateDir,
-          runId: record.id,
-        });
-    const launch: { bin: string; argv: string[] } = tui
-      ? buildTerminalCommand({
-          bin: found.bin,
-          args: found.args,
-          title,
-          command,
-          marker: runMarker(record.id),
-          // Private session store, so the run's window cannot list the owner's
-          // own sessions. `--standalone` alone does not do this.
-          dataHome: isolateDataHome(record.id, this.options.dataDir, homedir()),
-        })
-      : { bin: session!.bin, argv: session!.args };
-    try {
-      const child = spawn(launch.bin, launch.argv, {
-        cwd: workdir,
-        env: { ...process.env },
-        stdio: 'ignore',
-        detached: false,
-      });
-      child.on('error', (err) => {
-        this.finalize(entry, null, `Terminal nicht zu öffnen: ${err.message}`);
-      });
-      if (tui) {
-        // The emulator process is not the session; the session is below it.
-        entry.terminalTuiPid = child.pid ?? null;
-      } else {
-        // The wrapper's exit code is meaningless for the emulator; the real
-        // outcome is read from `exitFile` in `tick()`.
-        child.on('close', () => {});
-      }
-    } catch (err) {
-      this.finalize(entry, null, `Terminal nicht zu öffnen: ${(err as Error).message}`);
-      return null;
-    }
-    entry.terminal = session;
-    entry.child = null;
-    entry.summaryFallback = this.store.getSuggestion(record.suggestionId)?.text.slice(0, 200) ?? null;
-    // Either way the outcome arrives by polling: the pid file in wrapper mode, the
-    // process tree in TUI mode.
-    this.watchTerminal(entry);
-    // Verification, because a terminal can be *present* and still unusable: the
-    // dev server runs detached from the desktop session, and without DISPLAY
-    // gnome-terminal exits with a message instead of a window. `spawn` succeeds
-    // either way, so the pid file is the only honest proof that a session is
-    // actually running. Without this check a run would sit "läuft" for ever with
-    // nothing behind it.
-    setTimeout(() => {
-      if (entry.record.status !== 'running') return;
-      // Proof that a session really exists: in wrapper mode the pid file, in TUI
-      // mode a live process below the emulator.
-      const started = session
-        ? readPidFile(session.pidFile) !== null
-        : entry.terminalTuiPid !== null && findByEnvMarker(runMarker(entry.record.id)).length > 0;
-      if (started) return;
-      this.fallbackFromTerminal(entry, 'Terminal hat die Sitzung nicht gestartet');
-    }, TERMINAL_VERIFY_MS).unref?.();
-    return session;
-  }
-
-  /**
-   * Gives up on the terminal and runs the session the old way. Used when the
-   * window did not appear; the run then behaves exactly as it did before this
-   * existed, minus the interactive part.
-   *
-   * TUI mode included. It used to bail out at the first line because there is no
-   * wrapper session to clear, and that turned "the window did not come up" into
-   * "the run hangs until the hard timeout" — with `entry.pid` still null, so not
-   * even the cancel button had something to kill. The subtree that may or may
-   * not have come up is killed first, so the fallback is the only session left.
-   */
-  private fallbackFromTerminal(entry: RunEntry, reason: string): void {
-    if (entry.record.status !== 'running') return;
-    if (entry.timer) {
-      clearInterval(entry.timer);
-      entry.timer = null;
-    }
-    const session = entry.terminal;
-    if (session) clearTerminalState(session);
-    entry.terminal = null;
-    entry.terminalSeen = false;
-    if (entry.terminalTuiPid !== null) {
-      this.terminate(entry);
-      entry.terminalTuiPid = null;
-    }
-    entry.summaryFallback = null;
-    this.pushEvent(entry.record.id, { t: Date.now(), kind: 'info', text: `${reason} — Rückfall auf den Lauf im Dashboard.` });
-    this.startPiped(entry, findOpencodeBinary(), entry.pipedArgs ?? []);
-  }
-
-  /** Polls the pid and exit files of a terminal run until the session is done. */
-  private watchTerminal(entry: RunEntry): void {
-    if (entry.timer) clearInterval(entry.timer);
-    entry.timer = setInterval(() => this.checkTerminal(entry), ORPHAN_POLL_MS);
-  }
-
-  private checkTerminal(entry: RunEntry): void {
-    if (entry.record.status !== 'running') return;
-    if (entry.terminalTuiPid !== null) {
-      // TUI mode: no files and no process tree — the emulator exits as soon as
-      // the window is open and the session is re-parented. The marker in the
-      // session's own environment is what identifies it.
-      const sessions = findByEnvMarker(runMarker(entry.record.id));
-      if (sessions.length > 0) {
-        entry.terminalSeen = true;
-        const session = sessions[0];
-        if (entry.pid !== session) {
-          entry.pid = session;
-          this.rememberPid(entry.record.id, session);
-        }
-        return;
-      }
-      // Only report an end once the session was really there: the marker takes a
-      // moment to appear, and a run that never started must fall back instead of
-      // being called finished. A remembered pid is that proof — and so is a
-      // session we saw and killed ourselves (cancel, timeout).
-      if (entry.pid !== null) entry.terminalSeen = true;
-      if (!entry.terminalSeen) return;
-      this.finishTerminalRun(entry, this.terminalOutcome(entry));
-      return;
-    }
-    const session = entry.terminal;
-    if (!session) return;
-    const pid = readPidFile(session.pidFile);
-    if (pid !== null) {
-      entry.terminalSeen = true;
-      if (entry.pid !== pid) {
-        entry.pid = pid;
-        this.rememberPid(entry.record.id, pid);
-      }
-    }
-    const code = readExitFile(session.exitFile);
-    if (code === null) {
-      // No exit code, but the session is gone: the window was closed. In TUI mode
-      // that is the normal end — the agent finished and left the interface open,
-      // and closing the window is how the owner says so.
-      //
-      // Without this the run stays "läuft" for the full hard timeout, and the
-      // queue waits behind a job nobody is doing any more.
-      if (entry.pid !== null && !isProcessAlive(entry.pid)) {
-        this.finishTerminalRun(entry, this.terminalOutcome(entry));
-      }
-      return;
-    }
-    this.finishTerminalRun(entry, { code });
-  }
-
-  /**
-   * The outcome of a terminal run whose session is gone and which reported
-   * nothing.
-   *
-   * The agent's closing words live in the window that just closed; in TUI mode
-   * there is no exit file and no stream, so there is nothing to read. What *is*
-   * left is the work itself, and the repository is the honest place to look for
-   * it — the same signal `finishEntry` already uses for a process that died.
-   *
-   * Deciding this as "cancelled" without looking was the bug that made terminal
-   * runs look like lost ones: `finalize` maps cancelled back to the suggestion
-   * status `approved`, the changelog is gated on `succeeded`, and no retry is
-   * scheduled — so a run that opened a window, did the work and committed was
-   * recorded as nothing having happened. 4 of 44 runs on this machine.
-   *
-   * Without that evidence the old verdict stands: cancelled, and not a success
-   * nobody confirmed.
-   */
-  private terminalOutcome(entry: RunEntry): TerminalOutcome {
-    const commit = commitSince(entry.record.startedAt, this.options.projectRoot, entry.record.suggestionId, entry.record.worktreeBranch);
-    if (commit !== null) {
-      return {
-        code: 0,
-        status: 'succeeded',
-        note: `Im Terminal beendet — der Commit ${commit} für Vorschlag #${entry.record.suggestionId} belegt die Arbeit.`,
-      };
-    }
-    return { code: null, status: 'cancelled', note: 'Im Terminal beendet, ohne Ergebnis zu melden.' };
-  }
-
-  /** Closes a terminal run down: stop the poll, clear the files, record the outcome. */
-  private finishTerminalRun(entry: RunEntry, outcome: TerminalOutcome): void {
-    const session = entry.terminal;
-    if (entry.timer) {
-      clearInterval(entry.timer);
-      entry.timer = null;
-    }
-    if (session) clearTerminalState(session);
-    if (entry.timedOut) return;
-    if (entry.cancelRequested) {
-      this.finalize(entry, outcome.code ?? null, outcome.note ?? 'Abgebrochen (Terminal)', 'cancelled');
-      return;
-    }
-    if (outcome.status) {
-      this.finalize(entry, outcome.code ?? null, outcome.note, outcome.status);
-      return;
-    }
-    this.finalize(entry, outcome.code ?? null, outcome.note);
   }
 
   /** The argv of a run whose output the runner parses. */
@@ -1445,8 +1101,8 @@ export class Runner {
     );
 
     // Isolation happens here, after the record exists and before anything is
-    // spawned: the session's working directory is decided once, and both spawn
-    // paths below read it back from the record.
+    // spawned: the session's working directory is decided once, and the spawn
+    // below reads it back from the record.
     const isolation = prepareRunWorktree(this.options.projectRoot, record.suggestionId, {
       enabled: this.options.isolateRuns === true,
       log: (line) => this.pushEvent(record.id, { t: Date.now(), kind: 'info', text: line }),
@@ -1467,27 +1123,13 @@ export class Runner {
       });
     }
 
-    // A terminal window, if one can be opened: the session is then something the
-    // owner can watch *and* type into, which a log pane in the dashboard is not.
-    // `--auto` stays, so the agent does not stop on a permission question that
-    // nobody is there to answer.
-    const terminal = this.openTerminal(entry, bin, this.pipedArgs(record));
-    if (terminal) {
-      this.pushEvent(record.id, {
-        t: Date.now(),
-        kind: 'status',
-        text: `Lauf läuft in einem Terminalfenster: ${terminal.bin}`,
-      });
-      return;
-    }
-
     this.startPiped(entry, bin, this.pipedArgs(record));
   }
 
   /**
-   * The original way: the session's output is piped and parsed, and the
-   * dashboard shows it. Still used when no terminal can be opened, and it is
-   * what the runner falls back to if a terminal fails to come up.
+   * The session's output is piped and parsed, and the dashboard shows it as the
+   * run's console. `--auto` stays, so the agent does not stop on a permission
+   * question that nobody is there to answer.
    */
   private startPiped(entry: RunEntry, bin: string, args: string[]): void {
     const { record } = entry;
@@ -1648,7 +1290,7 @@ export class Runner {
     }
     const fallback =
       record.status === 'succeeded'
-        ? entry.summaryFallback ?? 'Erfolgreich abgeschlossen.'
+        ? 'Erfolgreich abgeschlossen.'
         : note ?? `Fehlgeschlagen${exitCode != null ? ` (Exit ${exitCode})` : ''}.`;
     record.resultSummary = shortSummary(entry.summary, fallback);
     record.scopeIssues = this.scopeIssuesOf(record, entry.events);
@@ -1800,18 +1442,8 @@ export class Runner {
       return { ok: true };
     }
     if (this.activeIds.has(runId)) {
-      // A terminal run has no child handle: the session hangs below the emulator
-      // and is reached through its pid or its environment marker. Requiring a
-      // child meant "Abbrechen" did nothing for the first seconds of every
-      // terminal run and then depended on which of the two the poll had found.
-      const terminalRun = entry.terminalTuiPid !== null || entry.terminal !== null;
-      if (entry.child || terminalRun || (entry.pid !== null && isProcessAlive(entry.pid))) {
+      if (entry.child || (entry.pid !== null && isProcessAlive(entry.pid))) {
         entry.cancelRequested = true;
-        // The poll only reports the end of a terminal run once it has seen the
-        // session, and in the first seconds it has not. Without this a cancel
-        // there would kill the window and leave the run "läuft" until the hard
-        // timeout.
-        if (terminalRun) entry.terminalSeen = true;
         this.terminate(entry);
         return { ok: true };
       }

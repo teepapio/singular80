@@ -2,6 +2,7 @@ import './style.css';
 import type {
   BusEvent,
   QueueState,
+  RunEvent,
   RunRecord,
   RunView,
   ScopeAudit,
@@ -34,6 +35,8 @@ interface DashboardState {
   runs: RunRecord[];
   /** Runs currently holding a lane, oldest first — one card each. */
   activeRuns: RunRecord[];
+  /** Live output per run id, so parallel sessions do not overwrite each other. */
+  runEvents: Map<string, RunEvent[]>;
   /** Wall-clock time of the last received/synced output, per run id. */
   lastActivityAt: Map<string, number>;
   /** Whether the server still tracks a live process, per run id. */
@@ -102,6 +105,7 @@ const state: DashboardState = {
   suggestions: [],
   runs: [],
   activeRuns: [],
+  runEvents: new Map(),
   lastActivityAt: new Map(),
   alive: new Map(),
   queue: null,
@@ -118,6 +122,11 @@ const state: DashboardState = {
   taskSending: false,
   loadError: null,
 };
+
+/** Newest live event per run id; an empty array means "nothing seen yet". */
+function eventsOf(runId: string): RunEvent[] {
+  return state.runEvents.get(runId) ?? [];
+}
 
 function lastActivityOf(runId: string): number | null {
   return state.lastActivityAt.get(runId) ?? null;
@@ -607,6 +616,12 @@ function renderRunCard(run: RunRecord): string {
     connected: state.connected,
     alive: alive ?? undefined,
   });
+  // The session's output, as the run wrote it. This is the panel the owner
+  // watches: what the agent says, in order, while it is doing it.
+  const lines = eventsOf(run.id)
+    .slice(-400)
+    .map((event) => `<div class="line ${event.kind}">${escapeHtml(event.text)}</div>`)
+    .join('');
   const operator = suggestionAuthor(run.suggestionId) === 'Betreiber' ? ' · Auftrag' : '';
   // The audit is what `describeLaneRisks` promises the operator when it says two
   // lanes may write to the same broad scope. It was computed, shipped, stored and
@@ -627,6 +642,7 @@ function renderRunCard(run: RunRecord): string {
       <div class="run-activity ${activity.level}" data-run-activity="${escapeAttr(runKey(run.id))}" title="Zeit seit der letzten Ausgabe von OpenCode">
         ${escapeHtml(activity.label)}
       </div>
+      <div class="console" data-run-console="${escapeAttr(runKey(run.id))}">${lines}</div>
       <div class="card-actions">
         <button data-action="cancel-run" data-run="${escapeAttr(runKey(run.id))}" data-focus-key="cancel:${escapeAttr(runKey(run.id))}">⏹ Abbrechen</button>
         ${
@@ -714,6 +730,12 @@ function renderRuns(): void {
 
   const focusKey = captureFocusKey();
   active.innerHTML = html;
+  // Every console shows the end of its own log, which is where the newest line
+  // is. Only after the innerHTML swap, because before it the elements are old.
+  for (const run of running) {
+    const consoleEl = document.querySelector(`[data-run-console="${runKey(run.id)}"]`);
+    if (consoleEl) consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
   updateRunActivity();
 
   $('#run-history').innerHTML = renderRunHistory();
@@ -934,6 +956,9 @@ function lastOutputAt(view: RunView): number | null {
 
 /** Folds one run view into the client bookkeeping. */
 function applyRunView(view: RunView): void {
+  // The server's event array is the console's content: this is what makes a
+  // reload or a missed SSE line show the session again instead of an empty box.
+  state.runEvents.set(view.id, view.events ?? []);
   state.alive.set(view.id, view.alive);
   if (view.scopeAudit) state.audits.set(view.id, view.scopeAudit);
   markActivity(view.id, lastOutputAt(view) ?? view.startedAt ?? undefined);
@@ -951,18 +976,20 @@ async function loadRuns(): Promise<void> {
     .sort((a, b) => (a.startedAt ?? a.createdAt) - (b.startedAt ?? b.createdAt));
   const before = new Set(state.activeRuns.map((r) => r.id));
   state.activeRuns = running;
-  // Forget a lane that ended while the page was closed, so its state does not
+  // Forget a lane that ended while the page was closed, so its console does not
   // stay in memory and reappear on the next start event. The audit stays: it is
   // the evidence of what the run touched, and it is the one thing the run card
   // shows about a finished session.
   for (const id of before) {
     if (running.some((r) => r.id === id)) continue;
+    state.runEvents.delete(id);
     state.lastActivityAt.delete(id);
     state.alive.delete(id);
   }
   pruneAudits();
-  // Refresh the per-run bookkeeping from the server, so runs that are already
-  // going show their last-output time even when SSE events were missed.
+  // Refresh console and per-run bookkeeping from the server, so runs that are
+  // already going show their output and their last-output time even when SSE
+  // events were missed.
   await Promise.all(
     running.map(async (run) => {
       try {
@@ -1489,6 +1516,9 @@ function connectEvents(): void {
       // A new lane: add it next to the ones already running instead of replacing
       // whatever was on screen.
       state.activeRuns = [...state.activeRuns.filter((r) => r.id !== event.run.id), event.run];
+      // A run id is never reused, but a card that kept a stale console would be
+      // a lie; starting empty is also what the server sends.
+      state.runEvents.set(event.run.id, []);
       state.alive.set(event.run.id, true);
       markActivity(event.run.id, event.run.startedAt ?? Date.now());
       renderRuns();
@@ -1497,17 +1527,31 @@ function connectEvents(): void {
       // this one re-reads the list — so the run cannot be put back to "queued".
       void refreshAll();
     } else if (event.type === 'run:log') {
-      // The session runs in a terminal window, so there is no log pane to append
-      // to. All an event carries for this panel is proof that the runner just
-      // did something, and that is a timestamp: the payload of the last 1500
-      // events used to be kept per run and never rendered.
+      // One line into the run's own console, in place, so the owner watches the
+      // session instead of re-reading it in the history afterwards.
+      const buffer = eventsOf(event.runId).slice();
+      buffer.push(event.event);
+      // Bounded: a long run would otherwise keep every line it ever wrote.
+      if (buffer.length > 1500) buffer.splice(0, buffer.length - 1500);
+      state.runEvents.set(event.runId, buffer);
       markActivity(event.runId);
+      const consoleEl = document.querySelector(`[data-run-console="${runKey(event.runId)}"]`);
+      if (consoleEl) {
+        const line = document.createElement('div');
+        line.className = `line ${event.event.kind}`;
+        line.textContent = event.event.text;
+        consoleEl.appendChild(line);
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+      } else {
+        renderRuns();
+      }
       updateRunActivity();
     } else if (event.type === 'run:finished') {
       // `toast` writes textContent, so this value needs no escaping — the
       // browser does it. Escaping here would show the entities themselves.
       toast(`Run für #${event.run.suggestionId}: ${event.run.status}`, event.run.status === 'succeeded' ? 'success' : 'error');
       state.activeRuns = state.activeRuns.filter((r) => r.id !== event.run.id);
+      state.runEvents.delete(event.run.id);
       state.lastActivityAt.delete(event.run.id);
       state.alive.delete(event.run.id);
       void refreshAll();

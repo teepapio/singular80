@@ -13,7 +13,6 @@ import * as discord from './discord';
 import * as telegram from './telegram';
 import { TelegramBot } from './telegramBot';
 import { findOpencodeBinary, Runner } from './runner';
-import { findTerminal } from './terminal';
 import {
   backupPath,
   backupStatus,
@@ -35,12 +34,6 @@ export interface AppOptions {
   distDir: string;
   dashboardUrl?: string;
   runnerEnabled?: boolean;
-  /**
-   * Run each session in a terminal window instead of the dashboard's log pane.
-   * Set from `server/index.ts`; off by default, and `S80_TERMINAL=0` overrides
-   * it without touching code.
-   */
-  terminalRuns?: boolean;
   /**
    * Give every run its own git worktree and its own branch, instead of having all
    * runs write into the shared tree. Set from `server/index.ts`; off by default,
@@ -145,9 +138,6 @@ export function createApp(options: AppOptions): FastifyInstance {
         projectRoot: options.projectRoot,
         dataDir: options.dataDir,
         contentDir: options.contentDir,
-        // Only the application may turn this on. Tests build a Runner directly
-        // and would otherwise open a window on the desktop for every case.
-        terminalMode: options.terminalRuns === true && findTerminal() !== null,
         isolateRuns: options.isolateRuns === true,
         callbacks: {
           onStarted: (run) => {
