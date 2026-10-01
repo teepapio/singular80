@@ -31,3 +31,4 @@ session. Written by the runner on success, or by
 - **edi:** Ein gescheiterter Lauf nennt den Grund im Klartext: die letzte Fehlermeldung von OpenCode steht in der Notiz, statt nur „exit 1“.
 - **edi:** Modell für neue Läufe auf `opencode-go/space-bunny-free` gestellt — das Standardmodell wurde vom Anbieter abgewiesen („This model is not available in your country“).
 - **edi:** Die Prioritäts-Zahl ist weg — Score, Score-Zerlegung und Auto-Genehmigung nach Score gibt es nicht mehr; sortiert wird nach Stimmen, Neuheit oder Cluster.
+- **#16** I'll start by checking the previous attempt's run log and the working tree state.Previous attempt l… — `6fd58ec` <!-- 16:run_mupy0eqn_a49cee -->
