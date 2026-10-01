@@ -611,6 +611,7 @@ function makeBot(
   return new TelegramBot({
     // A temp dir per bot: a leaked offset would make a command look "already handled".
     projectRoot: overrides.projectRoot ?? mkdtempSync(join(tmpdir(), 's80-tgbot-')),
+    chatId: '42',
     store: { listSuggestions: () => [], listRuns: () => [] } as never,
     runner: runner as never,
     bus: { on: () => {}, emit: () => false } as never,

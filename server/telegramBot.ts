@@ -2,6 +2,7 @@ import type { EventEmitter } from 'node:events';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { RunRecord, SuggestionStatus, SuggestionView } from '../src/shared/types';
+import { classify } from '../src/shared/sorting';
 import * as telegram from './telegram';
 import type { Store } from './db';
 import type { Runner } from './runner';
@@ -16,11 +17,29 @@ import type { Runner } from './runner';
  *
  * A run starts an opencode session in the working tree. So `isAuthorized()` is
  * the door: without an allowed id the bot does nothing, not even a reply.
+ *
+ * ## A player suggestion arrives looking like the bot itself
+ *
+ * The game posts with **this bot's token** (`telegram_relay.gd`), so a player
+ * suggestion comes back through `getUpdates` indistinguishable from one of our
+ * own messages: `from.is_bot = true`. The old rule `is_bot ⇒ stranger ⇒ drop`
+ * therefore discarded every player suggestion — the chat showed them, the
+ * dashboard never did, and nothing anywhere said so.
+ *
+ * So bot-authored is no longer a verdict. It is split by **whether this server
+ * sent it**, which `telegram.isOwnMessage()` answers from the ids the send path
+ * recorded. Ours stays silent; anything else in the configured chat is a player
+ * suggestion and gets imported.
  */
 
 export interface TelegramBotDeps {
   /** Repository root; the polling state lives in `data/` next to the database. */
   projectRoot: string;
+  /**
+   * The configured chat, for the suggestion `clientKey`. A Telegram message id is
+   * unique per chat only, so the key needs it.
+   */
+  chatId: string;
   store: Store;
   runner: Runner | null;
   bus: EventEmitter;
@@ -65,6 +84,13 @@ interface PersistedState {
   offset: number;
   /** update_ids already answered, so a replay is recognised. */
   seen: number[];
+  /**
+   * Message ids this server sent. Needed because a bot-authored message is
+   * either our own chatter or a player's suggestion, and the author field cannot
+   * tell them apart. Without this file, a restart would import the server's own
+   * `Aufruf 12 beendet` as a new suggestion.
+   */
+  own: string[];
 }
 
 export class TelegramBot {
@@ -79,6 +105,10 @@ export class TelegramBot {
 
   constructor(private readonly deps: TelegramBotDeps) {
     this.load();
+    // Every send the server makes — from this file or from `app.ts`, which
+    // announces suggestions and run results with the same token — lands in the
+    // registry, and the file is what keeps a restart from re-reading them.
+    telegram.onOwnMessageSaved(() => this.save());
   }
 
   start(): void {
@@ -150,6 +180,7 @@ export class TelegramBot {
       const raw = JSON.parse(readFileSync(this.statePath, 'utf8')) as PersistedState;
       this.offset = Number(raw.offset) || 0;
       this.seen = new Set(Array.isArray(raw.seen) ? raw.seen.map(Number) : []);
+      telegram.restoreOwnMessages(raw.own);
     } catch {
       // No state yet, or unreadable: start from 0. Telegram still holds every
       // unconfirmed message, so nothing is lost — they are simply offered again.
@@ -159,7 +190,10 @@ export class TelegramBot {
   private save(): void {
     try {
       mkdirSync(dirname(this.statePath), { recursive: true });
-      writeFileSync(this.statePath, JSON.stringify({ offset: this.offset, seen: [...this.seen] }));
+      writeFileSync(
+        this.statePath,
+        JSON.stringify({ offset: this.offset, seen: [...this.seen], own: telegram.ownMessageIds() }),
+      );
     } catch {
       // A missing state file only costs a replay guard, never a command.
     }
@@ -175,9 +209,21 @@ export class TelegramBot {
    */
   async handle(update: telegram.TelegramUpdate): Promise<void> {
     if (this.seen.has(update.update_id)) return;
-    const text = update.message?.text;
-    if (!text) {
+    const message = update.message;
+    const text = message?.text;
+    if (!text || !message) {
       this.markSeen(update.update_id);
+      return;
+    }
+    if (message.from?.is_bot) {
+      // Ours, or a player's. See the header: the game posts with this token, so
+      // `is_bot` used to mean "stranger" and every player suggestion was dropped
+      // here. Marked before the import so a failing insert is at worst a lost
+      // duplicate, never a second row for one message.
+      this.markSeen(update.update_id);
+      if (telegram.isOwnMessage(message.message_id)) return;
+      if (!telegram.isConfiguredChat(message.chat.id)) return;
+      await this.importSuggestion(message.message_id, text);
       return;
     }
     if (!telegram.isAuthorized(update)) {
@@ -216,6 +262,54 @@ export class TelegramBot {
     // on that sentence.
     this.awaitingTaskText = false;
     await telegram.sendMessage(await this.answer(command));
+  }
+
+  /**
+   * Turns one relayed message into a dashboard row.
+   *
+   * `clientKey` is the Telegram message id, so a replayed update finds the row it
+   * already made instead of a second one. The `seen` set would already stop that
+   * within a process, but Telegram replays everything after a lost offset — the
+   * key is what makes the guarantee survive a restart.
+   *
+   * Status `new` and **no run**: the owner decides whether an idea is taken, and
+   * `/run 12` or the dashboard's button starts it. Importing must not also queue
+   * it, or every player passing by would opencode session in the working tree.
+   */
+  private async importSuggestion(messageId: number, text: string): Promise<void> {
+    const { store, bus, viewOf } = this.deps;
+    // The relay appends a blank line and the author as `— name`. Kept out of the
+    // text because the dashboard has a column for it, and a suggestion that opens
+    // with a bare dash reads as a formatting accident.
+    const body = text.trim();
+    if (body.length < 3) return;
+    const authored = /^(.*)\n\n—\s*(.+)$/s.exec(body);
+    const suggestionText = (authored ? authored[1] : body).trim();
+    const author = authored ? authored[2].trim() : 'Anonym';
+    if (!suggestionText) return;
+    const result = store.createSuggestionOnce({
+      text: suggestionText.slice(0, 4000),
+      author: author.slice(0, 120),
+      // Not `game`: that source means "the game posted it to this server", and
+      // this one never touched the server. It is what tells the owner later which
+      // suggestions were typed on a phone rather than sent from the backend.
+      source: 'telegram',
+      category: classify(suggestionText),
+      canonicalId: null,
+      status: 'new',
+      // A Telegram message id is only unique within its chat, so the chat goes
+      // into the key: without it, a group and a private chat would hand the same
+      // id to two different suggestions and the second would be swallowed as a
+      // retry.
+      clientKey: `tg:${this.deps.chatId}:${messageId}`,
+    });
+    if (!result.created) return;
+    const view = viewOf(result.suggestion.id);
+    if (view) bus.emit('event', { type: 'suggestion:new', suggestion: view });
+    // One line, because the owner reads this on a phone: the number is what
+    // `/status` and `/run` take, and without it the idea is visible but not
+    // actionable from there.
+    await telegram.sendMessage(`#${result.suggestion.id} ist im Dashboard`);
   }
 
   private markSeen(updateId: number): void {

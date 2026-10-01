@@ -962,6 +962,7 @@ export function createApp(options: AppOptions): FastifyInstance {
   // here — a game that works without chat control must not hang on an empty bot.
   const bot = new TelegramBot({
     projectRoot: options.projectRoot,
+    chatId: process.env.TELEGRAM_CHAT_ID?.trim() ?? '',
     store,
     runner: runner ?? null,
     bus,
