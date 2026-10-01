@@ -943,6 +943,41 @@ Runner genau das an `opencode run --model` gibt. Ohne Netz bleibt die
 Modellwahl benutzbar und nur die Stufenliste leer — beides ist in
 `tests/modelChoices.test.ts` festgeschrieben.
 
+### Der Bot sieht seine eigenen Nachrichten nicht — und das ist Absicht von Telegram
+
+**Ein Vorschlag aus dem Spiel erreicht das Dashboard über eine Benutzer-Sitzung,
+nicht über den Bot.** Das ist die wichtigste Telegram-Eigenschaft dieses Projekts,
+und sie wurde gemessen, bevor sie geglaubt wurde.
+
+Das Spiel sendet einen Vorschlag **mit dem Bot-Token**
+(`godot/src/core/autoload/telegram_relay.gd`). Telegram sagt dazu im eigenen FAQ:
+
+> **Why doesn't my bot see messages from other bots?** … bots will not be able to
+> see messages from other bots **regardless of mode**.
+
+Eine eigene Nachricht *ist* eine Nachricht von einem Bot. `getUpdates` liefert sie
+nie zurück, und die Bot-API hat **überhaupt keine Methode, die einen Chat zu lesen**.
+Gemessen am 2026-10-01 auf diesem Rechner: eine exakt so gesendete Nachricht blieb
+für den Poller unsichtbar, der Offset stand still.
+
+Daraus folgt dreierlei, und jedes steht als Test da:
+
+- **Der Bot darf daraus nichts machen.** `tests/telegramBot.test.ts` pinnt, dass
+  eine bot-eigene Nachricht *nicht* zu einem Vorschlag wird und der Bot schweigt.
+- **`TelegramInbox`** (`server/telegramInbox.ts`) liest den Chat als **Benutzer**,
+  denn nur ein Benutzer sieht die Historie seines eigenen Chats. Einmalig
+  anmelden: `npm run telegram:login` (QR, kein Passwort im Verlauf). Ohne
+  `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` **und** Session bleibt der Inbox aus und
+  sagt es in einer Zeile.
+- **Was als Vorschlag gilt, ist die Signatur des Relays**: Leerzeile und
+  `— Autor`. Der Server schreibt in denselben Chat (`Auftrag 12 beendet`,
+  `#7\n…`, der Hilfetext), und keine dieser Zeilen trägt sie. Das trennt Spiel
+  und Server ohne eine Liste, die man pflegen müsste.
+
+`clientKey` ist `tginbox:<chat>:<messageId>`: eine Message-Id ist nur innerhalb
+ihres Chats eindeutig, und die Marke (`data/telegram-inbox.json`) ist nur eine
+Bequemlichkeit — der Schlüssel macht einen Neustart zum No-op.
+
 ## Godot-Spiel
 
 ```

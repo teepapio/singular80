@@ -36,73 +36,6 @@ const MAX_MESSAGE = 4096;
  */
 const SEND_TIMEOUT_MS = 10_000;
 
-/**
- * The message ids this process has sent.
- *
- * The game delivers a player suggestion **with this bot's own token** — see
- * `godot/src/core/autoload/telegram_relay.gd`, which posts to
- * `/bot<token>/sendMessage`. Telegram therefore reports a player's suggestion as
- * `from.is_bot = true`, the very same author as every reply the server sends
- * itself. A bot-authored message alone cannot be told apart from a player
- * suggestion, and the two demand opposite things: one has to become a dashboard
- * row, the other must not become one — otherwise the bot's own `#42 …` announcement
- * is imported as a fresh suggestion and announces itself, forever.
- *
- * The id is the discriminator, and it is exact: a message is the server's own if
- * and only if the server sent it, and the server knows which ids those are. The
- * registry is bounded like the replay guard — a suggestion older than the bound is
- * lost, which costs one duplicate at worst, and Telegram's offset means it is
- * redelivered never.
- */
-const ownMessages = new Set<string>();
-const OWN_MESSAGES_MAX = 400;
-
-/** Called after every remembered id, so the bot can persist it. */
-let onOwnMessage: (() => void) | null = null;
-
-function rememberOwn(id: unknown): void {
-  const key = String(id ?? '').trim();
-  if (!/^\d+$/.test(key)) return;
-  ownMessages.add(key);
-  if (ownMessages.size > OWN_MESSAGES_MAX) {
-    // A `Set` iterates in insertion order, so this drops the oldest ids.
-    for (const stale of ownMessages) {
-      ownMessages.delete(stale);
-      if (ownMessages.size <= OWN_MESSAGES_MAX) break;
-    }
-  }
-  onOwnMessage?.();
-}
-
-/** True when this server sent the message itself, so it must never read it back. */
-export function isOwnMessage(messageId: unknown): boolean {
-  return ownMessages.has(String(messageId ?? '').trim());
-}
-
-/** The ids to keep across a restart. */
-export function ownMessageIds(): string[] {
-  return [...ownMessages];
-}
-
-/** Re-seeds the registry after a restart, before the first poll. */
-export function restoreOwnMessages(ids: unknown): void {
-  for (const id of Array.isArray(ids) ? ids : []) rememberOwn(id);
-}
-
-/** Lets the bot persist the registry instead of guessing on the next start. */
-export function onOwnMessageSaved(cb: (() => void) | null): void {
-  onOwnMessage = cb;
-}
-
-/**
- * True for the chat the owner configured, and the only one a relayed suggestion
- * may come from. A group would let anyone with the token write dashboard rows.
- */
-export function isConfiguredChat(id: unknown): boolean {
-  const configured = chatId();
-  return configured !== '' && String(id ?? '').trim() === configured;
-}
-
 function token(): string {
   return (process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
 }
@@ -162,9 +95,6 @@ export async function editMessageText(
       const raw = await res.text().catch(() => '');
       return { ok: false, error: explain(res.status, raw) };
     }
-    // An edit keeps the id of the message it rewrites, so it is recorded under
-    // that id as well — the rewritten text is still this server's own.
-    rememberOwn(messageId);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: fetchError(err) };
@@ -208,11 +138,7 @@ export async function sendMessage(text: string): Promise<{ ok: boolean; error?: 
         // The id is what makes "write the outcome into that message" possible
         // instead of appending a new one.
         const data = (await res.json().catch(() => null)) as { result?: { message_id?: number } } | null;
-        const sentId = data?.result?.message_id;
-        // Recorded before returning: an edit or an import may look at it within
-        // the same tick, and a message the server forgot is one it reads back.
-        if (sentId) rememberOwn(sentId);
-        return { ok: true, messageId: sentId ? String(sentId) : undefined };
+        return { ok: true, messageId: data?.result?.message_id ? String(data.result.message_id) : undefined };
       }
       const raw = await res.text().catch(() => '');
       last = explain(res.status, raw);

@@ -11,6 +11,7 @@ import { ContentStore } from './content';
 import { Store } from './db';
 import * as discord from './discord';
 import * as telegram from './telegram';
+import { TelegramInbox } from './telegramInbox';
 import { TelegramBot } from './telegramBot';
 import { findOpencodeBinary, Runner } from './runner';
 import { catalogAvailable, listModelChoices } from './models';
@@ -1025,11 +1026,27 @@ export function createApp(options: AppOptions): FastifyInstance {
   });
   bot.start();
 
+  /**
+   * The other half of the chat: the bot cannot read what the game posted (Telegram
+   * never returns a bot its own messages), so a **user** session pulls the chat
+   * instead. Both run side by side — the bot answers commands, the inbox collects
+   * suggestions — and the inbox stays inert without a login.
+   */
+  const inbox = new TelegramInbox({
+    dataDir: options.dataDir,
+    store,
+    bus,
+    viewOf,
+    onError: (err) => console.warn('[telegram-inbox]', err.message),
+  });
+  inbox.start();
+
   app.addHook('onClose', async () => {
     // Only the timers: a run that is still going must survive the server, that
     // is what the PID registry and the adoption in `recover()` are for.
     runner?.dispose();
     await bot.stop();
+    await inbox.stop();
   });
 
   app.setErrorHandler((error: Error & { statusCode?: number }, _req, reply) => {

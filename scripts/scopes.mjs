@@ -304,6 +304,10 @@ const staticScopes = {
       'scripts/install-guard.sh',
       'scripts/install-android-template.mjs',
       'scripts/bake-telegram.mjs',
+      // The one-time login of the owner's Telegram account, which the inbox needs
+      // before it can read the chat. Next to the baker because both are the
+      // one-time setup around the same token set.
+      'scripts/telegram-login.ts',
       'scripts/smoke.ts',
       'scripts/backup.ts',
       // Writes the session's line into CHANGELOG.md. It has to be a named file

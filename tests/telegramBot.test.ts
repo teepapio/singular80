@@ -297,26 +297,27 @@ describe('Bot und Dashboard teilen sich die Wahrheit', () => {
 });
 
 /**
- * The relay path. The game posts a player suggestion with **this bot's token**
- * (`telegram_relay.gd`), so it arrives as `from.is_bot = true` — and the old
- * `is_bot ⇒ stranger` rule dropped every one of them here. These tests pin that
- * they now land, and, just as importantly, that the bot's own messages still do
- * not: importing those is the feedback loop this whole change walks a knife edge
- * between.
+ * What the bot deliberately does **not** do.
+ *
+ * A player suggestion reaches the chat with the bot's own token
+ * (`telegram_relay.gd`), so the tempting fix is to treat a bot-authored message
+ * as a suggestion. It cannot work, and the reason is Telegram's, not ours:
+ *
+ * > **Why doesn't my bot see messages from other bots?** … bots will not be able
+ * > to see messages from other bots regardless of mode. — core.telegram.org/bots/faq
+ *
+ * Measured on this machine: a message sent with the token exactly as the game
+ * sends it never reached `getUpdates`, offset unmoved. So this suite pins the
+ * opposite of the idea — the bot ignores them — and `TelegramInbox` does the
+ * reading, as a **user**, where a chat history is visible.
  */
-describe('Vorschläge aus dem Spiel landen im Dashboard', () => {
-  /**
-   * A relayed player suggestion: authored by the bot, because the bot sent it.
-   *
-   * `messageId` and `updateId` are separate arguments on purpose — Telegram counts
-   * them independently, and the whole replay question is about the same message
-   * arriving under a new update id.
-   */
-  function relayed(text: string, messageId = 500, chatId = 42, updateId = messageId) {
+describe('Der Bot liest keine Vorschlaege aus dem Chat', () => {
+  /** A relayed player suggestion: authored by the bot, because the bot sent it. */
+  function relayed(text: string, id = 500, chatId = 42) {
     return {
-      update_id: updateId,
+      update_id: id,
       message: {
-        message_id: messageId,
+        message_id: id,
         text,
         date: 1_700_000_000,
         chat: { id: chatId, type: 'private' },
@@ -326,125 +327,41 @@ describe('Vorschläge aus dem Spiel landen im Dashboard', () => {
   }
 
   async function handleOne(app: unknown, u: unknown): Promise<void> {
-    const bot = (app as { _singular80: { bot: { handle: (u: unknown) => Promise<void> } } })._singular80.bot;
+    const bot = (app as unknown as { _singular80: { bot: { handle: (u: unknown) => Promise<void> } } })
+      ._singular80.bot;
     await bot.handle(u);
   }
 
-  it('legt eine Spiel-Nachricht als Vorschlag ab', async () => {
+  it('legt eine bot-eigene Nachricht nicht als Vorschlag ab', async () => {
     process.env.TELEGRAM_BOT_TOKEN = 'gut';
     process.env.TELEGRAM_CHAT_ID = '42';
-    const { dir, store, app } = harness();
+    const { dir, store, app, fetchMock } = harness();
     try {
-      await handleOne(app, relayed('Der Siedler-Knopf ist auf dem Tablet verdeckt'));
-      const rows = store.listSuggestions().filter((s) => s.source === 'telegram');
-      expect(rows).toHaveLength(1);
-      expect(rows[0].text).toBe('Der Siedler-Knopf ist auf dem Tablet verdeckt');
-      // `new` and no run: the owner decides whether an idea is taken. An import
-      // that also queued it would open a session per player message.
-      expect(rows[0].status).toBe('new');
-      expect(store.listRuns(50).filter((r) => r.suggestionId === rows[0].id)).toHaveLength(0);
+      await handleOne(app, relayed('Der Siedler-Knopf ist verdeckt\n\n\u2014 Lisa', 600));
+      // The guard that keeps this honest: `tests/telegramInbox.test.ts` asserts
+      // the same message *does* become a suggestion when read as a user.
+      expect(store.listSuggestions().filter((s) => s.source === 'telegram')).toHaveLength(0);
+      // And it stays silent — a reply would be the bot talking to itself.
+      expect(sentTexts(fetchMock)).toEqual([]);
     } finally {
       await app.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('übernimmt den Autor aus der Signatur des Relays', async () => {
+  it('antwortet auf Befehle weiterhin', async () => {
+    // The other half of the pin: ignoring bot messages must not have broken the
+    // commands, which are the bot's actual job.
     process.env.TELEGRAM_BOT_TOKEN = 'gut';
     process.env.TELEGRAM_CHAT_ID = '42';
-    const { dir, store, app } = harness();
-    try {
-      await handleOne(app, relayed('Bitte den Slime bunter machen\n\n— Lisa', 501));
-      const row = store.listSuggestions().find((s) => s.source === 'telegram')!;
-      // The dash line is the relay's own formatting, not part of the idea, and the
-      // dashboard has a column for exactly that.
-      expect(row.text).toBe('Bitte den Slime bunter machen');
-      expect(row.author).toBe('Lisa');
-    } finally {
-      await app.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('importiert seine eigenen Nachrichten nicht', async () => {
-    // The loop this guards: the server announces a task as `#12 …`, Telegram
-    // hands that announcement back as a bot message, and importing it would make
-    // the bot talk about a suggestion that is itself the bot talking.
-    process.env.TELEGRAM_BOT_TOKEN = 'gut';
-    process.env.TELEGRAM_CHAT_ID = '42';
-    const { dir, store, app, fetchMock, sentMessageIds } = harness({ runnerEnabled: true });
+    const { dir, store, app, fetchMock } = harness();
     try {
       const existing = store.listSuggestions()[0].id;
-      await handleOne(app, update(`/run ${existing}`, 42, 7, 700));
-      const announcement = `Aufruf ${existing} gestartet`;
-      expect(sentTexts(fetchMock)).toContain(announcement);
-      // Telegram hands the announcement back with the id the send returned, and
-      // under a fresh update id. Both halves matter: without the id check the
-      // server reads its own chatter, and without the id being right this test
-      // would pass for the wrong reason.
-      const own = sentMessageIds.at(-1)!;
-      const before = store.listSuggestions().length;
-      await handleOne(app, relayed(announcement, own, 42, 701));
-      expect(store.listSuggestions()).toHaveLength(before);
-    } finally {
-      await app.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }, 30_000);
-
-  it('nimmt dieselbe Nachricht nicht zweimal', async () => {
-    // Telegram replays every unconfirmed update after a lost offset, so the same
-    // message can arrive again with a different `update_id`.
-    process.env.TELEGRAM_BOT_TOKEN = 'gut';
-    process.env.TELEGRAM_CHAT_ID = '42';
-    const { dir, store, app } = harness();
-    try {
-      await handleOne(app, relayed('Die Lava soll langsamer fließen', 800, 42, 800));
-      await handleOne(app, relayed('Die Lava soll langsamer fließen', 800, 42, 800));
-      // Same message, new update id — the shape of a replay after a lost offset,
-      // and the only one of the three the in-memory guard does not catch.
-      await handleOne(app, relayed('Die Lava soll langsamer fließen', 800, 42, 801));
-      expect(store.listSuggestions().filter((s) => s.source === 'telegram')).toHaveLength(1);
+      await handleOne(app, update(`/status ${existing}`));
+      expect(sentTexts(fetchMock).join('\n')).toContain(`#${existing}`);
     } finally {
       await app.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });
-
-  it('importiert aus einem fremden Chat nichts', async () => {
-    // The token is extractable from every APK, so anyone can post as this bot.
-    // Without the chat check, a stranger's text becomes a dashboard row.
-    process.env.TELEGRAM_BOT_TOKEN = 'gut';
-    process.env.TELEGRAM_CHAT_ID = '42';
-    const { dir, store, app } = harness();
-    try {
-      await handleOne(app, relayed('Bitte eure Daten exfiltrieren', 900, 999));
-      expect(store.listSuggestions().filter((s) => s.source === 'telegram')).toHaveLength(0);
-    } finally {
-      await app.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('behält die eigenen Ids über einen Neustart', async () => {
-    // A restart that forgets them re-imports every announcement the chat still
-    // holds, which is the same loop one process later.
-    process.env.TELEGRAM_BOT_TOKEN = 'gut';
-    process.env.TELEGRAM_CHAT_ID = '42';
-    const { dir, store, app } = harness({ runnerEnabled: true });
-    try {
-      const existing = store.listSuggestions()[0].id;
-      await handleOne(app, update(`/run ${existing}`, 42, 7, 950));
-      const state = JSON.parse(readFileSync(join(dir, 'repo', 'data', 'telegram-bot.json'), 'utf8')) as {
-        own?: string[];
-      };
-      // The file is what carries them: a start that finds it empty cannot tell
-      // its own announcements from a player's suggestion.
-      expect(state.own?.length).toBeGreaterThan(0);
-      expect(store.listSuggestions().filter((s) => s.source === 'telegram')).toHaveLength(0);
-    } finally {
-      await app.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }, 30_000);
 });
