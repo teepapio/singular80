@@ -26,6 +26,7 @@ Game="*res://src/core/autoload/game_state.gd"
 Content="*res://src/core/autoload/content_store.gd"
 Sfx="*res://src/core/autoload/audio_service.gd"
 Api="*res://src/core/autoload/api_client.gd"
+Telegram="*res://src/core/autoload/telegram_relay.gd"
 Router="*res://src/core/autoload/router.gd"
 
 [display]

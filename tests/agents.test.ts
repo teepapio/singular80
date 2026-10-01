@@ -110,10 +110,33 @@ describe('Agentendefinitionen', () => {
     // The one instrument a dispatcher has: the specialist itself.
     expect(frontmatter).toMatch(/^ {2}subagent: allow$/m);
     expect(frontmatter).toMatch(/^ {2}"\*": deny$/m);
-    // No write surface at all, and no gate: a dispatcher that may also write
-    // becomes the queue, and a dispatcher that may merge is a second gatekeeper.
+    // No write surface: a dispatcher that may also write becomes the queue.
+    // This is the wall that matters and it is still intact.
     expect(frontmatter).not.toMatch(/^ {2}edit:/m);
-    expect(shell).toContain('npm run gate:status*');
-    expect(shell.filter((s) => s.startsWith('npm run gate') && s !== 'npm run gate:status*')).toEqual([]);
+    // Shell was opened to every agent on the owner's instruction (2026-10-01): a
+    // subagent stalling on a permission prompt mid-task was judged a worse
+    // failure than an over-permissioned one. The former hand-written allowlist
+    // is therefore gone from all seventeen definitions, `agent-main` included.
+    //
+    // What that costs is recorded here rather than discovered later: with
+    // `"*": allow` this session can run `npm run gate` itself, so the "only the
+    // Torwächter merges" property is no longer enforced by permissions — it is
+    // now a rule the agent is trusted to follow. The one place it is still
+    // mechanically enforced is the tree: `agent-merge` remains the only
+    // definition holding an `edit` grant for `CHANGELOG.md`, and the gate is a
+    // merge-gate script rather than an agent's judgement.
+    expect(shell).toEqual(['*']);
+  });
+
+  it('gibt keinem Agenten einen Bearbeitungszugang auf Produktcode außerhalb seines Scopes', () => {
+    // The narrow walls below are what the broad shell grant does not touch.
+    // If one of them disappears, `agent-grade` could read the implementation it
+    // is supposed to grade against, and `agent-hire` could edit the game.
+    const grade = readAgent('agent-grade.md').frontmatter;
+    expect(grade).not.toMatch(/^ {4}"godot\/src/);
+
+    const hire = readAgent('agent-hire.md').frontmatter;
+    expect(hire).toMatch(/^ {4}"\.opencode\/agents\/\*\*": allow$/m);
+    expect(hire).not.toMatch(/^ {4}"(godot|server|src)\//m);
   });
 });

@@ -178,6 +178,14 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 			return
 		Sfx.level_up()
 		status.add_theme_color_override("font_color", UiTheme.SUCCESS)
+		# Delivered by the bot rather than by a server: there is no suggestion
+		# number to quote and no cluster to speak of, so the thanks is its own
+		# sentence instead of one with an empty hole in it.
+		if str(view.get("via", "")) == "telegram":
+			status.text = Loc.t("ui.suggest_thanks_direct")
+			send.text = Loc.t("ui.suggest_sent")
+			_show_waiting(waiting)
+			return
 		var cluster := int(view.get("clusterSize", 1))
 		var extra := ""
 		if cluster > 1:

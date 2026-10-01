@@ -6,6 +6,9 @@ godot/.godot/
 # Wird von `npm run godot:android-template` erzeugt, nicht eingecheckt.
 godot/android/
 .env
+# Trägt den Telegram-Bot-Token. Von `npm run telegram:bake` aus `.env`
+# erzeugt; ein Token im Repository ist ein Token in der Welt.
+godot/telegram_config.gd
 *.log
 .DS_Store
 __pycache__/

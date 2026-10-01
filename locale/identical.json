@@ -19,7 +19,6 @@
       "ui.origin.lobby",
       "ui.pending_reason",
       "ui.server_caption",
-      "ui.server_offline",
       "ui.settings_short",
       "ui.suggest_name"
     ],

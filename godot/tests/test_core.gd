@@ -43,6 +43,7 @@ func run(kit: TestKit, scene_tree: SceneTree) -> void:
 	_cap()
 	_close()
 	await _delivery()
+	await _telegram_route()
 	_legal()
 	_server_address()
 
@@ -354,6 +355,108 @@ func _last(items: Array[Dictionary]) -> Dictionary:
 	return (items[items.size() - 1] as Dictionary).duplicate()
 
 
+## The no-server case is the *normal* state on a player's device, and it used to
+## be answered with "Offline" — a claim about a network nobody tried. The idea
+## has to reach the owner anyway, and without a backend the only route is the
+## bot. What matters here is which message the player gets and where the idea
+## ends up, because that pair is the whole difference between "lost" and "sent".
+func _telegram_route() -> void:
+	t.suite("Vorschlags-Warteschlange — Zustellung ohne Server")
+	var api: Node = tree.root.get_node_or_null("/root/Api")
+	var game: Node = tree.root.get_node_or_null("/root/Game")
+	var relay: Node = tree.root.get_node_or_null("/root/Telegram")
+	if api == null or game == null or relay == null:
+		t.fail("Die Autoloads Api, Game und Telegram fehlen")
+		t.suite_done()
+		return
+
+	var failed_events: Array = []
+	var on_failed := func(reason: String) -> void: failed_events.append(reason)
+	api.suggestion_failed.connect(on_failed)
+	api._queue.clear()
+	api._persist = false
+	game.set_server_url("")
+
+	# The credentials are forced empty rather than assumed: a build made with
+	# `npm run telegram:bake` carries real ones, a plain checkout does not, and a
+	# suite that passed only on one of the two would be measuring the build
+	# rather than the behaviour.
+	# The credentials are forced empty rather than assumed: a build made with
+	# `npm run telegram:bake` carries real ones, a plain checkout does not, and a
+	# suite that passed only on one of the two would be measuring the build
+	# rather than the behaviour. The originals are kept so the end restores them.
+	var baked_token := str(relay._token)
+	var baked_chat := str(relay._chat_id)
+	relay._token = ""
+	relay._chat_id = ""
+
+	# 1. This build carries no bot credentials. Nothing can be sent, and the
+	#    player must be told *that* — not that the network is down.
+	t.check(not relay.is_configured(),
+		"Ohne eingebackene Zugangsdaten ist der Bot nicht konfiguriert")
+	var view: Dictionary = await api.submit_suggestion("Boss mit zwei Leben", "Test")
+	t.check(view.is_empty(), "Ohne Weg nach draußen gibt es keine Ansicht")
+	t.equal(api.pending_count(), 1, "Der Vorschlag bleibt in der Warteschlange")
+	t.check(failed_events.size() == 1 and str(failed_events[0]) == Loc.t("ui.queue_saved_no_route"),
+		"Die Meldung nennt die fehlende Adresse statt 'offline'")
+
+	# 2. With credentials, the send is attempted and its failure is reported as a
+	#    failure to deliver — never as a lost suggestion. The address is still
+	#    empty, so this is the path a player with no server configured takes.
+	var attempts := {"n": 0}
+	var original: Variant = relay.send_item
+	relay.send_item = func(_item: Dictionary) -> Dictionary:
+		attempts["n"] = int(attempts["n"]) + 1
+		return {"ok": false, "error": "offline"}
+	relay._token = "123:ABC"
+	relay._chat_id = "42"
+	t.check(relay.is_configured(), "Mit Token und Chat-ID ist der Bot konfiguriert")
+	failed_events.clear()
+	var second: Dictionary = await api.submit_suggestion("Noch eine Idee", "Test")
+	t.check(second.is_empty(), "Ein gescheiterter Sendeversuch liefert keine Ansicht")
+	t.equal(attempts["n"], 1, "Der Bot wurde genau einmal gefragt")
+	t.equal(api.pending_count(), 2, "Beide Ideen warten weiter")
+	t.check(failed_events.size() == 1 and str(failed_events[0]) == Loc.t("ui.queue_saved_telegram_failed"),
+		"Die Meldung sagt 'nicht zugestellt' und nicht 'Server unerreichbar'")
+
+	# 3. A confirmed send removes the idea and returns a view that carries no
+	#    suggestion number — there is no backend to number it, and the dialog
+	#    must not print an id it does not have.
+	relay.send_item = func(_item: Dictionary) -> Dictionary:
+		attempts["n"] = int(attempts["n"]) + 1
+		return {"ok": true, "messageId": 99}
+	failed_events.clear()
+	var third: Dictionary = await api.submit_suggestion("Dritte Idee", "Test")
+	t.check(not third.is_empty(), "Ein bestätigter Sendeversuch liefert eine Ansicht")
+	t.equal(str(third.get("via", "")), "telegram", "Die Ansicht nennt den Weg über den Bot")
+	t.check(not third.has("id") or int(third.get("id", 0)) == 0,
+		"Ohne Backend gibt es keine Vorschlagsnummer zu zeigen")
+	t.equal(api.pending_count(), 2, "Nur die zugestellte Idee hat die Warteschlange verlassen")
+
+	# 4. The queued ideas drain through the retry timer without a server, which
+	#    is what stops a suggestion from sitting in `user://` forever.
+	relay.send_item = func(_item: Dictionary) -> Dictionary:
+		attempts["n"] = int(attempts["n"]) + 1
+		return {"ok": true, "messageId": 100}
+	api._attempt = 3
+	api._on_timer()
+	var drained := await _wait_until(func() -> bool: return api.pending_count() == 0, 8.0)
+	t.check(drained, "Die Warteschlange leert sich auch ohne Server über den Bot")
+	t.equal(api.pending_hint(), "", "Ohne Warteschlange verschwindet die Anzeige")
+
+	relay.send_item = original
+	# Restore whatever the build actually carries, so this suite leaves no trace
+	# on the following ones.
+	relay._token = baked_token
+	relay._chat_id = baked_chat
+	api.suggestion_failed.disconnect(on_failed)
+	api._attempt = 0
+	api._arm(0)
+	api._queue.clear()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(QueueClass.PATH))
+	t.suite_done()
+
+
 ## Waits for a condition while yielding frames, so the transport gets to run.
 func _wait_until(done: Callable, seconds: float) -> bool:
 	var waited := 0.0
@@ -518,8 +621,10 @@ func _server_address() -> void:
 	# and forgets — the first assertion below would be asserting the state it did
 	# not set up.
 	Game.set_server_url("")
-	t.equal(ServerDialogClass.label(), "Server: offline",
-		"Ohne Adresse steht 'offline' im Knopf")
+	# "no address", not "offline": the button states what is missing. A player who
+	# never configured a server was told for weeks that their network was down.
+	t.equal(ServerDialogClass.label(), "Server: " + Loc.t("ui.server_offline"),
+		"Ohne Adresse nennt der Knopf die fehlende Adresse statt 'offline'")
 
 	# A waiting queue as it looks after an offline suggestion.
 	var pending: Array[Dictionary] = []
@@ -553,6 +658,6 @@ func _server_address() -> void:
 	Api._queue.clear()
 	Api._attempt = 0
 	Api._arm(0)
-	t.equal(ServerDialogClass.label(), "Server: offline",
-		"Eine leere Adresse stellt den Offline-Zustand wieder her")
+	t.equal(ServerDialogClass.label(), "Server: " + Loc.t("ui.server_offline"),
+		"Eine leere Adresse stellt den Zustand 'keine Adresse' wieder her")
 	t.suite_done()

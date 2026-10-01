@@ -106,6 +106,39 @@ func _probe_health() -> bool:
 	return _reachable
 
 
+## Sends one entry straight to the owner's Telegram bot, with no backend in the
+## way. Returns a view like `_deliver()` does — `{}` means it stays queued.
+##
+## The returned view carries `via: "telegram"` and a `messageId` rather than a
+## suggestion `id`, because there is no server to number it: the suggestion is
+## not in the dashboard and will never be run by the agent. The dialog reads
+## that flag instead of printing a suggestion number it does not have.
+func _deliver_direct(client_key: String) -> Dictionary:
+	if not Telegram.is_configured():
+		# Nothing to send to and no address to send through. Say which, rather
+		# than "offline" — the network may be perfectly fine.
+		suggestion_failed.emit(Loc.t("ui.queue_saved_no_route"))
+		return {}
+	var item := QueueClass.find(_queue, client_key)
+	if item.is_empty():
+		return {}
+	var result: Dictionary = await Telegram.send_item(item)
+	if not bool(result.get("ok", false)):
+		# Not "server unreachable" — no server was involved. The idea waits and
+		# goes out on its own; saying so is what keeps a phone in a dead spot from
+		# looking like a lost suggestion.
+		suggestion_failed.emit(Loc.t("ui.queue_saved_telegram_failed"))
+		_arm(1)
+		return {}
+	# Removed only after Telegram confirmed it, exactly as on the server path: a
+	# lost answer costs a retry, never the idea.
+	QueueClass.remove(_queue, client_key)
+	_save()
+	_announce_pending()
+	suggestion_sent.emit(0, 1)
+	return {"id": 0, "clusterSize": 1, "via": "telegram", "messageId": int(result.get("messageId", 0))}
+
+
 # --- content ----------------------------------------------------------------
 
 ## Fetches the live content pack, or `null` when unavailable.
@@ -135,7 +168,12 @@ func submit_suggestion(text: String, author: String, context: String = "") -> Di
 		suggestion_failed.emit(QueueClass.cap_warning(dropped, QueueClass.MAX_ITEMS))
 	_announce_pending()
 	if not Game.has_server():
-		suggestion_failed.emit(Loc.t("ui.queue_saved_offline"))
+		# No backend is the normal state on a player's device, not a fault. The
+		# suggestion still has to reach the owner, so it goes straight to the bot
+		# from the phone; only if that is unavailable or fails does it wait here.
+		var direct := await _deliver_direct(key)
+		if not direct.is_empty():
+			return direct
 		_arm(0, 0.25)
 		return {}
 	if not _try_lock():
@@ -189,9 +227,10 @@ func flush_queue() -> void:
 		_arm(0)
 		return
 	if not Game.has_server():
-		# Nothing to probe, but the address may still be set while the game runs.
+		# No backend, so the bot is the route. Hand over to the one attempt path
+		# that knows about it rather than re-implementing the loop here.
 		_unlock()
-		_arm(_attempt)
+		_attempt_queue()
 		return
 	var failed := false
 	# Over a copy: `_deliver()` removes successful entries from `_queue`.
@@ -232,16 +271,34 @@ func _deliver(client_key: String) -> Dictionary:
 func _on_timer() -> void:
 	if _queue.is_empty():
 		return
-	if not Game.has_server():
-		# Nothing to probe, but the address may still be set while the game runs.
+	if not Game.has_server() and not Telegram.is_configured():
+		# Neither a server nor a bot: nothing to try. The address or the build's
+		# credentials may still arrive, so keep the backoff running rather than
+		# dropping the idea.
 		_arm(_attempt + 1)
 		return
 	_attempt_queue()
 
 
 func _attempt_queue() -> void:
-	if _queue.is_empty() or not Game.has_server() or not _try_lock():
+	if _queue.is_empty() or not _try_lock():
 		_arm(_attempt)
+		return
+	if not Game.has_server():
+		# The bot is the only route. There is no health endpoint to probe first, so
+		# the send itself decides, and the backoff absorbs a phone without signal.
+		var failed := false
+		for entry in _queue.duplicate():
+			if (await _deliver_direct(str((entry as Dictionary).get("clientKey", "")))).is_empty():
+				# The first failure speaks for all; continuing would wait out N timeouts.
+				failed = true
+				break
+		_unlock()
+		if failed:
+			_arm(_attempt + 1)
+		else:
+			_attempt = 0
+			_arm(0)
 		return
 	# Health endpoint first: a forced POST with no network drains the battery.
 	var reachable: bool = await _probe_health()
