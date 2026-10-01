@@ -154,7 +154,8 @@ const SCOPE_SUITES = {
     'FreeCell — Tipp am Screen'],
   dame: ['Dame — Regeln', 'Dame — Schlagzug-Analyse', 'Dame — Ziehbare Steine', 'Dame — Tipp am Brett'],
   crystal3d: ['Crystal Tower', 'Crystal Tower — Flusskette', 'Crystal Tower — Flusspunkte',
-    'Crystal Tower — Screen', 'Crystal Tower — Screen fehlt'],
+    'Crystal Tower — Screen', 'Crystal Tower — Screen fehlt',
+    'Crystal Forge — Bag', 'Crystal Forge — Screen'],
   merge3d: ['Merge 3D', 'Merge 3D — Tipp', 'Merge 3D — Tipptext und Brettdruck', 'Merge 3D — Tipp am Screen'],
   horserunner: ['Pferde-Parcours', 'Pferde-Parcours — Beinahe-Treffer', 'Pferde-Parcours — Kette'],
   dragonrpg: ['Drachen-RPG', 'Drachen-RPG — Loot-Rarität',
@@ -194,7 +195,7 @@ const SCOPE_SUITES = {
     'Vorschlags-Warteschlange', 'Vorschlags-Warteschlange — Ablage',
     'Vorschlags-Warteschlange — Backoff', 'Vorschlags-Warteschlange — Obergrenze',
     'Vorschlags-Warteschlange — Zustellung',
-    'Vorschlags-Warteschlange — Zustellung ohne Server', 'Rechtliches & Melden',
+    'Vorschlags-Warteschlange — Zustellung an den Bot', 'Rechtliches & Melden',
     'Sprachen — Kataloge', 'Sprachen — Auflösung', 'Sprachen — Platzhalter',
     'Sprachen — Plural', 'Sprachen — Zahlen', 'Sprachen — Wechsel',
     'Sprachen — Oberfläche',
@@ -215,7 +216,7 @@ const SCOPE_SCREENS = {
   poker: ['poker'],
   freecell: ['freecell'],
   dame: ['dame'],
-  crystal3d: ['crystal3d', 'crystal3d_christmas', 'crystal3d_halloween'],
+  crystal3d: ['crystal3d', 'crystal3d_christmas', 'crystal3d_halloween', 'crystal_forge'],
   // The screen list hangs off the base scope: variants inherit it, so a list
   // under a variant key would never be read.
   merge3d: ['merge3d_christmas', 'merge3d_halloween'],

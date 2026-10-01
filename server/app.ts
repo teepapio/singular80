@@ -13,7 +13,7 @@ import * as discord from './discord';
 import * as telegram from './telegram';
 import { TelegramBot } from './telegramBot';
 import { findOpencodeBinary, Runner } from './runner';
-import { findTerminal } from './terminal';
+import { catalogAvailable, listModelChoices } from './models';
 import {
   backupPath,
   backupStatus,
@@ -35,12 +35,6 @@ export interface AppOptions {
   distDir: string;
   dashboardUrl?: string;
   runnerEnabled?: boolean;
-  /**
-   * Run each session in a terminal window instead of the dashboard's log pane.
-   * Set from `server/index.ts`; off by default, and `S80_TERMINAL=0` overrides
-   * it without touching code.
-   */
-  terminalRuns?: boolean;
   /**
    * Give every run its own git worktree and its own branch, instead of having all
    * runs write into the shared tree. Set from `server/index.ts`; off by default,
@@ -132,7 +126,7 @@ export function createApp(options: AppOptions): FastifyInstance {
     const all = store.listSuggestions();
     const found = all.find((s) => s.id === id);
     if (!found) return null;
-    const view = decorate(found, all, Date.now());
+    const view = decorate(found, all);
     if (found.runId) view.run = store.getRun(found.runId);
     return view;
   };
@@ -145,9 +139,6 @@ export function createApp(options: AppOptions): FastifyInstance {
         projectRoot: options.projectRoot,
         dataDir: options.dataDir,
         contentDir: options.contentDir,
-        // Only the application may turn this on. Tests build a Runner directly
-        // and would otherwise open a window on the desktop for every case.
-        terminalMode: options.terminalRuns === true && findTerminal() !== null,
         isolateRuns: options.isolateRuns === true,
         callbacks: {
           onStarted: (run) => {
@@ -251,7 +242,7 @@ export function createApp(options: AppOptions): FastifyInstance {
     // One pass over the whole list: `decorate` per row would rebuild the cluster
     // index per row, which is quadratic on a table this route polls every few
     // seconds.
-    const decorated = decorateAll(all, Date.now());
+    const decorated = decorateAll(all);
     let views = all.map((s, i) => {
       const v = decorated[i];
       if (s.runId) v.run = store.getRun(s.runId);
@@ -269,7 +260,7 @@ export function createApp(options: AppOptions): FastifyInstance {
       const needle = query.q.toLowerCase();
       views = views.filter((v) => v.text.toLowerCase().includes(needle));
     }
-    views = sortSuggestions(views, (query.sort as SortMode) ?? 'score');
+    views = sortSuggestions(views, (query.sort as SortMode) ?? 'top');
     return { suggestions: views, stats: statsOf(views) };
   });
 
@@ -825,6 +816,20 @@ export function createApp(options: AppOptions): FastifyInstance {
     };
   });
 
+  // The models the settings dialog offers, with the effort levels each one
+  // accepts. Cached in `server/models.ts`, so opening the dialog does not spawn
+  // `opencode` or download the catalog every time.
+  app.get('/api/models', async () => {
+    const models = await listModelChoices();
+    return {
+      models,
+      // False means the catalog could not be read: the models are real, the effort
+      // levels are missing, and the dialog says so instead of offering a choice
+      // that would fail the run.
+      catalog: catalogAvailable(),
+    };
+  });
+
   app.put('/api/settings', async (req, reply) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const patch: Record<string, string | boolean | number> = {};
@@ -843,8 +848,6 @@ export function createApp(options: AppOptions): FastifyInstance {
     }
     if (typeof body.model === 'string') patch.model = body.model.trim();
     if (typeof body.extraInstructions === 'string') patch.extraInstructions = body.extraInstructions;
-    if (typeof body.autoApprove === 'boolean') patch.autoApprove = body.autoApprove;
-    if (typeof body.autoApproveScore === 'number') patch.autoApproveScore = body.autoApproveScore;
     // Runner policy. The store clamps these to its bounds, so a typo cannot
     // disable the timeout or ask for a thousand retries.
     for (const key of ['runTimeoutMinutes', 'retryLimit', 'retryBackoffSeconds', 'maxParallelRuns'] as const) {
@@ -901,7 +904,7 @@ export function createApp(options: AppOptions): FastifyInstance {
 
   app.get('/api/stats', async () => {
     const all = store.listSuggestions();
-    const views = decorateAll(all, Date.now());
+    const views = decorateAll(all);
     return { stats: statsOf(views), runs: store.listRuns(5) };
   });
 

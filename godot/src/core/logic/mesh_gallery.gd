@@ -1,18 +1,26 @@
 class_name MeshGallery
 extends RefCounted
-## Layout of the walk-in mesh gallery: one long hall with a row of pedestals on
-## the left and one on the right, every mesh of the registry standing in one of
-## them. The player walks straight ahead and looks at what passes on either
-## side — no collections, no pages, nothing to choose.
+## Layout of the walk-in mesh gallery: a hall with two rows of pedestals on
+## either side, every mesh of the registry standing in one of them. The player
+## walks the nave between them and can step into the aisle on either side, so
+## the outer row is as reachable as the inner one — no collections, no pages,
+## nothing to choose.
 ##
 ## Everything deciding *where* a pedestal stands and *what* the suggestion says
 ## lives here, so it is unit tested without a viewport.
 
 # --- the hall ---------------------------------------------------------------
 
-## How far a row stands from the middle line, and how much room one pedestal
-## needs between two neighbours.
-const ROW_OFFSET := 4.2
+## How many rows stand on each side of the nave, and how many pedestals that
+## makes per step down the hall. Two rows per side keep the hall half as long
+## for the same number of meshes.
+const ROWS_PER_SIDE := 2
+const PER_STEP := 2 * ROWS_PER_SIDE
+
+## How far the inner and the outer row stand from the middle line, and how much
+## room one pedestal needs between two neighbours.
+const INNER_ROW_OFFSET := 2.8
+const OUTER_ROW_OFFSET := 7.0
 const SLOT_SPACING := 4.6
 const PEDESTAL_HEIGHT := 0.55
 const PEDESTAL_RADIUS := 0.85
@@ -24,14 +32,21 @@ const FIRST_SLOT_Z := 5.0
 
 ## Distance at which a pedestal counts as "the one you stand in front of".
 ##
-## Wider than `ROW_OFFSET`, so that walking down the middle of the lane is
-## already standing in front of a row — a player who never leaves the middle
-## would otherwise never look at a mesh at all. At the wall it is still narrow
-## enough that the pair of the next depth is clearly the farther one.
+## Wider than every gap the player can stand in — the nave to the inner row and
+## the aisle to the outer one — so a mesh is never there, close enough to read,
+## without being the one in front of them.
 const NEAR_DISTANCE := 5.2
 
-## The gap the player keeps to a pedestal, so the knight does not walk into it.
+## The gap the player keeps to a pedestal, so the knight does not walk into it,
+## and with it the width of the closed band around every pedestal.
 const PEDESTAL_GAP := 0.6
+const CLEAR := PEDESTAL_RADIUS + PEDESTAL_GAP
+
+## The three bands of the walkable floor: the nave between the inner rows, the
+## band the inner pedestals close off, and the aisle between the two rows.
+const LANE_MID := INNER_ROW_OFFSET - CLEAR
+const BAND_EDGE := INNER_ROW_OFFSET + CLEAR
+const LANE_SIDE := OUTER_ROW_OFFSET - CLEAR
 
 # --- the suggestion ---------------------------------------------------------
 
@@ -72,15 +87,50 @@ static func side_of(index: int) -> int:
 	return 1 if index % 2 == 1 else -1
 
 
-## World position of pedestal `index`. Two pedestals share a depth, one per side,
-## and the next pair stands one spacing further down the hall.
+## World position of pedestal `index`. Four pedestals share a depth — two per
+## side, inner and outer — and the next set of four stands one spacing further
+## down the hall.
 static func slot_position(index: int) -> Vector3:
-	var pair := index / 2
+	var step := index / PER_STEP
+	var in_step := index % PER_STEP
+	var side := float(side_of(index))
+	var offset := INNER_ROW_OFFSET if in_step < 2 else OUTER_ROW_OFFSET
 	return Vector3(
-		float(side_of(index)) * ROW_OFFSET,
+		side * offset,
 		PEDESTAL_HEIGHT * 0.5,
-		-(FIRST_SLOT_Z + float(pair) * SLOT_SPACING)
+		-(FIRST_SLOT_Z + float(step) * SLOT_SPACING)
 	)
+
+
+## How far `z` is from the depth of an inner row, in metres.
+##
+## Zero where the inner pedestals stand, half a step in the gap between two
+## depths — that gap is the only place the player gets from the nave into the
+## aisle. Infinite before the first row, where the floor is open.
+static func depth_gap(z: float) -> float:
+	var beyond := -z - FIRST_SLOT_Z
+	if beyond < 0.0:
+		return INF
+	return absf(beyond - roundf(beyond / SLOT_SPACING) * SLOT_SPACING)
+
+
+## The x the player ends up at, having wanted `x` at `z` and come from `was_x`.
+##
+## The hall is a nave with an aisle on either side, and the inner row closes off
+## the ground between them. So the player crosses that band only where the inner
+## pedestals leave a gap, and a player already in the aisle walks on — which is
+## what makes the outer row reachable at all: from a fixed spot the nearer
+## pedestal is the nearer one from everywhere, and no distance can make the far
+## row the mesh in front of them while the near row stands between.
+static func lane_x(want: float, z: float, was_x: float) -> float:
+	var x := clampf(want, -LANE_SIDE, LANE_SIDE)
+	if depth_gap(z) >= CLEAR or absf(x) >= BAND_EDGE:
+		return x
+	# Caught in the closed band. Push out towards the side the player came from,
+	# so nobody standing in the nave is yanked across the hall.
+	if absf(was_x) >= BAND_EDGE:
+		return signf(was_x) * BAND_EDGE
+	return signf(x) * LANE_MID
 
 
 ## Which pedestal is nearest `from`, or -1 when the player is too far from all.
@@ -105,12 +155,6 @@ static func end_z(count: int) -> float:
 ## the last one.
 static func walk_bounds(count: int) -> Vector2:
 	return Vector2(end_z(count) - SLOT_SPACING * 0.5, FIRST_SLOT_Z + 2.5)
-
-
-## The middle lane the player is kept in, as `(min x, max x)`.
-static func lane_bounds() -> Vector2:
-	var edge := ROW_OFFSET - PEDESTAL_RADIUS - PEDESTAL_GAP
-	return Vector2(-edge, edge)
 
 
 # --- the suggestion ---------------------------------------------------------

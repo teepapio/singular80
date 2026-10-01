@@ -114,16 +114,16 @@
           <input id="setting-webhook" type="text" placeholder="https://discord.com/api/webhooks/…" />
           <small id="webhook-state"></small>
         </label>
-        <label>Modell für Runs (leer = Standard)
-          <input id="setting-model" type="text" placeholder="z. B. opencode-go/deepseek-v4.1-flash" />
+        <label>Modell für Runs
+          <select id="setting-model"></select>
+          <small id="model-state"></small>
+        </label>
+        <label>Anstrengung (Effort)
+          <select id="setting-effort"></select>
+          <small id="effort-state"></small>
         </label>
         <label>Zusätzliche Anweisungen für den Umsetzungs-Agenten
           <textarea id="setting-instructions" rows="3"></textarea>
-        </label>
-        <label class="row">
-          <input id="setting-autoapprove" type="checkbox" />
-          Auto-Genehmigung ab Score
-          <input id="setting-autoscore" type="number" min="0" max="200" step="1" class="number" />
         </label>
         <h3>Runner</h3>
         <label class="row">

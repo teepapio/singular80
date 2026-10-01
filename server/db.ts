@@ -15,8 +15,6 @@ export const DEFAULT_SETTINGS: Settings = {
   discordWebhook: '',
   model: '',
   extraInstructions: '',
-  autoApprove: false,
-  autoApproveScore: 25,
   // 45 minutes: long enough for a godot import plus the scoped test run, short
   // enough that a hung agent does not block the queue over a weekend.
   runTimeoutMinutes: 45,
@@ -936,10 +934,6 @@ export class Store {
       discordWebhook: raw.discordWebhook ?? DEFAULT_SETTINGS.discordWebhook,
       model: raw.model ?? DEFAULT_SETTINGS.model,
       extraInstructions: raw.extraInstructions ?? DEFAULT_SETTINGS.extraInstructions,
-      autoApprove: raw.autoApprove ? raw.autoApprove === 'true' : DEFAULT_SETTINGS.autoApprove,
-      autoApproveScore: raw.autoApproveScore
-        ? Number(raw.autoApproveScore)
-        : DEFAULT_SETTINGS.autoApproveScore,
       runTimeoutMinutes: numberSetting(
         raw.runTimeoutMinutes,
         DEFAULT_SETTINGS.runTimeoutMinutes,

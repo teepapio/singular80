@@ -2,6 +2,7 @@ import './style.css';
 import type {
   BusEvent,
   QueueState,
+  RunEvent,
   RunRecord,
   RunView,
   ScopeAudit,
@@ -26,6 +27,15 @@ import {
   type QueueSummary,
 } from './queueControls';
 import { describeRunActivity, formatDuration, lastEventTimestamp, needsRunCleanup } from './runActivity';
+import {
+  effortOptions,
+  findChoice,
+  groupModelChoices,
+  joinModelSetting,
+  splitModelSetting,
+  type ModelChoice,
+  type ModelList,
+} from './models';
 
 type Tab = 'queue' | 'new' | 'top' | 'cluster' | 'done';
 
@@ -34,6 +44,8 @@ interface DashboardState {
   runs: RunRecord[];
   /** Runs currently holding a lane, oldest first — one card each. */
   activeRuns: RunRecord[];
+  /** Live output per run id, so parallel sessions do not overwrite each other. */
+  runEvents: Map<string, RunEvent[]>;
   /** Wall-clock time of the last received/synced output, per run id. */
   lastActivityAt: Map<string, number>;
   /** Whether the server still tracks a live process, per run id. */
@@ -62,6 +74,14 @@ interface DashboardState {
   backup: BackupState | null;
   /** True while an operator order is being sent, so the button cannot double-fire. */
   taskSending: boolean;
+  /** What `opencode` can run on this machine, from `/api/models`. */
+  models: ModelChoice[];
+  /** False when the effort levels are missing because the catalog was unreadable. */
+  modelCatalog: boolean;
+  /** One fetch per page: the list does not change while the panel is open. */
+  modelsLoaded: boolean;
+  /** Why the model list is empty, so the field can say it instead of "lädt". */
+  modelListError: string | null;
   /**
    * Last failure of a *background* load, `null` while everything works. It is
    * shown once in the top bar and never as a toast: the page refreshes itself
@@ -102,6 +122,7 @@ const state: DashboardState = {
   suggestions: [],
   runs: [],
   activeRuns: [],
+  runEvents: new Map(),
   lastActivityAt: new Map(),
   alive: new Map(),
   queue: null,
@@ -116,8 +137,17 @@ const state: DashboardState = {
   splitFor: null,
   backup: null,
   taskSending: false,
+  models: [],
+  modelCatalog: false,
+  modelsLoaded: false,
+  modelListError: null,
   loadError: null,
 };
+
+/** Newest live event per run id; an empty array means "nothing seen yet". */
+function eventsOf(runId: string): RunEvent[] {
+  return state.runEvents.get(runId) ?? [];
+}
 
 function lastActivityOf(runId: string): number | null {
   return state.lastActivityAt.get(runId) ?? null;
@@ -343,7 +373,7 @@ function visibleSuggestions(): SuggestionView[] {
       // Parents that were split into sub-tasks are containers, not runnable orders.
       const { parents } = splitIndex();
       list = list.filter((s) => (s.status === 'approved' || s.status === 'implementing') && !parents.has(s.id));
-      return sortSuggestions(list, 'score');
+      return sortSuggestions(list, 'top');
     }
     case 'new':
       list = list.filter((s) => s.status === 'new');
@@ -451,7 +481,6 @@ function renderCard(s: SuggestionView, children: number[]): string {
         <span>#${s.id}</span>
         <span>${escapeHtml(s.author)}</span>
         <span>${timeAgo(s.createdAt)}</span>
-        <span class="score" title="Prioritäts-Score (ohne KI berechnet)">Score ${s.score}</span>
       </div>
       <p class="card-text">${escapeHtml(s.text)}</p>
       ${run?.resultSummary && !settled ? `<p class="card-summary"><span class="summary-label">🤖 Umsetzung:</span> ${escapeHtml(run.resultSummary)}</p>` : ''}
@@ -506,16 +535,7 @@ function renderCard(s: SuggestionView, children: number[]): string {
       ${
         expanded
           ? `<div class="details">
-              <strong>Score-Zerlegung</strong>
-              <div class="breakdown">
-                <div>Stimmen: +${s.breakdown.votes}</div>
-                <div>Cluster: +${s.breakdown.cluster}</div>
-                <div>Frische: +${s.breakdown.recency.toFixed(1)}</div>
-                <div>Kategorie: +${s.breakdown.category}</div>
-                <div>Qualität: +${s.breakdown.quality}</div>
-                <div>Malus: −${s.breakdown.penalty}</div>
-              </div>
-              ${s.clusterIds.length > 1 ? `<div style="margin-top:8px"><strong>Cluster:</strong> ${s.clusterIds.map((id) => `#${id}`).join(', ')}</div>` : ''}
+              ${s.clusterIds.length > 1 ? `<div><strong>Cluster:</strong> ${s.clusterIds.map((id) => `#${id}`).join(', ')}</div>` : ''}
               ${run ? `<div style="margin-top:8px"><strong>Letzter Run:</strong> ${escapeHtml(run.id)} · ${escapeHtml(run.status)} · ${run.cost != null ? `$${run.cost.toFixed(4)}` : 'Kosten unbekannt'}${run.tokensInput != null ? ` · ${run.tokensInput}/${run.tokensOutput} Tokens` : ''}${attemptLabel(run) ? ` · ${escapeHtml(attemptLabel(run) as string)}` : ''}</div>` : ''}
               <div style="margin-top:8px"><strong>Quelle:</strong> ${escapeHtml(s.source)} · erstellt ${new Date(s.createdAt).toLocaleString('de-DE')}</div>
               ${s.clientKey ? `<div style="margin-top:8px"><strong>Client-Key:</strong> <code>${escapeHtml(s.clientKey)}</code> · ein Retry mit diesem Schlüssel legt keine zweite Zeile an</div>` : ''}
@@ -607,6 +627,12 @@ function renderRunCard(run: RunRecord): string {
     connected: state.connected,
     alive: alive ?? undefined,
   });
+  // The session's output, as the run wrote it. This is the panel the owner
+  // watches: what the agent says, in order, while it is doing it.
+  const lines = eventsOf(run.id)
+    .slice(-400)
+    .map((event) => `<div class="line ${event.kind}">${escapeHtml(event.text)}</div>`)
+    .join('');
   const operator = suggestionAuthor(run.suggestionId) === 'Betreiber' ? ' · Auftrag' : '';
   // The audit is what `describeLaneRisks` promises the operator when it says two
   // lanes may write to the same broad scope. It was computed, shipped, stored and
@@ -627,6 +653,7 @@ function renderRunCard(run: RunRecord): string {
       <div class="run-activity ${activity.level}" data-run-activity="${escapeAttr(runKey(run.id))}" title="Zeit seit der letzten Ausgabe von OpenCode">
         ${escapeHtml(activity.label)}
       </div>
+      <div class="console" data-run-console="${escapeAttr(runKey(run.id))}">${lines}</div>
       <div class="card-actions">
         <button data-action="cancel-run" data-run="${escapeAttr(runKey(run.id))}" data-focus-key="cancel:${escapeAttr(runKey(run.id))}">⏹ Abbrechen</button>
         ${
@@ -692,7 +719,7 @@ function renderRuns(): void {
         const badge = attemptLabel(run);
         const wait =
           run.notBefore && run.notBefore > Date.now() ? ` · startet in ${formatCountdown(run.notBefore - Date.now())}` : '';
-        const waitReason = blocked.has(run.id) ? 'wartet auf eine belegte Spur (gleicher Scope)' : 'wartet';
+        const waitReason = blocked.has(run.id) ? 'wartet auf eine freie Spur' : 'wartet';
         // What is actually queued. The run id, the cost and the scope line said
         // how the runner works, not what it is about to do, and the owner
         // recognises a task by its text.
@@ -714,6 +741,12 @@ function renderRuns(): void {
 
   const focusKey = captureFocusKey();
   active.innerHTML = html;
+  // Every console shows the end of its own log, which is where the newest line
+  // is. Only after the innerHTML swap, because before it the elements are old.
+  for (const run of running) {
+    const consoleEl = document.querySelector(`[data-run-console="${runKey(run.id)}"]`);
+    if (consoleEl) consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
   updateRunActivity();
 
   $('#run-history').innerHTML = renderRunHistory();
@@ -934,6 +967,9 @@ function lastOutputAt(view: RunView): number | null {
 
 /** Folds one run view into the client bookkeeping. */
 function applyRunView(view: RunView): void {
+  // The server's event array is the console's content: this is what makes a
+  // reload or a missed SSE line show the session again instead of an empty box.
+  state.runEvents.set(view.id, view.events ?? []);
   state.alive.set(view.id, view.alive);
   if (view.scopeAudit) state.audits.set(view.id, view.scopeAudit);
   markActivity(view.id, lastOutputAt(view) ?? view.startedAt ?? undefined);
@@ -951,18 +987,20 @@ async function loadRuns(): Promise<void> {
     .sort((a, b) => (a.startedAt ?? a.createdAt) - (b.startedAt ?? b.createdAt));
   const before = new Set(state.activeRuns.map((r) => r.id));
   state.activeRuns = running;
-  // Forget a lane that ended while the page was closed, so its state does not
+  // Forget a lane that ended while the page was closed, so its console does not
   // stay in memory and reappear on the next start event. The audit stays: it is
   // the evidence of what the run touched, and it is the one thing the run card
   // shows about a finished session.
   for (const id of before) {
     if (running.some((r) => r.id === id)) continue;
+    state.runEvents.delete(id);
     state.lastActivityAt.delete(id);
     state.alive.delete(id);
   }
   pruneAudits();
-  // Refresh the per-run bookkeeping from the server, so runs that are already
-  // going show their last-output time even when SSE events were missed.
+  // Refresh console and per-run bookkeeping from the server, so runs that are
+  // already going show their output and their last-output time even when SSE
+  // events were missed.
   await Promise.all(
     running.map(async (run) => {
       try {
@@ -1143,13 +1181,89 @@ async function retryRun(runId: string): Promise<void> {
   }
 }
 
+/**
+ * The two dropdowns of the settings dialog: which model, and how hard it thinks.
+ *
+ * The model list comes from `/api/models`, which answers with what `opencode
+ * models` reports on this machine plus the effort levels from opencode's public
+ * catalog. It is fetched once per page: opening the dialog must not spawn a
+ * process, and a list of thirty-odd models does not change while the panel is
+ * open.
+ *
+ * An effort level that the chosen model does not support is a failed run, not a
+ * slower one — opencode exits with `Variant unavailable for …` — which is why the
+ * effort options come from the model and not from a fixed list of levels.
+ */
+function renderModelSelects(storedValue: string): void {
+  const modelSelect = $('#setting-model') as HTMLSelectElement;
+  const effortSelect = $('#setting-effort') as HTMLSelectElement;
+  const { model, effort } = splitModelSetting(storedValue);
+  const groups = groupModelChoices(state.models, model);
+  const options = [
+    `<option value=""${model === '' ? ' selected' : ''}>Standard — opencode wählt selbst</option>`,
+    ...groups.map(
+      (group) =>
+        `<optgroup label="${escapeAttr(group.provider)}">${group.options
+          .map((option) => `<option value="${escapeAttr(option.value)}"${option.value === model ? ' selected' : ''}>${escapeHtml(option.label)}</option>`)
+          .join('')}</optgroup>`,
+    ),
+  ];
+  modelSelect.innerHTML = options.join('');
+  // A model the owner picked but the list does not know: the effort levels are
+  // unknown, and offering any would be offering a guess.
+  const choice = findChoice(state.models, model);
+  // Three states, told apart: still loading, failed, or loaded. "lädt" that never
+  // ends is a lie, and a failed load has to be visible — otherwise the owner sees
+  // an empty box and blames the dialog.
+  $('#model-state').textContent =
+    state.models.length > 0
+      ? !state.modelCatalog
+        ? 'Katalog nicht erreichbar — Modell wählbar, Anstrengung nicht.'
+        : choice && choice.efforts.length === 0
+          ? `${choice.name} hat keine Anstrengungsstufen.`
+          : ''
+      : state.modelListError
+        ? `Modelliste nicht ladbar (${state.modelListError}) — der gespeicherte Wert bleibt erhalten.`
+        : 'Modellliste wird geladen …';
+  renderEffortSelect(choice, effort);
+}
+
+/** The effort options of one model. A level it does not have is never offered. */
+function renderEffortSelect(choice: ModelChoice | null, effort: string): void {
+  const effortSelect = $('#setting-effort') as HTMLSelectElement;
+  const options = effortOptions(choice);
+  const known = options.some((option) => option.value === effort);
+  effortSelect.innerHTML = options
+    .map((option) => `<option value="${escapeAttr(option.value)}"${option.value === effort && known ? ' selected' : ''}>${escapeHtml(option.label)}</option>`)
+    .join('');
+  effortSelect.disabled = (choice?.efforts.length ?? 0) === 0;
+  $('#effort-state').textContent = choice && choice.efforts.length > 0
+    ? 'Höher = mehr Nachdenken, mehr Kosten, längere Laufzeit.'
+    : '';
+}
+
+/** Fetches the model list once; a failure leaves the dropdowns as they are. */
+async function loadModelChoices(): Promise<void> {
+  if (state.modelsLoaded) return;
+  try {
+    const list = await api<ModelList>('/api/models');
+    state.models = list.models;
+    state.modelCatalog = list.catalog;
+    state.modelListError = null;
+    state.modelsLoaded = true;
+  } catch (err) {
+    // The dialog stays usable and says so: the stored value stays in the field,
+    // and the note under it names the reason instead of leaving "wird geladen".
+    state.modelListError = errorText(err);
+    state.modelsLoaded = true;
+  }
+}
+
 async function loadSettings(): Promise<void> {
   const settings = await api<{
     discordWebhook: string;
     model: string;
     extraInstructions: string;
-    autoApprove: boolean;
-    autoApproveScore: number;
     runTimeoutMinutes: number;
     retryLimit: number;
     retryBackoffSeconds: number;
@@ -1164,10 +1278,8 @@ async function loadSettings(): Promise<void> {
   ($('#setting-webhook') as HTMLInputElement).placeholder = settings.webhookConfigured
     ? `konfiguriert (${settings.discordWebhook})`
     : 'https://discord.com/api/webhooks/…';
-  ($('#setting-model') as HTMLInputElement).value = settings.model;
+  renderModelSelects(settings.model);
   ($('#setting-instructions') as HTMLTextAreaElement).value = settings.extraInstructions;
-  ($('#setting-autoapprove') as HTMLInputElement).checked = settings.autoApprove;
-  ($('#setting-autoscore') as HTMLInputElement).value = String(settings.autoApproveScore);
   ($('#setting-timeout') as HTMLInputElement).value = String(settings.runTimeoutMinutes);
   ($('#setting-retries') as HTMLInputElement).value = String(settings.retryLimit);
   ($('#setting-backoff') as HTMLInputElement).value = String(settings.retryBackoffSeconds);
@@ -1489,6 +1601,9 @@ function connectEvents(): void {
       // A new lane: add it next to the ones already running instead of replacing
       // whatever was on screen.
       state.activeRuns = [...state.activeRuns.filter((r) => r.id !== event.run.id), event.run];
+      // A run id is never reused, but a card that kept a stale console would be
+      // a lie; starting empty is also what the server sends.
+      state.runEvents.set(event.run.id, []);
       state.alive.set(event.run.id, true);
       markActivity(event.run.id, event.run.startedAt ?? Date.now());
       renderRuns();
@@ -1497,17 +1612,31 @@ function connectEvents(): void {
       // this one re-reads the list — so the run cannot be put back to "queued".
       void refreshAll();
     } else if (event.type === 'run:log') {
-      // The session runs in a terminal window, so there is no log pane to append
-      // to. All an event carries for this panel is proof that the runner just
-      // did something, and that is a timestamp: the payload of the last 1500
-      // events used to be kept per run and never rendered.
+      // One line into the run's own console, in place, so the owner watches the
+      // session instead of re-reading it in the history afterwards.
+      const buffer = eventsOf(event.runId).slice();
+      buffer.push(event.event);
+      // Bounded: a long run would otherwise keep every line it ever wrote.
+      if (buffer.length > 1500) buffer.splice(0, buffer.length - 1500);
+      state.runEvents.set(event.runId, buffer);
       markActivity(event.runId);
+      const consoleEl = document.querySelector(`[data-run-console="${runKey(event.runId)}"]`);
+      if (consoleEl) {
+        const line = document.createElement('div');
+        line.className = `line ${event.event.kind}`;
+        line.textContent = event.event.text;
+        consoleEl.appendChild(line);
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+      } else {
+        renderRuns();
+      }
       updateRunActivity();
     } else if (event.type === 'run:finished') {
       // `toast` writes textContent, so this value needs no escaping — the
       // browser does it. Escaping here would show the entities themselves.
       toast(`Run für #${event.run.suggestionId}: ${event.run.status}`, event.run.status === 'succeeded' ? 'success' : 'error');
       state.activeRuns = state.activeRuns.filter((r) => r.id !== event.run.id);
+      state.runEvents.delete(event.run.id);
       state.lastActivityAt.delete(event.run.id);
       state.alive.delete(event.run.id);
       void refreshAll();
@@ -1615,16 +1744,30 @@ function setupUi(): void {
   });
   const dialog = $('#settings-dialog') as HTMLDialogElement;
   $('#open-settings').addEventListener('click', async () => {
+    // The list in the background: the dialog opens with the stored value and
+    // fills in, instead of the owner waiting for `opencode models` and a catalog.
+    void loadModelChoices().then(() => {
+      const current = joinModelSetting(
+        ($('#setting-model') as HTMLSelectElement).value,
+        ($('#setting-effort') as HTMLSelectElement).value,
+      );
+      renderModelSelects(current);
+    });
     await loadSettings();
     dialog.showModal();
   });
   $('#close-settings').addEventListener('click', () => dialog.close());
+  $('#setting-model').addEventListener('change', (event) => {
+    const id = (event.target as HTMLSelectElement).value;
+    renderEffortSelect(findChoice(state.models, id), '');
+  });
   $('#save-settings').addEventListener('click', async () => {
     const body: Record<string, unknown> = {
-      model: ($('#setting-model') as HTMLInputElement).value.trim(),
+      model: joinModelSetting(
+        ($('#setting-model') as HTMLSelectElement).value,
+        ($('#setting-effort') as HTMLSelectElement).value,
+      ),
       extraInstructions: ($('#setting-instructions') as HTMLTextAreaElement).value,
-      autoApprove: ($('#setting-autoapprove') as HTMLInputElement).checked,
-      autoApproveScore: Number(($('#setting-autoscore') as HTMLInputElement).value) || 0,
       runTimeoutMinutes: Number(($('#setting-timeout') as HTMLInputElement).value) || 0,
       retryLimit: Number(($('#setting-retries') as HTMLInputElement).value) || 0,
       retryBackoffSeconds: Number(($('#setting-backoff') as HTMLInputElement).value) || 0,

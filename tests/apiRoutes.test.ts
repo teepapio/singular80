@@ -174,17 +174,19 @@ describe('POST /api/suggestions/:id/vote', () => {
     expect(rows[0].voterId).not.toBe('geraet-eins');
   });
 
-  it('lässt die Stimme in den Score einfließen', async () => {
-    // `decorate` is unit-tested; what is new here is that the route feeds it the
-    // new count, so the list the panel reloads really reorders.
+  it('zählt die Stimme und zieht den Vorschlag damit nach vorn', async () => {
+    // There is no score any more; what a vote still does is reorder the list, and
+    // that is worth a test of its own: it is the one effect a player can see.
     const api = await boot();
+    // `suggestion()` is synchronous: it seeds the row through the store, because
+    // the route that used to create one over HTTP is gone with the game's.
     const view = api.suggestion('Tetris: die Level sollen schneller kommen');
-    const before = (await api.get<{ suggestions: SuggestionView[] }>('/api/suggestions')).body.suggestions[0];
+    const plain = api.suggestion('Pang: die Bälle sollen langsamer fliegen');
     await api.post(`/api/suggestions/${view.id}/vote`, { voterId: 'geraet-eins' });
-    const after = (await api.get<{ suggestions: SuggestionView[] }>('/api/suggestions')).body.suggestions[0];
-    expect(after.votes).toBe(1);
-    expect(after.breakdown.votes).toBe(3);
-    expect(after.score).toBeGreaterThan(before.score);
+    const list = (await api.get<{ suggestions: SuggestionView[] }>('/api/suggestions')).body.suggestions;
+    expect(list.find((s) => s.id === view.id)?.votes).toBe(1);
+    expect(list[0].id).toBe(view.id);
+    expect(list[0].id).not.toBe(plain.id);
   });
 
   it('meldet die Stimme im Bus, damit offene Panels sie sehen', async () => {
@@ -235,7 +237,7 @@ describe('Cluster über HTTP', () => {
     const listed = (await api.get<{ suggestions: SuggestionView[] }>('/api/suggestions')).body.suggestions;
     expect(listed).toHaveLength(2);
     expect(listed.every((s) => s.clusterSize === 2)).toBe(true);
-    expect(listed.every((s) => s.breakdown.cluster === 2)).toBe(true);
+    expect(listed.every((s) => s.clusterIds.length === 2)).toBe(true);
   });
 
   it('lässt unverbundene Zeilen bei clusterSize 1', async () => {
@@ -247,6 +249,27 @@ describe('Cluster über HTTP', () => {
     expect(other.canonicalId).toBeNull();
     const listed = (await api.get<{ suggestions: SuggestionView[] }>('/api/suggestions')).body.suggestions;
     expect(listed.every((s) => s.clusterSize === 1)).toBe(true);
+  });
+});
+
+describe('Die Bewertung ist abgeschafft', () => {
+  it('die API schickt weder score noch breakdown', async () => {
+    // Der Besitzer hat die Prioritäts-Zahl entfernt. Sie über die Leitung
+    // zurückzubringen — als Zahl, als Zerlegung oder als Feld — hieße, sie wieder
+    // einzuführen, und niemand soll sie dann für gegeben halten.
+    const api = await boot();
+    await api.suggestion('Tetris: die Level sollen schneller kommen');
+    const list = (await api.get<{ suggestions: Record<string, unknown>[] }>('/api/suggestions')).body.suggestions;
+    expect(list).toHaveLength(1);
+    expect(Object.keys(list[0])).not.toContain('score');
+    expect(Object.keys(list[0])).not.toContain('breakdown');
+  });
+
+  it('die Einstellungen kennen keine Auto-Genehmigung nach Score', async () => {
+    const api = await boot();
+    const settings = await api.get<Record<string, unknown>>('/api/settings');
+    expect(Object.keys(settings.body)).not.toContain('autoApprove');
+    expect(Object.keys(settings.body)).not.toContain('autoApproveScore');
   });
 });
 

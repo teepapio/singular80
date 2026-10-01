@@ -713,6 +713,12 @@ func _reach_summit() -> void:
 	var prefix := str(theme["keyPrefix"])
 	var value := CrystalTower.run_score(counts, flow_bonus)
 	Game.submit_score("%s_highscore" % prefix, value)
+	# The forge's bag. The summit merge is a tool for this one run and what it
+	# produces buys a bonus for the climb that follows; the bag is what many
+	# climbs leave behind. It is therefore fed with the crystals as they were
+	# found — before the player merges anything at the summit. Two places that
+	# hold crystals, two different jobs, and neither one can empty the other.
+	CrystalForge.deposit(theme_id, counts)
 	if run_best_flow > best_flow:
 		best_flow = run_best_flow
 		flow_record = true

@@ -103,7 +103,14 @@ describe('Agentendefinitionen', () => {
 
   it('gibt der Leitsitzung genau das eine Werkzeug, das sie braucht', () => {
     const { frontmatter } = readAgent('agent-main.md');
-    const shell = [...frontmatter.matchAll(/^ {4}"([^"]+)": (?:allow|deny)$/gm)].map((m) => m[1]);
+    // Only the `shell:` block. The four-space form is shared by every nested
+    // permission map — `external_directory` included — so matching the whole
+    // frontmatter would read a lane grant as a shell grant the moment one is
+    // added.
+    // The last block of a frontmatter has no trailing newline, so the final line
+    // is allowed to end the string.
+    const shellBlock = /^ {2}shell:\n((?:^ {4}.*(?:\n|$))*)/m.exec(frontmatter)?.[1] ?? '';
+    const shell = [...shellBlock.matchAll(/^ {4}"([^"]+)": (?:allow|deny)$/gm)].map((m) => m[1]);
 
     // Primary, because the owner addresses it directly.
     expect(frontmatter).toMatch(/^mode: primary$/m);
@@ -138,5 +145,20 @@ describe('Agentendefinitionen', () => {
     const hire = readAgent('agent-hire.md').frontmatter;
     expect(hire).toMatch(/^ {4}"\.opencode\/agents\/\*\*": allow$/m);
     expect(hire).not.toMatch(/^ {4}"(godot|server|src)\//m);
+  });
+
+  it('gibt jeder Lane Zugang zu ihrem eigenen Worktree', () => {
+    // `npm run agent:new` puts the checkout under
+    // ~/.local/share/singular80/worktrees/<name>, outside the project root. With
+    // `"*": deny` and no `external_directory` grant the base policy's `ask` never
+    // happens — the deny answers — and the lane cannot `cd` into its own branch.
+    // Measured 2026-10-01: agent-mesh was stopped by exactly this on
+    // `cd <worktree> && git log`.
+    const missing = agentFiles().filter((f) => {
+      const { frontmatter } = readAgent(f);
+      return !/^ {2}external_directory:$/m.test(frontmatter)
+        || !/^ {4}"~\/\.local\/share\/singular80\/worktrees\/\*": allow$/m.test(frontmatter);
+    });
+    expect(missing, 'ohne diese Regel kann die Lane ihren eigenen Worktree nicht öffnen').toEqual([]);
   });
 });

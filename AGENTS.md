@@ -45,6 +45,57 @@ Backend.
 > hier hat 101 Commits, 1269 Dateien und rund 76.000 Zeilen angesammelt, ohne dass
 > eines davon auf GitHub ankam. Details und die Branch-Frage unten.
 
+## Immer erst recherchieren, dann bauen
+
+**Regel für jede Sitzung und jeden Agenten: Bevor implementiert, repariert oder
+„mal eben ergänzt" wird, wird recherchiert.** Ein Auftrag, der ohne Recherche
+angefangen wird, ist kein Versuch, sondern eine Vermutung mit Code als Ergebnis.
+
+Die Unterscheidung ist die zwischen *diesem Repository* und *der Welt draußen*.
+Alles über das Repository steht in den Dateien: `grep`, `git log`, die Tests,
+dieses Dokument. Wer dort nachfragt, hat recherchiert. Alles über **Godot 4.5**,
+**Fastify 5**, **Node 22**, **glTF**, **Blender**, **Android-Export**, **SQLite**
+oder ein Verhalten, das nur auf dem Gerät auftaucht, steht **nicht** dort — das
+gehört nachgelesen, und dafür gibt es `websearch` und `webfetch`.
+
+**Was gelesen wird, in dieser Reihenfolge:**
+
+1. **Offizielle Dokumentation** des genauen Major/Point-Release, das hier läuft
+   (`godot/project.godot` sagt `4.5`, `package.json` sagt Fastify 5 / Node ≥
+   22.5). Eine Anleitung für Godot 4.1 ist keine Anleitung für 4.5.
+2. **Der Upstream selbst** — Quelltext, Changelog, Release Notes, Issue-Tracker
+   des Projekts. Für „ist das ein Bug oder Absicht?" ist das Issue die Quelle,
+   nicht ein Blogeintrag von 2023.
+3. **Bekannte Fallstricke**, die jemand schon gemessen hat (Godot-Forum,
+   Release-Bekanntmachungen, Android-Build-Threads).
+
+**Was nicht zählt:** ein Stack Overflow von 2019, ein LLM-Gedächtnis, ein
+Blogpost ohne Versionsangabe, und eine Behauptung ohne Link. Wenn der Preis einer
+falschen Annahme ein Debug-Abend auf dem Gerät ist, ist die Recherche die
+billigere Hälfte.
+
+**Wann ohne Recherche gearbeitet wird** — und dann ausdrücklich:
+
+- Eine reine Stilausrichtung an Code, den man gerade gelesen hat, ohne Verhalten
+  und ohne Schnittstelle.
+- Ein Fehler, dessen Ursache man **gemessen** hat (Logcat, Stacktrace,
+  Testausgabe) und dessen Behebung in der Fehlermeldung steht.
+- Ein Detail, bei dem eine Suche nichts ändern würde, weil es eine Entscheidung
+  des Projekts ist und keine Eigenschaft einer Bibliothek. Dann wird die
+  bestehende Konvention befolgt.
+
+**Was aus der Recherche in den Bericht gehört:** die Quelle (URL, Doc-Seite,
+Issue-Nummer), was sie geändert hat, und — wenn die Recherche dem Auftrag
+widersprach — das im Klartext. Ein Auftrag, dessen Plan die Quellen widerlegt
+haben, wird gemeldet und **nicht** stillschweigend anders gebaut; die
+Entscheidung darüber, ob der Plan oder die Erkenntnis gewinnt, ist eine des
+Besitzers.
+
+**Und das Ergebnis bleibt im Repository, nicht nur in der Sitzung.** Was
+recherchiert wurde und nicht in der Codebasis oder deren Dokumentation steht,
+gehört als Kommentar oder Notiz dorthin — sonst sucht die nächste Sitzung
+dieselbe Antwort ein zweites Mal.
+
 ## Nach dem Commit: pushen
 
 `git push origin main` — **in derselben Sitzung, in der du committet hast.**
@@ -137,6 +188,34 @@ und es gibt ihn nur einmal.
 `godot/.godot` = 57 MB, zusammen 113 MB). Drei Lanes sind rund 340 MB und 35 s
 Setup — der Platz ist kein Argument, die 11 s sind es schon, deshalb sagt das
 Werkzeug beim Anlegen, was es tut.
+
+### Die Lane muss in ihren Worktree wechseln, bevor sie arbeitet
+
+`npm run agent:new` legt den Auscheckout **außerhalb** des Repositorys an, und
+eine Session, deren Verzeichnis das Projekt selbst ist, darf dort nichts
+anfassen: OpenCodes Grundregel für `external_directory` ist `ask`, und die
+Agentendefinitionen beginnen mit `"*": deny` — die deny-Regel antwortet, also
+wird **nicht gefragt**, sondern abgelehnt. Der Fehler ist
+`Permission denied: external_directory`, und er sieht aus wie ein kaputter
+Worktree aus. Gemessen am 2026-10-01 an `agent-mesh`: `cd <worktree> && git log`
+scheiterte, während dieselbe Lane im Projektverzeichnis schreiben durfte.
+
+Zwei Wege, und sie sind nicht dasselbe:
+
+- **Die Sitzung verschieben** (`session_move` auf die Session-ID, Ziel der
+  Worktree-Pfad). Danach ist der Worktree das Verzeichnis der Session, `cd` ist
+  überflüssig, und die `edit`-Pfadregeln der Definition greifen **relativ** zum
+  Worktree — `scripts/grade/**` bedeutet dort `scripts/grade/**` *dieses*
+  Auschecks. Das ist der Weg, den die Leitsitzung nimmt.
+- **Nur den Pfad freigeben** (`external_directory` in der Definition, heute auf
+  `~/.local/share/singular80/worktrees/*` und `/tmp/opencode/*` begrenzt). Das
+  öffnet das Verzeichnis, lässt die Session aber im Projektverzeichnis stehen —
+  relative Pfade zeigen dann auf den **gemeinsamen** Baum, nicht auf die Lane.
+  Ein Lane, der `scripts/blender/x.py` schreibt, schreibt damit in `main`.
+
+Beides ist in allen siebzehn Definitionen freigegeben, damit die zweite Variante
+nicht an einem `deny` hängenbleibt. Wer eine Lane startet, verschiebt die
+Sitzung trotzdem — die Freigabe ist die Notverpflegung, nicht der Plan.
 
 ### Das Gate ist der einzige Weg auf `main`
 
@@ -494,9 +573,10 @@ schloss sich mitten in seinem Satz.
 
 Ein Namensmuster ist keine Unterscheidung, sondern eine Vermutung. Gilt:
 
-- **Nur töten, was eine Datei benennt.** Der Runner schreibt seine pid nach
-  `run/terminal/<runId>.pid`; diese pids sind zweifelsfrei die eigenen. Abbrechen
-  läuft ohnehin über `POST /api/runs/:id/cancel`, und das ist der richtige Weg.
+- **Nur töten, was eine Datei benennt.** Der Runner schreibt die pid jedes
+  aktiven Laufs nach `data/active-runs.json` (`<runId>: <pid>`); diese pids sind
+  zweifelsfrei die eigenen. Abbrechen läuft ohnehin über
+  `POST /api/runs/:id/cancel`, und das ist der richtige Weg.
 - **Ein Muster, das `opencode`, `node`, `python` oder `npm` enthält, ist verboten.**
   Auf dieser Maschine laufen der Dienst des Besitzers, seine Fenster, der
   Dev-Server und Vite gleichzeitig; sie unterscheiden sich nicht über ihre
@@ -723,20 +803,33 @@ als Beweis für ein fehlendes Gerät gilt.
 `server/runner.ts` startet für jeden Auftrag eine echte `opencode run`-Sitzung
 im gemeinsamen Arbeitsbaum. Drei Dinge sind inzwischen wichtig.
 
-**Spuren statt einer Schlange.** `maxParallelRuns` (Einstellungen im Dashboard,
-1–8, Vorgabe 3) ist die Zahl der gleichzeitigen Sitzungen. Eine wartende Arbeit
-startet nur, wenn eine Spur frei ist **und** kein laufender Run ihren Scope schon
-beansprucht — die Regel ist `scopesConflict` in `server/scopes.ts` und sie
-entscheidet nach dem *primären* Scope. Das ist Absicht und kein Versehen:
-`scopeForSuggestion` hängt an jeden Spielauftrag noch die breite Kategorie
-(`core`, `content`), und ein Vergleich der ganzen Scope-Liste würde Tetris und
-Pang deshalb wieder hintereinander einreihen.
+**Spuren statt einer Schlange — und keine Reservierung pro Scope.**
+`maxParallelRuns` (Einstellungen im Dashboard, 1–8, Vorgabe 3) ist die Zahl der
+gleichzeitigen Sitzungen und **die einzige Grenze**. Eine wartende Arbeit startet,
+sobald eine Spur frei ist; welcher Scope ihr gehört, spielt keine Rolle.
 
-Was das offen lässt, wird nicht versteckt: Zwei verschiedene Spiele *dürfen* beide
-auf `content/` oder `core/` zeigen. Der Scope-Audit meldet es pro Run
-(`shared: [...]`), und das Panel beschriftet ein solches Paar
-(`laneRisks` in `src/dashboard/queueControls.ts`). Ein Run ohne bekannten Scope
-oder mit breitem primären Scope bekommt den Baum immer allein.
+Bis zum 2026-10-01 gab es hier eine zweite Regel, `scopesConflict` in
+`server/scopes.ts`: gleicher primärer Scope, ein breiter Primär-Scope (`core`,
+`content`), zwei Scopes mit denselben Dateien oder ein unbekannter Scope bedeuteten
+„nur einer zur Zeit". Sie ist entfernt, auf Wunsch des Besitzers — er wollte
+ausdrücklich mehrere Aufträge auch im selben Scope parallel fahren, und die Regel
+hat verneint, ohne je zu sagen, was sie beschützte. Die Funktion ist weg, samt
+ihren Tests; `server/scopes.ts` sagt an ihrer Stelle, warum es sie nicht mehr gibt.
+
+Was das offen lässt, wird nicht versteckt, nur gemeldet statt verhindert:
+
+- **Zwei Agenten können dieselbe Datei anfassen.** Das ist das echte Risiko, und
+  die Antwort darauf ist `S80_ISOLATE_RUNS=1` — jeder Lauf in seinem Worktree, wo
+  nichts kollidieren kann, und `npm run gate` führt zusammen.
+- **Das Panel beschriftet jedes Paar**, das einen Scope teilt — auch zwei Läufe
+  im selben Spiel (`laneRisks` in `src/dashboard/queueControls.ts`, und die
+  breiten Scopes werden schwächer formuliert als die spezifischen).
+- **Der Scope-Audit läuft weiter.** Jeder Run bekommt seinen Scope im Prompt, und
+  die Dateien, die er angefasst hat, werden weiter gegen diesen Scope geprüft
+  (`shared: [...]`). Ohne Reservierung ist diese Prüfung die einzige, die noch
+  etwas sagt — sie darf darum nicht weg.
+- **„Blockiert" heißt jetzt „keine freie Spur"** und nichts mehr sonst. Ein Run,
+  dessen Scope mit einem laufenden kollidiert, ist nicht blockiert.
 
 **Scopes der Sprachschicht.** Der `core`-Scope besitzt
 `godot/src/core/logic/loc.gd`, `godot/src/core/ui/**` (also
@@ -753,6 +846,23 @@ Zweig, und dann ist das Gate (`npm run gate`) der einzige Weg auf `main`. Beide
 Betriebsarten gelten nebeneinander, und die Umschaltung ist eine Entscheidung des
 Besitzers — der Grund und die Folgen stehen in „Ein Worktree je Agent".
 
+**Es gibt keine Prioritäts-Zahl mehr.** Am 2026-10-01 hat der Besitzer die
+Bewertung abschafft: `scoreSuggestion`, `qualityScore`, `recencyBonus`, die
+Kategorie-Gewichte, `ScoreBreakdown`, das Feld `score` in `SuggestionView`, die
+Score-Zeile in der Karte, die „Score-Zerlegung" im Detailbereich, das Score-Feld
+im Discord-Embed und die Einstellungen `autoApprove`/`autoApproveScore` (die
+Genehmigung nach Score). Was bleibt, ist sortierbar und nachvollziehbar:
+`sortSuggestions` kennt `top` (Stimmen, dann neu — die Voreinstellung), `new` und
+`cluster`. Ein alter Bookmark mit `?sort=score` fällt auf `top` zurück, statt die
+Liste leer zu liefern.
+
+Zwei Dinge, die dabei **nicht** mitgefallen sind und auch nicht fallen dürfen: das
+**Clustern** ähnlicher Vorschläge (`findCanonical`, `clusterIds`, `clusterSize`) und
+das **Abstimmen**. Ein Vorschlag hat weiter Stimmen, und die Reihenfolge der
+Warteschlange folgt ihnen. `tests/apiRoutes.test.ts` prüft ausdrücklich, dass die
+API weder `score` noch `breakdown` schickt und die Einstellungen keine
+Auto-Genehmigung kennen — sonst käme die Zahl durch die Hintertür zurück.
+
 **Direkte Aufträge.** `POST /api/tasks` (im Panel: „Direkter Auftrag an OpenCode")
 legt eine Empfehlung mit `source: 'operator'` an und stellt sie sofort in die
 Schlange — ohne Abstimmung, ohne Spieler, ohne Discord. Sie bleibt eine
@@ -767,6 +877,34 @@ Merge ein (neuere lokale Daten gewinnen, Ids bleiben, ein unfertiger Run aus der
 Datei kommt als `cancelled` an). Der Prompt jedes Runs steht **nicht** in der
 Datei: er ist aus Empfehlung und Einstellungen ableitbar und wird beim Import neu
 gebaut.
+
+**Modell und Anstrengung: zwei Quellen, und eine falsche Stufe ist ein Fehler.**
+`GET /api/models` (`server/models.ts`) beantwortet die beiden Auswahllisten im
+Einstellungsdialog, und sie kommen aus zwei verschiedenen Orten:
+
+- **Welche Modelle es gibt:** `opencode models`. Das ist opencodes eigene Antwort
+  auf dieser Maschine, mit den Zugangsdaten des Besitzers — die Liste kann kein
+  Modell nennen, das er nicht fahren kann.
+- **Welche Anstrengungsstufen ein Modell hat:** der öffentliche Katalog
+  `https://models.opencode.ai/api.json`, den opencode selbst lädt (die URL steht
+  im Binary, neben dem Code, der daraus die Varianten bildet). Pro Modell trägt er
+  `reasoning_options[].values`; für `opencode-go/space-bunny-free` genau
+  `low, medium, high, xhigh, max`.
+
+**Gemessen am 2026-10-01, warum das getrennt sein muss:**
+`opencode run --model 'opencode/nemotron-3.5-lightning-free#low'` endet mit Exit 1
+und `Variant unavailable for opencode/nemotron-3.5-lightning-free: low` — auch
+für eine Stufe, die es gar nicht gibt (`#nope`), und für *jede* Stufe bei einem
+Modell ohne Stufen. Eine falsche Anstrengung ist also **kein langsamer Lauf,
+sondern ein toter Lauf vor dem ersten Token**. Eine fest Liste „niedrig/mittel/
+hoch" im Dialog wäre deshalb eine Liste von Weisen, den Run zu verlieren; die
+Stufen kommen aus dem Katalog, und ohne Katalog wird das Feld gesperrt, statt zu
+raten.
+
+Gespeichert wird weiterhin **ein** String (`provider/model#stufe`), weil der
+Runner genau das an `opencode run --model` gibt. Ohne Netz bleibt die
+Modellwahl benutzbar und nur die Stufenliste leer — beides ist in
+`tests/modelChoices.test.ts` festgeschrieben.
 
 ## Godot-Spiel
 
@@ -869,9 +1007,71 @@ an, `SettingsDialog` dieselbe Zahl.
   `WorldScreen.standard_material()`; `StandardMaterial3D` nicht pro Frame anlegen.
 - Meshes kommen **ausschließlich** über `AssetRegistry`/`WorldScreen.mesh()`.
 
+### Neue Meshes: erst fünf Bilder, dann bauen, dann ansehen
+
+**Ein Mesh baut man nicht aus dem Gedächtnis.** Ein `.glb` ist binär: im Diff
+steht nichts, keine Dreieckzahl und keine grüne Suite sagen, ob ein Drachenflügel
+wie ein Flügel aussieht. Gemessen am 2026-10-01: das Bonbon lief durch Registry,
+LOD-Test und Import und war ein grauer, facettierter Klotz — die einzige
+Möglichkeit, das zu erfahren, war es anzusehen.
+
+Also gilt für **jedes** neue oder umgebaute Mesh, in dieser Reihenfolge:
+
+1. **Fünf Referenzbilder suchen und ansehen.** Fotos der Sache selbst, im Spiel, in
+   dem sie steht. Das gilt für Bonbons genauso wie für Kristalle oder Flügel.
+   `websearch` findet sie; Wikimedia Commons liefert sie ohne Umwege:
+
+   ```
+   https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search
+     &gsrsearch=filetype%3Abitmap%20<url-encoded+query>&gsrlimit=5&gsrnamespace=6
+     &prop=imageinfo&iiprop=url&iiurlwidth=960
+   ```
+
+   `thumburl` aus der JSON holen, mit `curl -sL -A "<eigener Name>"` nach `/tmp`
+   (nicht ins Repository), dann **das Bild wirklich lesen**. `filetype%3Abitmap`
+   muss prozentkodiert sein, sonst lehnt urllib die URL ab. Wohin die Bilder
+   zeigen, gehört in den Bericht — „drei Fotos zeigten eine Hexagonalfläche mit
+   Pyramidenspitze" ist eine Begründung, „sieht besser aus" nicht.
+2. **Bauen** im Builder-Skript, im Stil der Nachbarn.
+3. **Ansehen.** `npm run mesh:shot -- --keys <key>` rendert das Mesh aus vier
+   Winkeln (front, three-quarter, side, top) mit Schattenboden, klebt sie zu
+   einem Kontaktbogen und schreibt darunter die gemessenen Zahlen. Das Ergebnis
+   **mit dem Bild-Werkzeug lesen**, nicht nur den Pfad zur Kenntnis nehmen. Der
+   Bogen ist die eigentliche Prüfung; ein Mesh, das niemand angesehen hat, ist
+   nicht geprüft.
+4. Iterate, bis die Silhouette die Sache benennt. Ein Lolli, der aus allen vier
+   Winkeln gleich aussieht, ist kein Lolli.
+
+Was der Bogen nebenbei mitliefert und was kein Test kann: die
+**Höhen/Breiten-Verhältnis**-Zeile. Ein Bonbon mit 1,4 ist kein Bonbon, und das
+steht als Zahl da, statt als Vermutung.
+
+`scripts/blender/shot_mesh.py --keys all` fotografiert alle 155 Meshes auf
+einmal — die richtige Methode, um nach einem Umbau zu sehen, was man angerichtet
+hat.
+
+#### Die Detailstufen sind Budgets, keine Ziele
+
+Die drei Stufen sind **gemessen**, nicht behauptet: `refine_low_meshes.py`
+verfeinert die Low-Stufe auf das Ziel aus `godot/assets/meshes/low_target.json`
+(je Mesh eine Zahl, dreimal die Basis, committen — damit das reproduzierbar ist
+und niemand eine Binärdatei von Hand editiert), und `generate_lod_meshes.py`
+leitet `med` und `high` daraus ab.
+
+Die Budgets in `TIER_TARGETS`/`TIER_BUDGET` sind **Untergrenzen**, keine festen
+Zahlen: jede Stufe ist mindestens ihr Wert und mindestens ein Vielfaches der Low-
+Zahl. Grund: die Low-Stufen unterscheiden sich um eine Größenordnung (30 bis
+3 800 Dreiecke), ein flaches 1 000 hätte die Mittelstufe bei den größten Meshes
+**gröber** gemacht als die darunter — im Galerieraum sichtbar und vom Test
+`Mesh — Detailstufen` zu Recht beanstandet.
+
+Ein neues Mesh kommt einmal mit `--adopt` in die Zielliste, danach ist die Zahl
+fest. Wer die Faktoren anhebt, misst vorher und nachher `du -sh med high` und
+sagt es im Bericht: die beiden reichen Stufen sind der teuerste Posten im APK.
+
 ### Meshes und Detailstufen
 
-- Format: binäres glTF 2.0 (`.glb`), Godot importiert nativ.
+- Format: binärisches glTF 2.0 (`.glb`), Godot importiert nativ.
 - Erzeugen: `blender --background --python scripts/blender/make_mesh.py -- --out … --name <builder>`
   bzw. `scripts/blender/generate_rpg_meshes.py` für den Drachen-Pack.
 - **Jedes neue Mesh braucht einen Key in `AssetRegistry.KEYS`** — zwei Tests
@@ -879,8 +1079,10 @@ an, `SettingsDialog` dieselbe Zahl.
 - Fehlt ein Mesh, benutzt `WorldScreen.mesh()` ein prozedurales Primitiv;
   3D-Spiele starten dadurch nie mit leerer Szene.
 - Jedes Mesh liegt in drei Stufen: `assets/meshes/<key>.glb` (Low, das benutzen
-  die Spiele), `assets/meshes/med/<key>.glb` (~1.000 Dreiecke) und
-  `assets/meshes/high/<key>.glb` (~10.000 Dreiecke, mit Displacement).
+  die Spiele), `assets/meshes/med/<key>.glb` und
+  `assets/meshes/high/<key>.glb` (mit Displacement). Die Zahlen sind Untergrenzen
+  plus Vielfaches der Low-Stufe, keine festen Werte — siehe „Die Detailstufen
+  sind Budgets, keine Ziele" oben.
   Neu erzeugen:
   ```bash
   blender --background --python scripts/blender/generate_lod_meshes.py -- \
@@ -889,8 +1091,10 @@ an, `SettingsDialog` dieselbe Zahl.
   Das Skript misst die Dreieckzahlen und schreibt sie nach `lod.json`; die
   Galerie zeigt sie an, der Test prüft `med ≥ low` und `high ≥ med`.
   **Nach jedem neuen Mesh erneut laufen lassen**, sonst fehlen die höheren Stufen.
-- Die beiden reichen Stufen kosten zusammen rund 45 MB APK. Ohne sie wird das
-  Release gut 80 MB kleiner — dafür zeigt die Galerie nur ein einziges Mesh.
+  Vorher die Low-Stufe mit `refine_low_meshes.py --adopt` einmal eintragen.
+- Die beiden reichen Stufen kosten zusammen rund 65 MB APK (gemessen nach der
+  Verdreifachung der Low-Stufe, vorher 45 MB). Ohne sie wird das Release gut
+  80 MB kleiner — dafür zeigt die Galerie nur ein einziges Mesh.
 - `include_filter="*.json"` im Export-Preset ist Pflicht: `.json` wird nicht
   importiert und käme sonst nicht ins Paket (die Galerie braucht `lod.json`).
 

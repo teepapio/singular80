@@ -3,26 +3,8 @@ import { networkInterfaces } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app';
-import { findTerminal } from './terminal';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-
-/**
- * Run each OpenCode session in a terminal window, so the owner can watch and
- * type into it instead of reading a frozen log pane in the dashboard.
- *
- * `S80_TERMINAL=0` turns it off without a code change — worth having, because a
- * session that cannot be supervised is worse than one that merely runs quietly.
- * A terminal that is present but unusable (no DISPLAY, because the dev server
- * hangs off `setsid`) is detected per run and falls back on its own.
- */
-const terminal = findTerminal();
-const terminalRuns = process.env.S80_TERMINAL !== '0' && terminal !== null;
-if (process.env.S80_TERMINAL === '0') {
-  console.log('[singular80] Terminal-Läufe abgeschaltet (S80_TERMINAL=0) — Ausgabe im Dashboard.');
-} else if (terminalRuns) {
-  console.log(`[singular80] Läufe öffnen ein Terminalfenster (${terminal.bin}).`);
-}
 
 /**
  * One worktree and one branch per run. Off unless `S80_ISOLATE_RUNS=1`, because
@@ -41,7 +23,6 @@ const app = createApp({
   contentDir: process.env.CONTENT_DIR ?? join(root, 'content'),
   projectRoot: root,
   distDir: join(root, 'dist'),
-  terminalRuns,
   isolateRuns,
 });
 

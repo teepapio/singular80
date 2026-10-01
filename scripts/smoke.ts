@@ -120,16 +120,17 @@ async function main(): Promise<void> {
   });
   check('Status ändern', approved.body.status === 'approved');
 
-  const list = await call<{ suggestions: { score: number; id: number; breakdown: { votes: number } }[]; stats: { total: number } }>(
+  const list = await call<{ suggestions: { votes: number; id: number }[]; stats: { total: number } }>(
     base,
     '/api/suggestions',
   );
   check('Liste enthält alle Vorschläge', list.body.suggestions.length === 3 && list.body.stats.total === 3);
-  const scores = list.body.suggestions.map((s) => s.score);
+  // Kein Score mehr: die Voreinstellung sortiert nach Stimmen, dann nach neu.
+  const votes = list.body.suggestions.map((s) => s.votes);
   check(
-    'Liste ist nach Score sortiert',
-    scores.every((score, index) => index === 0 || scores[index - 1] >= score),
-    scores.join(', '),
+    'Liste ist nach Stimmen sortiert',
+    votes.every((count, index) => index === 0 || votes[index - 1] >= count),
+    votes.join(', '),
   );
 
   const settings = await call<{ webhookConfigured: boolean }>(base, '/api/settings', {

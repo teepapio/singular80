@@ -1,10 +1,4 @@
-import type {
-  ScoreBreakdown,
-  Suggestion,
-  SuggestionCategory,
-  SuggestionStatus,
-  SuggestionView,
-} from './types';
+import type { Suggestion, SuggestionCategory, SuggestionStatus, SuggestionView } from './types';
 
 /**
  * Stop words, in **folded** form.
@@ -311,64 +305,6 @@ export function classify(input: string): SuggestionCategory {
   return best;
 }
 
-const CATEGORY_WEIGHT: Record<SuggestionCategory, number> = {
-  bug: 6,
-  mechanics: 5,
-  content: 4,
-  balance: 3,
-  ui: 2.5,
-  audio: 2,
-  other: 1,
-};
-
-export function recencyBonus(createdAt: number, now: number): number {
-  const ageHours = Math.max(0, (now - createdAt) / 3_600_000);
-  return 12 * Math.pow(0.5, ageHours / 48);
-}
-
-export function qualityScore(text: string): { quality: number; penalty: number } {
-  let quality = 0;
-  let penalty = 0;
-  const trimmed = text.trim();
-  const len = trimmed.length;
-  if (len >= 40 && len <= 600) quality += 4;
-  else if (len >= 20) quality += 2;
-  const words = tokenize(trimmed);
-  if (words.length >= 5) quality += 1;
-  if (/\d/.test(trimmed)) quality += 1;
-  if (/\n/.test(trimmed)) quality += 1;
-  const concrete = ['sollte', 'should', 'koennte', 'could', 'fuege', 'add', 'baue', 'build', 'implementiere', 'implement', 'waere', 'would'];
-  const folded = foldText(trimmed);
-  if (concrete.some((c) => folded.includes(c))) quality += 2;
-  if (len < 15) penalty += 4;
-  if (len > 1500) penalty += 2;
-  const letters = trimmed.replace(/[^a-zA-ZäöüÄÖÜß]/g, '');
-  if (letters.length > 8 && letters === letters.toUpperCase()) penalty += 2;
-  if (letters.length === 0) penalty += 6;
-  const urlOnly = trimmed.replace(/https?:\/\/\S+/g, '').trim().length < 5;
-  if (urlOnly) penalty += 6;
-  const repeats = /(.)\1{4,}/.test(trimmed);
-  if (repeats) penalty += 2;
-  return { quality, penalty };
-}
-
-export function scoreSuggestion(
-  suggestion: Pick<Suggestion, 'text' | 'votes' | 'createdAt' | 'category'>,
-  now: number,
-  clusterSize: number,
-): { score: number; breakdown: ScoreBreakdown } {
-  const votesScore = 3 * Math.min(suggestion.votes, 40);
-  const clusterScore = 2 * Math.min(Math.max(clusterSize - 1, 0), 12);
-  const recency = recencyBonus(suggestion.createdAt, now);
-  const category = CATEGORY_WEIGHT[suggestion.category] ?? 1;
-  const { quality, penalty } = qualityScore(suggestion.text);
-  const raw = votesScore + clusterScore + recency + category + quality - penalty;
-  return {
-    score: Math.max(0, Math.round(raw * 10) / 10),
-    breakdown: { votes: votesScore, cluster: clusterScore, recency, category, quality, penalty },
-  };
-}
-
 export interface ClusterInfo {
   canonicalId: number;
   clusterIds: number[];
@@ -378,18 +314,15 @@ export interface ClusterInfo {
 /**
  * The statuses whose rows do not count as "somebody else said it too".
  *
- * `rejected` is the only one, and it is excluded on purpose. A rejected row is
- * a request the operator turned down, so counting it as support for the
- * surviving row inflates the very score that decides whether a job starts by
- * itself. `findCanonical` never let a rejected row be canonical, and the
- * auto-approve gate in `app.ts` filtered them out of its candidates — while the
- * dashboard grouped by `(canonicalId ?? id)` with no status filter at all. Two
- * rejected duplicates then made the gate see a cluster of 3 and the screen
- * announce 4: two score points per rejected row, up to 24, and an operator
- * reading a number the decision never used.
+ * `rejected` is the only one, and it is excluded on purpose: a rejected row is a
+ * request the operator turned down, so it is not evidence that anybody else wants
+ * the surviving one. `findCanonical` never lets a rejected row be canonical, and
+ * `app.ts` filters them out of its candidates with `countsTowardsCluster` — while
+ * the dashboard once grouped by `(canonicalId ?? id)` with no status filter at
+ * all, so two rejected duplicates made one card claim a cluster of four.
  *
- * The rule lives here, once. `app.ts` must call it (`existing.filter(...)`) so
- * the displayed size and the gated size cannot drift apart again.
+ * The rule lives here, once, and both sides call it, so the size that is shown and
+ * the size that is computed cannot drift apart again.
  */
 export const NON_CLUSTERING_STATUSES: ReadonlySet<SuggestionStatus> = new Set<SuggestionStatus>([
   'rejected',
@@ -446,36 +379,33 @@ export function findCanonical(
   return { canonicalId: best.id, clusterIds, similarity: best.sim };
 }
 
-function decorateFromIndex(
-  suggestion: Suggestion,
-  index: Map<number, number[]>,
-  now: number,
-): SuggestionView {
+function decorateFromIndex(suggestion: Suggestion, index: Map<number, number[]>): SuggestionView {
   const canonical = suggestion.canonicalId ?? suggestion.id;
   // A rejected row is in no index, so it is a cluster of one — and a duplicate
   // of a rejected canonical still finds its siblings, because they carry its id
   // as their own `canonicalId` and that key is in the index without it.
   const clusterIds = index.get(canonical) ?? [suggestion.id];
-  const { score, breakdown } = scoreSuggestion(suggestion, now, clusterIds.length);
-  return { ...suggestion, score, breakdown, clusterIds, clusterSize: clusterIds.length, run: null };
+  return { ...suggestion, clusterIds, clusterSize: clusterIds.length, run: null };
 }
 
-/** One row, scored against the clusters of the whole list. */
-export function decorate(
-  suggestion: Suggestion,
-  all: readonly Suggestion[],
-  now: number,
-): SuggestionView {
-  return decorateFromIndex(suggestion, clusterIndex(all), now);
+/** One row, clustered against the whole list. */
+export function decorate(suggestion: Suggestion, all: readonly Suggestion[]): SuggestionView {
+  return decorateFromIndex(suggestion, clusterIndex(all));
 }
 
 /** The whole list in one pass — what the routes should call. */
-export function decorateAll(list: readonly Suggestion[], now: number): SuggestionView[] {
+export function decorateAll(list: readonly Suggestion[]): SuggestionView[] {
   const index = clusterIndex(list);
-  return list.map((s) => decorateFromIndex(s, index, now));
+  return list.map((s) => decorateFromIndex(s, index));
 }
 
-export type SortMode = 'score' | 'new' | 'top' | 'cluster';
+/**
+ * `top` is the default, because it is the only order left that rests on something
+ * real: the players' votes, then the newest. There is no priority score any more —
+ * the owner had it removed, and a number that ranked suggestions without anyone
+ * being able to say why is worse than no number.
+ */
+export type SortMode = 'new' | 'top' | 'cluster';
 
 export function sortSuggestions(list: SuggestionView[], mode: SortMode): SuggestionView[] {
   const copy = [...list];
@@ -483,12 +413,10 @@ export function sortSuggestions(list: SuggestionView[], mode: SortMode): Suggest
   switch (mode) {
     case 'new':
       return copy.sort(byNew);
-    case 'top':
-      return copy.sort((a, b) => b.votes - a.votes || b.score - a.score || byNew(a, b));
     case 'cluster':
-      return copy.sort((a, b) => b.clusterSize - a.clusterSize || b.score - a.score || byNew(a, b));
-    case 'score':
+      return copy.sort((a, b) => b.clusterSize - a.clusterSize || byNew(a, b));
+    case 'top':
     default:
-      return copy.sort((a, b) => b.score - a.score || byNew(a, b));
+      return copy.sort((a, b) => b.votes - a.votes || byNew(a, b));
   }
 }

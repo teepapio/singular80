@@ -1,9 +1,10 @@
 class_name MeshGalleryScreen
 extends WorldScreen
-## One long hall. A row of pedestals on the left, one on the right, every mesh
-## of the registry in walking order — walk straight ahead and they pass on
-## either side. Three detail levels can be switched, and in front of a mesh the
-## player presses E for the ordinary suggestion dialog, with that mesh named.
+## One long hall. Two rows of pedestals on either side, every mesh of the
+## registry in walking order — walk down the nave and they pass on either side,
+## step into the aisle between the rows and the far ones do. Three detail levels
+## can be switched, and in front of a mesh the player presses E for the ordinary
+## suggestion dialog, with that mesh named.
 ##
 ## The geometry lives in `MeshGallery`, so it is testable without a screen.
 
@@ -20,15 +21,18 @@ const MESH_ON_PEDESTAL := 1.75
 
 # --- the hall ---------------------------------------------------------------
 
-## How far a row stands from the middle line, and the walls behind it.
-const HALL_HALF_WIDTH := 8.2
+## How far the outer row stands from the middle line plus the aisle behind it,
+## and with it the walls.
+const HALL_HALF_WIDTH := 8.6
 const WALL_HEIGHT := 4.2
 
 ## How far away a mesh may be before it goes into the scene — and how far it may
-## have walked on before it leaves it again. The hall is 800 m long; with every
-## mesh resident the high level alone would be over a million triangles, and
-## nobody would ever get past the first ten.
-const LOAD_DISTANCE := 48.0
+## have walked on before it leaves it again. Four pedestals to a step means
+## twice as many meshes stand in as much hall, and a mesh on "high" carries
+## fifty times the triangles of one on "low", so the window follows the level:
+## on "high" it is narrower than the one this hall had with two rows, so it
+## costs about what it did then while showing twice as much per screen.
+const LOAD_DISTANCE := {"low": 48.0, "med": 40.0, "high": 30.0}
 ## Meshes taken into the scene per frame. One every 0.6 s of walking, so the
 ## hitch stays a few milliseconds instead of a visible pause.
 const LOADS_PER_FRAME := 2
@@ -43,7 +47,7 @@ const FOG_DENSITY := 0.02
 
 var tier := "low"
 
-## Every key of the registry, in walking order. The two rows take them in turn.
+## Every key of the registry, in walking order. The four rows take them in turn.
 var keys: Array[String] = []
 
 var pos := Vector3(0, 0, 0)
@@ -125,7 +129,7 @@ func _build_hall() -> void:
 		add_child(wall)
 
 
-## One pedestal per mesh, left and right alternating.
+## One pedestal per mesh, four to a depth — inner and outer, left and right.
 func _build_slots() -> void:
 	for i in keys.size():
 		var root := Node3D.new()
@@ -284,14 +288,15 @@ func _update_world(delta: float) -> void:
 
 	var vector := VirtualStick.combined(_stick.value, &"move_left", &"move_right")
 	if vector.length() > 0.05:
-		pos.x += vector.x * MOVE_SPEED * delta
-		pos.z += vector.y * MOVE_SPEED * delta
-		facing = atan2(-vector.x, -vector.y)
-		# The hall is a corridor: a lane in the middle, an entrance and an end.
-		var lane := MeshGallery.lane_bounds()
 		var walk := MeshGallery.walk_bounds(keys.size())
-		pos.x = clampf(pos.x, lane.x, lane.y)
-		pos.z = clampf(pos.z, walk.x, walk.y)
+		facing = atan2(-vector.x, -vector.y)
+		# The hall is a nave with an aisle on either side: the middle lane, the
+		# band the inner row closes off, the aisle between the two rows. z is
+		# clamped first, because whether the player may stand beside a pedestal
+		# at all depends on how far along they got — and which side they came
+		# from decides which way a blocked one pushes them out.
+		pos.z = clampf(pos.z + vector.y * MOVE_SPEED * delta, walk.x, walk.y)
+		pos.x = MeshGallery.lane_x(pos.x + vector.x * MOVE_SPEED * delta, pos.z, pos.x)
 
 	player.position = Vector3(pos.x, sin(elapsed * 3.0) * 0.04, pos.z)
 	player.rotation.y = facing
@@ -372,10 +377,11 @@ func _sweep() -> void:
 	_reload = false
 	_sweep_z = pos.z
 	var here := _ground()
+	var reach := load_distance()
 	var low := -1
 	var high := -1
 	for i in slot_nodes.size():
-		if here.distance_to(MeshGallery.slot_position(i)) <= LOAD_DISTANCE:
+		if here.distance_to(MeshGallery.slot_position(i)) <= reach:
 			if low < 0:
 				low = i
 			high = i
@@ -388,11 +394,20 @@ func _sweep() -> void:
 
 ## Forces the window to be rebuilt and every resident mesh loaded again — what
 ## switching the detail level does, since a mesh on the pedestal is the one
-## level the player asked for.
+## level the player asked for, and the window is measured in metres of that
+## level rather than in meshes.
 func _reload_stream() -> void:
 	for i in range(_low, maxi(_high, -1) + 1):
 		_unload_slot(i)
 	_reload = true
+
+
+## How far the streaming window reaches with the level that stands on the
+## pedestals right now. An unknown level gets the narrowest window, because a
+## window that is too wide costs triangles and one that is too narrow only costs
+## a mesh a moment later than it should appear.
+func load_distance() -> float:
+	return float(LOAD_DISTANCE.get(tier, 30.0))
 
 
 func _load_slot(index: int) -> void:
@@ -504,7 +519,7 @@ func _refresh_panel() -> void:
 
 
 ## Where in the hall the player is. The counter is the answer to "how many of
-## these do I still have to walk past" in a hall that is 800 m long.
+## these do I still have to walk past" in a hall of nearly two hundred metres.
 func _refresh_counter() -> void:
 	if _counter_label == null:
 		return

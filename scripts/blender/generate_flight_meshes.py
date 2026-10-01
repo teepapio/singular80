@@ -256,23 +256,29 @@ def build_egg_large() -> bpy.types.Object:
 
 
 def build_egg_crystal() -> bpy.types.Object:
-    """A faceted crystal egg — the rarest shell in the hatchery."""
+    """A crystal egg — the rarest shell in the hatchery.
+
+    This one stays an egg on purpose: it is a themed hatchery prop, not one of
+    the game's collectible crystals, and an egg-shaped crystal is a legible idea
+    (something *hatching*). What it lacked was crystal vocabulary, so the shell
+    is faceted like a crystal and the surrounding shards are hexagonal points
+    with pyramidal tips instead of 4-sided cones.
+    """
     core = _ico("EggCore", (0.46, 0.46, 0.68), (0.0, 0.0, 0.62), (0.45, 0.85, 0.95), 1.4, 0.15, 0.3)
     for i in range(6):
         angle = i * 1.0472
-        shard = _cone(
+        shard = mm.crystal_shaft(
             f"EggShard{i}",
-            4,
-            0.12,
-            0.0,
-            0.66,
-            (0.34 * math.cos(angle), 0.34 * math.sin(angle), 0.78),
-            (0.65, 0.95, 1.0),
-            0.9,
-            0.2,
-            0.25,
+            radius=0.12,
+            shaft_height=0.34,
+            tip_height=0.32,
+            location=(0.34 * math.cos(angle), 0.34 * math.sin(angle), 0.62),
+            tilt=(-0.32, 0.0, angle),
+            color=(0.65, 0.95, 1.0, 1.0),
+            emission=0.9,
+            roughness=0.2,
+            metallic=0.25,
         )
-        shard.rotation_euler = (-0.32, 0.0, 0.0)
     return core
 
 

@@ -105,8 +105,10 @@ func _build_hud_layer() -> void:
 
 	# One builder for both base classes, see `Ui.top_bar`. The only difference
 	# is the entry point into the suggestion dialog: a 3D screen has no `Control`
-	# to hand `SuggestDialog.open`.
-	var bar := Ui.top_bar(HUD_HEIGHT, self, func() -> void: SuggestDialog.open_world(self))
+	# to hand `SuggestDialog.open`. `screen_id` is set by the router before the
+	# screen enters the tree, so a companion declared for this screen is in the
+	# bar from the first frame.
+	var bar := Ui.top_bar(HUD_HEIGHT, self, func() -> void: SuggestDialog.open_world(self), GameRegistry.companions_of(screen_id))
 	bar.z_index = CHROME_Z
 	hud_root.add_child(bar)
 

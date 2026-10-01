@@ -22,8 +22,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import bmesh  # noqa: E402
 import bpy  # noqa: E402
-from mathutils import Matrix  # noqa: E402
+from mathutils import Matrix, Vector  # noqa: E402
 
 import make_mesh as mm  # noqa: E402
 
@@ -106,6 +107,184 @@ def _pivot_box(
     return obj
 
 
+def _membrane_wing(
+    name: str,
+    side: float,
+    span: float,
+    color: tuple[float, float, float, float],
+    accent: tuple[float, float, float, float],
+    thickness: float = 0.035,
+) -> bpy.types.Object:
+    """One dragon wing, built around the origin so the pivot is the shoulder.
+
+    The game flaps the wings by setting ``rotation.z`` on the objects named
+    ``DragonWingL`` / ``DragonWingR``, so each wing must stay a **single**
+    object whose origin sits at the shoulder — see
+    ``godot/src/game/dragon_flight/dragon_flight_screen.gd``. Everything below
+    (arm bone, finger bones, membrane) is therefore built into one mesh and
+    given one object with its origin at (0, 0, 0); the caller places it.
+
+    What the reference photographs show (Wikimedia Commons, "Flying bat with
+    tree", "Rhamphorhynchus life restoration"), and what the previous build —
+    a flat plank plus two floating cones — did not have:
+
+    * an **arm bone** running out and slightly back, thickening at the shoulder
+      and tapering to the wrist, so the wing has a leading edge with a direction;
+    * **finger bones** fanning from the wrist to the trailing edge — four of
+      them, which is what gives a bat or dragon wing its ribbed look;
+    * a **membrane** spanning those fingers, i.e. the wing has area rather than
+      being struts with holes in them;
+    * a **scalloped trailing edge**: the outline between two finger tips curves
+      *inwards*, a concave arc. This is the single feature that makes the
+      silhouette read as a membrane wing instead of as a plank;
+    * a slight **upward curl**, so the wing is not a flat plane.
+
+    The wing is built for `side = +1` pointing along +X and mirrored by scaling
+    X, rather than by negating every coordinate, which keeps the scallop arcs
+    symmetric.
+    """
+    # --- planform of the membrane, in wing-local space ------------------------
+    # X out along the span, Y back along the body (the dragon faces +Y),
+    # Z up. `span` scales the whole thing.
+    #
+    # The anatomy is the bat's: the **arm reaches the wing tip**, forming the
+    # whole leading edge, and the fingers fan back from a wrist partway along
+    # it. An earlier version made the wrist the end of the arm and put the
+    # tips beyond it, which produced a solid triangular slab — the fan of
+    # membrane had no notches to be notched into, so the scallops vanished and
+    # the wing read as a paddle.
+    root_front = Vector((0.02 * span, 0.04 * span, 0.05 * span))
+    # Elbow and wrist partway along the arm.
+    elbow = Vector((0.34 * span, -0.06 * span, 0.10 * span))
+    wrist = Vector((0.70 * span, -0.26 * span, 0.16 * span))
+    # The wing tip: the end of the arm, the outermost point of the whole wing.
+    tip = Vector((1.34 * span, -0.50 * span, 0.20 * span))
+
+    # Finger tips, fanning back from the wrist to the trailing edge. These sit
+    # on the concave trailing edge, behind and below the arm.
+    tips = [
+        Vector((1.06 * span, -0.80 * span, 0.10 * span)),
+        Vector((0.78 * span, -1.06 * span, 0.02 * span)),
+        Vector((0.46 * span, -1.20 * span, -0.05 * span)),
+        Vector((0.16 * span, -1.16 * span, -0.08 * span)),
+    ]
+    root_back = Vector((0.04 * span, -0.62 * span, -0.04 * span))
+
+    # Outline walked along the leading edge from the root out to the tip, then
+    # back along the trailing edge through the finger tips to the rear root.
+    outline = [root_front, elbow, wrist, tip, *tips, root_back]
+
+    # The trailing edge runs between consecutive finger tips. A scallop is the
+    # midpoint of that chord pushed **perpendicular** to the chord, inwards.
+    # Pushing it towards the wrist instead — which looks like the obvious thing
+    # to do — moves the point mostly along the edge and merely rotates it, so
+    # the outline comes out almost straight. The sign is chosen by testing
+    # against the wrist, so the dent always goes into the membrane.
+    trailing = []
+    for i in range(len(tips) - 1):
+        a = tips[i]
+        b = tips[i + 1]
+        mid = (a + b) * 0.5
+        chord = b - a
+        normal = Vector((-chord.y, chord.x, 0.0))
+        if normal.length < 1e-6:
+            trailing.append(mid)
+            trailing.append(b)
+            continue
+        normal.normalize()
+        if normal.dot(wrist - mid) < 0.0:
+            normal = -normal
+        # Deep enough to read at gallery size: a third of a span.
+        trailing.append(mid + normal * (0.26 * span))
+        trailing.append(b)
+    trailing.append(root_back)
+
+    # A slight upward curl: raise the middle of the membrane, so the wing is a
+    # shallow curved surface rather than a plane. `tip.x` is the full span, so
+    # normalising against it puts the crest mid-membrane and zero at the root.
+    def _curl(point: Vector) -> Vector:
+        out = point.copy()
+        t = min(1.0, max(0.0, out.x / max(1e-6, tip.x)))
+        out.z += 0.09 * span * (1.0 - abs(2.0 * t - 1.0))
+        return out
+
+    outline = [_curl(p) for p in outline]
+    trailing = [_curl(p) for p in trailing]
+
+    bm = bmesh.new()
+
+    def _vert(point: Vector) -> bmesh.types.BMVert:
+        vert = bm.verts.new((point.x * side, point.y, point.z))
+        return vert
+
+    # --- the membrane surface ------------------------------------------------
+    # Fill the outline as a polygon rather than fanning it from the wrist. The
+    # trailing edge is deliberately concave — that is the scallop — and a fan
+    # from an interior hub simply ignores the concavity: it would produce
+    # overlapping triangles and a flat, convex hull instead of a notched edge.
+    # `triangle_fill` ear-clips the loop, so the notches survive.
+    ring = [_vert(p) for p in outline]
+    for i in range(len(ring)):
+        bm.edges.new((ring[i], ring[(i + 1) % len(ring)]))
+    bmesh.ops.triangle_fill(bm, use_beauty=True, edges=list(bm.edges))
+
+    # --- finger bones --------------------------------------------------------
+    # Thin tapered prisms from the wrist out to each finger tip, plus one along
+    # the arm itself. They stand slightly proud of the membrane so they read as
+    # ribs on top of it rather than being lost in the sheet.
+    def _rib(name_start: str, start: Vector, end: Vector, r0: float, r1: float, sides: int) -> None:
+        length = (end - start).length
+        if length <= 1e-6:
+            return
+        direction = (end - start).normalized()
+        perp = direction.cross(Vector((0.0, 0.0, 1.0)))
+        if perp.length < 1e-6:
+            perp = direction.cross(Vector((0.0, 1.0, 0.0)))
+        perp.normalize()
+        second = direction.cross(perp).normalized()
+        # Lift the rib a hair off the membrane plane so it is visible on top.
+        lift = Vector((0.0, 0.0, 0.018 * span))
+        near = []
+        far = []
+        for k in range(sides):
+            angle = 2.0 * math.pi * k / sides
+            offset = (perp * math.cos(angle) + second * math.sin(angle))
+            near.append(_vert(start + lift + offset * r0))
+            far.append(_vert(end + lift + offset * r1))
+        for k in range(sides):
+            n = (k + 1) % sides
+            bm.faces.new((near[k], near[n], far[n], far[k]))
+
+    for i, finger_tip in enumerate(tips):
+        _rib(f"Finger{i}", wrist, finger_tip, 0.03 * span, 0.012 * span, 3)
+
+    # --- arm bone ------------------------------------------------------------
+    # Two tapering segments, shoulder → elbow → wrist → tip: the leading edge
+    # has thickness, which is what separates a wing from a sheet of paper.
+    _rib("ArmLower", root_front, elbow, 0.075 * span, 0.055 * span, 5)
+    _rib("ArmUpper", elbow, wrist, 0.055 * span, 0.042 * span, 5)
+    _rib("ArmTip", wrist, tip, 0.042 * span, 0.008 * span, 4)
+
+    mesh = bpy.data.meshes.new(name)
+    bm.to_mesh(mesh)
+    bm.free()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    mm._apply_material(obj, color, 0.0, 0.7, 0.05)
+
+    # Give the membrane real thickness. A single-sided sheet is invisible from
+    # behind and looks like a hole in the wing on a phone; a 3.5 cm slab reads
+    # as a membrane from every angle.
+    solidify = obj.modifiers.new("MembraneThickness", type="SOLIDIFY")
+    solidify.thickness = thickness * span
+    solidify.offset = 0.0
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.modifier_apply(modifier=solidify.name)
+    return obj
+
+
 # --- dragons ----------------------------------------------------------------
 def build_dragon(
     body: tuple[float, float, float],
@@ -154,22 +333,17 @@ def build_dragon(
         crest_obj = _cone("DragonCrest", 5, 0.16 * s, 0.0, 0.5 * s, (0.0, head_y - 0.2 * s, head_z + 0.3 * s), accent_c, 0.4, 0.5, 0.1)
         crest_obj.rotation_euler = (0.5, 0.0, 0.0)
 
-    # Wings — pivoted at the shoulders so the scene can flap them.
+    # Wings — one object per side, origin at the shoulder, so the scene can
+    # flap them by setting rotation.z (dragon_flight_screen.gd:397). The
+    # membrane, the arm bone and the finger bones are all part of that single
+    # object, because a wing split across several nodes would leave the
+    # membrane behind while the bones flap.
     for side, tag in ((-1.0, "L"), (1.0, "R")):
-        wing = _pivot_box(
-            f"DragonWing{tag}",
-            (1.25 * wing_span * s, 0.72 * wing_span * s, 0.07 * s),
-            (side * 0.72 * wing_span * s, -0.12 * s, 0.22 * s),
-            (side * 0.3 * s, 0.05 * s, 1.35 * s),
-            body_c, 0.0, 0.7, 0.05,
-            rotation=(0.0, -side * 0.22, -side * 0.45),
-        )
-        for i in range(2):
-            strut = _cone(
-                f"DragonWingStrut{tag}{i}", 4, 0.05 * s, 0.0, 0.9 * wing_span * s,
-                (side * (0.6 + i * 0.5) * wing_span * s, -0.42 * s, 1.62 * s), accent_c, 0.0, 0.6, 0.05,
-            )
-            strut.rotation_euler = (1.45, 0.0, -side * 0.3)
+        wing = _membrane_wing(f"DragonWing{tag}", side, wing_span * s, body_c, accent_c)
+        # Place the shoulder and tilt the wing back and up like a real one at
+        # rest. A little dihedral, so the wings are not perfectly flat.
+        wing.location = (side * 0.34 * s, 0.16 * s, 1.36 * s)
+        wing.rotation_euler = (0.0, -side * 0.30, -side * 0.22)
 
     # Tail — three tapering segments sweeping back and down.
     tail_len = tail_len * s
@@ -305,11 +479,36 @@ def build_stalagmite() -> bpy.types.Object:
 
 
 def build_crystal_cluster() -> bpy.types.Object:
+    """A cluster of hexagonal crystal shafts of mixed heights and angles.
+
+    This was four smooth 5-sided cones — 32 triangles for the whole object,
+    which is not enough to show a crystal. Real clusters are hexagonal shafts
+    with pyramidal terminations (see the amethyst reference in make_mesh.py), so
+    each point here is a shaft plus a 6-triangle tip, leaning outwards from a
+    shared base.
+    """
     base = None
-    specs = [(0.0, 0.0, 1.6), (0.4, 0.2, 1.1), (-0.35, 0.3, 1.25), (0.15, -0.4, 0.95)]
-    for i, (x, y, h) in enumerate(specs):
-        shard = _cone(f"CrystalShard{i}", 5, 0.2, 0.0, h, (x, y, h * 0.5), CYAN, 1.6, 0.3, 0.2)
-        shard.rotation_euler = (y * 0.6, -x * 0.6, 0.0)
+    # (x, y, radius, shaft height, tip height, base tip, tilt x, tilt y)
+    specs = (
+        (0.0, 0.0, 0.28, 1.45, 0.6, 0.3, 0.0, 0.0),
+        (0.4, 0.2, 0.19, 1.0, 0.44, 0.0, 0.2, -0.28),
+        (-0.35, 0.3, 0.16, 0.82, 0.38, 0.0, -0.24, 0.3),
+        (0.15, -0.4, 0.18, 0.64, 0.32, 0.0, 0.3, 0.14),
+    )
+    for i, (x, y, radius, shaft, tip, base_tip, tilt_x, tilt_y) in enumerate(specs):
+        shard = mm.crystal_shaft(
+            f"CrystalShard{i}",
+            radius=radius,
+            shaft_height=shaft,
+            tip_height=tip,
+            base_tip=base_tip,
+            location=(x, y, shaft / 2.0 + base_tip),
+            tilt=(tilt_x, tilt_y, 0.0),
+            color=CYAN,
+            emission=1.6,
+            roughness=0.3,
+            metallic=0.2,
+        )
         if base is None:
             base = shard
     return base  # type: ignore[return-value]

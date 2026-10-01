@@ -97,13 +97,21 @@ describe('laneRisks', () => {
     run({ id, lane, status: 'running', scopes, scope: scopes[0] ?? null });
 
   it('meldet zwei Spuren, die auf denselben breiten Scope zeigen', () => {
-    // The one collision parallel lanes deliberately allow: `scopesConflict`
-    // compares the primary scope, so two different games may both be handed
-    // `core` as a supplement.
-    const risks = laneRisks([busy('a', 1, ['tetris', 'core']), busy('b', 2, ['pang', 'content'])]);
-    expect(risks).toEqual([]);
-    const shared = laneRisks([busy('a', 1, ['tetris', 'core']), busy('b', 2, ['pang', 'core'])]);
-    expect(shared).toEqual([{ scope: 'core', lanes: [1, 2] }]);
+    // Zwei verschiedene Spiele bekommen beide `core` als Ergänzung — das ist die
+    // schwächere der beiden Kollisionen und wird als `broad` markiert.
+    expect(laneRisks([busy('a', 1, ['tetris', 'core']), busy('b', 2, ['pang', 'content'])])).toEqual([]);
+    expect(laneRisks([busy('a', 1, ['tetris', 'core']), busy('b', 2, ['pang', 'core'])])).toEqual([
+      { scope: 'core', lanes: [1, 2], broad: true },
+    ]);
+  });
+
+  it('meldet auch zwei Spuren im selben Spiel — das ist der echte Fall', () => {
+    // Seit die Spuren nicht mehr pro Scope reserviert sind, können zwei Tetris-Runs
+    // gleichzeitig laufen. Genau das muss das Panel sagen, sonst sieht es aus, als
+    // wäre nichts geschehen.
+    const risks = laneRisks([busy('a', 1, ['tetris']), busy('b', 2, ['tetris'])]);
+    expect(risks).toEqual([{ scope: 'tetris', lanes: [1, 2], broad: false }]);
+    expect(describeLaneRisks(risks)).toContain('dieselben Dateien');
   });
 
   it('nennt die Spuren aufsteigend, unabhängig von der Reihenfolge', () => {
@@ -134,7 +142,7 @@ describe('describeLaneRisks', () => {
   it('nennt Scope und beide Spuren — die Beschriftung, die AGENTS.md verlangt', () => {
     // AGENTS.md: "der Scope-Audit meldet es pro Run, und das Panel beschriftet ein
     // solches Paar". Without this line the pair is silent.
-    const text = describeLaneRisks([{ scope: 'core', lanes: [1, 2] }]);
+    const text = describeLaneRisks([{ scope: 'core', lanes: [1, 2], broad: true }]);
     expect(text).toContain('core');
     expect(text).toContain('Spur 1 + 2');
     expect(text).toContain('Scope-Audit');
@@ -142,8 +150,8 @@ describe('describeLaneRisks', () => {
 
   it('zählt mehrere Paare, statt nur das erste zu zeigen', () => {
     const text = describeLaneRisks([
-      { scope: 'core', lanes: [1, 2] },
-      { scope: 'content', lanes: [2, 3] },
+      { scope: 'core', lanes: [1, 2], broad: true },
+      { scope: 'content', lanes: [2, 3], broad: true },
     ]);
     expect(text).toContain('core (Spur 1 + 2)');
     expect(text).toContain('content (Spur 2 + 3)');

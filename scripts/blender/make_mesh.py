@@ -168,16 +168,144 @@ def _box(
     return _primitive(name, color, emission, roughness, metallic)
 
 
+#: Every crystal in the game is built from this, so the set reads as one family.
+#: Reference photographs of amethyst and quartz clusters (Wikimedia Commons,
+#: "Quartz var Amethyst Specimen 22", "Quartz Crystal Cluster") agree on the
+#: vocabulary: a **hexagonal** prism shaft, a **pyramidal termination** of six
+#: triangles meeting at a point, and a flat or slightly tapered base. The point
+#: is what makes a shape read as "crystal" at all — a 4- or 5-sided cone or a
+#: scaled icosphere reads as a rock or a gem, never as a crystal.
+CRYSTAL_FACETS = 6
+
+
+def crystal_shaft(
+    name: str,
+    radius: float,
+    shaft_height: float,
+    tip_height: float,
+    base_tip: float = 0.0,
+    location: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    tilt: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    color: tuple[float, float, float, float] = (0.15, 0.8, 1.0, 1.0),
+    emission: float = 1.5,
+    roughness: float = 0.3,
+    metallic: float = 0.2,
+) -> bpy.types.Object:
+    """One crystal: a hexagonal shaft, a pyramidal tip, optionally a tapered base.
+
+    `base_tip` gives the underside an inverted pyramid of that height instead of
+    a flat cut — real terminations are often doubly pointed, and a flat base
+    next to a pointed top looks like a pencil.
+
+    The parts are separate objects parented to the shaft, so the whole point
+    can be moved and tilted as a unit. Returns the shaft.
+    """
+    body = _cone(
+        f"{name}Shaft",
+        CRYSTAL_FACETS,
+        radius,
+        radius,
+        shaft_height,
+        (0.0, 0.0, 0.0),
+        color,
+        emission,
+        roughness,
+        metallic,
+    )
+    parts = [body]
+    if tip_height > 0.0:
+        parts.append(
+            _cone(
+                f"{name}Tip",
+                CRYSTAL_FACETS,
+                radius,
+                0.0,
+                tip_height,
+                (0.0, 0.0, shaft_height / 2.0 + tip_height / 2.0),
+                color,
+                emission,
+                roughness,
+                metallic,
+            )
+        )
+    if base_tip > 0.0:
+        parts.append(
+            _cone(
+                f"{name}Base",
+                CRYSTAL_FACETS,
+                radius,
+                0.0,
+                base_tip,
+                (0.0, 0.0, -shaft_height / 2.0 - base_tip / 2.0),
+                color,
+                emission,
+                roughness,
+                metallic,
+                flip=True,
+            )
+        )
+    for part in parts[1:]:
+        part.parent = body
+        part.matrix_parent_inverse = body.matrix_world.inverted()
+
+    body.matrix_world = (
+        Matrix.Translation(location)
+        @ Matrix.Rotation(tilt[2], 4, "Z")
+        @ Matrix.Rotation(tilt[1], 4, "Y")
+        @ Matrix.Rotation(tilt[0], 4, "X")
+    )
+    return body
+
+
+def crystal_cluster(
+    name: str,
+    color: tuple[float, float, float, float],
+    emission: float,
+    roughness: float = 0.3,
+    metallic: float = 0.2,
+) -> bpy.types.Object:
+    """Several shafts of different heights and tilts sharing one base.
+
+    A single crystal is a lonely spear; the amethyst reference is a *cluster*,
+    and a cluster is what gives the silhouette its irregular outline. The
+    tallest shaft stands in the middle and the smaller ones lean out around it.
+    """
+    specs = (
+        # (x, y, radius, shaft, tip, base_tip, tilt_x, tilt_y)
+        (0.0, 0.0, 0.30, 1.55, 0.62, 0.34, 0.0, 0.0),
+        (0.42, 0.18, 0.20, 1.00, 0.44, 0.22, 0.18, -0.26),
+        (-0.38, 0.26, 0.17, 0.82, 0.38, 0.0, -0.22, 0.28),
+        (0.16, -0.40, 0.19, 0.64, 0.32, 0.0, 0.30, 0.12),
+    )
+    base = None
+    for i, (x, y, radius, shaft, tip, base_tip, tilt_x, tilt_y) in enumerate(specs):
+        # Lift each shaft so its base still sits on z=0 after tilting.
+        lift = shaft / 2.0 + base_tip
+        point = crystal_shaft(
+            f"{name}{i}",
+            radius,
+            shaft,
+            tip,
+            base_tip=base_tip,
+            location=(x, y, lift),
+            tilt=(tilt_x, tilt_y, 0.0),
+            color=color,
+            emission=emission,
+            roughness=roughness,
+            metallic=metallic,
+        )
+        if base is None:
+            base = point
+    if base is None:  # pragma: no cover - specs is a constant
+        raise RuntimeError("crystal_cluster needs at least one shaft")
+    return base
+
+
 def build_crystal() -> bpy.types.Object:
-    """A faceted, glowing crystal used as a collectible."""
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=1.0)
-    obj = bpy.context.active_object
-    obj.name = "Crystal"
-    obj.scale = (0.6, 0.6, 1.4)
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    bpy.ops.object.shade_flat()
-    _apply_material(obj, (0.15, 0.8, 1.0, 1.0), emission=2.0)
-    return obj
+    """A faceted, glowing crystal cluster used as a collectible."""
+    color = (0.15, 0.8, 1.0, 1.0)
+    cluster = crystal_cluster("Crystal", color, 2.0)
+    return cluster
 
 
 def build_ship() -> bpy.types.Object:
@@ -575,68 +703,137 @@ def build_halloween_ghost_pumpkin() -> bpy.types.Object:
 
 
 def build_crystal_shard() -> bpy.types.Object:
-    """Tier 1 — a raw, pale splinter of crystal."""
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=0.7)
-    obj = bpy.context.active_object
-    obj.name = "CrystalShard"
-    obj.scale = (0.34, 0.34, 1.0)
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    return _primitive(obj.name, (0.6, 0.78, 1.0, 1.0), emission=1.0, roughness=0.5, metallic=0.05)
+    """Tier 1 — a raw, pale splinter: two small shafts, barely grown.
+
+    The lowest tier has to stay visibly *less* than the tiers above it, so this
+    is one thin shaft with a short tip and a single small companion rather than
+    a full cluster.
+    """
+    color = (0.6, 0.78, 1.0, 1.0)
+    main = crystal_shaft(
+        "CrystalShard",
+        radius=0.26,
+        shaft_height=1.0,
+        tip_height=0.44,
+        base_tip=0.2,
+        location=(0.0, 0.0, 0.7),
+        color=color,
+        emission=1.0,
+        roughness=0.5,
+        metallic=0.05,
+    )
+    crystal_shaft(
+        "CrystalShardSmall",
+        radius=0.15,
+        shaft_height=0.5,
+        tip_height=0.26,
+        location=(0.3, -0.14, 0.38),
+        tilt=(0.14, -0.3, 0.0),
+        color=color,
+        emission=1.0,
+        roughness=0.5,
+        metallic=0.05,
+    )
+    return main
 
 
 def build_crystal_gem() -> bpy.types.Object:
-    """Tier 2 — a round, faceted gemstone."""
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=0.82)
-    obj = bpy.context.active_object
-    obj.name = "CrystalGem"
-    obj.scale = (0.84, 0.84, 1.0)
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    return _primitive(obj.name, (0.13, 0.83, 0.93, 1.0), emission=1.3, roughness=0.42, metallic=0.1)
+    """Tier 2 — a single well-formed crystal, taller than tier 1's splinter."""
+    return crystal_shaft(
+        "CrystalGem",
+        radius=0.34,
+        shaft_height=1.15,
+        tip_height=0.58,
+        base_tip=0.3,
+        location=(0.0, 0.0, 0.88),
+        color=(0.13, 0.83, 0.93, 1.0),
+        emission=1.3,
+        roughness=0.42,
+        metallic=0.1,
+    )
 
 
 def build_crystal_jewel() -> bpy.types.Object:
-    """Tier 3 — a cut jewel with a brilliant-style crown and pavilion."""
-    _cone("JewelCrown", 8, 0.9, 0.44, 0.6, (0.0, 0.0, 0.46), (0.2, 0.9, 0.55, 1.0), 1.6, 0.35, 0.15)
-    _cone("JewelPavilion", 8, 0.9, 0.0, 0.95, (0.0, 0.0, -0.3), (0.2, 0.9, 0.55, 1.0), 1.6, 0.35, 0.15, flip=True)
-    _torus("JewelGirdle", 0.88, 0.08, (0.0, 0.0, 0.12), (0.85, 1.0, 0.9, 1.0), 1.2, 0.3, 0.3)
-    obj = bpy.data.objects["JewelCrown"]
-    return obj
+    """Tier 3 — a crystal with a smaller companion and a girdle ring."""
+    color = (0.2, 0.9, 0.55, 1.0)
+    main = crystal_shaft(
+        "Jewel",
+        radius=0.30,
+        shaft_height=0.95,
+        tip_height=0.62,
+        base_tip=0.26,
+        location=(0.0, 0.0, 0.74),
+        color=color,
+        emission=1.6,
+        roughness=0.35,
+        metallic=0.15,
+    )
+    crystal_shaft(
+        "JewelSmall",
+        radius=0.17,
+        shaft_height=0.6,
+        tip_height=0.36,
+        location=(0.34, 0.12, 0.48),
+        tilt=(0.1, -0.34, 0.0),
+        color=color,
+        emission=1.6,
+        roughness=0.35,
+        metallic=0.15,
+    )
+    _torus("JewelGirdle", 0.5, 0.055, (0.0, 0.0, 0.72), (0.85, 1.0, 0.9, 1.0), 1.2, 0.3, 0.3)
+    return main
 
 
 def build_crystal_prism() -> bpy.types.Object:
-    """Tier 4 — a tall hexagonal prism crowned with pyramidal tips."""
-    _cone("PrismBody", 6, 0.46, 0.46, 1.35, (0.0, 0.0, 0.0), (0.98, 0.75, 0.15, 1.0), 1.8, 0.3, 0.25)
-    _cone("PrismTipTop", 6, 0.46, 0.0, 0.6, (0.0, 0.0, 0.97), (0.98, 0.75, 0.15, 1.0), 1.8, 0.3, 0.25)
-    _cone("PrismTipBottom", 6, 0.46, 0.0, 0.6, (0.0, 0.0, -0.97), (0.98, 0.75, 0.15, 1.0), 1.8, 0.3, 0.25, flip=True)
+    """Tier 4 — a tall hexagonal prism crowned with pyramidal tips (doubly pointed)."""
+    color = (0.98, 0.75, 0.15, 1.0)
+    main = crystal_shaft(
+        "Prism",
+        radius=0.46,
+        shaft_height=1.35,
+        tip_height=0.6,
+        base_tip=0.6,
+        color=color,
+        emission=1.8,
+        roughness=0.3,
+        metallic=0.25,
+    )
     _torus("PrismHalo", 0.78, 0.07, (0.0, 0.0, 0.05), (1.0, 0.92, 0.6, 1.0), 1.4, 0.25, 0.35)
-    return bpy.data.objects["PrismBody"]
+    return main
 
 
 def build_crystal_star() -> bpy.types.Object:
-    """Tier 5 — a radiant star core with radiating spikes and a halo."""
+    """Tier 5 — a radiant star core with radiating spikes and a halo.
+
+    The spikes are hexagonal crystal points now rather than 4-sided cones, so
+    the top tier still belongs to the same family as the tiers below it.
+    """
+    color = (0.96, 0.45, 0.72, 1.0)
     bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=0.5)
     core = bpy.context.active_object
     core.name = "StarCore"
-    _primitive(core.name, (0.96, 0.45, 0.72, 1.0), 2.4, 0.22, 0.4)
+    _primitive(core.name, color, 2.4, 0.22, 0.4)
 
+    # Six short hexagonal points radiating in the XZ plane, plus one up and one
+    # down, each standing off the core rather than floating beside it.
     for i in range(6):
         angle = i * math.pi / 3.0
         spike = _cone(
             f"StarSpike{i}",
-            4,
+            CRYSTAL_FACETS,
             0.2,
             0.0,
             0.85,
             (math.cos(angle) * 0.45, 0.0, math.sin(angle) * 0.45),
-            (0.96, 0.45, 0.72, 1.0),
+            color,
             2.0,
             0.25,
             0.35,
         )
         # Point the spike away from the core (cone default axis is +Z).
         spike.rotation_euler = (0.0, math.pi / 2.0 - angle, 0.0)
-    _cone("StarSpikeUp", 4, 0.2, 0.0, 0.9, (0.0, 0.55, 0.0), (0.96, 0.45, 0.72, 1.0), 2.0, 0.25, 0.35)
-    _cone("StarSpikeDown", 4, 0.2, 0.0, 0.9, (0.0, -0.55, 0.0), (0.96, 0.45, 0.72, 1.0), 2.0, 0.25, 0.35, flip=True)
+    _cone("StarSpikeUp", CRYSTAL_FACETS, 0.2, 0.0, 0.9, (0.0, 0.55, 0.0), color, 2.0, 0.25, 0.35)
+    _cone("StarSpikeDown", CRYSTAL_FACETS, 0.2, 0.0, 0.9, (0.0, -0.55, 0.0), color, 2.0, 0.25, 0.35, flip=True)
     _torus("StarHalo", 0.95, 0.06, (0.0, 0.0, 0.0), (1.0, 0.85, 0.95, 1.0), 1.6, 0.2, 0.4)
     return core
 

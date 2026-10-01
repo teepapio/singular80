@@ -94,11 +94,11 @@ export function waitingLabel(summary: QueueSummary): string {
 }
 
 /**
- * Scope ids naming a kind of work rather than a place, which the server hands to
- * a run *in addition* to the specific scope. Two lanes can therefore both be
- * pointed at the same one — the scheduler allows that, or the queue stays
- * serial — so the panel says it out loud. Mirrors `BROAD_SCOPES` in
- * `server/scopes.ts`.
+ * Scope ids naming a *kind* of work rather than a place: the server hands them to
+ * a run in addition to the specific scope it guessed. Two lanes are therefore
+ * routinely pointed at `core` without either of them owning it, and that is the
+ * weaker of the two collisions — so it is reported differently from two lanes in
+ * the same game.
  */
 export const BROAD_SCOPE_IDS = new Set(['core', 'content']);
 
@@ -107,9 +107,16 @@ export interface LaneRisk {
   scope: string;
   /** Lanes involved, ascending. */
   lanes: number[];
+  /** True for `core`/`content`: a supplement, not the owner of the files. */
+  broad: boolean;
 }
 
-/** Pairs of busy lanes sharing a broad scope: the one collision the queue allows. */
+/**
+ * Pairs of busy lanes that share a scope — the collision parallel lanes allow and
+ * the owner asked for. It lists *every* shared scope, not only the broad ones:
+ * two Tetris runs really can land in the same directory, and that is the case the
+ * panel has to name.
+ */
 export function laneRisks(runs: readonly RunRecord[]): LaneRisk[] {
   const out: LaneRisk[] = [];
   for (let i = 0; i < runs.length; i += 1) {
@@ -117,9 +124,9 @@ export function laneRisks(runs: readonly RunRecord[]): LaneRisk[] {
       const a = runs[i];
       const b = runs[j];
       if (a.lane == null || b.lane == null) continue;
-      const shared = a.scopes.filter((id) => BROAD_SCOPE_IDS.has(id) && b.scopes.includes(id));
+      const shared = a.scopes.filter((id) => b.scopes.includes(id));
       for (const scope of shared) {
-        out.push({ scope, lanes: [a.lane, b.lane].sort((x, y) => x - y) });
+        out.push({ scope, lanes: [a.lane, b.lane].sort((x, y) => x - y), broad: BROAD_SCOPE_IDS.has(scope) });
       }
     }
   }
@@ -129,8 +136,12 @@ export function laneRisks(runs: readonly RunRecord[]): LaneRisk[] {
 /** One German warning line for `laneRisks`, or null when there is nothing to say. */
 export function describeLaneRisks(risks: readonly LaneRisk[]): string | null {
   if (risks.length === 0) return null;
-  const parts = risks.map((risk) => `${risk.scope} (Spur ${risk.lanes.join(' + ')})`);
-  return `⚠ ${parts.join(', ')} — beide Spuren dürfen dort schreiben; der Scope-Audit meldet es, falls es passiert.`;
+  const parts = risks.map((risk) =>
+    risk.broad
+      ? `${risk.scope} (Spur ${risk.lanes.join(' + ')}) — beide dürfen dort schreiben`
+      : `${risk.scope} (Spur ${risk.lanes.join(' + ')}) — beide können dieselben Dateien anfassen`,
+  );
+  return `⚠ ${parts.join(', ')}. Der Scope-Audit meldet es, falls es passiert.`;
 }
 
 /** `Versuch 2/3` for a retried run, or null for a first attempt. */

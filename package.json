@@ -32,6 +32,7 @@
     "telegram:check": "node scripts/bake-telegram.mjs --check",
     "content:sync": "node scripts/sync-content.mjs",
     "content:check": "node scripts/sync-content.mjs --check",
+    "mesh:shot": "python3 scripts/blender/shot_mesh.py",
     "godot:android-template": "node scripts/install-android-template.mjs",
     "locale:sync": "node scripts/locale.mjs sync",
     "locale:check": "node scripts/locale.mjs check",

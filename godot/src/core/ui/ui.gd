@@ -164,7 +164,13 @@ static func set_bar(node: ProgressBar, ratio: float, color: Color) -> void:
 ## differences: `SuggestDialog.open` vs `open_world` (passed in as
 ## `on_suggest`) and the bar's own height (passed in as `height`).
 ## `owner` is the screen the ⚙ opens the settings on.
-static func top_bar(height: float, owner: Node, on_suggest: Callable) -> HBoxContainer:
+##
+## `companions` are the buttons a screen declares for itself
+## (`GameRegistry.companions_of`), each one a `{"label", "screen", "payload"}`
+## dictionary. They sit in front of "◀ Lobby", because they are the screen's own
+## action and the bar's stock buttons are the ways out of it. An empty list is
+## the normal answer and adds nothing to the bar.
+static func top_bar(height: float, owner: Node, on_suggest: Callable, companions: Array = []) -> HBoxContainer:
 	var bar := HBoxContainer.new()
 	bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	bar.offset_bottom = height
@@ -183,6 +189,11 @@ static func top_bar(height: float, owner: Node, on_suggest: Callable) -> HBoxCon
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(spacer)
 
+	for entry in companions:
+		var companion := _companion_button(entry as Dictionary)
+		if companion != null:
+			bar.add_child(companion)
+
 	bar.add_child(button(Loc.t("ui.back_to_lobby"), Vector2(120, TOP_BAR_BUTTON), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		Router.to_lobby()
@@ -200,6 +211,22 @@ static func top_bar(height: float, owner: Node, on_suggest: Callable) -> HBoxCon
 	)
 	bar.add_child(mute)
 	return bar
+
+
+## One screen's own top-bar button, or `null` for an entry without a target.
+##
+## A function of its own because a lambda may not capture a variable declared
+## inside a `for` body: the compiler rejects it, and the workaround of one
+## lambda outside the loop would give every button the target of the last entry.
+static func _companion_button(entry: Dictionary) -> Button:
+	var target := str(entry.get("screen", ""))
+	if target.is_empty():
+		return null
+	var payload: Dictionary = entry.get("payload", {})
+	return button(str(entry.get("label", "Merge")), Vector2(150, TOP_BAR_BUTTON), UiTheme.ACCENT, func() -> void:
+		Sfx.select()
+		Router.go_to(target, payload)
+	)
 
 
 ## Caption of the top bar's sound button, in the active language.

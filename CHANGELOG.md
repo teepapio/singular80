@@ -22,3 +22,13 @@ session. Written by the runner on success, or by
 - **edi:** Changelog-Zeile für Aufträge aus Telegram ergänzt, die nach einem Server-Neustart sonst verloren gingen
 - **#14** Ja. — `7191201`
 - **edi:** Agenten arbeiten auf getrennten Worktrees statt im gemeinsamen Ordner; ein Merge-Gate prüft, merged… <!-- session:600c9e410f7a -->
+
+## 2026-10-01
+
+- **edi:** Die OpenCode-Sitzung läuft wieder im Panel rechts statt in einem Terminalfenster; die Konsole zeigt die Ausgabe des Laufs Zeile für Zeile.
+- **edi:** Modell und Anstrengung lassen sich im Dashboard auswählen statt tippen: echte Liste aller Modelle mit Kontext und Preis, und je Modell nur die Anstrengungsstufen, die es wirklich hat.
+- **edi:** Spuren sind nicht mehr pro Scope reserviert: mehrere Aufträge laufen auch dann gleichzeitig, wenn sie denselben Scope haben; blockiert heißt nur noch „keine freie Spur“.
+- **edi:** Ein gescheiterter Lauf nennt den Grund im Klartext: die letzte Fehlermeldung von OpenCode steht in der Notiz, statt nur „exit 1“.
+- **edi:** Modell für neue Läufe auf `opencode-go/space-bunny-free` gestellt — das Standardmodell wurde vom Anbieter abgewiesen („This model is not available in your country“).
+- **edi:** Die Prioritäts-Zahl ist weg — Score, Score-Zerlegung und Auto-Genehmigung nach Score gibt es nicht mehr; sortiert wird nach Stimmen, Neuheit oder Cluster.
+- **#16** I'll start by checking the previous attempt's run log and the working tree state.Previous attempt l… — `6fd58ec` <!-- 16:run_mupy0eqn_a49cee -->

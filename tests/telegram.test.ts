@@ -31,7 +31,6 @@ const VIEW = {
   category: 'content',
   status: 'new',
   votes: 0,
-  score: 3,
   canonicalId: null,
   clusterSize: 1,
   createdAt: 1_700_000_000_000,

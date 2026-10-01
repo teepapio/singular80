@@ -333,109 +333,25 @@ export interface AuditInput {
   manifestError?: string | null;
 }
 
-/** The two things a lane admission has to know about a run. */
-export interface ScopedRun {
-  id: string;
-  scopes: string[];
-}
-
 /**
- * Scopes that name a *kind* of work rather than a place. `scopeForSuggestion`
- * adds them to a run on top of the specific scope it guessed from the text, so
- * they are a supplement, never the owner. Their names are the values of
- * `CATEGORY_SCOPES` above, kept here so the scheduler and the prediction cannot
- * drift apart.
+ * Lanes are not reserved per scope any more.
+ *
+ * There was a rule here that decided whether two runs may work at the same time
+ * (`scopesConflict`): equal primary scopes, a broad primary (`core`, `content`),
+ * two scopes owning the same files, or an unknown scope all meant "one at a
+ * time". It was defensible, and it was wrong for this machine: the owner asked
+ * for parallel runs in the same scope, and the rule said no every time without
+ * ever showing what it protected.
+ *
+ * What replaces it is the lane count and nothing else — `maxParallelRuns` decides
+ * how many sessions run at once, and a queued run starts as soon as one is free.
+ * Two agents in one game directory can now overwrite each other; that is a real
+ * risk and it has a real answer, `S80_ISOLATE_RUNS=1`, which gives every run its
+ * own worktree where nothing can collide. What is *not* gone is the scope itself:
+ * every run still gets its scope in the prompt, the audit still compares the files
+ * a run touched with the scope it declared, and the panel still labels two lanes
+ * that share a broad scope. Losing the reservation must not cost the warning.
  */
-const BROAD_SCOPES = new Set<string>(Object.values(CATEGORY_SCOPES));
-
-/**
- * The file set a scope owns, or null when the manifest cannot answer for it —
- * an id it does not know, or a scope that owns nothing at all.
- *
- * Reading this from the manifest instead of from the scope *name* is what makes
- * the answer honest. Two scopes that own the same files are the same owner twice,
- * whatever they are called: `scripts/scopes.mjs` builds a variant scope by
- * copying its base and only relabelling it, so `crystal3d`,
- * `crystal3d-christmas` and `crystal3d-halloween` claim byte-identical file sets
- * and would happily run three agents into one directory. Comparing the strings
- * `crystal3d-christmas` and `crystal3d-halloween` finds nothing to complain about.
- */
-function ownedFiles(scopeId: string): string | null {
-  if (ownership) return ownership.get(scopeId) ?? null;
-  const manifest = loadManifest();
-  if (manifest.status !== 'ok') return null;
-  ownership = new Map();
-  for (const [id, scope] of manifest.buildScopes()) {
-    const own = [...scope.own].sort().join('\n');
-    if (own) ownership.set(id, own);
-  }
-  return ownership.get(scopeId) ?? null;
-}
-
-/**
- * May two runs share the working tree at the same time?
- *
- * Comparing the two scope lists for *any* common id looks right and is useless
- * here: every game job carries a broad category scope on top of the game (`core`
- * for mechanics/balance/ui/bug, `content` for data), so a Tetris run and a Pang
- * run would both claim `core` and the queue would silently stay serial — which
- * is the whole thing the operator asked to get rid of.
- *
- * So the unit of the claim is the **primary** scope, the most specific one:
- *
- *  - equal primaries → one owner, no parallelism. The case the
- *    exclusive-ownership rule in `scripts/scopes.mjs` exists for.
- *  - a broad primary (`core`, `content`) → the tree to itself. Those own the
- *    files everybody else may also have to touch, and a run whose whole job *is*
- *    that shared file set cannot stand next to anybody.
- *  - an unknown primary (no scopes, unreadable manifest, an id the manifest does
- *    not know) → the tree to itself too. Guessing "probably fine" for a run
- *    nobody can place is how a half-finished registry line lands in a stranger's
- *    commit.
- *  - two primaries that own the *same files* → the tree to themselves. The names
- *    differ, the manifest does not: a variant scope is its base with a new
- *    label, and three agents in one game directory is one lost merge.
- *  - otherwise → parallel. Exclusive ownership of every concrete file goes to
- *    exactly one scope, so two different games cannot both own the same file.
- *
- * What this leaves open, and does not hide: two runs on *different* games may
- * still both have been pointed at `content/` or `core/` by their category and
- * edit the same file. The scope audit reports that per run (`shared: [...]`),
- * and it is the price of running agents in parallel on one tree at all. The
- * dashboard labels such a pair — see `sharedBroadScopes`.
- */
-export function scopesConflict(a: ScopedRun, b: ScopedRun): boolean {
-  if (a.id === b.id) return true;
-  const primaryA = primaryScope(a.scopes);
-  const primaryB = primaryScope(b.scopes);
-  if (!primaryA || !primaryB) return true;
-  if (primaryA === primaryB) return true;
-  if (BROAD_SCOPES.has(primaryA) || BROAD_SCOPES.has(primaryB)) return true;
-  // Neither the name nor the comment decides this: the manifest does. An id it
-  // does not know is as unplaceable as a run with no scope at all, and two
-  // scopes with the same file set are one owner.
-  const filesA = ownedFiles(primaryA);
-  const filesB = ownedFiles(primaryB);
-  if (filesA === null || filesB === null) return true;
-  if (filesA === filesB) return true;
-  return false;
-}
-
-/**
- * The scope that owns the work: the most specific one, i.e. the first that is
- * not a broad category supplement. Null when nothing at all is known.
- */
-export function primaryScope(scopes: readonly string[]): string | null {
-  for (const id of scopes) if (!BROAD_SCOPES.has(id)) return id;
-  // A run that is *only* about a broad scope still has an owner — a broad one,
-  // which `scopesConflict` then treats as exclusive.
-  return scopes[0] ?? null;
-}
-
-/** Broad scopes a busy pair of lanes has in common, for the operator's label. */
-export function sharedBroadScopes(a: ScopedRun, b: ScopedRun): string[] {
-  return a.scopes.filter((id) => BROAD_SCOPES.has(id) && b.scopes.includes(id));
-}
 
 export function freeLane(taken: Iterable<number>, capacity: number): number | null {
   const used = new Set(taken);

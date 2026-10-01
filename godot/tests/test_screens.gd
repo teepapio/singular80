@@ -633,12 +633,14 @@ func _mesh_gallery_flow() -> void:
 		t.equal(str(gallery.tier), tier_id, "Stufe '%s' lässt sich einschalten" % tier_id)
 	gallery._set_tier("low")
 
-	# Walk forward until a pedestal is close enough to look at. The pedestals
-	# stand `ROW_OFFSET` to either side of the lane and `ROW_OFFSET` is larger
-	# than `NEAR_DISTANCE`, so the player has to stand in the row, not in the
-	# middle of the hall — standing at x = 0 finds nothing, however far forward.
+	# Walk forward until a pedestal is close enough to look at. The nave is
+	# `LANE_MID` from either inner row and that is less than `NEAR_DISTANCE`, so
+	# the player in the middle of the hall already looks at a mesh — standing in
+	# the nave finds one, however far forward. The position goes through
+	# `lane_x` because the pedestal stands in the band the inner row closes off,
+	# and a player is never allowed to stand there.
 	var here := MeshGallery.slot_position(4)
-	gallery.pos = Vector3(here.x, 0, here.z)
+	gallery.pos = Vector3(MeshGallery.lane_x(here.x, here.z, here.x), 0, here.z)
 	gallery._update_world(0.016)
 	await tree.create_timer(0.5).timeout
 	t.check(gallery.active_slot >= 0, "Vor einem Sockel steht ein Mesh im Vordergrund")
@@ -669,6 +671,18 @@ func _mesh_gallery_flow() -> void:
 	_suggest_script().close()
 	await tree.create_timer(0.2).timeout
 	t.check(not _suggest_script().is_open(), "Der Dialog schließt wieder")
+
+	# The aisle between the two rows is not decoration. Standing in it puts the
+	# outer row in front of the player, and that is the only way the far half of
+	# the hall can be read or written about at all — from the nave the inner row
+	# is always the nearer one, and no distance rule can change that.
+	var far := MeshGallery.slot_position(6)
+	var aisle: float = float(MeshGallery.side_of(6)) * MeshGallery.LANE_SIDE
+	gallery.pos = Vector3(MeshGallery.lane_x(aisle, far.z, aisle), 0, far.z)
+	gallery._update_world(0.016)
+	t.equal(int(gallery.active_slot), 6, "Im Gang zwischen den Reihen steht das ferne Mesh vorn")
+	t.check(AssetRegistry.exists(str(gallery.active_key())),
+		"Das ferne Mesh ist gebündelt")
 
 	await _goto("lobby")
 	t.suite_done()

@@ -20,6 +20,9 @@ const SCREEN_SCRIPTS := {
 	"crystal3d": "res://src/game/crystal3d/crystal_jumper_screen.gd",
 	"crystal3d_christmas": "res://src/game/crystal3d/crystal_jumper_screen.gd",
 	"crystal3d_halloween": "res://src/game/crystal3d/crystal_jumper_screen.gd",
+	# The Crystal Jumper's bag, merge and equip. One screen for all three
+	# editions: the payload says which theme it is, see `GameRegistry.COMPANIONS`.
+	"crystal_forge": "res://src/game/crystal3d/crystal_forge_screen.gd",
 	"merge3d_christmas": "res://src/game/merge3d/merge3d_screen.gd",
 	"merge3d_halloween": "res://src/game/merge3d/merge3d_screen.gd",
 	"horserunner": "res://src/game/horse_runner/horse_runner_screen.gd",
