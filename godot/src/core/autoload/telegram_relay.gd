@@ -34,7 +34,16 @@ extends Node
 ## player text; doing that twice, on two platforms, is a bug waiting to happen,
 ## and a player who typed `<b>` should see `<b>`.
 
-const API := "https://api.telegram.org"
+## Where the bot API lives, as a field rather than a constant.
+##
+## Only so a test can point the relay at a local server and read the request it
+## really makes. The alternative — replacing `send_item` on the instance — does not
+## work in GDScript: assigning to a name that is a method of the script raises
+## "Invalid assignment of property or key 'send_item'", so a suite that tried it
+## measured the real Telegram call instead of its stub and still reported success.
+## An address is also the one thing in this file the owner may legitimately want to
+## change, so it earns the field on its own.
+var api_url := "https://api.telegram.org"
 
 ## Longer than the server's own send, because a phone may be resuming from a
 ## cold radio rather than talking to a machine on the same desk.
@@ -45,6 +54,18 @@ const MAX_MESSAGE := 4096
 
 ## Written by `scripts/bake-telegram.mjs`. Absent in a plain checkout, and a
 ## missing file simply means this relay is not available.
+##
+## The `.gd` name is what the export renames: an exported package holds
+## `telegram_config.gdc` plus a `.remap` that points this path at it. So the file
+## has to be asked for through `load()`, which follows that remap — a
+## `FileAccess.file_exists()` on this path is answered by the filesystem layer,
+## which does not. Godot's own `FileAccess` documentation says so and points to
+## `ResourceLoader.exists()` for a check that takes remapping into account
+## (docs.godotengine.org/en/stable/classes/class_fileaccess.html). That guard stood
+## in front of the only `load()` and made the relay answer "no bot credentials in
+## this build" on **every** exported APK while the credentials were shipped inside
+## it — measured on the tablet, where `FileAccess.file_exists()` returned `false`
+## and the very same path loaded a 46-character token.
 const CONFIG_PATH := "res://telegram_config.gd"
 
 var _token := ""
@@ -87,7 +108,7 @@ func send_item(item: Dictionary) -> Dictionary:
 		"disable_web_page_preview": true,
 	})
 	var err := http.request(
-		"%s/bot%s/sendMessage" % [API, _token],
+		"%s/bot%s/sendMessage" % [api_url, _token],
 		PackedStringArray(["Content-Type: application/json"]),
 		HTTPClient.METHOD_POST,
 		body
@@ -124,8 +145,6 @@ func _describe(payload: PackedByteArray) -> String:
 
 
 func _load_config() -> void:
-	if not FileAccess.file_exists(CONFIG_PATH):
-		return
 	var script: Variant = load(CONFIG_PATH)
 	if script == null:
 		return

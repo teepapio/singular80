@@ -93,20 +93,16 @@ func _flow() -> void:
 		"Der clientKey überlebt den Neustart")
 	t.equal(str(reloaded[0].get("text", "")), composed, "…und der Text auch")
 
-	# 4. The POST body the server would receive: text, author, source, clientKey.
-	var body: Dictionary = QueueClass.request_body(reloaded[0])
-	t.equal(body.size(), 4, "Der Body besteht genau aus text, author, source und clientKey")
-	t.equal(str(body.get("text", "")), composed, "Der Text trägt das Präfix")
-	t.equal(str(body.get("author", "")), "Spieler", "Der Autor wird übergeben")
-	t.equal(str(body.get("source", "")), "game", "Die Quelle ist 'game'")
-	t.check(str(body.get("clientKey", "")).begins_with("s80_"),
-		"Der clientKey folgt dem Schema")
+	# 4. What the bot is handed: the entry itself, with its key. There is no POST
+	# body any more — the relay reads `text` and `author` off the queue entry.
+	t.equal(str((reloaded[0] as Dictionary).get("text", "")), composed, "Der Eintrag trägt den Text mit Präfix")
+	t.equal(str((reloaded[0] as Dictionary).get("author", "")), "Spieler", "…und den Autor")
 
-	# 5. After the server confirms, the entry leaves the queue and the file — and
-	# it is removed by the key the queue itself holds and just sent, which is the
-	# one that came back off the disk. A key the test cannot predict must never be
-	# the reason a delivered idea stays in the queue for good.
-	t.check(QueueClass.remove(reloaded, str(body.get("clientKey", ""))),
+	# 5. After Telegram confirms, the entry leaves the queue and the file — and it
+	# is removed by the key the queue itself holds and just sent, which is the one
+	# that came back off the disk. A key the test cannot predict must never be the
+	# reason a delivered idea stays in the queue for good.
+	t.check(QueueClass.remove(reloaded, restored_key),
 		"Ein zugestellter Vorschlag verschwindet auch von der Platte")
 	QueueClass.persist(TEST_PATH, reloaded)
 	var third: Array[Dictionary] = QueueClass.restore(TEST_PATH)
@@ -127,11 +123,10 @@ func _queueing() -> void:
 	t.equal(items.size(), 1, "Der Vorschlag liegt in der Warteschlange")
 	t.check(str(item.get("clientKey", "")).length() <= 64, "Der clientKey passt in das 64-Zeichen-Limit")
 
-	# The contract with the server: `clientKey`, camelCase, top level, opaque.
-	var body: Dictionary = QueueClass.request_body(item)
-	t.check(body.has("clientKey"), "Der POST-Body trägt den clientKey")
-	t.equal(str(body.get("clientKey", "")), str(item.get("clientKey", "")), "…unverändert aus dem Eintrag")
-	t.equal(body.size(), 4, "Der Body besteht genau aus text, author, source und clientKey")
+	# The key is the entry's own: opaque, camelCase, and the thing a retry and a
+	# removal look it up by.
+	t.check(item.has("clientKey"), "Der Eintrag trägt den clientKey")
+	t.equal(str(item.get("clientKey", "")).begins_with("s80_"), true, "…im Schema s80_")
 
 	# Two identical ideas from one player are two suggestions. Dedup is the
 	# server's job and it keys on the clientKey, not on the text.
@@ -182,12 +177,12 @@ func _persistence() -> void:
 	t.equal(str(reloaded[1].get("text", "")), "Drache mit Feueratem", "…und der Text auch")
 
 	# A retry after the restart has to send the very same key again.
-	var retry: Dictionary = QueueClass.request_body(reloaded[0])
-	t.equal(str(retry.get("clientKey", "")), key, "Der Wiederholungsversuch nutzt denselben clientKey")
+	t.equal(str((reloaded[0] as Dictionary).get("clientKey", "")), key,
+		"Der Wiederholungsversuch nutzt denselben clientKey")
 
 	# Removing is a file operation too — otherwise a crash would resurrect it. It
-	# happens by the key the queue holds, which is the one the body just carried.
-	t.check(QueueClass.remove(reloaded, str(retry.get("clientKey", ""))),
+	# happens by the key the queue holds, which is the one that just went out.
+	t.check(QueueClass.remove(reloaded, key),
 		"Ein zugestellter Vorschlag verschwindet auch von der Platte")
 	QueueClass.persist(TEST_PATH, reloaded)
 	var third := QueueClass.restore(TEST_PATH)
@@ -249,12 +244,27 @@ func _cap() -> void:
 
 # --- Delivery ----------------------------------------------------------------
 
+## The delivery path, end to end and over real HTTP: the idea must reach the disk
+## before the attempt, stay there when the attempt fails, and leave the queue only
+## once Telegram confirmed it.
+##
+## The relay points at a local server rather than at Telegram, and the server
+## answers 500 first. So this suite proves the failure *and* the recovery without a
+## network, and it reads the request the relay really built — the credentials, the
+## chat id, the text — instead of trusting a stub. It used to swap
+## `Telegram.send_item` for a lambda, which GDScript silently refused (see
+## `api_url`), and so the assertions after it measured the real bot call.
+##
+## The server address is set to a closed port throughout, on purpose. That is the
+## arrangement this bug lived in: an address that does not answer must no longer
+## have any say in where a suggestion goes.
 func _delivery() -> void:
 	t.suite("Vorschlags-Warteschlange — Zustellung")
 	var api: Node = tree.root.get_node_or_null("/root/Api")
 	var game: Node = tree.root.get_node_or_null("/root/Game")
-	if api == null or game == null:
-		t.fail("Die Autoloads Api und Game fehlen")
+	var relay: Node = tree.root.get_node_or_null("/root/Telegram")
+	if api == null or game == null or relay == null:
+		t.fail("Die Autoloads Api, Game und Telegram fehlen")
 		t.suite_done()
 		return
 
@@ -276,26 +286,43 @@ func _delivery() -> void:
 	# for the duration, and off again at the end.
 	api._persist = true
 
-	# 1. A server address is configured but nothing is listening. This is the
-	#    case in which the old code dropped the text on the floor.
+	var baked_token := str(relay._token)
+	var baked_chat := str(relay._chat_id)
+	var baked_url := str(relay.api_url)
+	var telegram := FakeTelegram.new()
+	tree.root.add_child(telegram)
+	relay._token = "123:ABC"
+	relay._chat_id = "42"
+	relay.api_url = telegram.url()
+	telegram.reply_status = 500
+
+	# Nothing about this depends on the address, and there is one, pointing at
+	# nothing: the arrangement that used to swallow the suggestion.
 	game.set_server_url("http://127.0.0.1:%d" % _closed_port())
+
+	# 1. Telegram refuses. The idea must be queued, on disk, and reported as
+	#    waiting — never as lost.
 	var view: Dictionary = await api.submit_suggestion("Boss mit zwei Leben", "Test")
-	t.check(view.is_empty(), "Ein unerreichbarer Server liefert keine Ansicht zurück")
-	t.equal(api.pending_count(), 1, "Der Vorschlag bleibt trotzdem in der Warteschlange")
+	t.check(view.is_empty(), "Ein abgelehnter Sendeversuch liefert keine Ansicht zurück")
+	t.equal(api.pending_count(), 1, "Der Vorschlag bleibt in der Warteschlange")
 	t.equal(api.pending_hint(), "1 Vorschlag wartet auf Netz", "Der Spieler sieht, dass es wartet")
 	t.equal(pending_events.size(), 1, "Der Wartestand wird genau einmal gemeldet")
-	# The warning is a catalogue string now: `ui.queue_saved_unreachable` is what
-	# the client emits, and the test compares against the same key instead of
-	# grepping for the English fragment "saved locally" — which the German
-	# catalogue has never contained, so the assertion could only ever have
-	# measured the language, not the behaviour.
-	t.check(failed_events.size() == 1 and str(failed_events[0]) == Loc.t("ui.queue_saved_unreachable"),
-		"Der Spieler wird gewarnt, statt eine Löschung zu melden")
-	t.equal(sent_events.size(), 0, "Ohne Server wird kein Erfolg gemeldet")
-	var key := str(api._queue[0].get("clientKey", ""))
+	t.check(failed_events.size() == 1 and str(failed_events[0]) == Loc.t("ui.queue_saved_telegram_failed"),
+		"Die Meldung sagt 'nicht zugestellt' und nicht 'Server unerreichbar'")
+	t.equal(sent_events.size(), 0, "Ohne Bestätigung wird kein Erfolg gemeldt")
+	t.check(telegram.has_path("/bot123:ABC/sendMessage"), "Der Bot wurde genau einmal gefragt")
+	var posts := telegram.with_path("/bot123:ABC/sendMessage")
+	t.equal(posts.size(), 1, "Und genau einmal geantwortet ist nicht nötig")
+	if posts.size() == 1:
+		var body: Dictionary = posts[0]
+		t.equal(str(body.get("chat_id", "")), "42", "Die Nachricht trägt die eingebackene Chat-ID")
+		t.check(str(body.get("text", "")).contains("Boss mit zwei Leben"), "Und den Text des Spielers")
+		t.equal(bool(body.get("disable_web_page_preview", false)), true,
+			"Eine URL im Text darf keine Vorschau werden")
 
 	# It was on the disk before the attempt, not after: an app kill in between
 	# costs a retry, not the idea.
+	var key := str(api._queue[0].get("clientKey", ""))
 	var stored: Variant = JSON.parse_string(FileAccess.get_file_as_string(str(QueueClass.PATH)))
 	var stored_items: Variant = (stored as Dictionary).get("items", []) if stored is Dictionary else []
 	t.equal((stored_items as Array).size(), 1, "Die Idee stand auf der Platte, als der Versuch scheiterte")
@@ -303,30 +330,131 @@ func _delivery() -> void:
 
 	# 2. The network comes back. `wake()` is the path the app-resume
 	#    notification takes — no restart involved.
-	var server := FakeServer.new()
-	tree.root.add_child(server)
-	game.set_server_url("http://127.0.0.1:%d" % server.port)
+	telegram.reply_status = 200
+	failed_events.clear()
 	api.wake()
 	var delivered := await _wait_until(func() -> bool: return api.pending_count() == 0, 8.0)
 	t.check(delivered, "Nach dem Aufwachen ist die Warteschlange leer")
 	t.equal(api.pending_hint(), "", "Ohne Warteschlange verschwindet die Anzeige wieder")
-	t.check(server.has_path("/api/health"), "Vor dem Senden wird das Netz geprüft")
-	var posts := server.with_path("/api/suggestions")
-	t.equal(posts.size(), 1, "Genau ein Vorschlag kam an")
-	if posts.size() == 1:
-		var body: Dictionary = posts[0]
-		t.equal(str(body.get("clientKey", "")), key, "Mit demselben clientKey wie in der Offline-Zeit")
-		t.equal(str(body.get("text", "")), "Boss mit zwei Leben", "Und mit dem Text des Spielers")
-		t.equal(body.size(), 4, "Der Body hält sich an den Vertrag")
+	# `with_path()` builds a new array on every call, so this has to ask again —
+	# the copy taken before the retry still holds one request.
+	t.equal(posts.size(), 1, "Der Wiederholungsversuch ging an denselben Bot")
+	t.equal(failed_events.size(), 0, "Der erfolgreiche Versuch meldet nichts als Fehler")
 	t.equal(sent_events.size(), 1, "suggestion_sent feuert genau einmal")
-	t.equal(sent_events[0][0], 7, "…mit der Id aus der Antwort")
+	# No suggestion number exists: the backend never saw this idea.
+	t.equal(sent_events[0][0], 0, "…und die Id ist 0, weil es keine gibt")
+	t.equal(sent_events[0][1], 1, "…die Clustergröße likewise 1")
 
 	api.suggestion_sent.disconnect(on_sent)
 	api.suggestion_failed.disconnect(on_failed)
 	api.pending_changed.disconnect(on_pending)
 	api._persist = false
-	server.queue_free()
+	relay._token = baked_token
+	relay._chat_id = baked_chat
+	relay.api_url = baked_url
+	telegram.queue_free()
 	game.set_server_url("")
+	api._queue.clear()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(QueueClass.PATH))
+	t.suite_done()
+
+
+## The no-server case is the *normal* state on a player's device, and it used to
+## be answered with "Offline" — a claim about a network nobody tried. The idea has
+## to reach the owner anyway, and the bot is the route. What matters here is which
+## message the player gets and where the idea ends up, because that pair is the
+## whole difference between "lost" and "sent".
+##
+## Over real HTTP again, for the reason `api_url` gives: replacing `send_item` was
+## refused by GDScript, so the old version of this suite was measuring the live bot
+## while claiming to measure a stub.
+func _telegram_route() -> void:
+	t.suite("Vorschlags-Warteschlange — Zustellung an den Bot")
+	var api: Node = tree.root.get_node_or_null("/root/Api")
+	var game: Node = tree.root.get_node_or_null("/root/Game")
+	var relay: Node = tree.root.get_node_or_null("/root/Telegram")
+	if api == null or game == null or relay == null:
+		t.fail("Die Autoloads Api, Game und Telegram fehlen")
+		t.suite_done()
+		return
+
+	var failed_events: Array = []
+	var on_failed := func(reason: String) -> void: failed_events.append(reason)
+	api.suggestion_failed.connect(on_failed)
+	api._queue.clear()
+	api._persist = false
+	game.set_server_url("")
+
+	# The credentials are forced empty rather than assumed: a build made with
+	# `npm run telegram:bake` carries real ones, a plain checkout does not, and a
+	# suite that passed only on one of the two would be measuring the build
+	# rather than the behaviour. The originals are kept so the end restores them.
+	var baked_token := str(relay._token)
+	var baked_chat := str(relay._chat_id)
+	var baked_url := str(relay.api_url)
+	var telegram := FakeTelegram.new()
+	tree.root.add_child(telegram)
+	relay.api_url = telegram.url()
+	relay._token = ""
+	relay._chat_id = ""
+
+	# 1. This build carries no bot credentials. Nothing can be sent, and the
+	#    player must be told *that* — not that the network is down. Nothing is
+	#    asked of the server, so it must not even be reachable.
+	t.check(not relay.is_configured(),
+		"Ohne eingebackene Zugangsdaten ist der Bot nicht konfiguriert")
+	var view: Dictionary = await api.submit_suggestion("Boss mit zwei Leben", "Test")
+	t.check(view.is_empty(), "Ohne Weg nach draußen gibt es keine Ansicht")
+	t.equal(api.pending_count(), 1, "Der Vorschlag bleibt in der Warteschlange")
+	t.equal(telegram.seen.size(), 0, "Der Bot wurde gar nicht gefragt")
+	t.check(failed_events.size() == 1 and str(failed_events[0]) == Loc.t("ui.queue_saved_no_route"),
+		"Die Meldung nennt die fehlenden Zugangsdaten statt 'offline'")
+
+	# 2. With credentials, the send is attempted and its failure is reported as a
+	#    failure to deliver — never as a lost suggestion. The address is still
+	#    empty, so this is the path a player with no server configured takes.
+	relay._token = "123:ABC"
+	relay._chat_id = "42"
+	t.check(relay.is_configured(), "Mit Token und Chat-ID ist der Bot konfiguriert")
+	telegram.reply_status = 500
+	failed_events.clear()
+	var second: Dictionary = await api.submit_suggestion("Noch eine Idee", "Test")
+	t.check(second.is_empty(), "Ein gescheiterter Sendeversuch liefert keine Ansicht")
+	t.equal(telegram.with_path("/bot123:ABC/sendMessage").size(), 1, "Der Bot wurde genau einmal gefragt")
+	t.equal(api.pending_count(), 2, "Beide Ideen warten weiter")
+	t.check(failed_events.size() == 1 and str(failed_events[0]) == Loc.t("ui.queue_saved_telegram_failed"),
+		"Die Meldung sagt 'nicht zugestellt' und nicht 'Server unerreichbar'")
+
+	# 3. A confirmed send removes the idea and returns a view that carries no
+	#    suggestion number — the backend never saw it, and the dialog must not
+	#    print an id it does not have.
+	telegram.reply_status = 200
+	failed_events.clear()
+	var third: Dictionary = await api.submit_suggestion("Dritte Idee", "Test")
+	t.check(not third.is_empty(), "Ein bestätigter Sendeversuch liefert eine Ansicht")
+	t.equal(str(third.get("via", "")), "telegram", "Die Ansicht nennt den Weg über den Bot")
+	t.check(not third.has("id") or int(third.get("id", 0)) == 0,
+		"Ohne Backend gibt es keine Vorschlagsnummer zu zeigen")
+	t.equal(api.pending_count(), 2, "Nur die zugestellte Idee hat die Warteschlange verlassen")
+	t.equal(failed_events.size(), 0, "Der erfolgreiche Versuch meldet nichts als Fehler")
+
+	# 4. The queued ideas drain through the retry timer, which is what stops a
+	#    suggestion from sitting in `user://` forever.
+	api._attempt = 3
+	api._on_timer()
+	var drained := await _wait_until(func() -> bool: return api.pending_count() == 0, 8.0)
+	t.check(drained, "Die Warteschlange leert sich auch ohne Server über den Bot")
+	t.equal(api.pending_hint(), "", "Ohne Warteschlange verschwindet die Anzeige")
+
+	# Restore whatever the build actually carries, so this suite leaves no trace
+	# on the following ones.
+	relay._token = baked_token
+	relay._chat_id = baked_chat
+	relay.api_url = baked_url
+	telegram.queue_free()
+	api.suggestion_failed.disconnect(on_failed)
+	api._attempt = 0
+	api._arm(0)
 	api._queue.clear()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(QueueClass.PATH))
 	t.suite_done()
@@ -355,108 +483,6 @@ func _last(items: Array[Dictionary]) -> Dictionary:
 	return (items[items.size() - 1] as Dictionary).duplicate()
 
 
-## The no-server case is the *normal* state on a player's device, and it used to
-## be answered with "Offline" — a claim about a network nobody tried. The idea
-## has to reach the owner anyway, and without a backend the only route is the
-## bot. What matters here is which message the player gets and where the idea
-## ends up, because that pair is the whole difference between "lost" and "sent".
-func _telegram_route() -> void:
-	t.suite("Vorschlags-Warteschlange — Zustellung ohne Server")
-	var api: Node = tree.root.get_node_or_null("/root/Api")
-	var game: Node = tree.root.get_node_or_null("/root/Game")
-	var relay: Node = tree.root.get_node_or_null("/root/Telegram")
-	if api == null or game == null or relay == null:
-		t.fail("Die Autoloads Api, Game und Telegram fehlen")
-		t.suite_done()
-		return
-
-	var failed_events: Array = []
-	var on_failed := func(reason: String) -> void: failed_events.append(reason)
-	api.suggestion_failed.connect(on_failed)
-	api._queue.clear()
-	api._persist = false
-	game.set_server_url("")
-
-	# The credentials are forced empty rather than assumed: a build made with
-	# `npm run telegram:bake` carries real ones, a plain checkout does not, and a
-	# suite that passed only on one of the two would be measuring the build
-	# rather than the behaviour.
-	# The credentials are forced empty rather than assumed: a build made with
-	# `npm run telegram:bake` carries real ones, a plain checkout does not, and a
-	# suite that passed only on one of the two would be measuring the build
-	# rather than the behaviour. The originals are kept so the end restores them.
-	var baked_token := str(relay._token)
-	var baked_chat := str(relay._chat_id)
-	relay._token = ""
-	relay._chat_id = ""
-
-	# 1. This build carries no bot credentials. Nothing can be sent, and the
-	#    player must be told *that* — not that the network is down.
-	t.check(not relay.is_configured(),
-		"Ohne eingebackene Zugangsdaten ist der Bot nicht konfiguriert")
-	var view: Dictionary = await api.submit_suggestion("Boss mit zwei Leben", "Test")
-	t.check(view.is_empty(), "Ohne Weg nach draußen gibt es keine Ansicht")
-	t.equal(api.pending_count(), 1, "Der Vorschlag bleibt in der Warteschlange")
-	t.check(failed_events.size() == 1 and str(failed_events[0]) == Loc.t("ui.queue_saved_no_route"),
-		"Die Meldung nennt die fehlende Adresse statt 'offline'")
-
-	# 2. With credentials, the send is attempted and its failure is reported as a
-	#    failure to deliver — never as a lost suggestion. The address is still
-	#    empty, so this is the path a player with no server configured takes.
-	var attempts := {"n": 0}
-	var original: Variant = relay.send_item
-	relay.send_item = func(_item: Dictionary) -> Dictionary:
-		attempts["n"] = int(attempts["n"]) + 1
-		return {"ok": false, "error": "offline"}
-	relay._token = "123:ABC"
-	relay._chat_id = "42"
-	t.check(relay.is_configured(), "Mit Token und Chat-ID ist der Bot konfiguriert")
-	failed_events.clear()
-	var second: Dictionary = await api.submit_suggestion("Noch eine Idee", "Test")
-	t.check(second.is_empty(), "Ein gescheiterter Sendeversuch liefert keine Ansicht")
-	t.equal(attempts["n"], 1, "Der Bot wurde genau einmal gefragt")
-	t.equal(api.pending_count(), 2, "Beide Ideen warten weiter")
-	t.check(failed_events.size() == 1 and str(failed_events[0]) == Loc.t("ui.queue_saved_telegram_failed"),
-		"Die Meldung sagt 'nicht zugestellt' und nicht 'Server unerreichbar'")
-
-	# 3. A confirmed send removes the idea and returns a view that carries no
-	#    suggestion number — there is no backend to number it, and the dialog
-	#    must not print an id it does not have.
-	relay.send_item = func(_item: Dictionary) -> Dictionary:
-		attempts["n"] = int(attempts["n"]) + 1
-		return {"ok": true, "messageId": 99}
-	failed_events.clear()
-	var third: Dictionary = await api.submit_suggestion("Dritte Idee", "Test")
-	t.check(not third.is_empty(), "Ein bestätigter Sendeversuch liefert eine Ansicht")
-	t.equal(str(third.get("via", "")), "telegram", "Die Ansicht nennt den Weg über den Bot")
-	t.check(not third.has("id") or int(third.get("id", 0)) == 0,
-		"Ohne Backend gibt es keine Vorschlagsnummer zu zeigen")
-	t.equal(api.pending_count(), 2, "Nur die zugestellte Idee hat die Warteschlange verlassen")
-
-	# 4. The queued ideas drain through the retry timer without a server, which
-	#    is what stops a suggestion from sitting in `user://` forever.
-	relay.send_item = func(_item: Dictionary) -> Dictionary:
-		attempts["n"] = int(attempts["n"]) + 1
-		return {"ok": true, "messageId": 100}
-	api._attempt = 3
-	api._on_timer()
-	var drained := await _wait_until(func() -> bool: return api.pending_count() == 0, 8.0)
-	t.check(drained, "Die Warteschlange leert sich auch ohne Server über den Bot")
-	t.equal(api.pending_hint(), "", "Ohne Warteschlange verschwindet die Anzeige")
-
-	relay.send_item = original
-	# Restore whatever the build actually carries, so this suite leaves no trace
-	# on the following ones.
-	relay._token = baked_token
-	relay._chat_id = baked_chat
-	api.suggestion_failed.disconnect(on_failed)
-	api._attempt = 0
-	api._arm(0)
-	api._queue.clear()
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(QueueClass.PATH))
-	t.suite_done()
-
-
 ## Waits for a condition while yielding frames, so the transport gets to run.
 func _wait_until(done: Callable, seconds: float) -> bool:
 	var waited := 0.0
@@ -479,22 +505,35 @@ func _closed_port() -> int:
 	return port
 
 
-## The smallest possible backend: answers every request with 200 and remembers
-## what it was asked. Enough to prove that a retry arrives with the same key.
-class FakeServer extends Node:
+## A one-route HTTP server on localhost: answers with `reply_status` and `reply`,
+## and remembers what it was asked.
+##
+## It stands in for the bot's API. It used to stand in for the backend's
+## `POST /api/suggestions`, which the game no longer calls — so it is not a
+## leftover from that, it is the only way to see the request the relay really
+## builds. `reply_status` is writable, so a case can fail a send and then let it
+## succeed without a second server.
+class FakeTelegram extends Node:
 	var port: int = 0
 	var seen: Array = []
-	var reply := {"id": 7, "clusterSize": 2}
+	## Status every reply carries. 200 delivers, 500 is Telegram refusing.
+	var reply_status := 200
+	## `{"result": {"message_id": 99}}` is what a real answer looks like.
+	var reply := {"ok": true, "result": {"message_id": 99}}
 
 	var _tcp := TCPServer.new()
 	var _conn: StreamPeerTCP = null
-	var _buffer := ""
+	var _bytes := PackedByteArray()
+	var _answered := false
 
 	func _init() -> void:
 		if _tcp.listen(0, "127.0.0.1") == OK:
 			port = _tcp.get_local_port()
 
-	## The bodies of all requests that went to `path`.
+	func url() -> String:
+		return "http://127.0.0.1:%d" % port
+
+	## The parsed bodies of all requests that went to `path`.
 	func with_path(path: String) -> Array:
 		var out: Array = []
 		for entry in seen:
@@ -509,30 +548,61 @@ class FakeServer extends Node:
 	func _process(_delta: float) -> void:
 		if _conn == null:
 			_conn = _tcp.take_connection()
-			_buffer = ""
-		if _conn == null or _conn.get_available_bytes() <= 0:
+			_bytes = PackedByteArray()
+			_answered = false
+		if _conn == null:
+			return
+		# `put_data` only buffers, and the buffer is flushed by `poll()`. Letting go
+		# of the connection in the same frame threw the answer away before it left —
+		# the client then saw a status line with an empty body, and the code under
+		# test reported "no answer" for a request that had been answered.
+		#
+		# `take_connection()` hands back a peer that is still `STATUS_CONNECTING`:
+		# the handshake needs a few `poll()` calls first. Dropping it for that is
+		# how the server ended up with `seen == []` and the client with a response
+		# code of 0 — a connection refused that never happened. Only a closed or
+		# failed peer is released; a connecting one is waited for.
+		_conn.poll()
+		var status := _conn.get_status()
+		if status == StreamPeerTCP.STATUS_NONE or status == StreamPeerTCP.STATUS_ERROR:
+			_conn = null
+			return
+		if status != StreamPeerTCP.STATUS_CONNECTED:
+			return
+		if _answered:
+			return
+		if _conn.get_available_bytes() <= 0:
 			return
 		var chunk: Array = _conn.get_data(_conn.get_available_bytes())
-		_buffer += (chunk[1] as PackedByteArray).get_string_from_utf8()
-		var split := _buffer.find("\r\n\r\n")
+		_bytes.append_array(chunk[1])
+		# `Content-Length` counts **bytes**, and the relay's body carries an em dash
+		# in its author line: two characters short of what a String length reports.
+		# Measuring the body in characters made this server wait for two bytes that
+		# would never arrive, answer nothing, and leave the code under test looking
+		# like it had never sent — which is exactly what happened before.
+		var head_text := _bytes.get_string_from_utf8()
+		var split := head_text.find("\r\n\r\n")
 		if split < 0:
 			return
 		var expected := 0
-		for line in _buffer.substr(0, split).split("\r\n"):
+		for line in head_text.substr(0, split).split("\r\n"):
 			if line.begins_with("Content-Length:"):
 				expected = int(line.get_slice(":", 1).strip_edges())
-		var body := _buffer.substr(split + 4)
-		if body.length() < expected:
+		# The separator is four ASCII bytes, so the byte offset is the same number.
+		var body_bytes := _bytes.slice(split + 4)
+		if body_bytes.size() < expected:
 			return
-		var request_line := _buffer.substr(0, split).split(" ")
+		var request_line := head_text.substr(0, split).split(" ")
 		seen.append({
 			"path": str(request_line[1]) if request_line.size() > 1 else "",
-			"body": JSON.parse_string(body),
+			"body": JSON.parse_string(body_bytes.get_string_from_utf8()),
 		})
 		var payload := JSON.stringify(reply)
-		_conn.put_data(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" % payload.length()).to_utf8_buffer())
+		var reason := "OK" if reply_status == 200 else "Internal Server Error"
+		var head := "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" % [reply_status, reason, payload.length()]
+		_conn.put_data(head.to_utf8_buffer())
 		_conn.put_data(payload.to_utf8_buffer())
-		_conn = null
+		_answered = true
 
 
 # --- Legal & Reporting -------------------------------------------------------

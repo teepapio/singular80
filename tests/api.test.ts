@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../server/app';
 import { Store } from '../server/db';
+import { classify } from '../src/shared/sorting';
 import type { QueueState, RunRecord, ScopeManifest, SuggestionView } from '../src/shared/types';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -33,6 +34,8 @@ interface Api {
   post: <T>(path: string, body?: unknown) => Promise<{ status: number; body: T }>;
   put: <T>(path: string, body: unknown) => Promise<{ status: number; body: T }>;
   close: () => Promise<void>;
+  /** The server's own store — the way to seed a suggestion without a route. */
+  store: Store;
   dataDir: string;
   projectRoot: string;
 }
@@ -61,6 +64,7 @@ async function boot(runnerEnabled = true): Promise<Api> {
   });
   await app.ready();
   opened.push({ close: () => app.close(), dataDir, projectRoot });
+  const store = (app as unknown as { _singular80: { store: Store } })._singular80.store;
   const call = async <T>(path: string, method: Method, payload?: string): Promise<{ status: number; body: T }> => {
     const res = await app.inject({
       path,
@@ -75,14 +79,27 @@ async function boot(runnerEnabled = true): Promise<Api> {
       call<T>(path, 'POST', body === undefined ? undefined : JSON.stringify(body)),
     put: <T>(path: string, body: unknown) => call<T>(path, 'PUT', JSON.stringify(body)),
     close: () => app.close(),
+    store,
     dataDir,
     projectRoot,
   };
 }
 
-async function newSuggestion(api: Api, text: string): Promise<number> {
-  const res = await api.post<{ id: number }>('/api/suggestions', { text, author: 'Api-Test' });
-  return res.body.id;
+/**
+ * A suggestion row, written straight into the store.
+ *
+ * `POST /api/suggestions` is gone: what a player types goes from the device into
+ * the owner's Telegram chat and never becomes a row here, so there is no route left
+ * to seed through. The store is the same one the server reads.
+ */
+function newSuggestion(api: Api, text: string): number {
+  return api.store.createSuggestion({
+    text,
+    author: 'Api-Test',
+    source: 'game',
+    category: classify(text),
+    canonicalId: null,
+  }).id;
 }
 
 describe('GET /api/runner', () => {
@@ -151,7 +168,7 @@ describe('GET /api/scopes', () => {
 describe('GET /api/suggestions/:id/scope', () => {
   it('sagt, welcher Scope zu einem Vorschlag gehört', async () => {
     const api = await boot();
-    const id = await newSuggestion(api, 'Tetris: die Level sollen schneller kommen');
+    const id = newSuggestion(api, 'Tetris: die Level sollen schneller kommen');
     const res = await api.get<{ suggestion: SuggestionView; scope: { scopes: string[]; reason: string } }>(
       `/api/suggestions/${id}/scope`,
     );
@@ -170,7 +187,7 @@ describe('GET /api/suggestions/:id/scope', () => {
 describe('GET /api/runs/:id/scope', () => {
   it('liefert ein Audit für einen bekannten Run', async () => {
     const api = await boot();
-    const id = await newSuggestion(api, 'Pang: mehr Bälle');
+    const id = newSuggestion(api, 'Pang: mehr Bälle');
     const started = await api.post<{ run: RunRecord }>(`/api/suggestions/${id}/implement`, {});
     const res = await api.get<{ runId: string; scopes: string[] }>(`/api/runs/${started.body.run.id}/scope`);
     expect(res.status).toBe(200);
@@ -200,7 +217,7 @@ describe('POST /api/runs/:id/retry', () => {
 
   it('lehnt das Wiederholen eines laufenden Runs ab', async () => {
     const api = await boot();
-    const id = await newSuggestion(api, 'Siedler: Handelsweg optimieren');
+    const id = newSuggestion(api, 'Siedler: Handelsweg optimieren');
     const started = await api.post<{ run: RunRecord }>(`/api/suggestions/${id}/implement`, {});
     const res = await api.post<{ error: string }>(`/api/runs/${started.body.run.id}/retry`, {});
     expect(res.status).toBe(409);
@@ -345,7 +362,7 @@ describe('PUT /api/settings (Spuren)', () => {
 describe('Backup im Repository', () => {
   it('schreibt die Historie ins Repo und meldet sie identisch zurück', async () => {
     const api = await boot();
-    await newSuggestion(api, 'Tetris: mehr Bälle am Stück');
+    newSuggestion(api, 'Tetris: mehr Bälle am Stück');
     const written = await api.post<{ ok: boolean; path: string; counts: { suggestions: number } }>(
       '/api/backup/write',
       {},
@@ -360,7 +377,7 @@ describe('Backup im Repository', () => {
 
   it('liest die Datei zurück, ohne doppelt anzulegen', async () => {
     const api = await boot();
-    await newSuggestion(api, 'Poker: Chips anders verteilen');
+    newSuggestion(api, 'Poker: Chips anders verteilen');
     await api.post('/api/backup/write', {});
     const first = await api.post<{ report: { suggestionsAdded: number } }>('/api/backup/read', {});
     expect(first.body.report.suggestionsAdded).toBe(0);

@@ -1,37 +1,27 @@
 /**
- * The game's offline queue resends the same `clientKey` when the first answer was
- * lost. The server must turn that into no second row, no second Discord message and
- * no second `suggestion:new`.
+ * `clientKey` idempotency, at the only level where it still exists.
  *
- * `app.inject` instead of `listen`: no port is bound. The runner stays off, but
- * `OPENCODE_BIN` still points at a stub and `projectRoot` at a temp dir, so no test
- * can start a real agent in the real working tree by the back door.
+ * The game's offline queue used to resend the same `clientKey` to
+ * `POST /api/suggestions` when the first answer was lost, and the server turned
+ * that into no second row, no second Discord message and no second
+ * `suggestion:new`. That route is gone — a suggestion from the device goes straight
+ * to the owner's Telegram chat and never becomes a row here.
+ *
+ * What did not go with it: the column, the partial unique index, the migration that
+ * adds both to an existing database, and `createSuggestionOnce()`/`normalizeClientKey`
+ * in the store. A row imported from `backup/dashboard.json` still carries a
+ * `clientKey`, so the index still decides who wins a duplicate and the migration
+ * still has to run on the owner's database, which is months old and cannot be
+ * thrown away and recreated. That is what is tested here.
  */
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { EventEmitter } from 'node:events';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createApp } from '../server/app';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { CLIENT_KEY_MAX, Store, normalizeClientKey } from '../server/db';
-import type { BusEvent, Suggestion, SuggestionView } from '../src/shared/types';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const tempDirs: string[] = [];
-/**
- * Every booted app, closed in `afterEach`.
- *
- * The cases below used to end with `await api.close()` as their *last statement*,
- * so a failing assertion skipped it: the Fastify instance and its SQLite handle
- * stayed open for the rest of the file, and a `rmSync` on a live database is a
- * different failure than the one under investigation. The same shape as
- * `api.test.ts`.
- */
-const opened: { close: () => Promise<void> }[] = [];
-let previousBin: string | undefined;
-let previousWebhook: string | undefined;
 
 function tempDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -39,221 +29,16 @@ function tempDir(prefix: string): string {
   return dir;
 }
 
-afterEach(async () => {
-  for (const app of opened.splice(0)) await app.close();
+afterEach(() => {
+  // The store handles are never closed here — SQLite in Node has no cheap "close",
+  // and `rmSync` under an open connection is the kind of failure that hides the
+  // real one. These are temp directories; the OS reclaims them.
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-  if (previousBin === undefined) delete process.env.OPENCODE_BIN;
-  else process.env.OPENCODE_BIN = previousBin;
-  if (previousWebhook === undefined) delete process.env.DISCORD_WEBHOOK_URL;
-  else process.env.DISCORD_WEBHOOK_URL = previousWebhook;
-  vi.restoreAllMocks();
 });
-
-beforeEach(() => {
-  previousWebhook = process.env.DISCORD_WEBHOOK_URL;
-  delete process.env.DISCORD_WEBHOOK_URL;
-});
-
-interface Api {
-  post: (body: unknown) => Promise<{ status: number; headers: Record<string, unknown>; body: SuggestionView }>;
-  put: <T>(path: string, body: unknown) => Promise<{ status: number; body: T }>;
-  count: () => number;
-  suggestion: (id: number) => Suggestion;
-  events: () => BusEvent[];
-  close: () => Promise<void>;
-  store: Store;
-}
-
-/** Every call that would have posted to Discord, counted instead of sent. */
-let webhookCalls = 0;
-function stubDiscord(): void {
-  webhookCalls = 0;
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-    const url = String(input instanceof URL ? input.toString() : (input as Request).url ?? input);
-    if (url.includes('discord.com')) {
-      webhookCalls += 1;
-      return new Response(JSON.stringify({ id: `msg-${webhookCalls}` }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    }
-    throw new Error(`unerwarteter Netzwerkzugriff in einem Test: ${url}`);
-  });
-}
-
-async function boot(): Promise<Api> {
-  const dataDir = tempDir('singular80-idem-');
-  const projectRoot = tempDir('singular80-idem-repo-');
-  const stub = join(projectRoot, 'opencode-stub');
-  writeFileSync(stub, '#!/bin/sh\nexit 0\n');
-  chmodSync(stub, 0o755);
-  previousBin = process.env.OPENCODE_BIN;
-  process.env.OPENCODE_BIN = stub;
-
-  const app = createApp({
-    dataDir,
-    contentDir: join(root, 'content'),
-    projectRoot,
-    distDir: join(root, 'dist-does-not-exist'),
-    runnerEnabled: false,
-  });
-  await app.ready();
-  opened.push({ close: () => app.close() });
-  const store = (app as unknown as { _singular80: { store: Store } })._singular80.store;
-  const bus = (app as unknown as { _singular80: { bus: EventEmitter } })._singular80.bus;
-  const seen: BusEvent[] = [];
-  bus.on('event', (event: BusEvent) => seen.push(event));
-  const call = async <T>(path: string, method: 'GET' | 'POST' | 'PUT', payload?: unknown) => {
-    const res = await app.inject({
-      path,
-      method,
-      ...(payload !== undefined
-        ? { headers: { 'content-type': 'application/json' }, payload: JSON.stringify(payload) }
-        : {}),
-    });
-    return { status: res.statusCode, headers: res.headers as Record<string, unknown>, body: res.json() as T };
-  };
-  return {
-    post: (body) => call<SuggestionView>('/api/suggestions', 'POST', body),
-    put: <T>(path: string, body: unknown) => call<T>(path, 'PUT', body),
-    count: () => store.listSuggestions().length,
-    suggestion: (id) => store.getSuggestion(id)!,
-    events: () => seen,
-    close: () => app.close(),
-    store,
-  };
-}
 
 const text = 'Die Lobby sollte den letzten Gewinn des Tages zeigen';
 
-describe('POST /api/suggestions mit clientKey', () => {
-  it('legt beim ersten Absenden genau eine Zeile an', async () => {
-    const api = await boot();
-    const res = await api.post({ text, author: 'Spiel', clientKey: 'sug-2026-09-26-7' });
-    expect(res.status).toBe(200);
-    expect(res.body.id).toBeGreaterThan(0);
-    expect(res.body.clientKey).toBe('sug-2026-09-26-7');
-    expect(api.count()).toBe(1);
-    expect(api.suggestion(res.body.id).clientKey).toBe('sug-2026-09-26-7');
-  });
-
-  it('liefert beim Wiederholen dieselbe id und legt nichts Neues an', async () => {
-    const api = await boot();
-    const first = await api.post({ text, author: 'Spiel', clientKey: 'sug-doppelt' });
-    const second = await api.post({ text, author: 'Spiel', clientKey: 'sug-doppelt' });
-    expect(second.status).toBe(200);
-    expect(second.body.id).toBe(first.body.id);
-    expect(second.body.createdAt).toBe(first.body.createdAt);
-    expect(api.count()).toBe(1);
-  });
-
-  it('antwortet beim Wiederholen mit dem aktuellen Zustand, nicht mit dem alten', async () => {
-    const api = await boot();
-    const first = await api.post({ text, author: 'Spiel', clientKey: 'sug-status' });
-    api.store.updateSuggestionStatus(first.body.id, 'implemented');
-    const second = await api.post({ text, author: 'Spiel', clientKey: 'sug-status' });
-    expect(second.body.id).toBe(first.body.id);
-    expect(second.body.status).toBe('implemented');
-    expect(api.count()).toBe(1);
-  });
-
-  it('meldet beim Wiederholen weder Discord noch ein suggestion:new', async () => {
-    const api = await boot();
-    stubDiscord();
-    await api.put('/api/settings', { discordWebhook: 'https://discord.com/api/webhooks/1/token' });
-
-    const first = await api.post({ text, author: 'Spiel', clientKey: 'sug-silent' });
-    expect(webhookCalls).toBe(1);
-    expect(api.events().map((e) => e.type)).toEqual(['suggestion:new']);
-
-    const second = await api.post({ text, author: 'Spiel', clientKey: 'sug-silent' });
-    // No second Discord post, no second event, and nothing written: the row still
-    // carries the message id of the first submit.
-    expect(webhookCalls).toBe(1);
-    expect(api.events().map((e) => e.type)).toEqual(['suggestion:new']);
-    expect(second.headers['x-suggestion-replay']).toBe('1');
-    expect(second.body.discordMessageId).toBe('msg-1');
-    expect(second.body.id).toBe(first.body.id);
-  });
-
-  it('lässt einen neuen Schlüssel weiterhin einen neuen Vorschlag anlegen', async () => {
-    const api = await boot();
-    const a = await api.post({ text, author: 'Spiel', clientKey: 'a' });
-    const b = await api.post({ text, author: 'Spiel', clientKey: 'b' });
-    expect(b.body.id).not.toBe(a.body.id);
-    expect(api.count()).toBe(2);
-  });
-});
-
-describe('POST /api/suggestions ohne clientKey', () => {
-  it('verhält sich wie bisher: jeder Versuch ist ein eigener Vorschlag', async () => {
-    const api = await boot();
-    stubDiscord();
-    await api.put('/api/settings', { discordWebhook: 'https://discord.com/api/webhooks/1/token' });
-    const a = await api.post({ text, author: 'Dashboard' });
-    const b = await api.post({ text, author: 'Dashboard' });
-    expect(b.body.id).not.toBe(a.body.id);
-    expect(b.body.clientKey).toBeNull();
-    expect(api.count()).toBe(2);
-    expect(webhookCalls).toBe(2);
-    expect(api.events().map((e) => e.type)).toEqual(['suggestion:new', 'suggestion:new']);
-  });
-
-  it('behandelt einen leeren Schlüssel wie einen fehlenden', async () => {
-    const api = await boot();
-    const a = await api.post({ text, clientKey: '' });
-    const b = await api.post({ text, clientKey: '   ' });
-    expect(b.body.id).not.toBe(a.body.id);
-    expect(a.body.clientKey).toBeNull();
-    expect(b.body.clientKey).toBeNull();
-    expect(api.count()).toBe(2);
-  });
-
-  it('behandelt nur Leerzeichen als Leerraum, nicht als neuen Schlüssel', async () => {
-    const api = await boot();
-    const a = await api.post({ text, clientKey: 'mit rand' });
-    const b = await api.post({ text, clientKey: '  mit rand  ' });
-    expect(b.body.id).toBe(a.body.id);
-    expect(b.body.clientKey).toBe('mit rand');
-    expect(api.count()).toBe(1);
-  });
-});
-
-describe('Unbrauchbarer clientKey', () => {
-  it('ignoriert Werte, die keine Zeichenkette sind, ohne Fehler', async () => {
-    const api = await boot();
-    for (const bad of [42, true, null, { id: 7 }, ['x'], 1.5]) {
-      const res = await api.post({ text, clientKey: bad });
-      expect(res.status).toBe(200);
-      expect(res.body.clientKey).toBeNull();
-    }
-    // Ignored, not rejected: each is its own suggestion, like a client build that
-    // does not know the field.
-    expect(api.count()).toBe(6);
-  });
-
-  it('ignoriert einen zu langen Schlüssel, statt ihn zu kürzen', async () => {
-    const api = await boot();
-    const long = 'k'.repeat(CLIENT_KEY_MAX + 1);
-    const a = await api.post({ text, clientKey: long });
-    const b = await api.post({ text, clientKey: long });
-    expect(a.body.clientKey).toBeNull();
-    // Truncating would let two keys with a common 64-char prefix collapse into one row
-    // and hand a retry somebody else's suggestion.
-    expect(b.body.id).not.toBe(a.body.id);
-    expect(api.count()).toBe(2);
-  });
-
-  it('nimmt einen Schlüssel mit genau 64 Zeichen an', async () => {
-    const api = await boot();
-    const key = 'k'.repeat(CLIENT_KEY_MAX);
-    const a = await api.post({ text, clientKey: key });
-    const b = await api.post({ text, clientKey: key });
-    expect(a.body.clientKey).toBe(key);
-    expect(b.body.id).toBe(a.body.id);
-    expect(api.count()).toBe(1);
-  });
-
+describe('normalizeClientKey', () => {
   it('normalisiert Schlüssel deterministisch', () => {
     expect(normalizeClientKey(undefined)).toBeNull();
     expect(normalizeClientKey('')).toBeNull();
@@ -276,6 +61,16 @@ describe('Store: Idempotenz auf Datenbankebene', () => {
     clientKey,
   });
 
+  it('legt mit einem Schlüssel genau eine Zeile an und melde created', () => {
+    const store = new Store(tempDir('singular80-idem-store-'));
+    const first = store.createSuggestionOnce(input('sug-2026-09-26-7'));
+    expect(first.created).toBe(true);
+    expect(first.suggestion.id).toBeGreaterThan(0);
+    expect(first.suggestion.clientKey).toBe('sug-2026-09-26-7');
+    expect(store.getSuggestion(first.suggestion.id)!.clientKey).toBe('sug-2026-09-26-7');
+    expect(store.listSuggestions()).toHaveLength(1);
+  });
+
   it('meldet beim zweiten Aufruf created: false', () => {
     const store = new Store(tempDir('singular80-idem-store-'));
     const first = store.createSuggestionOnce(input('k1'));
@@ -286,11 +81,87 @@ describe('Store: Idempotenz auf Datenbankebene', () => {
     expect(store.listSuggestions()).toHaveLength(1);
   });
 
+  it('antwortet beim Wiederholen mit dem aktuellen Zustand, nicht mit dem alten', () => {
+    // The row read back is the row in the database, so a status change in between is
+    // what a retry sees — never the state the first attempt computed.
+    const store = new Store(tempDir('singular80-idem-status-'));
+    const first = store.createSuggestionOnce(input('k-status')).suggestion;
+    store.updateSuggestionStatus(first.id, 'implemented');
+    const second = store.createSuggestionOnce(input('k-status'));
+    expect(second.created).toBe(false);
+    expect(second.suggestion.id).toBe(first.id);
+    expect(second.suggestion.status).toBe('implemented');
+    expect(store.listSuggestions()).toHaveLength(1);
+  });
+
+  it('lässt einen neuen Schlüssel weiterhin einen neuen Vorschlag anlegen', () => {
+    const store = new Store(tempDir('singular80-idem-distinct-'));
+    const a = store.createSuggestionOnce(input('a')).suggestion;
+    const b = store.createSuggestionOnce(input('b')).suggestion;
+    expect(b.id).not.toBe(a.id);
+    expect(store.listSuggestions()).toHaveLength(2);
+  });
+
   it('lässt viele Vorschläge ohne Schlüssel zu (partieller Index)', () => {
     const store = new Store(tempDir('singular80-idem-null-'));
     for (let i = 0; i < 3; i += 1) store.createSuggestionOnce(input(null));
     store.createSuggestionOnce(input(undefined));
     expect(store.listSuggestions()).toHaveLength(4);
+  });
+
+  it('behandelt einen leeren Schlüssel wie einen fehlenden', () => {
+    const store = new Store(tempDir('singular80-idem-empty-'));
+    const a = store.createSuggestionOnce(input('')).suggestion;
+    const b = store.createSuggestionOnce(input('   '));
+    expect(b.suggestion.id).not.toBe(a.id);
+    expect(a.clientKey).toBeNull();
+    expect(b.suggestion.clientKey).toBeNull();
+    expect(store.listSuggestions()).toHaveLength(2);
+  });
+
+  it('behandelt nur Leerzeichen als Leerraum, nicht als neuen Schlüssel', () => {
+    const store = new Store(tempDir('singular80-idem-trim-'));
+    const a = store.createSuggestionOnce(input('mit rand')).suggestion;
+    const b = store.createSuggestionOnce(input('  mit rand  '));
+    expect(b.created).toBe(false);
+    expect(b.suggestion.id).toBe(a.id);
+    expect(b.suggestion.clientKey).toBe('mit rand');
+    expect(store.listSuggestions()).toHaveLength(1);
+  });
+
+  it('ignoriert Werte, die keine Zeichenkette sind, ohne Fehler', () => {
+    const store = new Store(tempDir('singular80-idem-junk-'));
+    for (const bad of [42, true, null, { id: 7 }, ['x'], 1.5]) {
+      const res = store.createSuggestionOnce(input(bad));
+      // Ignored, not rejected: each is its own suggestion, like a client build that
+      // does not know the field.
+      expect(res.created).toBe(true);
+      expect(res.suggestion.clientKey).toBeNull();
+    }
+    expect(store.listSuggestions()).toHaveLength(6);
+  });
+
+  it('ignoriert einen zu langen Schlüssel, statt ihn zu kürzen', () => {
+    const store = new Store(tempDir('singular80-idem-long-'));
+    const long = 'k'.repeat(CLIENT_KEY_MAX + 1);
+    const a = store.createSuggestionOnce(input(long)).suggestion;
+    const b = store.createSuggestionOnce(input(long)).suggestion;
+    expect(a.clientKey).toBeNull();
+    // Truncating would let two keys with a common 64-char prefix collapse into one
+    // row and hand a retry somebody else's suggestion.
+    expect(b.id).not.toBe(a.id);
+    expect(store.listSuggestions()).toHaveLength(2);
+  });
+
+  it('nimmt einen Schlüssel mit genau 64 Zeichen an', () => {
+    const store = new Store(tempDir('singular80-idem-max-'));
+    const key = 'k'.repeat(CLIENT_KEY_MAX);
+    const a = store.createSuggestionOnce(input(key));
+    const b = store.createSuggestionOnce(input(key));
+    expect(a.suggestion.clientKey).toBe(key);
+    expect(b.created).toBe(false);
+    expect(b.suggestion.id).toBe(a.suggestion.id);
+    expect(store.listSuggestions()).toHaveLength(1);
   });
 
   it('gewinnt gegen einen zweiten Prozess auf derselben Datei', () => {

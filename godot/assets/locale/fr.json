@@ -199,7 +199,6 @@
     "ui.queue_full": "File d’attente pleine (au plus {limit}) — la plus ancienne suggestion a été écartée : « {text} »",
     "ui.queue_saved_no_route": "Aucune adresse de serveur dans cette version — suggestion enregistrée localement.",
     "ui.queue_saved_telegram_failed": "Pas encore delivered — enregistrée, elle partira dès qu'il y aura du réseau.",
-    "ui.queue_saved_unreachable": "Serveur injoignable — suggestion enregistrée localement.",
     "ui.queue_waiting": {
       "one": "{count} suggestion attend le réseau",
       "other": "{count} suggestions attendent le réseau"
@@ -222,7 +221,6 @@
     "ui.settings_short": "⚙",
     "ui.sound_off": "♪ silencieux",
     "ui.sound_on": "♪ son activé",
-    "ui.suggest_cluster": " Des suggestions similaires existent déjà (un groupe de {count} entrées) — ton vote y compte aussi.",
     "ui.suggest_hint": "Contenus, mécaniques, équilibrage ou bugs — tout est rassemblé sur le tableau de bord et y est priorisé. Les réalisations apparaissent directement dans le jeu.",
     "ui.suggest_name": "Nom (facultatif)",
     "ui.suggest_origin": "Depuis : {game}",
@@ -233,7 +231,6 @@
     "ui.suggest_sent": "Envoyé ✓",
     "ui.suggest_stored": "Enregistré ✓",
     "ui.suggest_terms": "Conditions d’utilisation : {url}",
-    "ui.suggest_thanks": "Merci ! Ta suggestion est enregistrée sous le n° {id}.{extra}",
     "ui.suggest_thanks_direct": "Merci ! Ta suggestion est arrivée directement chez l'auteur.",
     "ui.suggest_title": "Envoyer une suggestion",
     "ui.suggest_too_short": "Écris au moins quelques mots.",

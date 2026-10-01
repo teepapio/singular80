@@ -240,26 +240,6 @@ static func ensure_key(entry: Dictionary) -> String:
 	return key
 
 
-## The POST body for one entry. `clientKey` sits on top and stays the same across
-## all retries — the server dedupes on exactly that.
-static func request_body(item: Dictionary) -> Dictionary:
-	var clean := sanitise(item)
-	# The key of the entry **as it was handed in**, and `ensure_key` stores one
-	# there if it was missing. `clean` is a copy, so its freshly minted key is not
-	# the entry's: posting that one would leave the local row — which the caller
-	# removes by the key it looked the entry up with — in the queue for good,
-	# while the server took the same idea under a new key on every attempt. Three
-	# keys, three identical rows in the dashboard: what this file promises cannot
-	# happen.
-	ensure_key(item)
-	return {
-		"text": str(clean.get("text", "")),
-		"author": str(clean.get("author", "Anonym")),
-		"source": str(clean.get("source", "game")),
-		"clientKey": str(item.get("clientKey", "")),
-	}
-
-
 # --- Decisions --------------------------------------------------------------
 
 ## Wait time before the next attempt. Attempt 0 does not wait — after a state change
