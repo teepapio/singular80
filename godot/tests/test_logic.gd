@@ -328,6 +328,96 @@ func _crystal_tower() -> void:
 	t.equal(int(config["targetMs"]), 100000.0, "Level 1 Zielzeit 100 s")
 	var last := CrystalTower.level_config(CrystalTower.MAX_LEVEL)
 	t.equal(int(last["floors"]), 17, "Die letzte Stufe hat 17 Etagen")
+
+	# Six levels that differ only in length are one level six times. Every level
+	# carries a silhouette out of three and its own set of rules, and no two carry
+	# the same pair — so "they all feel the same" has an answer that is a table row
+	# and not a coincidence.
+	t.equal(CrystalTower.LEVELS.size(), CrystalTower.MAX_LEVEL, "Jede Stufe hat eine Zeile")
+	var shapes_seen: Dictionary = {}
+	for level in range(1, CrystalTower.MAX_LEVEL + 1):
+		var cfg := CrystalTower.level_config(level)
+		shapes_seen[str(cfg["shape"])] = true
+		t.equal(int(cfg["level"]), level, "Stufe %d nennt sich selbst" % level)
+	t.equal(shapes_seen.size(), CrystalTower.SHAPES.size(), "Alle Turmformen werden gespielt")
+	var pairs: Dictionary = {}
+	for level in range(1, CrystalTower.MAX_LEVEL + 1):
+		var pair := "%s/%s" % [CrystalTower.level_shape(level), str(CrystalTower.level_rules(level))]
+		t.check(not pairs.has(pair), "Stufe %d unterscheidet sich von Stufe %s" % [level, str(pairs.get(pair, "?"))])
+		pairs[pair] = level
+	t.equal(pairs.size(), CrystalTower.MAX_LEVEL, "Keine zwei Stufen sind gleich")
+
+	# Level 1 stays the plain climb: no rule, nothing drifting, no sliding floor and
+	# the full three seconds of chain. Everything above it is an addition to that.
+	t.equal(str(config["shape"]), "spire", "Level 1 ist ein Turm")
+	t.check(CrystalTower.level_rules(1).is_empty(), "Level 1 hat keine Sonderregel")
+	t.almost(float(config["driftOrbit"]), 0.0, 0.001, "Level 1 lässt die Kristalle stehen")
+	t.almost(float(config["flowWindowMs"]), CrystalTower.FLOW_WINDOW_MS, 0.001, "Level 1 lässt die Kette drei Sekunden leben")
+	t.almost(CrystalTower.floor_slide(1, 4, int(config["floors"])), 0.0, 0.001, "Level 1 hat keine gleitende Etage")
+
+	# The rules do what they say. Each one is a number the screen reads, and a rule
+	# that is named but does nothing is a caption without a difference.
+	t.almost(float(CrystalTower.level_config(2)["driftOrbit"]), 1.2, 0.001, "Stufe 2 treibt ihre Kristalle")
+	t.check(CrystalTower.has_rule(1, "drift") == false, "Stufe 1 treibt nichts")
+	t.check(CrystalTower.floor_slide(3, 4, 11) > 0.0, "Stufe 3 hat eine gleitende Etage")
+	t.almost(CrystalTower.floor_slide(3, 1, 11), 0.0, 0.001, "Der Sockel steht still")
+	t.almost(CrystalTower.floor_slide(3, 3, 11), 0.0, 0.001, "Nur jede zweite Etage gleitet")
+	t.almost(CrystalTower.floor_slide(3, 10, 11), 0.0, 0.001, "Der Gipfel steht still")
+	t.almost(float(CrystalTower.level_config(5)["flowWindowMs"]), 1500.0, 0.001, "Stufe 5 verkürzt die Kette")
+	t.equal(CrystalTower.level_rules(CrystalTower.MAX_LEVEL).size(), CrystalTower.RULES.size(),
+		"Die letzte Stufe spielt jede Regel")
+
+	# A shorter window is a shorter window, and the chain really does end earlier.
+	t.equal(CrystalTower.next_flow(2000.0, 1000.0, 3, 1500.0), 4, "Das kurze Fenster zählt noch")
+	t.equal(CrystalTower.next_flow(2600.0, 1000.0, 3, 1500.0), 1, "Das kurze Fenster endet früher")
+	t.almost(CrystalTower.flow_left_ms(2000.0, 1000.0, 3, 1500.0), 500.0, 0.001, "Restzeit im kurzen Fenster")
+	t.almost(CrystalTower.flow_ratio(2000.0, 1000.0, 3, 1500.0), 1.0 / 3.0, 0.001, "Der Balken folgt dem Fenster")
+
+	# Platforms get narrower with every level, so the last tower asks for a precise
+	# landing where the first one forgave a sloppy one.
+	t.almost(float(config["platformHalf"]), CrystalTower.BASE_PLATFORM_HALF, 0.001, "Level 1 startet breit")
+	t.check(float(last["platformHalf"]) < float(config["platformHalf"]), "Die letzte Stufe ist schmaler")
+	t.almost(float(config["platformHalf"]) - float(last["platformHalf"]),
+		float(CrystalTower.MAX_LEVEL - 1) * CrystalTower.PLATFORM_HALF_STEP, 0.001,
+		"Jede Stufe nimmt einen Schritt ab")
+
+	# The one thing that must never hold: a level the player cannot finish. It is
+	# invisible in play — the run just never reaches the top — so it is proved here,
+	# against the very numbers the ship obeys.
+	t.equal(CrystalTower.unreachable_level(), "", "Jede Stufe ist zu erklettern")
+	t.check(CrystalTower.FLOOR_HEIGHT < CrystalTower.jump_reach(),
+		"Die Etagenhöhe bleibt unter der Sprunghöhe")
+	t.check(CrystalTower.jump_gap(CrystalTower.FLOOR_HEIGHT) > 0.0, "Ein Sprung trägt quer")
+	# `coil` winds so fast that the landing boxes of two neighbours stop overlapping
+	# — that is the shape with a real jump in it, and the jump still has to carry
+	# what the shape opened up.
+	var coil := CrystalTower.widest_gap(5)
+	t.check(float(coil["gap"]) > 0.0, "Die Wendel öffnet einen Absatz, den die Etagen nicht decken")
+	t.equal(int(coil["floor"]), 3, "Er liegt früh im Turm")
+	for level in range(1, CrystalTower.MAX_LEVEL + 1):
+		t.check(float(CrystalTower.widest_gap(level)["gap"]) <= CrystalTower.jump_gap(CrystalTower.FLOOR_HEIGHT),
+			"Stufe %d ist quer zu überwinden" % level)
+
+	# The floor height is the number that decides whether a tower can be finished,
+	# so it is one constant and not a per-level ramp: a ramp turns the upper levels
+	# from "harder" into "impossible", and no screen in the game says so.
+	t.almost(CrystalTower.FLOOR_HEIGHT, 3.4, 0.001, "Die Etagenhöhe ist auf jeder Stufe gleich")
+
+	# Where a sliding floor stands is rebuilt from the run clock and not accumulated,
+	# so it is the same on every frame and the same again after a pause.
+	var travel := CrystalTower.floor_slide(3, 4, 11)
+	t.almost(CrystalTower.slide_offset(0.0, 0.0, travel).length(), travel, 0.001, "Die Etage startet am äußeren Punkt")
+	t.almost(CrystalTower.slide_offset(0.0, 0.0, travel).x, travel, 0.001, "Sie startet auf der X-Seite")
+	t.check(CrystalTower.slide_offset(1.0, 0.0, travel).x < travel, "Die Etage ist einen Schritt weiter")
+	t.almost(CrystalTower.slide_offset(1.0, 0.0, travel).length(), travel, 0.001, "Der Weg ist kreisförmig")
+	# One full turn of the circle is the same point again: the floor is rebuilt from
+	# the clock, so nothing drifts over a long climb.
+	var turn := TAU / 0.9
+	t.almost(CrystalTower.slide_offset(3.0 + turn, 0.0, travel).x, CrystalTower.slide_offset(3.0, 0.0, travel).x, 0.001,
+		"Nach einer Umdrehung steht die Etage wieder")
+	t.almost(CrystalTower.slide_offset(3.0 + turn, 0.0, travel).y, CrystalTower.slide_offset(3.0, 0.0, travel).y, 0.001,
+		"…und zwar an beiden Achsen")
+	t.almost(CrystalTower.slide_offset(1.0, 0.0, 0.0).length(), 0.0, 0.001, "Eine stehende Etage bleibt stehen")
 	t.equal(CrystalTower.format_time(95000.0), "1:35", "Zeitformat")
 
 	var bonus := CrystalTower.equip_bonus(3)

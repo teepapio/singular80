@@ -184,24 +184,26 @@ static func inventory_value(counts: Array) -> int:
 ## which is what makes it readable while the tower scrolls past.
 
 ## Chain length after a pickup at `elapsed_ms`. A `last_ms` below zero means "no
-## pickup yet"; an elapsed window starts a fresh chain at 1.
-static func next_flow(elapsed_ms: float, last_ms: float, chain: int) -> int:
-	if chain > 0 and last_ms >= 0.0 and elapsed_ms - last_ms <= FLOW_WINDOW_MS:
+## pickup yet"; an elapsed window starts a fresh chain at 1. `window_ms` is the
+## level's chain window — the default keeps the plain three seconds, and a level
+## that shortens it says so instead of silently ignoring the argument.
+static func next_flow(elapsed_ms: float, last_ms: float, chain: int, window_ms: float = FLOW_WINDOW_MS) -> int:
+	if chain > 0 and last_ms >= 0.0 and elapsed_ms - last_ms <= window_ms:
 		return mini(chain + 1, MAX_FLOW)
 	return 1
 
 
 ## Remaining lifetime of the chain in ms (0 = expired). A chain of one has no bar:
 ## a single pickup is not a flow yet, so the HUD stays quiet until the second one.
-static func flow_left_ms(elapsed_ms: float, last_ms: float, chain: int) -> float:
+static func flow_left_ms(elapsed_ms: float, last_ms: float, chain: int, window_ms: float = FLOW_WINDOW_MS) -> float:
 	if chain < 2:
 		return 0.0
-	return clampf(FLOW_WINDOW_MS - (elapsed_ms - last_ms), 0.0, FLOW_WINDOW_MS)
+	return clampf(window_ms - (elapsed_ms - last_ms), 0.0, window_ms)
 
 
 ## Fill level of the chain bar, 0..1.
-static func flow_ratio(elapsed_ms: float, last_ms: float, chain: int) -> float:
-	return flow_left_ms(elapsed_ms, last_ms, chain) / FLOW_WINDOW_MS
+static func flow_ratio(elapsed_ms: float, last_ms: float, chain: int, window_ms: float = FLOW_WINDOW_MS) -> float:
+	return flow_left_ms(elapsed_ms, last_ms, chain, window_ms) / window_ms
 
 
 ## Score multiplier the chain currently pays.
@@ -244,15 +246,262 @@ static func equip_bonus(tier: int) -> Dictionary:
 	}
 
 
-## Tower tuning for a level (1-based, clamped to `MAX_LEVEL`).
+# --- tower tuning ------------------------------------------------------------
+## The numbers the ship obeys. They live in this module and not in the screen so
+## that a level can be *proved* playable: `jump_reach` walks the same integration
+## the screen walks, and every level below is written to stay under it.
+
+## Gravity, and the jump it produces. `crystal_jumper_screen.gd` reads all three
+## from here, so the numbers a test proves and the numbers a player feels cannot
+## drift apart.
+const GRAVITY := 42.0
+const JUMP_SPEED := 18.5
+const BASE_SPEED := 12.0
+## How much of the ship's own footprint a landing still tolerates.
+const PLAYER_RADIUS := 0.7
+## Vertical distance between two floors.
+##
+## Constant on purpose. It is the one number of a tower the player cannot argue
+## with: raise it with the level and the upper levels stop being harder, they
+## stop being *finishable* — and nothing in a run says so, because the ship just
+## never comes down on the next floor. The level ramp lives in the floors, in
+## their width and in the rules below.
+const FLOOR_HEIGHT := 3.4
+## Half the width of a floor on level 1; every level takes a step off it.
+const BASE_PLATFORM_HALF := 2.4
+const PLATFORM_HALF_STEP := 0.1
+const PLATFORM_THICKNESS := 0.6
+## The screen clamps one frame to this, and `jump_reach` assumes no longer.
+const MAX_STEP := 0.05
+
+## Three silhouettes. A shape is what the player *sees*: a tower that winds
+## slowly and close in does not feel like one that winds fast and wide, and
+## `zigzag` — every other floor thrown out over the void — does not feel like
+## either. A level names its shape so the difference is more than a number.
+const SHAPES := {
+	# A chimney. The tower barely turns, so the climb is almost straight up.
+	"spire": {"step": 0.55, "radius": 4.9, "sway": 0.3},
+	# A coil. Wide and fast: the player runs around the column between floors.
+	"coil": {"step": 1.05, "radius": 6.4, "sway": 0.5},
+	# A switchback. Half the floors stand far out, so the climb crosses a gap
+	# again and again instead of circling the column once.
+	"zigzag": {"step": 0.8, "radius": 5.4, "sway": 1.7},
+}
+
+## The rules a level runs under — what the player *feels*. A level that lists no
+## rule here has the plain climb of level 1, which is why level 1 lists none.
+const RULES := {
+	# Crystals above the base circle their floor instead of standing on it.
+	"drift": {"orbit": 1.2},
+	# Every other floor of the middle of the tower slides sideways.
+	"slide": {"travel": 1.8},
+	# The river chain dies earlier, so the climb has to be without a pause.
+	"tight_flow": {"windowMs": 1500.0},
+}
+
+## One line per level: a shape and the rules under it. Six levels, three
+## shapes, and no two levels with the same pair — "the levels all feel the same"
+## was a true complaint, and this table is the answer to it.
+const LEVELS := [
+	{"shape": "spire", "rules": []},
+	{"shape": "coil", "rules": ["drift"]},
+	{"shape": "zigzag", "rules": ["slide"]},
+	{"shape": "spire", "rules": ["drift", "slide"]},
+	{"shape": "coil", "rules": ["slide", "tight_flow"]},
+	{"shape": "zigzag", "rules": ["drift", "slide", "tight_flow"]},
+]
+
+
+## The apex of one jump, in metres.
+##
+## Not `v² / 2g`: the ship subtracts gravity and moves within the same frame, so
+## the apex it reaches is a *sampled* one and it depends on how long a frame is.
+## The screen caps a frame at `MAX_STEP` and this walks exactly that cap — the
+## number a player on a slow device really gets, and the one a floor height has
+## to stay below.
+static func jump_reach(step: float = MAX_STEP) -> float:
+	var speed := JUMP_SPEED
+	var height := 0.0
+	var best := 0.0
+	while speed > 0.0:
+		speed -= GRAVITY * step
+		height += speed * step
+		if height > best:
+			best = height
+	return best
+
+
+## Seconds one jump spends at or above `height`, counted the same way. Zero when
+## the ship cannot reach that height in the first place.
+static func air_window(height: float, step: float = MAX_STEP) -> float:
+	var speed := JUMP_SPEED
+	var y := 0.0
+	var window := 0.0
+	while speed > 0.0:
+		speed -= GRAVITY * step
+		y += speed * step
+		if y >= height:
+			window += step
+	return window
+
+
+## How far the ship travels sideways while it is above `height` — the widest gap
+## one jump bridges.
+##
+## Framerate independent on purpose. This is the *design* bound a shape has to
+## respect, while `jump_reach` is the *hardware* bound a floor has to respect;
+## reading the shape against the sampled number would make every silhouette look
+## too tight.
+static func jump_gap(height: float) -> float:
+	var apex: float = JUMP_SPEED * JUMP_SPEED / (2.0 * GRAVITY)
+	if height >= apex:
+		return 0.0
+	var up := (JUMP_SPEED - sqrt(JUMP_SPEED * JUMP_SPEED - 2.0 * GRAVITY * height)) / GRAVITY
+	return BASE_SPEED * 2.0 * up
+
+
+## Which silhouette a level is built in.
+static func level_shape(level: int) -> String:
+	return str((LEVELS[clampi(level, 1, MAX_LEVEL) - 1] as Dictionary)["shape"])
+
+
+## The rule ids a level runs under, in the order `LEVELS` lists them.
+static func level_rules(level: int) -> Array:
+	return (LEVELS[clampi(level, 1, MAX_LEVEL) - 1] as Dictionary)["rules"]
+
+
+## Whether a level runs under `rule`. The screen asks this once per frame per
+## system, which is why the answer is a lookup and not a scan of the table.
+static func has_rule(level: int, rule: String) -> bool:
+	return level_rules(level).has(rule)
+
+
+## Half the width of one of this level's floors. Every level takes `STEP` off
+## the one before, so the last tower asks for a precise landing and the first
+## forgives a sloppy one.
+static func platform_half(level: int) -> float:
+	return BASE_PLATFORM_HALF - float(clampi(level, 1, MAX_LEVEL) - 1) * PLATFORM_HALF_STEP
+
+
+## Where the platform of `floor` stands, tower centre at the origin.
+##
+## The base sits on the ground and every floor above it is one `FLOOR_HEIGHT`
+## higher, so this is the one place the tower's geometry exists. `zigzag` throws
+## every other floor out over the void; the other two shapes breathe with a sine
+## instead, which keeps two neighbouring floors from standing exactly above one
+## another without opening a gap.
+static func floor_position(level: int, floor: int) -> Vector3:
+	var shape_id := level_shape(level)
+	var shape: Dictionary = SHAPES[shape_id]
+	var sway: float = float(shape["sway"])
+	var radius: float = float(shape["radius"])
+	if shape_id == "zigzag":
+		radius += sway if floor % 2 == 1 else 0.0
+	else:
+		radius += sin(float(floor) * 0.7) * sway
+	var angle := float(floor) * float(shape["step"])
+	return Vector3(cos(angle) * radius, float(floor) * FLOOR_HEIGHT, sin(angle) * radius)
+
+
+## How far the platform of `floor` slides, in metres. Zero means it stands
+## still.
+##
+## Only the middle of the tower moves. The base is where the run starts and the
+## summit is where it ends, and a target that walks away from under the player
+## is a different game than a climb — with a fall, a respawn and a torn chain on
+## top of it.
+static func floor_slide(level: int, floor: int, floors: int) -> float:
+	if not has_rule(level, "slide"):
+		return 0.0
+	if floor < 2 or floor > floors - 3 or floor % 2 == 1:
+		return 0.0
+	return float((RULES["slide"] as Dictionary)["travel"])
+
+
+## Where a sliding floor stands at `elapsed`, relative to where it was built.
+## `floor_slide` says how far it travels; this says where it is, and the screen
+## moves the mesh by exactly the number the landing check reads.
+static func slide_offset(elapsed: float, phase: float, travel: float) -> Vector2:
+	if travel <= 0.0:
+		return Vector2.ZERO
+	var angle: float = elapsed * 0.9 + phase
+	return Vector2(cos(angle) * travel, sin(angle) * travel)
+
+
+## How far a crystal above the base circles its floor, in metres. Zero means the
+## crystals stand still, which is the whole of level 1.
+static func drift_orbit(level: int) -> float:
+	if not has_rule(level, "drift"):
+		return 0.0
+	return float((RULES["drift"] as Dictionary)["orbit"])
+
+
+## Tower tuning for a level (1-based, clamped to `MAX_LEVEL`): the silhouette,
+## the rules under it and every number the screen needs to build it.
 static func level_config(level: int) -> Dictionary:
 	var l: int = clampi(level, 1, MAX_LEVEL)
+	var window := FLOW_WINDOW_MS
+	for rule in level_rules(l):
+		if str(rule) == "tight_flow":
+			window = float((RULES["tight_flow"] as Dictionary)["windowMs"])
 	return {
 		"level": l,
 		"floors": 5 + l * 2,
 		"targetMs": float(75 + l * 25) * 1000.0,
 		"crystalsPerFloor": 2 + mini(2, int(floor(float(l) / 2.0))),
+		"shape": level_shape(l),
+		"platformHalf": platform_half(l),
+		"driftOrbit": drift_orbit(l),
+		"flowWindowMs": window,
+		"rules": level_rules(l),
 	}
+
+
+## The widest horizontal gap between two neighbouring floors of a level, in
+## metres, and the floor it happens on.
+##
+## This is the number a silhouette has to answer for. A shape is free to wind
+## fast, lean out or throw half its floors over the void — and every one of those
+## is only a shape while the ship can still cross what the shape opened up. The
+## landing box is subtracted, because the ship has to *touch* a floor, not reach
+## its middle.
+static func widest_gap(level: int) -> Dictionary:
+	var floors: int = 5 + clampi(level, 1, MAX_LEVEL) * 2
+	var reach: float = platform_half(level) + PLAYER_RADIUS
+	var best := 0.0
+	var best_floor := 1
+	for f in range(1, floors):
+		var below := floor_position(level, f - 1)
+		var above := floor_position(level, f)
+		var gap := Vector2(below.x - above.x, below.z - above.z).length() - 2.0 * reach
+		if gap > best:
+			best = gap
+			best_floor = f
+	return {"gap": best, "floor": best_floor}
+
+
+## Whether every level of the game can be climbed, and why not if one cannot.
+##
+## A tower a player cannot finish is the worst thing a difficulty ramp can do, and
+## it is invisible: the run just never reaches the top and no screen says why. The
+## proof therefore lives in the repository and not in a player's hands. Two
+## conditions have to hold, and they are the two ways a tower turns impossible:
+##
+## 1. A floor at or above `jump_reach` — the ship never comes down on it.
+## 2. A gap wider than `jump_gap` — the ship comes down beside it, not on it.
+##
+## `""` when every level holds, otherwise the level and the reason in one line.
+static func unreachable_level() -> String:
+	var carry := jump_gap(FLOOR_HEIGHT)
+	for level in range(1, MAX_LEVEL + 1):
+		if FLOOR_HEIGHT >= jump_reach():
+			return "Floor height %.2f m is at or above the jump reach %.2f m" % [FLOOR_HEIGHT, jump_reach()]
+		var gap := widest_gap(level)
+		if float(gap["gap"]) > carry:
+			return "Level %d: the gap on floor %d is %.2f m, the jump carries %.2f m" % [
+				level, int(gap["floor"]), float(gap["gap"]), carry,
+			]
+	return ""
 
 
 static func format_time(ms: float) -> String:

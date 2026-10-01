@@ -140,6 +140,7 @@
   "fr": {
     "keys": [
       "common.seconds",
+      "crystal.shape.zigzag",
       "dragon_flight.traits",
       "metro.trains",
       "metro.tunnels",

@@ -5,15 +5,12 @@ extends WorldScreen
 ## Three editions share this screen (crystals, Christmas ornaments, Halloween
 ## pumpkins); a theme only swaps names, tints, meshes and scenery, so the
 ## gameplay stays identical.
+##
+## Every number the ship obeys lives in `CrystalTower`, including the shape of
+## the tower and the rules of the level. What is left here is the building and
+## the drawing — and the one place a per-level rule can be felt.
 
-const FLOOR_HEIGHT := 3.4
-const PLATFORM_HALF := 2.4
-const PLATFORM_THICKNESS := 0.6
 const PLAYER_HALF_HEIGHT := 0.75
-const PLAYER_RADIUS := 0.7
-const GRAVITY := 42.0
-const JUMP_SPEED := 18.5
-const BASE_SPEED := 12.0
 const BOUND := 18.0
 const WORLD_CRYSTAL_SCALE := 0.62
 ## How often the three HUD labels are rebuilt. The camera and the crystals still
@@ -54,9 +51,16 @@ var counts: Array = []
 var collected := 0
 var bonus: Dictionary = {}
 var equipped_tier := 0
-var move_speed := BASE_SPEED
-var jump_speed := JUMP_SPEED
+var move_speed := CrystalTower.BASE_SPEED
+var jump_speed := CrystalTower.JUMP_SPEED
 var pickup_radius := 2.0
+## The level's rule values, read once at build time. A level without a rule has
+## a zero here, so every frame below pays a comparison instead of a table walk.
+var drift_orbit := 0.0
+var slide_count := 0
+## The chain window of this level in ms — the default three seconds, half that on
+## a tower that lists `tight_flow`.
+var flow_window_ms := CrystalTower.FLOW_WINDOW_MS
 
 ## River chain: length, bonus already paid out, and the time of the last find.
 ## `run_best_flow` is this run's longest chain, `best_flow` the record in `Game`.
@@ -102,6 +106,7 @@ var _time_label: Label
 var _chain_label: Label
 var _chain_bar: ProgressBar
 var _bag_label: Label
+var _level_label: Label
 var _hint_label: Label
 var _hud_layer: Control
 var _label_pool: Array = []
@@ -122,14 +127,16 @@ func _ready_world() -> void:
 	bonus = CrystalTower.equip_bonus(equipped_tier) if equipped_tier > 0 else {
 		"speedMult": 1.0, "jumpMult": 1.0, "pickupRadius": 2.0, "extraJumps": 0,
 	}
-	move_speed = BASE_SPEED * float(bonus["speedMult"])
-	jump_speed = JUMP_SPEED * float(bonus["jumpMult"])
+	move_speed = CrystalTower.BASE_SPEED * float(bonus["speedMult"])
+	jump_speed = CrystalTower.JUMP_SPEED * float(bonus["jumpMult"])
 	pickup_radius = float(bonus["pickupRadius"])
 	air_jumps = int(bonus["extraJumps"])
 
 	var unlocked: int = clampi(int(Game.get_number("%s_unlocked" % prefix, 1.0)), 1, CrystalTower.MAX_LEVEL)
 	var level: int = clampi(int(Game.get_number("%s_level" % prefix, 1.0)), 1, unlocked)
 	config = CrystalTower.level_config(level)
+	drift_orbit = float(config["driftOrbit"])
+	flow_window_ms = float(config["flowWindowMs"])
 	counts = []
 	for i in CrystalTower.MAX_CRYSTAL_TIER:
 		counts.append(0)
@@ -234,33 +241,49 @@ func _crystal_fallback(color: Color) -> Node3D:
 
 
 func _build_tower() -> void:
+	# The tower is `CrystalTower`'s, not this screen's: `floor_position` decides
+	# where every floor stands and how far a sliding one travels, and the landing
+	# check below reads the very same numbers. A level is therefore a table row
+	# rather than a switch statement in two places that have to agree.
+	var level: int = int(config["level"])
+	var floors: int = int(config["floors"])
+	var half: float = float(config["platformHalf"])
 	platforms = []
-	platforms.append({"index": 0, "x": 0.0, "z": 0.0, "y": 0.0, "half": PLATFORM_HALF + 1.6, "summit": false})
-	for i in range(1, int(config["floors"])):
-		var angle := float(i) * 0.95
-		var radius := 5.4 + sin(float(i) * 0.7) * 0.5
-		var summit := i == int(config["floors"]) - 1
+	slide_count = 0
+	for i in floors:
+		var at := CrystalTower.floor_position(level, i)
+		var summit := i == floors - 1
+		var slide := CrystalTower.floor_slide(level, i, floors)
+		if slide > 0.0:
+			slide_count += 1
 		platforms.append({
 			"index": i,
-			"x": cos(angle) * radius,
-			"z": sin(angle) * radius,
-			"y": float(i) * FLOOR_HEIGHT,
-			"half": PLATFORM_HALF + 1.0 if summit else PLATFORM_HALF,
+			"x": at.x,
+			"z": at.z,
+			"y": at.y,
+			"half": half + 1.6 if i == 0 else (half + 1.0 if summit else half),
 			"summit": summit,
+			# The slide has to be rebuilt from the run clock rather than tracked,
+			# so a floor that stands still while the game is paused stands still
+			# again where the player left it.
+			"baseX": at.x,
+			"baseZ": at.z,
+			"slide": slide,
+			"phase": float(i) * 0.7,
 		})
 
 	for platform in platforms:
-		var half: float = platform["half"]
 		var box := MeshInstance3D.new()
 		var mesh := BoxMesh.new()
-		mesh.size = Vector3(half * 2.0, PLATFORM_THICKNESS, half * 2.0)
+		mesh.size = Vector3(float(platform["half"]) * 2.0, CrystalTower.PLATFORM_THICKNESS, float(platform["half"]) * 2.0)
 		box.mesh = mesh
 		if bool(platform["summit"]):
 			box.material_override = WorldScreen.standard_material(theme["summit"], 0.7)
 		else:
 			box.material_override = WorldScreen.standard_material(theme["platform"])
-		box.position = Vector3(float(platform["x"]), float(platform["y"]) - PLATFORM_THICKNESS * 0.5, float(platform["z"]))
+		box.position = Vector3(float(platform["x"]), float(platform["y"]) - CrystalTower.PLATFORM_THICKNESS * 0.5, float(platform["z"]))
 		add_child(box)
+		platform["node"] = box
 
 	var tower_top: float = float(platforms[platforms.size() - 1]["y"]) + 1.0
 	var column := MeshInstance3D.new()
@@ -312,9 +335,11 @@ func _build_tower() -> void:
 	inventory_root.add_child(burst_light)
 
 	# Crystals on every floor; higher floors carry rarer tiers.
+	var drift: float = drift_orbit
 	for platform in platforms:
 		var count: int = int(config["crystalsPerFloor"]) + (1 if bool(platform["summit"]) else 0)
 		var tier := CrystalTower.tier_for_floor(int(platform["index"]), int(config["floors"]))
+		var floor_index: int = int(platform["index"])
 		for c in count:
 			var node := _spawn_tier_node(tier)
 			var spread: float = float(platform["half"]) * 0.62
@@ -324,7 +349,14 @@ func _build_tower() -> void:
 			node.position = Vector3(x, base_y, z)
 			node.rotation.y = randf() * TAU
 			add_child(node)
-			crystals.append({"node": node, "x": x, "y": base_y, "z": z, "tier": tier, "phase": randf() * TAU})
+			crystals.append({
+				"node": node, "x": x, "y": base_y, "z": z, "tier": tier,
+				"phase": randf() * TAU,
+				# A drifting crystal circles its own spot rather than the floor's
+				# axis: the player aims at where the crystal is now, and the run
+				# does not become a chase for one find out of thirty.
+				"drift": drift if floor_index > 0 else 0.0,
+			})
 
 
 func _spawn_tier_node(tier: int) -> Node3D:
@@ -401,7 +433,10 @@ func _build_ui() -> void:
 
 	_hud_layer = Control.new()
 	_hud_layer.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	_hud_layer.offset_left = -300
+	# Wide enough for the level line, which is the longest text in the block and
+	# wraps rather than shrinks: a name that gets smaller to fit is a name nobody
+	# reads on a phone.
+	_hud_layer.offset_left = -396
 	_hud_layer.offset_right = -16
 	_hud_layer.offset_top = 66
 	_hud_layer.offset_bottom = 310
@@ -413,7 +448,8 @@ func _build_ui() -> void:
 
 	_score_label = _stat(Loc.t("crystal.crystals"), "0", Vector2(0, 0), 60.0)
 	_points_label = _stat(Loc.resolve("Points"), "0", Vector2(0, 46), 120.0)
-	_floor_label = _stat(Loc.t("crystal.floor"), "1/%d" % int(config["floors"]), Vector2(0, 92), 60.0)
+	_floor_label = _stat(Loc.t("crystal.floor", {"floor": str(int(config["floors"]))}),
+		"1/%d" % int(config["floors"]), Vector2(0, 92), 60.0)
 	_time_label = _stat("Time", "0:00", Vector2(0, 138), 120.0)
 
 	# The chain gets its own row plus a bar that drains while it is alive: the
@@ -428,14 +464,24 @@ func _build_ui() -> void:
 	_hud_layer.add_child(_chain_label)
 	_chain_bar = Ui.bar(theme["accent"], 10.0)
 	_chain_bar.position = Vector2(0, 222)
-	_chain_bar.size = Vector2(300, 10)
+	_chain_bar.size = Vector2(380, 10)
 	_hud_layer.add_child(_chain_bar)
 	Ui.set_bar(_chain_bar, 0.0, theme["accent"])
 
+	# What this level is that the last one was not. Six towers that differ only in
+	# length feel like one tower six times, and a rule the player cannot see is a
+	# rule that reads as a bug — so the level names its silhouette and its rules,
+	# under the chain bar, where the eye already goes for "how is this going".
+	_level_label = Ui.label(_level_caption(), 13, UiTheme.TEXT_MUTED, true)
+	_level_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_level_label.position = Vector2(0, 240)
+	_level_label.size = Vector2(380, 60)
+	_hud_layer.add_child(_level_label)
+
 	_bag_label = Ui.label("", 15, UiTheme.TEXT_DIM)
 	_bag_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	_bag_label.position = Vector2(20, -170)
-	_bag_label.size = Vector2(320, 150)
+	_bag_label.position = Vector2(20, -206)
+	_bag_label.size = Vector2(320, 186)
 	_bag_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_bag_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
 	hud_root.add_child(_bag_label)
@@ -448,6 +494,48 @@ func _build_ui() -> void:
 
 	if equipped_tier > 0:
 		_hint_label.text += "  ·  Equipped: %s" % CrystalTower.crystal_tier_name(theme, equipped_tier)
+
+
+## The caption naming this level's shape and its rules, e.g.
+## "Level 3 · Zigzag · Sliding platforms".
+##
+## Written as one sentence per part rather than as one template, so that every
+## part can be a catalogue key: a shape and a rule are words a translator
+## reorders, and a template with the number already baked into it is one they
+## cannot.
+func _level_caption() -> String:
+	var parts: Array[String] = []
+	var level := int(config["level"])
+	parts.append(Loc.t("crystal.level", {"level": str(level)}))
+	parts.append(_shape_name(str(config["shape"])))
+	for rule in CrystalTower.level_rules(level):
+		parts.append(_rule_name(str(rule)))
+	return " · ".join(parts)
+
+
+## The name of a silhouette. Every key is a literal at its own call site because
+## that is where the catalogue finds them: `"crystal.shape.%s"` is a key the
+## extractor never sees, and a key with no call site reads as one the game no
+## longer needs.
+func _shape_name(shape_id: String) -> String:
+	match shape_id:
+		"spire":
+			return Loc.t("crystal.shape.spire")
+		"coil":
+			return Loc.t("crystal.shape.coil")
+		_:
+			return Loc.t("crystal.shape.zigzag")
+
+
+## The name of a rule, for the same reason as `_shape_name`.
+func _rule_name(rule: String) -> String:
+	match rule:
+		"drift":
+			return Loc.t("crystal.rule.drift")
+		"slide":
+			return Loc.t("crystal.rule.slide")
+		_:
+			return Loc.t("crystal.rule.tight_flow")
 
 
 ## One caption/value pair of the top-right status block.
@@ -514,8 +602,12 @@ func _update_floating(dt: float) -> void:
 # --- loop -------------------------------------------------------------------
 
 func _update_world(delta: float) -> void:
-	var dt: float = minf(delta, 0.05)
+	var dt: float = minf(delta, CrystalTower.MAX_STEP)
 	var prev_y := pos.y
+
+	# Before the physics, not after: the landing check below reads `x`/`z`, and a
+	# floor that has already moved this frame is the floor the player is over.
+	_update_platforms()
 
 	if running:
 		elapsed += dt
@@ -537,7 +629,7 @@ func _update_world(delta: float) -> void:
 				Sfx.jump()
 		jump_held = jump_now
 
-		vel_y -= GRAVITY * dt
+		vel_y -= CrystalTower.GRAVITY * dt
 		pos.y += vel_y * dt
 
 		grounded = false
@@ -546,8 +638,9 @@ func _update_world(delta: float) -> void:
 			var feet: float = pos.y - PLAYER_HALF_HEIGHT
 			for platform in platforms:
 				var top: float = platform["y"]
-				var within_x: bool = absf(pos.x - float(platform["x"])) <= float(platform["half"]) + PLAYER_RADIUS
-				var within_z: bool = absf(pos.z - float(platform["z"])) <= float(platform["half"]) + PLAYER_RADIUS
+				var reach: float = float(platform["half"]) + CrystalTower.PLAYER_RADIUS
+				var within_x: bool = absf(pos.x - float(platform["x"])) <= reach
+				var within_z: bool = absf(pos.z - float(platform["z"])) <= reach
 				if prev_feet >= top - 0.05 and feet <= top and within_x and within_z:
 					pos.y = top + PLAYER_HALF_HEIGHT
 					vel_y = 0.0
@@ -605,6 +698,27 @@ var _camera_look := Vector3.ZERO
 var _hud_timer := 0.0
 
 
+## Moves the floors of a tower that slides them. A level without the rule has
+## `slide_count == 0` and this costs one comparison per frame; the others write
+## into the platform dictionaries, because the landing check, the respawn and the
+## camera all read `x`/`z` from there and none of them may see a stale floor.
+func _update_platforms() -> void:
+	if slide_count == 0:
+		return
+	for platform in platforms:
+		var travel: float = platform["slide"]
+		if travel <= 0.0:
+			continue
+		var at := CrystalTower.slide_offset(elapsed, float(platform["phase"]), travel)
+		var x: float = float(platform["baseX"]) + at.x
+		var z: float = float(platform["baseZ"]) + at.y
+		platform["x"] = x
+		platform["z"] = z
+		var node: Node3D = platform["node"]
+		node.position.x = x
+		node.position.z = z
+
+
 func _update_crystals(dt: float) -> void:
 	var pickup_sq: float = pickup_radius * pickup_radius
 	for i in range(crystals.size() - 1, -1, -1):
@@ -613,11 +727,24 @@ func _update_crystals(dt: float) -> void:
 		node.rotation.y += dt * 1.5
 		var y: float = float(crystal["y"]) + sin(elapsed * 2.0 + float(crystal["phase"])) * 0.22
 		node.position.y = y
+		# The drift is a circle around the spot the crystal was placed on, and the
+		# pickup test reads the same two numbers the mesh is drawn at — a crystal
+		# that looks in reach and cannot be taken is the one rule that would ruin
+		# a run.
+		var x: float = float(crystal["x"])
+		var z: float = float(crystal["z"])
+		var orbit: float = crystal["drift"]
+		if orbit > 0.0:
+			var turn: float = elapsed * 0.8 + float(crystal["phase"])
+			x += cos(turn) * orbit
+			z += sin(turn) * orbit
+			node.position.x = x
+			node.position.z = z
 		if not running:
 			continue
-		var dx: float = float(crystal["x"]) - pos.x
+		var dx: float = x - pos.x
 		var dy: float = y - pos.y
-		var dz: float = float(crystal["z"]) - pos.z
+		var dz: float = z - pos.z
 		if dx * dx + dy * dy + dz * dz >= pickup_sq:
 			continue
 		node.queue_free()
@@ -625,7 +752,7 @@ func _update_crystals(dt: float) -> void:
 		var tier := int(crystal["tier"])
 		counts[tier - 1] = int(counts[tier - 1]) + 1
 		collected += 1
-		_pickup_flow(Vector3(float(crystal["x"]), y, float(crystal["z"])), tier)
+		_pickup_flow(Vector3(x, y, z), tier)
 		_refresh_bag()
 
 
@@ -633,7 +760,7 @@ func _update_crystals(dt: float) -> void:
 ## into the air. A single pickup has nothing to celebrate, so the text and the
 ## second sound only start at a chain of two.
 func _pickup_flow(at: Vector3, tier: int) -> void:
-	flow_chain = CrystalTower.next_flow(elapsed * 1000.0, flow_last_ms, flow_chain)
+	flow_chain = CrystalTower.next_flow(elapsed * 1000.0, flow_last_ms, flow_chain, flow_window_ms)
 	flow_last_ms = elapsed * 1000.0
 	if flow_chain > run_best_flow:
 		run_best_flow = flow_chain
@@ -653,14 +780,14 @@ func _pickup_flow(at: Vector3, tier: int) -> void:
 ## Only the bar is touched every frame; text and colours follow the chain length.
 func _update_flow(dt: float) -> void:
 	_update_floating(dt)
-	if flow_chain > 0 and CrystalTower.flow_left_ms(elapsed * 1000.0, flow_last_ms, flow_chain) <= 0.0:
+	if flow_chain > 0 and CrystalTower.flow_left_ms(elapsed * 1000.0, flow_last_ms, flow_chain, flow_window_ms) <= 0.0:
 		flow_chain = 0
 	var score := CrystalTower.run_score(counts, flow_bonus)
 	if score != _score_shown:
 		_score_shown = score
 		_points_label.text = str(score)
 	if flow_chain >= 2:
-		Ui.set_bar(_chain_bar, CrystalTower.flow_ratio(elapsed * 1000.0, flow_last_ms, flow_chain), _flow_color())
+		Ui.set_bar(_chain_bar, CrystalTower.flow_ratio(elapsed * 1000.0, flow_last_ms, flow_chain, flow_window_ms), _flow_color())
 	elif _chain_bar.value > 0.0:
 		Ui.set_bar(_chain_bar, 0.0, _flow_color())
 	if flow_chain == _flow_shown:
@@ -713,11 +840,11 @@ func _reach_summit() -> void:
 	var prefix := str(theme["keyPrefix"])
 	var value := CrystalTower.run_score(counts, flow_bonus)
 	Game.submit_score("%s_highscore" % prefix, value)
-	# The forge's bag. The summit merge is a tool for this one run and what it
-	# produces buys a bonus for the climb that follows; the bag is what many
-	# climbs leave behind. It is therefore fed with the crystals as they were
-	# found — before the player merges anything at the summit. Two places that
-	# hold crystals, two different jobs, and neither one can empty the other.
+	# The forge's bag. The summit merge is a tool for this one run and its result
+	# buys a bonus for the climb that follows; the bag is what many climbs leave
+	# behind, so it is fed with the crystals as they were found — before the
+	# player merges anything at the summit. Two places that hold crystals, two
+	# different jobs, and neither one can empty the other.
 	CrystalForge.deposit(theme_id, counts)
 	if run_best_flow > best_flow:
 		best_flow = run_best_flow
@@ -738,7 +865,18 @@ func _refresh_bag() -> void:
 	for i in counts.size():
 		if int(counts[i]) > 0:
 			parts.append(Loc.f("◆ %s ×%d", [CrystalTower.crystal_tier_name(theme, i + 1), int(counts[i])]))
-	_bag_label.text = "\n".join(parts) if not parts.is_empty() else Loc.f("Inventory empty", [])
+	if parts.is_empty():
+		parts.append(Loc.f("Inventory empty", []))
+	# The rule of the merge, under the bag, for the whole climb. The button that
+	# runs it is two floors away at the bottom of a menu the player only sees after
+	# the climb is over, and "merge" is not a word a first-time player goes
+	# looking for (#16). When the bag already holds a full set, the line says how
+	# many merges are waiting, so the reason to keep climbing stays visible.
+	parts.append(Loc.t("crystal.merge_rule"))
+	var ready: int = (CrystalTower.plan_merges(counts)["steps"] as Array).size()
+	if ready > 0:
+		parts.append(Loc.t("crystal.merge_ready", {"count": str(ready)}))
+	_bag_label.text = "\n".join(parts)
 
 
 ## Lays the 3D inventory grid out in tier rows above the summit altar.
@@ -926,7 +1064,12 @@ func _show_summit_panel() -> void:
 			cell.add_child(equip)
 
 	var merge_count: int = (CrystalTower.plan_merges(counts)["steps"] as Array).size()
-	column.add_child(Ui.button(Loc.f("Merge (%d×)", [merge_count]), Vector2(320, 46), UiTheme.ACCENT, start_merge).with_disabled(merge_phase != PHASE_IDLE or merge_count == 0))
+	# The merge lives behind the summit, and a player who never heard of it stands
+	# at the top without knowing what the tower was for. The rule therefore sits
+	# under the bag for the whole climb (#16), and this is its short form next to
+	# the button that runs it.
+	column.add_child(Ui.label(Loc.t("crystal.merge_rule"), 15, UiTheme.TEXT_DIM))
+	column.add_child(Ui.button(Loc.f("Merge (%d×)", [merge_count]), Vector2(320, 52), UiTheme.ACCENT, start_merge).with_disabled(merge_phase != PHASE_IDLE or merge_count == 0))
 	column.add_child(Ui.label(Loc.f("Merged so far: %d×  ·  Active bonuses: +%d%% speed · +%d%% jump · %d bonus jumps", [summit_merges,
 		int(round((float(bonus["speedMult"]) - 1.0) * 100.0)),
 		int(round((float(bonus["jumpMult"]) - 1.0) * 100.0)),
@@ -948,8 +1091,8 @@ func _equip(tier: int) -> void:
 	Game.set_number("%s_equipped" % str(theme["keyPrefix"]), float(tier))
 	equipped_tier = tier
 	bonus = CrystalTower.equip_bonus(tier)
-	move_speed = BASE_SPEED * float(bonus["speedMult"])
-	jump_speed = JUMP_SPEED * float(bonus["jumpMult"])
+	move_speed = CrystalTower.BASE_SPEED * float(bonus["speedMult"])
+	jump_speed = CrystalTower.JUMP_SPEED * float(bonus["jumpMult"])
 	pickup_radius = float(bonus["pickupRadius"])
 	_sync_inventory()
 	_refresh_bag()
