@@ -6,6 +6,15 @@ steps: 120
 color: "#38bdf8"
 permission:
   "*": deny
+  # A lane works in its own worktree, and `npm run agent:new` puts those under
+  # ~/.local/share/singular80/worktrees/<name> — outside the project root. Without
+  # this rule the session cannot even `cd` into its own checkout: the base policy
+  # asks for external_directory, and the `"*": deny` above answers instead of
+  # asking. Scoped to the worktree root, so /tmp and the rest of the home
+  # directory stay closed.
+  external_directory:
+    "~/.local/share/singular80/worktrees/*": allow
+    "/tmp/opencode/*": allow
   websearch: allow
   webfetch: allow
   read: allow

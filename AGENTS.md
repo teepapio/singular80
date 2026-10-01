@@ -189,6 +189,34 @@ und es gibt ihn nur einmal.
 Setup — der Platz ist kein Argument, die 11 s sind es schon, deshalb sagt das
 Werkzeug beim Anlegen, was es tut.
 
+### Die Lane muss in ihren Worktree wechseln, bevor sie arbeitet
+
+`npm run agent:new` legt den Auscheckout **außerhalb** des Repositorys an, und
+eine Session, deren Verzeichnis das Projekt selbst ist, darf dort nichts
+anfassen: OpenCodes Grundregel für `external_directory` ist `ask`, und die
+Agentendefinitionen beginnen mit `"*": deny` — die deny-Regel antwortet, also
+wird **nicht gefragt**, sondern abgelehnt. Der Fehler ist
+`Permission denied: external_directory`, und er sieht aus wie ein kaputter
+Worktree aus. Gemessen am 2026-10-01 an `agent-mesh`: `cd <worktree> && git log`
+scheiterte, während dieselbe Lane im Projektverzeichnis schreiben durfte.
+
+Zwei Wege, und sie sind nicht dasselbe:
+
+- **Die Sitzung verschieben** (`session_move` auf die Session-ID, Ziel der
+  Worktree-Pfad). Danach ist der Worktree das Verzeichnis der Session, `cd` ist
+  überflüssig, und die `edit`-Pfadregeln der Definition greifen **relativ** zum
+  Worktree — `scripts/grade/**` bedeutet dort `scripts/grade/**` *dieses*
+  Auschecks. Das ist der Weg, den die Leitsitzung nimmt.
+- **Nur den Pfad freigeben** (`external_directory` in der Definition, heute auf
+  `~/.local/share/singular80/worktrees/*` und `/tmp/opencode/*` begrenzt). Das
+  öffnet das Verzeichnis, lässt die Session aber im Projektverzeichnis stehen —
+  relative Pfade zeigen dann auf den **gemeinsamen** Baum, nicht auf die Lane.
+  Ein Lane, der `scripts/blender/x.py` schreibt, schreibt damit in `main`.
+
+Beides ist in allen siebzehn Definitionen freigegeben, damit die zweite Variante
+nicht an einem `deny` hängenbleibt. Wer eine Lane startet, verschiebt die
+Sitzung trotzdem — die Freigabe ist die Notverpflegung, nicht der Plan.
+
 ### Das Gate ist der einzige Weg auf `main`
 
 `npm run gate` (`scripts/merge-gate.mjs`) macht, in dieser Reihenfolge:

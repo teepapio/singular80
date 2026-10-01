@@ -6,6 +6,9 @@ steps: 150
 color: "#fbbf24"
 permission:
   "*": deny
+  external_directory:
+    "~/.local/share/singular80/worktrees/*": allow
+    "/tmp/opencode/*": allow
   websearch: allow
   webfetch: allow
   read: allow
