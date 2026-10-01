@@ -53,6 +53,42 @@ looks the same thing up again.
 You make the geometry. Low-poly glTF, three levels of detail per mesh, generated
 headless by Blender so the result is reproducible rather than hand-saved.
 
+## Look at it, do not assume it
+
+A `.glb` is binary. No diff, no triangle count and no green suite says whether a
+dragon's wing looks like a wing — a bonbon once passed every check in this
+repository and was an unrecognisable grey lump. So mesh work is a loop, and the
+loop is the job:
+
+1. **Find and read five reference photographs** of the real thing, in games and
+   in life. Wikimedia Commons serves them without ceremony:
+
+   ```
+   https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search
+     &gsrsearch=filetype%3Abitmap%20<url-encoded+query>&gsrlimit=5&gsrnamespace=6
+     &prop=imageinfo&iiprop=url&iiurlwidth=960
+   ```
+
+   Take `thumburl` from the JSON, `curl -sL -A "<your name>"` it into `/tmp`, and
+   actually read the image. `filetype%3Abitmap` must be percent-encoded or urllib
+   rejects the URL. What the pictures told you belongs in your report: "three
+   photos showed a hexagonal shaft with a pyramidal tip" is a reason, "looks
+   better" is not.
+2. **Build it** in the builder script, in the style of its neighbours.
+3. **Photograph it**: `npm run mesh:shot -- --keys <key>`, or
+   `python3 scripts/blender/shot_mesh.py --keys all` after a rebuild that touched
+   many meshes. It renders four angles with a shadow floor and stitches a
+   contact sheet with the measured counts under it.
+4. **Read the sheet with your image tool.** Not the path — the picture. A sheet
+   nobody looked at proves nothing, and `--keys all` is how you see what your
+   rebuild broke in the meshes you were not thinking about.
+5. **Iterate until the silhouette names the thing.** A lollipop that looks the
+   same from all four angles is not a lollipop.
+
+The sheet also prints a height/width ratio, which is the one number that catches
+a bonbon built as a pillar. Asserted facts cannot replace this step: a test has
+no opinion on whether a wing is beautiful.
+
 ## You own
 
 `godot/assets/meshes/**`, `scripts/blender/**`, and the generator that keeps
@@ -84,9 +120,18 @@ that file that nobody measured is a number nobody can defend.
 
 ## What it costs
 
-Low and high together are about 45 MB of APK. Without them the release is
-roughly 80 MB smaller, and the gallery shows exactly one mesh. That trade is the
-owner's to make — say the number, do not decide it.
+Low and high together are about 65 MB of APK, measured after the low tier was
+tripled (it was 45 MB before). Without them the release is roughly 80 MB smaller,
+and the gallery shows exactly one mesh. That trade is the owner's to make — say
+the number, do not decide it. If you change `TIER_MIN_FACTOR` in
+`generate_lod_meshes.py`, run `du -sh` on both folders before and after and
+report both numbers: the factors are the only thing in the mesh pipeline that
+moves the APK by tens of megabytes.
+
+A new mesh enters the low tier with one `refine_low_meshes.py --adopt` run,
+which writes its committed target into `low_target.json`. The target is three
+times what the builder produced, and it is committed data precisely so nobody has
+to edit a binary to change it.
 
 ## Done when
 

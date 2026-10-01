@@ -1007,9 +1007,71 @@ an, `SettingsDialog` dieselbe Zahl.
   `WorldScreen.standard_material()`; `StandardMaterial3D` nicht pro Frame anlegen.
 - Meshes kommen **ausschließlich** über `AssetRegistry`/`WorldScreen.mesh()`.
 
+### Neue Meshes: erst fünf Bilder, dann bauen, dann ansehen
+
+**Ein Mesh baut man nicht aus dem Gedächtnis.** Ein `.glb` ist binär: im Diff
+steht nichts, keine Dreieckzahl und keine grüne Suite sagen, ob ein Drachenflügel
+wie ein Flügel aussieht. Gemessen am 2026-10-01: das Bonbon lief durch Registry,
+LOD-Test und Import und war ein grauer, facettierter Klotz — die einzige
+Möglichkeit, das zu erfahren, war es anzusehen.
+
+Also gilt für **jedes** neue oder umgebaute Mesh, in dieser Reihenfolge:
+
+1. **Fünf Referenzbilder suchen und ansehen.** Fotos der Sache selbst, im Spiel, in
+   dem sie steht. Das gilt für Bonbons genauso wie für Kristalle oder Flügel.
+   `websearch` findet sie; Wikimedia Commons liefert sie ohne Umwege:
+
+   ```
+   https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search
+     &gsrsearch=filetype%3Abitmap%20<url-encoded+query>&gsrlimit=5&gsrnamespace=6
+     &prop=imageinfo&iiprop=url&iiurlwidth=960
+   ```
+
+   `thumburl` aus der JSON holen, mit `curl -sL -A "<eigener Name>"` nach `/tmp`
+   (nicht ins Repository), dann **das Bild wirklich lesen**. `filetype%3Abitmap`
+   muss prozentkodiert sein, sonst lehnt urllib die URL ab. Wohin die Bilder
+   zeigen, gehört in den Bericht — „drei Fotos zeigten eine Hexagonalfläche mit
+   Pyramidenspitze" ist eine Begründung, „sieht besser aus" nicht.
+2. **Bauen** im Builder-Skript, im Stil der Nachbarn.
+3. **Ansehen.** `npm run mesh:shot -- --keys <key>` rendert das Mesh aus vier
+   Winkeln (front, three-quarter, side, top) mit Schattenboden, klebt sie zu
+   einem Kontaktbogen und schreibt darunter die gemessenen Zahlen. Das Ergebnis
+   **mit dem Bild-Werkzeug lesen**, nicht nur den Pfad zur Kenntnis nehmen. Der
+   Bogen ist die eigentliche Prüfung; ein Mesh, das niemand angesehen hat, ist
+   nicht geprüft.
+4. Iterate, bis die Silhouette die Sache benennt. Ein Lolli, der aus allen vier
+   Winkeln gleich aussieht, ist kein Lolli.
+
+Was der Bogen nebenbei mitliefert und was kein Test kann: die
+**Höhen/Breiten-Verhältnis**-Zeile. Ein Bonbon mit 1,4 ist kein Bonbon, und das
+steht als Zahl da, statt als Vermutung.
+
+`scripts/blender/shot_mesh.py --keys all` fotografiert alle 155 Meshes auf
+einmal — die richtige Methode, um nach einem Umbau zu sehen, was man angerichtet
+hat.
+
+#### Die Detailstufen sind Budgets, keine Ziele
+
+Die drei Stufen sind **gemessen**, nicht behauptet: `refine_low_meshes.py`
+verfeinert die Low-Stufe auf das Ziel aus `godot/assets/meshes/low_target.json`
+(je Mesh eine Zahl, dreimal die Basis, committen — damit das reproduzierbar ist
+und niemand eine Binärdatei von Hand editiert), und `generate_lod_meshes.py`
+leitet `med` und `high` daraus ab.
+
+Die Budgets in `TIER_TARGETS`/`TIER_BUDGET` sind **Untergrenzen**, keine festen
+Zahlen: jede Stufe ist mindestens ihr Wert und mindestens ein Vielfaches der Low-
+Zahl. Grund: die Low-Stufen unterscheiden sich um eine Größenordnung (30 bis
+3 800 Dreiecke), ein flaches 1 000 hätte die Mittelstufe bei den größten Meshes
+**gröber** gemacht als die darunter — im Galerieraum sichtbar und vom Test
+`Mesh — Detailstufen` zu Recht beanstandet.
+
+Ein neues Mesh kommt einmal mit `--adopt` in die Zielliste, danach ist die Zahl
+fest. Wer die Faktoren anhebt, misst vorher und nachher `du -sh med high` und
+sagt es im Bericht: die beiden reichen Stufen sind der teuerste Posten im APK.
+
 ### Meshes und Detailstufen
 
-- Format: binäres glTF 2.0 (`.glb`), Godot importiert nativ.
+- Format: binärisches glTF 2.0 (`.glb`), Godot importiert nativ.
 - Erzeugen: `blender --background --python scripts/blender/make_mesh.py -- --out … --name <builder>`
   bzw. `scripts/blender/generate_rpg_meshes.py` für den Drachen-Pack.
 - **Jedes neue Mesh braucht einen Key in `AssetRegistry.KEYS`** — zwei Tests
@@ -1017,8 +1079,10 @@ an, `SettingsDialog` dieselbe Zahl.
 - Fehlt ein Mesh, benutzt `WorldScreen.mesh()` ein prozedurales Primitiv;
   3D-Spiele starten dadurch nie mit leerer Szene.
 - Jedes Mesh liegt in drei Stufen: `assets/meshes/<key>.glb` (Low, das benutzen
-  die Spiele), `assets/meshes/med/<key>.glb` (~1.000 Dreiecke) und
-  `assets/meshes/high/<key>.glb` (~10.000 Dreiecke, mit Displacement).
+  die Spiele), `assets/meshes/med/<key>.glb` und
+  `assets/meshes/high/<key>.glb` (mit Displacement). Die Zahlen sind Untergrenzen
+  plus Vielfaches der Low-Stufe, keine festen Werte — siehe „Die Detailstufen
+  sind Budgets, keine Ziele" oben.
   Neu erzeugen:
   ```bash
   blender --background --python scripts/blender/generate_lod_meshes.py -- \
@@ -1027,8 +1091,10 @@ an, `SettingsDialog` dieselbe Zahl.
   Das Skript misst die Dreieckzahlen und schreibt sie nach `lod.json`; die
   Galerie zeigt sie an, der Test prüft `med ≥ low` und `high ≥ med`.
   **Nach jedem neuen Mesh erneut laufen lassen**, sonst fehlen die höheren Stufen.
-- Die beiden reichen Stufen kosten zusammen rund 45 MB APK. Ohne sie wird das
-  Release gut 80 MB kleiner — dafür zeigt die Galerie nur ein einziges Mesh.
+  Vorher die Low-Stufe mit `refine_low_meshes.py --adopt` einmal eintragen.
+- Die beiden reichen Stufen kosten zusammen rund 65 MB APK (gemessen nach der
+  Verdreifachung der Low-Stufe, vorher 45 MB). Ohne sie wird das Release gut
+  80 MB kleiner — dafür zeigt die Galerie nur ein einziges Mesh.
 - `include_filter="*.json"` im Export-Preset ist Pflicht: `.json` wird nicht
   importiert und käme sonst nicht ins Paket (die Galerie braucht `lod.json`).
 
