@@ -155,7 +155,7 @@ const SCOPE_SUITES = {
   dame: ['Dame — Regeln', 'Dame — Schlagzug-Analyse', 'Dame — Ziehbare Steine', 'Dame — Tipp am Brett'],
   crystal3d: ['Crystal Tower', 'Crystal Tower — Flusskette', 'Crystal Tower — Flusspunkte',
     'Crystal Tower — Screen', 'Crystal Tower — Screen fehlt',
-    'Crystal Forge — Bag', 'Crystal Forge — Screen'],
+    'Crystal Forge — Bag', 'Crystal Forge — Screen', 'Crystal Forge — Auffindbar'],
   merge3d: ['Merge 3D', 'Merge 3D — Tipp', 'Merge 3D — Tipptext und Brettdruck', 'Merge 3D — Tipp am Screen'],
   horserunner: ['Pferde-Parcours', 'Pferde-Parcours — Beinahe-Treffer', 'Pferde-Parcours — Kette'],
   dragonrpg: ['Drachen-RPG', 'Drachen-RPG — Loot-Rarität',

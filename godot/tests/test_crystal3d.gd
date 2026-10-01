@@ -26,6 +26,7 @@ func run(kit: TestKit, tree: SceneTree = null) -> void:
 	# `crystal_jumper_screen.gd` cannot be loaded, and the forge is a separate
 	# file — a parse error in one screen must not take the other's checks with it.
 	await _forge_screen(tree)
+	await _forge_findable(tree)
 	_router = tree.root.get_node_or_null("/root/Router")
 	_screen_script = load("res://src/game/crystal3d/crystal_jumper_screen.gd")
 	if _router == null or _screen_script == null:
@@ -266,6 +267,84 @@ func _forge_screen(tree: SceneTree) -> void:
 	screen._refresh()
 	t.check(screen._merge_button.disabled, "Zwei verschiedene Stufen ergeben keine Merge")
 	t.suite_done()
+
+
+## The complaint this whole scene was built for: inside the Crystal Jumper there
+## was nothing to find. A registry entry is not that proof — the button has to
+## stand in the bar the player sees, and a tap has to arrive at the forge with
+## the theme of the tower it was tapped in.
+func _forge_findable(tree: SceneTree) -> void:
+	t.suite("Crystal Forge — Auffindbar")
+	var router := tree.root.get_node_or_null("/root/Router")
+	if router == null:
+		t.check(false, "Der Router laeuft")
+		return
+	await t.goto(router, tree, "crystal3d_christmas")
+	var tower = router.current_screen
+	t.check(tower != null, "Der Weihnachtsturm wird geoeffnet")
+	if tower == null:
+		return
+
+	var companions := GameRegistry.companions_of("crystal3d_christmas")
+	t.equal(companions.size(), 1, "Der Turm deklariert genau einen zweiten Knopf")
+	if companions.is_empty():
+		return
+	var caption := Loc.resolve(str((companions[0] as Dictionary)["label"]))
+	var found := _buttons_labelled(tower.hud_root, caption)
+	t.equal(found.size(), 1, "In der Leiste des Turms steht genau ein Merge-Knopf")
+	if found.size() != 1:
+		return
+	var button: Button = found[0]
+	t.check(button.is_visible_in_tree(), "Der Knopf ist zu sehen")
+	var bar := _bar_of(button, tower.hud_root)
+	t.check(bar != null and int(bar.z_index) == WorldScreen.CHROME_Z,
+		"Er haengt an der Top-Leiste, nicht im Spielhud")
+
+	# A tap on it: the forge opens, and it opens for the tower it was tapped in.
+	button.emit_signal("pressed")
+	await _await_screen(router, tree, "crystal_forge")
+	t.equal(str(router.current_id), "crystal_forge", "Der Knopf oeffnet die Schmiede")
+	var forge = router.current_screen
+	t.check(forge != null and str(forge.theme_id) == "christmas", "Die Schmiede kennt das Thema des Turms")
+	t.check(forge != null and str(forge.climb_screen) == "crystal3d_christmas",
+		"Und dorthin fuehrt ihr Kletter-Knopf zurueck")
+
+	# The forge is a view inside a game, not a game with a companion of its own:
+	# a second button would offer a way from the forge into the forge.
+	t.equal(_buttons_labelled(forge.hud_root, caption).size(), 0,
+		"Die Schmiede verlinkt sich nicht auf sich selbst")
+	t.suite_done()
+
+
+## Every button below `root` carrying `caption`, in tree order.
+func _buttons_labelled(root: Node, caption: String) -> Array:
+	var out: Array = []
+	if root is Button and (root as Button).text == caption:
+		out.append(root)
+	for child in root.get_children():
+		out.append_array(_buttons_labelled(child, caption))
+	return out
+
+
+## The bar a button sits in: the child of the HUD layer that holds it, or `null`
+## when the button does not live below that layer at all.
+func _bar_of(button: Control, root: Control) -> Control:
+	var node: Node = button
+	while node != null and node.get_parent() != root:
+		node = node.get_parent()
+	return node as Control if node != null and node != root else null
+
+
+## Waits for a switch the way `TestKit.goto` does: the router drops requests
+## while a fade runs, so the wait looks at the same two things — the id and the
+## fade, not at a fixed number of frames.
+func _await_screen(router: Node, tree: SceneTree, screen_id: String, cap_ms := 2000) -> bool:
+	var started := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - started < cap_ms:
+		await tree.process_frame
+		if str(router.current_id) == screen_id and not bool(router.transitioning):
+			return true
+	return false
 
 
 # --- Screen -----------------------------------------------------------------
