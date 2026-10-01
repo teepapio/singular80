@@ -34,8 +34,34 @@ import bpy
 
 
 #: Triangle budget per tier. The low tier is the shipped mesh and is never
-#: rewritten; these two are produced here.
+#: rewritten here; these two are produced from it.
+#:
+#: The numbers are a *floor*, not a fixed count. The low tier is refined to its
+#: own committed target by `refine_low_meshes.py` and some meshes reach a few
+#: thousand triangles; a flat med target of 1000 would then be coarser than the
+#: tier below it, which the gallery would show as a "simpler" middle step and
+#: the `Mesh — Detailstufen` suite would reject. So each tier is at least its
+#: floor and at least this many times the low tier, and the per-mesh count is
+#: measured and written to the stats file either way.
 TIER_TARGETS: dict[str, int] = {"med": 1000, "high": 10000}
+
+#: Multiples of the low tier's own count, so the three tiers stay ordered and
+#: roughly comparable in richness whatever the low mesh happens to cost.
+#: Multiples of the low tier's own count, so the three tiers stay ordered and
+#: roughly comparable in richness whatever the low mesh happens to cost.
+#:
+#: These factors are deliberately modest. Their only job is to lift a tier clear
+#: of the one below it; the floors do the visual work for the cheap meshes. At
+#: 3x/16x the med+high folders measured 83 MB against 45 MB before, nearly
+#: doubling what the two gallery tiers cost in the APK to buy detail nobody
+#: looks at twice. At 2x/10x the same ordering holds and the growth is about
+#: half that, so that is what is used.
+TIER_MIN_FACTOR: dict[str, float] = {"med": 2.0, "high": 10.0}
+
+
+def _tier_target(tier: str, low: int) -> int:
+    """The triangle target for `tier`, given the low tier's real count."""
+    return max(TIER_TARGETS[tier], int(round(TIER_MIN_FACTOR[tier] * low)))
 
 #: A full grid-fill pass roughly quadruples the count, so a pass is only taken
 #: when the result stays below `target * OVERSHOOT`.
@@ -213,9 +239,9 @@ def _export(obj: bpy.types.Object, out: str) -> None:
     )
 
 
-def _build_tier(source: str, out: str, tier: str) -> int:
+def _build_tier(source: str, out: str, tier: str, low: int) -> int:
     obj = _load(source)
-    _refine_to(obj, TIER_TARGETS[tier])
+    _refine_to(obj, _tier_target(tier, low))
     _apply_detail(obj, DISPLACE[tier])
     _shade_smooth(obj)
     _export(obj, out)
@@ -258,7 +284,7 @@ def main() -> None:
         entry = stats.setdefault(key, {})
         entry["low"] = _tri_count(_load(source))
         for tier in ("med", "high"):
-            entry[tier] = _build_tier(source, os.path.join(args.out, tier, f"{key}.glb"), tier)
+            entry[tier] = _build_tier(source, os.path.join(args.out, tier, f"{key}.glb"), tier, entry["low"])
         print(
             f"[lod] {key}: low={entry['low']} med={entry['med']} high={entry['high']}",
             flush=True,

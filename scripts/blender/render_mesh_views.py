@@ -201,6 +201,7 @@ def _world_points(objects: list[bpy.types.Object]) -> list[Vector]:
 
 
 def _place_camera(
+    camera: bpy.types.Object | None,
     points: list[Vector],
     azimuth_deg: float,
     elevation_deg: float,
@@ -210,6 +211,13 @@ def _place_camera(
     Fitting in camera space rather than by bounding-sphere radius matters for a
     dragon: a sphere around a long body would leave it a speck in the middle of
     the frame, which is exactly the shot that hides a bad wing.
+
+    The camera object is passed in and reused. Creating a fresh one per call
+    looks harmless and is not: the caller sets ``scene.camera`` once, so the
+    second and later views were rendered by the *first* camera at its original
+    position, and every "angle" in the sheet was the front view. A lollipop
+    whose disc is edge-on in one direction looked identical from all four,
+    which is exactly the kind of thing this tool exists to catch.
     """
     centre = Vector((0.0, 0.0, 0.0))
     for point in points:
@@ -227,12 +235,14 @@ def _place_camera(
         )
     )
 
-    camera_data = bpy.data.cameras.new("ShotCamera")
-    camera_data.lens = LENS_MM
-    camera_data.sensor_width = SENSOR_MM
-    camera_data.sensor_fit = "AUTO"
-    camera = bpy.data.objects.new("ShotCamera", camera_data)
-    bpy.context.collection.objects.link(camera)
+    if camera is None:
+        camera_data = bpy.data.cameras.new("ShotCamera")
+        camera_data.lens = LENS_MM
+        camera_data.sensor_width = SENSOR_MM
+        camera_data.sensor_fit = "AUTO"
+        camera = bpy.data.objects.new("ShotCamera", camera_data)
+        bpy.context.collection.objects.link(camera)
+        bpy.context.scene.camera = camera
 
     forward = -offset
     camera.rotation_euler = forward.to_track_quat("-Z", "Y").to_euler()
@@ -286,12 +296,12 @@ def _shoot(source: str, out_dir: str, size: int, stem: str, ground: bool) -> dic
     _lights()
     _render_settings(size)
 
-    camera, _centre = _place_camera(points, VIEWS[0][1], VIEWS[0][2])
+    camera, _centre = _place_camera(None, points, VIEWS[0][1], VIEWS[0][2])
     bpy.context.scene.camera = camera
 
     shots = []
     for label, azimuth, elevation in VIEWS:
-        _place_camera(points, azimuth, elevation)
+        camera, _centre = _place_camera(camera, points, azimuth, elevation)
         bpy.context.view_layer.update()
         path = os.path.join(out_dir, f"{stem}__{label}.png")
         bpy.context.scene.render.filepath = path
