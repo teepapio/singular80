@@ -1760,6 +1760,26 @@ function setupUi(): void {
       ($('#task-form') as HTMLFormElement).requestSubmit();
     }
   });
+  $('#restart-server').addEventListener('click', async () => {
+    const button = $('#restart-server') as HTMLButtonElement;
+    try {
+      await api('/api/server/restart', { method: 'POST' });
+      // The connection dies here by design: the process answering this request is
+      // the one being replaced. A `fetch` that rejects with "Failed to fetch" is
+      // therefore the expected answer, not a failure — reporting it as an error
+      // would tell the owner the restart did not work when it did.
+      toast('Server startet neu — das Dashboard verbindet sich von selbst wieder.', 'success');
+      button.disabled = true;
+      // The SSE stream dies with the server; the reconnect path takes over, and a
+      // poll that lands before the new process listens must not read as "server
+      // unreachable" forever. `hadConnection` is what stops that loop.
+      setTimeout(() => {
+        button.disabled = false;
+      }, 8000);
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    }
+  });
   $('#reload-content').addEventListener('click', async () => {
     try {
       await api('/api/content/reload', { method: 'POST' });

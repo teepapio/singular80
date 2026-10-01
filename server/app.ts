@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { timingSafeEqual } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
@@ -916,6 +916,56 @@ export function createApp(options: AppOptions): FastifyInstance {
     content.load(true);
     emit({ type: 'content:reloaded' });
     return content.load(true);
+  });
+
+  /**
+   * Restarts the server — by making `tsx watch` notice a change, not by signalling.
+   *
+   * The mechanism was measured, not guessed. Under `npm run dev:server` a watcher
+   * process owns a child that serves the API. Two findings from a throwaway
+   * `tsx watch` on this machine:
+   *
+   *  - touching a watched file makes the watcher start a new child (new pid), and
+   *  - a child that exits on its own is **not** respawned: the watcher stays alive
+   *    and the server is simply gone until the next file change.
+   *
+   * So `process.exit()` — the obvious one-liner — would answer this request, kill
+   * the child and leave the dashboard's server permanently dead. Touching a file
+   * is the only version of this that actually brings the server back.
+   *
+   * Touched, not written: the entry file keeps its contents, so the restart does
+   * not dirty the working tree or fight a `git status` the agent is reading. Only
+   * the mtime moves, which is what the watcher's listener reads.
+   *
+   * Guarded against active runs: a restart orphans the opencode child, and the run
+   * row then describes a process nobody is watching. It says so instead.
+   */
+  app.post('/api/server/restart', async (_req, reply) => {
+    const entry = join(options.projectRoot, 'server', 'index.ts');
+    if (!existsSync(entry)) {
+      return reply.code(500).send({ error: `Startdatei nicht gefunden: ${entry}` });
+    }
+    const active = runner?.activeRuns() ?? [];
+    if (active.length) {
+      return reply.code(409).send({
+        error: `${active.length} Lauf/Läufe aktiv — erst abwarten lassen oder abbrechen. Ein Neustart würde das Kindprozess-Watch verwaissen.`,
+        activeRuns: active.map((r) => r.id),
+      });
+    }
+    // Answered before the restart lands: the request is in flight while the child
+    // is replaced, and a response that never arrives reads as a failure in the
+    // dashboard. `setImmediate` gets the reply onto the wire first.
+    const now = new Date();
+    const timer = setTimeout(() => {
+      try {
+        utimesSync(entry, now, now);
+        console.log('[singular80] Neustart angefordert — tsx watch startet neu.');
+      } catch (err) {
+        console.error('[singular80] Neustart fehlgeschlagen:', (err as Error).message);
+      }
+    }, 150);
+    timer.unref();
+    return { ok: true, restarted: true, entry };
   });
 
   app.get('/api/stats', async () => {

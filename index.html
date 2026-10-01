@@ -69,6 +69,21 @@
             <button id="toggle-pause" class="ghost small" title="Warteschlange anhalten bzw. fortsetzen" aria-label="Warteschlange anhalten bzw. fortsetzen">⏸</button>
             <button id="cleanup-runs" class="ghost small" title="Runs aufräumen, deren Prozess nicht mehr läuft" aria-label="Verwaiste Runs aufräumen">🧹</button>
             <button id="refresh-runs" class="ghost small" title="Aktualisieren" aria-label="Alles aktualisieren">⟳</button>
+            <!--
+              Server neu starten. Bewusst neben dem Aktualisieren-Knopf und nicht
+              in den Einstellungen: er wird gebraucht, nachdem eine Datei geändert
+              wurde, und die Einstellungen stehen genau dann nicht offen. Das Symbol
+              ist ein Neustart-Pfeil, `aria-label` trägt das Wort, weil die drei
+              Nachbarn dasselbe Prinzip haben.
+            -->
+            <button
+              id="restart-server"
+              class="ghost small"
+              title="Server neu starten (nur ohne laufende Aufträge)"
+              aria-label="Server neu starten"
+            >
+              ⏻
+            </button>
           </div>
         </div>
         <div id="queue-state" class="queue-state"></div>

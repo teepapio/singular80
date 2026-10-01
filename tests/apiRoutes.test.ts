@@ -17,7 +17,16 @@
  * a temp directory, so the `implement` route — which really enqueues a run — cannot
  * start a real agent in the real working tree.
  */
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -85,13 +94,21 @@ interface Api {
   dir: string;
 }
 
-async function boot(): Promise<Api> {
+async function boot(options: { opencodeSleep?: boolean } = {}): Promise<Api> {
   isolateChannels();
   const dir = mkdtempSync(join(tmpdir(), 'singular80-routes-'));
   const projectRoot = join(dir, 'repo');
   mkdirSync(projectRoot, { recursive: true });
   const stub = join(projectRoot, 'opencode-stub');
-  writeFileSync(stub, '#!/bin/sh\necho \'{"type":"text","part":{"text":"ok"}}\'\nexit 0\n');
+  // A stub that lingers, so a case can look at the server *while* a run is going.
+  // The default exits at once, which is right for everything else: a run that
+  // outlives its test would keep writing into the temp directory.
+  writeFileSync(
+    stub,
+    options.opencodeSleep
+      ? '#!/bin/sh\nsleep 30\n'
+      : '#!/bin/sh\necho \'{"type":"text","part":{"text":"ok"}}\'\nexit 0\n',
+  );
   chmodSync(stub, 0o755);
   previousBin = process.env.OPENCODE_BIN;
   process.env.OPENCODE_BIN = stub;
@@ -399,6 +416,75 @@ describe('GET /api/content und POST /api/content/reload', () => {
     expect(res.status).toBe(200);
     expect(res.body.version).toBe(before);
     expect(api.events().map((e) => e.type)).toEqual(['content:reloaded']);
+  });
+});
+
+describe('POST /api/server/restart', () => {
+  /**
+   * The entry file inside this suite's own temp repository — the one the route
+   * touches. `boot()` builds a projectRoot without a `server/` folder, so a case
+   * that wants the restart to actually happen has to create it.
+   */
+  function writeEntry(api: Api): string {
+    const entry = join(api.dir, 'repo', 'server', 'index.ts');
+    mkdirSync(dirname(entry), { recursive: true });
+    writeFileSync(entry, 'console.log("harness");\n');
+    return entry;
+  }
+
+  it('berührt die Startdatei, statt den Prozess zu beenden', async () => {
+    // The mechanism, measured: under `tsx watch`, a child that exits on its own is
+    // never respawned, so a `process.exit()` here would leave the dashboard's
+    // server gone for good. Touching a watched file is what starts a new child.
+    const api = await boot();
+    const entry = writeEntry(api);
+    const before = statSync(entry);
+    // A clearly older stamp, so the assertion cannot pass on a sub-millisecond
+    // filesystem or on a clock that did not move.
+    const old = new Date(before.mtimeMs - 60_000);
+    utimesSync(entry, old, old);
+    const stale = statSync(entry).mtimeMs;
+
+    const res = await api.post<{ ok: boolean }>('/api/server/restart');
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    // The touch is deferred so the reply reaches the wire first.
+    await new Promise((r) => setTimeout(r, 400));
+    const after = statSync(entry);
+    expect(after.mtimeMs).toBeGreaterThan(stale);
+    // Touched, not written: contents stay, so the restart cannot dirty the working
+    // tree or change what the next process runs.
+    expect(readFileSync(entry, 'utf8')).toBe('console.log("harness");\n');
+  });
+
+  it('verweigert den Neustart, solange ein Auftrag läuft', async () => {
+    // The guard that matters: a restart replaces the process that owns the
+    // opencode child, and the run row would then describe a process nobody watches.
+    const api = await boot({ opencodeSleep: true });
+    writeEntry(api);
+    const suggestion = api.suggestion('Etwas, das einen laufenden Auftrag braucht');
+    const started = await api.post<{ run: { id: string } }>(
+      `/api/suggestions/${suggestion.id}/implement`,
+      {},
+    );
+    expect(started.status).toBe(200);
+    await new Promise((r) => setTimeout(r, 250));
+
+    const res = await api.post<{ error: string; activeRuns: string[] }>('/api/server/restart');
+    expect(res.status).toBe(409);
+    expect(res.body.activeRuns).toContain(started.body.run.id);
+    // Named rather than just refused: the owner has to know what to wait for.
+    expect(res.body.error).toContain('aktiv');
+  });
+
+  it('meldet einen fehlenden Start, statt stillzuschweigen', async () => {
+    // No `server/index.ts` in the temp repository: the button exists, but there is
+    // nothing to touch. A 200 here would leave the owner waiting for a restart
+    // that never happens.
+    const api = await boot();
+    const res = await api.post<{ error: string }>('/api/server/restart');
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain('Startdatei');
   });
 });
 
