@@ -1,5 +1,9 @@
 ---
-description: Torwächter. Der einzige, der main anfasst. Führt das Merge-Gate aus: mergen, Spiegel neu erzeugen, prüfen, fast-forwarden, pushen. Löst keine Konflikte.
+# Quoted, and that is the whole reason this agent existed for a day without
+# being found: an unquoted plain scalar may not contain ": ", gray-matter throws,
+# and opencode drops the agent without a word. A colon in a description is a
+# key/value separator to the parser, not punctuation to the reader.
+description: "Torwächter. Der einzige, der main anfasst. Führt das Merge-Gate aus: mergen, Spiegel neu erzeugen, prüfen, fast-forwarden, pushen. Löst keine Konflikte."
 mode: subagent
 model: opencode-go/space-bunny-free#high
 steps: 60

@@ -797,6 +797,7 @@ export const ROSTER_WITHOUT_DESK = new Map([
   ['agent-hire', 'besitzt den Personalbestand selbst'],
   ['agent-android', 'der Export ist eine Release-Stufe; `godot/project.godot` ist geteilte tooling-Fläche'],
   ['agent-dev', 'der Generalist: der Aufrufer nennt den Scope, die Fachagenten sind seine Ausprägungen'],
+  ['agent-main', 'die Leitsitzung verteilt nur — sie besitzt keine Datei, und der Besitzer ruft sie auf, nicht ein Scope'],
   ['agent-locale', '`locale/**` liegt heute im Scope `core` — die Dateien gehören core, der Katalog locale'],
   ['agent-web', '`src/dashboard/**` liegt heute im Scope `dashboard` — geteilt mit agent-api'],
 ]);
