@@ -45,6 +45,11 @@ case "$FAKE_RUNNER_MODE" in
     [ -n "$FAKE_RUNNER_MARK" ] && : > "$FAKE_RUNNER_MARK"
     echo '{"type":"error","part":{"error":{"data":{"message":"Rate limit"}}}}'
     exit 1 ;;
+  fail-provider)
+    # The shape a real provider refusal has: type "error" with the error at the
+    # top level, a 4xx status and the reason inside a nested body.
+    echo '{"type":"error","timestamp":1790879844594,"error":{"type":"provider.auth","message":"Error from provider (Console): This model is not available in your country","status":403,"response":{"body":"{\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"FreeTierError\\",\\"message\\":\\"This model is not available in your country\\"}}"}}}'
+    exit 1 ;;
   fail-edit)
     echo '{"type":"tool","part":{"tool":"edit","state":{"status":"completed","title":"godot/src/game/tetris/tetris_screen.gd","output":"ok"}}}'
     exit 1 ;;
@@ -347,6 +352,35 @@ describe('Wiederholungen', () => {
     // instead of starting the retry immediately.
     expect(restarted.queueState().queue.map((r) => r.id)).toContain(retry.id);
     expect(retry.notBefore).toBeGreaterThan(Date.now());
+  }, SLOW);
+});
+
+describe('Warum ein Lauf gescheitert ist', () => {
+  /**
+   * Gemessen am 2026-10-01: sechs Laeufe hintereinander starben, jede mit Exit 1,
+   * und die Karte sagte `exit 1`. Im Stream stand der Grund — opencodes
+   * Standardmodell war beim Anbieter gesperrt. Die Notiz eines gescheiterten
+   * Laufs muss den Grund sagen, den der Anbieter genannt hat.
+   */
+  it('nimmt die letzte Fehlermeldung des Anbieters in die Notiz', async () => {
+    process.env.FAKE_RUNNER_MODE = 'fail-provider';
+    const h = harness();
+    const run = h.runner.enqueue(h.suggestion(), h.store.getSettings(), [h.suggestion()]);
+    await waitFor(() => h.store.getRun(run.id)!.status === 'failed', 8000, 'Fehlschlag');
+    expect(h.store.getRun(run.id)!.note).toBe(
+      'Error from provider (Console): This model is not available in your country',
+    );
+  }, SLOW);
+
+  it('behaelt die eigene Begruendung, wenn der Agent keine schickt', async () => {
+    // `fail-edit` bricht ohne Fehlermeldung ab: dann bleibt `exit 1` stehen, und
+    // ein erfundener Grund waere schlimmer als keiner.
+    process.env.FAKE_RUNNER_MODE = 'fail-edit';
+    const h = harness();
+    const suggestion = h.suggestion();
+    const run = h.runner.enqueue(suggestion, h.store.getSettings(), [suggestion]);
+    await waitFor(() => h.store.getRun(run.id)!.status === 'failed', 8000, 'Fehlschlag');
+    expect(h.store.getRun(run.id)!.note).toBe('exit 1');
   }, SLOW);
 });
 

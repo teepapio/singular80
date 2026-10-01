@@ -1226,6 +1226,37 @@ export class Runner {
     }
   }
 
+  /**
+   * Why a run failed, in the words of whoever said it last.
+   *
+   * `exit 1` is what the runner knows: the process died. It is not what the owner
+   * needs, because the interesting cases say why in the stream — measured on
+   * 2026-10-01, six runs in a row died with
+   * `Model fledge-alpha-free is not supported` (401) and then
+   * `This model is not available in your country` (403) from the provider, and the
+   * card said nothing but `exit 1`. Both lines reach the panel as error events
+   * (`mapOpencodeEvent`), so the last one is already in `entry.events` — reading it
+   * back is the difference between a reason and an exit code.
+   *
+   * The runner's own wording is kept in front when it knows more than the agent
+   * (a timeout, a cancel), because those are the ones the agent cannot report.
+   */
+  private failureReason(entry: RunEntry, exitCode: number | null): string {
+    const own = `exit ${exitCode ?? '?'}`;
+    let last = '';
+    for (let i = entry.events.length - 1; i >= 0; i -= 1) {
+      const event = entry.events[i];
+      if (event.kind !== 'error') continue;
+      const text = event.text.trim().replace(/\s+/g, ' ');
+      if (text) {
+        last = text.slice(0, 200);
+        break;
+      }
+    }
+    if (!last) return own;
+    return own === 'exit 1' ? last : `${last} (${own})`;
+  }
+
   private pushEvent(runId: string, event: RunEvent) {
     const entry = this.entries.get(runId);
     if (entry) {
@@ -1259,7 +1290,7 @@ export class Runner {
     // The reason is kept separately from the summary: the summary is the agent's
     // own text, and a timeout must stay visible even when the agent did say
     // something before it hung.
-    record.note = note ?? (record.status === 'succeeded' ? 'ok' : `exit ${exitCode ?? '?'}`);
+    record.note = note ?? (record.status === 'succeeded' ? 'ok' : this.failureReason(entry, exitCode));
     if (record.status === 'succeeded' && record.commitHash === null) {
       // Only a commit that belongs to *this* suggestion and was made after it
       // started. The previous fallback was an unfiltered `git log -1`, which on
