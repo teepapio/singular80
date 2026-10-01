@@ -45,6 +45,57 @@ Backend.
 > hier hat 101 Commits, 1269 Dateien und rund 76.000 Zeilen angesammelt, ohne dass
 > eines davon auf GitHub ankam. Details und die Branch-Frage unten.
 
+## Immer erst recherchieren, dann bauen
+
+**Regel für jede Sitzung und jeden Agenten: Bevor implementiert, repariert oder
+„mal eben ergänzt" wird, wird recherchiert.** Ein Auftrag, der ohne Recherche
+angefangen wird, ist kein Versuch, sondern eine Vermutung mit Code als Ergebnis.
+
+Die Unterscheidung ist die zwischen *diesem Repository* und *der Welt draußen*.
+Alles über das Repository steht in den Dateien: `grep`, `git log`, die Tests,
+dieses Dokument. Wer dort nachfragt, hat recherchiert. Alles über **Godot 4.5**,
+**Fastify 5**, **Node 22**, **glTF**, **Blender**, **Android-Export**, **SQLite**
+oder ein Verhalten, das nur auf dem Gerät auftaucht, steht **nicht** dort — das
+gehört nachgelesen, und dafür gibt es `websearch` und `webfetch`.
+
+**Was gelesen wird, in dieser Reihenfolge:**
+
+1. **Offizielle Dokumentation** des genauen Major/Point-Release, das hier läuft
+   (`godot/project.godot` sagt `4.5`, `package.json` sagt Fastify 5 / Node ≥
+   22.5). Eine Anleitung für Godot 4.1 ist keine Anleitung für 4.5.
+2. **Der Upstream selbst** — Quelltext, Changelog, Release Notes, Issue-Tracker
+   des Projekts. Für „ist das ein Bug oder Absicht?" ist das Issue die Quelle,
+   nicht ein Blogeintrag von 2023.
+3. **Bekannte Fallstricke**, die jemand schon gemessen hat (Godot-Forum,
+   Release-Bekanntmachungen, Android-Build-Threads).
+
+**Was nicht zählt:** ein Stack Overflow von 2019, ein LLM-Gedächtnis, ein
+Blogpost ohne Versionsangabe, und eine Behauptung ohne Link. Wenn der Preis einer
+falschen Annahme ein Debug-Abend auf dem Gerät ist, ist die Recherche die
+billigere Hälfte.
+
+**Wann ohne Recherche gearbeitet wird** — und dann ausdrücklich:
+
+- Eine reine Stilausrichtung an Code, den man gerade gelesen hat, ohne Verhalten
+  und ohne Schnittstelle.
+- Ein Fehler, dessen Ursache man **gemessen** hat (Logcat, Stacktrace,
+  Testausgabe) und dessen Behebung in der Fehlermeldung steht.
+- Ein Detail, bei dem eine Suche nichts ändern würde, weil es eine Entscheidung
+  des Projekts ist und keine Eigenschaft einer Bibliothek. Dann wird die
+  bestehende Konvention befolgt.
+
+**Was aus der Recherche in den Bericht gehört:** die Quelle (URL, Doc-Seite,
+Issue-Nummer), was sie geändert hat, und — wenn die Recherche dem Auftrag
+widersprach — das im Klartext. Ein Auftrag, dessen Plan die Quellen widerlegt
+haben, wird gemeldet und **nicht** stillschweigend anders gebaut; die
+Entscheidung darüber, ob der Plan oder die Erkenntnis gewinnt, ist eine des
+Besitzers.
+
+**Und das Ergebnis bleibt im Repository, nicht nur in der Sitzung.** Was
+recherchiert wurde und nicht in der Codebasis oder deren Dokumentation steht,
+gehört als Kommentar oder Notiz dorthin — sonst sucht die nächste Sitzung
+dieselbe Antwort ein zweites Mal.
+
 ## Nach dem Commit: pushen
 
 `git push origin main` — **in derselben Sitzung, in der du committet hast.**
