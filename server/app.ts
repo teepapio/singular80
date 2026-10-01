@@ -6,7 +6,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import type { BusEvent, RunRecord, Suggestion, SuggestionStatus, SuggestionView } from '../src/shared/types';
 import { OPERATOR_SOURCE } from '../src/shared/types';
-import { classify, countsTowardsCluster, decorate, decorateAll, findCanonical, sortSuggestions, type SortMode } from '../src/shared/sorting';
+import { classify, decorate, decorateAll, sortSuggestions, type SortMode } from '../src/shared/sorting';
 import { ContentStore } from './content';
 import { Store } from './db';
 import * as discord from './discord';
@@ -273,62 +273,23 @@ export function createApp(options: AppOptions): FastifyInstance {
     return { suggestion: view, runs };
   });
 
-  app.post('/api/suggestions', async (req, reply) => {
-    const body = (req.body ?? {}) as { text?: string; author?: string; source?: string; clientKey?: unknown };
-    const text = (body.text ?? '').trim();
-    if (text.length < 3 || text.length > 2000) {
-      return reply.code(400).send({ error: 'Der Vorschlag muss zwischen 3 und 2000 Zeichen lang sein.' });
-    }
-    const author = (body.author ?? '').trim().slice(0, 60) || 'Anonym';
-    const source = body.source === 'dashboard' ? 'dashboard' : 'game';
-    const existing = store.listSuggestions();
-    // The same membership rule the dashboard's cluster size uses, so the score
-    // the gate evaluated is the score the operator sees.
-    const candidates = existing.filter(countsTowardsCluster);
-    const canon = findCanonical(text, candidates);
-    const category = classify(text);
-    const settings = store.getSettings();
-    // The store decides whether this is a new row or a replay: a lost response
-    // makes the client send the same `clientKey` again, and only the unique
-    // index can tell a retry from a genuine second suggestion.
-    const { suggestion, created } = store.createSuggestionOnce({
-      text,
-      author,
-      source,
-      category,
-      canonicalId: canon?.canonicalId ?? null,
-      status: 'new',
-      clientKey: body.clientKey,
-    });
-    if (!created) {
-      // Replay: no row, no Discord post, no event. The client gets the current
-      // state of its suggestion in the same shape as the first answer, and the
-      // header makes the replay visible to the dashboard and to tests without
-      // adding a field the client would have to know.
-      return reply.header('X-Suggestion-Replay', '1').send(viewOf(suggestion.id)!);
-    }
-    let view = viewOf(suggestion.id)!;
-    const webhook = settings.discordWebhook || process.env.DISCORD_WEBHOOK_URL || '';
-    if (webhook) {
-      const result = await discord.notifyNewSuggestion(view, webhook, dashboardUrl);
-      if (result.ok && result.messageId) {
-        store.setSuggestionDiscordMessage(suggestion.id, result.messageId);
-        view = viewOf(suggestion.id)!;
-      }
-    }
-    // Either channel is optional and one of them suffices: the submission is
-    // already in the database at this point, so a failure here costs a log line.
-    if (telegram.isConfigured()) {
-      const sent = await telegram.notifyNewSuggestion(view, dashboardUrl);
-      if (!sent.ok) console.warn('[telegram] Vorschlag nicht zugestellt:', sent.error);
-      // Remembered so the run's outcome is written into this very message
-      // instead of arriving as another one.
-      else if (sent.messageId) store.setSuggestionTelegramMessage(suggestion.id, sent.messageId);
-    }
-    emit({ type: 'suggestion:new', suggestion: view });
-    return view;
-  });
-
+  /**
+   * There is no `POST /api/suggestions`.
+   *
+   * A suggestion from the device goes straight to the owner's Telegram chat —
+   * `telegram_relay.gd` in the game, and nothing in between. It used to be posted
+   * here whenever the game had a server address configured, and that was the
+   * reason a suggestion typed on the tablet never arrived: the address pointed
+   * somewhere that did not answer, the post failed, and the one route that would
+   * have worked was never tried. Two ways out meant the wrong one was chosen by a
+   * stale config file rather than by what actually works, so the second way is
+   * gone.
+   *
+   * What a player writes is not a row in this database: it has no number, no
+   * score, no cluster and nothing the runner could ever pick up. Everything this
+   * server stores arrives through `POST /api/tasks` — the dashboard's button and
+   * the chat's `/task` — and every one of those is announced in the same chat.
+   */
   app.post('/api/suggestions/:id/vote', async (req, reply) => {
     const id = intParam(req);
     const body = (req.body ?? {}) as { voterId?: string };

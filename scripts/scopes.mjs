@@ -195,7 +195,7 @@ const SCOPE_SUITES = {
     'Vorschlags-Warteschlange', 'Vorschlags-Warteschlange — Ablage',
     'Vorschlags-Warteschlange — Backoff', 'Vorschlags-Warteschlange — Obergrenze',
     'Vorschlags-Warteschlange — Zustellung',
-    'Vorschlags-Warteschlange — Zustellung ohne Server', 'Rechtliches & Melden',
+    'Vorschlags-Warteschlange — Zustellung an den Bot', 'Rechtliches & Melden',
     'Sprachen — Kataloge', 'Sprachen — Auflösung', 'Sprachen — Platzhalter',
     'Sprachen — Plural', 'Sprachen — Zahlen', 'Sprachen — Wechsel',
     'Sprachen — Oberfläche',

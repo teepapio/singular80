@@ -34,3 +34,4 @@ session. Written by the runner on success, or by
 - **edi:** Modell für neue Läufe auf `opencode-go/space-bunny-free` gestellt — das Standardmodell wurde vom Anbieter abgewiesen („This model is not available in your country“).
 - **edi:** Die Prioritäts-Zahl ist weg — Score, Score-Zerlegung und Auto-Genehmigung nach Score gibt es nicht mehr; sortiert wird nach Stimmen, Neuheit oder Cluster.
 - **#16** I'll start by checking the previous attempt's run log and the working tree state.Previous attempt l… — `6fd58ec` <!-- 16:run_mupy0eqn_a49cee -->
+- **edi:** Vorschläge aus dem Spiel gehen wieder beim Besitzer an: sie gehen jetzt immer an den Telegram-Bot, und die vier Ideen, die auf dem Tablet hängen geblieben waren, sind zugestellt worden.

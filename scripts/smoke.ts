@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from '../server/app';
+import type { Store } from '../server/db';
+import { classify } from '../src/shared/sorting';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = mkdtempSync(join(tmpdir(), 'singular80-smoke-'));
@@ -49,44 +51,70 @@ async function main(): Promise<void> {
     content.status === 200 && content.body.enemies.length > 0 && content.body.weapons.length > 0 && content.body.upgrades.length > 0,
   );
 
-  const first = await call<{ id: number; category: string; clusterSize: number }>(base, '/api/suggestions', {
-    method: 'POST',
-    body: JSON.stringify({ text: 'Füge einen Slime Gegner hinzu, der in kleine Slimes zerfällt', author: 'Smoke' }),
+  // Suggestions are seeded through the store, not through HTTP: the game delivers
+  // a player's idea straight to the Telegram chat, so there is no
+  // `POST /api/suggestions` left to create one with. What this file still checks
+  // is everything that reads a suggestion back — the classifier, the cluster size,
+  // the votes, the status change.
+  const store = (app as unknown as { _singular80: { store: Store } })._singular80.store;
+  const slimeText = 'Füge einen Slime Gegner hinzu, der in kleine Slimes zerfällt';
+  const first = store.createSuggestion({
+    text: slimeText,
+    author: 'Smoke',
+    source: 'game',
+    category: classify(slimeText),
+    canonicalId: null,
+    status: 'new',
   });
-  check('Vorschlag anlegen', first.status === 200 && first.body.id > 0);
-  check('Kategorie automatisch erkannt', first.body.category === 'content', `war ${first.body.category}`);
+  const listedFirst = await call<{ id: number; category: string; clusterSize: number }>(
+    base,
+    `/api/suggestions/${first.id}`,
+  );
+  check('Vorschlag anlegen', listedFirst.status === 200 && listedFirst.body.id > 0);
+  check('Kategorie automatisch erkannt', listedFirst.body.category === 'content', `war ${listedFirst.body.category}`);
 
-  const similar = await call<{ id: number; canonicalId: number | null; clusterSize: number }>(base, '/api/suggestions', {
-    method: 'POST',
-    body: JSON.stringify({ text: 'Neuer Gegner: Slime der sich teilt', author: 'Smoke' }),
+  // A second, similar idea joined to the first one's cluster. Nothing clusters a
+  // new suggestion any more — there is no route that classifies an incoming text
+  // — so the link is written by the caller, and the read side still has to add up.
+  const similar = store.createSuggestion({
+    text: 'Neuer Gegner: Slime der sich teilt',
+    author: 'Smoke',
+    source: 'game',
+    category: classify('Neuer Gegner: Slime der sich teilt'),
+    canonicalId: first.id,
+    status: 'new',
   });
-  check('Duplikat wird geclustert', similar.body.canonicalId === first.body.id, `canonicalId=${similar.body.canonicalId}`);
-  check('Cluster-Größe wird berechnet', similar.body.clusterSize === 2, `clusterSize=${similar.body.clusterSize}`);
+  const listedSimilar = await call<{ id: number; canonicalId: number | null; clusterSize: number }>(
+    base,
+    `/api/suggestions/${similar.id}`,
+  );
+  check('Ähnlicher Vorschlag teilt den Cluster', listedSimilar.body.canonicalId === first.id, `canonicalId=${listedSimilar.body.canonicalId}`);
+  check('Cluster-Größe wird berechnet', listedSimilar.body.clusterSize === 2, `clusterSize=${listedSimilar.body.clusterSize}`);
 
-  const unrelated = await call<{ canonicalId: number | null }>(base, '/api/suggestions', {
-    method: 'POST',
-    body: JSON.stringify({ text: 'Bitte die Musik im Menü leiser machen', author: 'Smoke' }),
+  const unrelatedText = 'Bitte die Musik im Menü leiser machen';
+  const unrelated = store.createSuggestion({
+    text: unrelatedText,
+    author: 'Smoke',
+    source: 'game',
+    category: classify(unrelatedText),
+    canonicalId: null,
+    status: 'new',
   });
-  check('Unähnlicher Vorschlag wird nicht geclustert', unrelated.body.canonicalId === null);
+  const listedUnrelated = await call<{ canonicalId: number | null }>(base, `/api/suggestions/${unrelated.id}`);
+  check('Unähnlicher Vorschlag wird nicht geclustert', listedUnrelated.body.canonicalId === null);
 
-  const bad = await call<{ error: string }>(base, '/api/suggestions', {
-    method: 'POST',
-    body: JSON.stringify({ text: 'x' }),
-  });
-  check('Zu kurzer Vorschlag wird abgelehnt', bad.status === 400);
-
-  const vote1 = await call<{ votes: number }>(base, `/api/suggestions/${first.body.id}/vote`, {
+  const vote1 = await call<{ votes: number }>(base, `/api/suggestions/${first.id}/vote`, {
     method: 'POST',
     body: JSON.stringify({ voterId: 'smoke-voter-1' }),
   });
-  const vote2 = await call<{ votes: number }>(base, `/api/suggestions/${first.body.id}/vote`, {
+  const vote2 = await call<{ votes: number }>(base, `/api/suggestions/${first.id}/vote`, {
     method: 'POST',
     body: JSON.stringify({ voterId: 'smoke-voter-1' }),
   });
   check('Stimme zählt', vote1.body.votes === 1);
   check('Doppelte Stimme zählt nicht', vote2.body.votes === 1);
 
-  const approved = await call<{ status: string }>(base, `/api/suggestions/${first.body.id}`, {
+  const approved = await call<{ status: string }>(base, `/api/suggestions/${first.id}`, {
     method: 'PATCH',
     body: JSON.stringify({ status: 'approved' }),
   });

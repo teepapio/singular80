@@ -1,10 +1,23 @@
 extends Node
-## Thin HTTP client for the Singular 80 backend.
+## Thin HTTP client for the Singular 80 backend, and the queue of suggestions
+## waiting to be sent.
 ##
 ## Every call is fire-and-forget with a short timeout: on a phone the game must
 ## never block on a missing server.
-## A suggestion is persisted to `user://` before any send, keeps one `clientKey`
-## across retries, and leaves the queue only after the server confirmed it.
+##
+## ## A suggestion goes to Telegram. There is no second route.
+##
+## The game used to post a suggestion to `POST /api/suggestions` whenever a
+## server address was configured, and to the bot only when none was. That
+## "whenever" was the bug: an address that is set but no longer answers — a typo,
+## a machine that moved, `127.0.0.1` on a tablet that is not the server — makes
+## the idea wait there forever, silently, while the one route that would have
+## worked is never tried. Two routes meant the choice was made by a stale config
+## file, not by what actually works. So the server path is gone: content and
+## highscores still use the configured address, a suggestion never does.
+##
+## The address is irrelevant to `submit_suggestion()`, which is what a reader
+## needs to see to know where a suggestion goes.
 
 signal suggestion_sent(id: int, cluster_size: int)
 signal suggestion_failed(reason: String)
@@ -26,9 +39,6 @@ var _timer: Timer
 var _attempt: int = 0
 var _busy: bool = false
 var _announced: int = 0
-## The address the pending attempt was armed for. A focus notification is only
-## news when the address is not this one.
-var _armed_for: String = ""
 ## Health as of the last probe. Private, because a public `online` reads like
 ## "the network works" while it is one answer from one moment — and nothing
 ## outside this file ever asked for it.
@@ -45,8 +55,10 @@ func _ready() -> void:
 	add_child(_timer)
 	_announce_pending()
 	if not _queue.is_empty():
-		# Startup catches up quickly; without a server the first contact takes over.
-		_arm(0, 0.25 if Game.has_server() else 60.0)
+		# Startup catches up at once. The route is Telegram and nothing else, so
+		# there is no address to wait for — the earlier "60 s without a server"
+		# delay only postponed an idea that could have gone out immediately.
+		_arm(0, 0.25)
 
 
 func _notification(what: int) -> void:
@@ -66,22 +78,16 @@ func _notification(what: int) -> void:
 ## Every focus the window gets ends up here, and most of them have nothing to do
 ## with the network — the notification shade, the keyboard, a permission dialog,
 ## a phone call. So it only does something when something is waiting *and* the
-## backoff is actually running, or when the address is not the one the pending
-## attempt was armed for: `ServerDialog.apply` reaches a queue that sits at the
-## backoff cap through here, and that one has to go out at once.
+## backoff is actually running.
 func wake() -> void:
-	if _queue.is_empty():
-		return
-	if _attempt == 0 and _armed_for == Game.server_url:
+	if _queue.is_empty() or _attempt == 0:
 		return
 	_arm(0, 0.25)
 
 
-## True when a server URL is configured and its health endpoint answered.
-## Shares the mutex with the two delivery paths, which is what `main.gd`'s
-## startup probe was missing: without the guard it and the retry timer each fired
-## their own `/api/health`, the startup flush came back as "busy" without sending
-## anything, and two health requests raced for the same answer.
+## True when a server URL is configured and its health endpoint answered. The
+## configured address is for content and highscores; a suggestion never goes
+## there.
 func probe() -> bool:
 	if not Game.has_server():
 		_reachable = false
@@ -99,24 +105,24 @@ func probe() -> bool:
 
 ## The health request itself, without the guard. Callers that already hold the
 ## mutex come here: through `probe()` they would only be told the state of the
-## previous attempt and would send the queue without ever having checked it.
+## previous attempt.
 func _probe_health() -> bool:
 	var result: Variant = await _request("/api/health")
 	_reachable = result is Dictionary
 	return _reachable
 
 
-## Sends one entry straight to the owner's Telegram bot, with no backend in the
-## way. Returns a view like `_deliver()` does — `{}` means it stays queued.
+## Sends one entry straight to the owner's Telegram bot. Returns the view, or `{}`
+## when the idea stays queued.
 ##
-## The returned view carries `via: "telegram"` and a `messageId` rather than a
-## suggestion `id`, because there is no server to number it: the suggestion is
-## not in the dashboard and will never be run by the agent. The dialog reads
-## that flag instead of printing a suggestion number it does not have.
+## The view carries `via: "telegram"` and a `messageId` rather than a suggestion
+## `id`, because the backend does not number it: a suggestion sent from the device
+## lands in the chat and not in the dashboard. The dialog reads the flag instead
+## of printing a number it does not have.
 func _deliver_direct(client_key: String) -> Dictionary:
 	if not Telegram.is_configured():
-		# Nothing to send to and no address to send through. Say which, rather
-		# than "offline" — the network may be perfectly fine.
+		# A build without credentials cannot deliver at all. Say that rather than
+		# "offline" — the network may be perfectly fine.
 		suggestion_failed.emit(Loc.t("ui.queue_saved_no_route"))
 		return {}
 	var item := QueueClass.find(_queue, client_key)
@@ -130,13 +136,27 @@ func _deliver_direct(client_key: String) -> Dictionary:
 		suggestion_failed.emit(Loc.t("ui.queue_saved_telegram_failed"))
 		_arm(1)
 		return {}
-	# Removed only after Telegram confirmed it, exactly as on the server path: a
-	# lost answer costs a retry, never the idea.
+	# Removed only after Telegram confirmed it: a lost answer costs a retry, never
+	# the idea.
 	QueueClass.remove(_queue, client_key)
 	_save()
 	_announce_pending()
 	suggestion_sent.emit(0, 1)
 	return {"id": 0, "clusterSize": 1, "via": "telegram", "messageId": int(result.get("messageId", 0))}
+
+
+## Sends everything that is still queued, entry by entry. `false` when an attempt
+## failed, so the caller arms the backoff.
+##
+## Over a copy: a delivered entry leaves `_queue` from inside `_deliver_direct()`.
+func _flush_direct() -> bool:
+	var failed := false
+	for entry in _queue.duplicate():
+		if (await _deliver_direct(str((entry as Dictionary).get("clientKey", "")))).is_empty():
+			# The first failure speaks for all; continuing would wait out N timeouts.
+			failed = true
+			break
+	return failed
 
 
 # --- content ----------------------------------------------------------------
@@ -156,6 +176,13 @@ func get_content() -> Variant:
 ## response cannot turn into a duplicate.
 ## `context` names the screen or area the idea came from; it is prepended to the
 ## text so the dashboard can group ideas without the author having to say it.
+## Submits a player suggestion. Returns the view, or `{}` when Telegram did not
+## take it **yet** — the suggestion is then queued in `user://` and delivered on a
+## later attempt, with the same `clientKey`, so a lost answer cannot turn into a
+## duplicate.
+## `context` names the screen or area the idea came from; it is prepended to the
+## text so the chat message says where the idea belongs, without the author
+## having to.
 func submit_suggestion(text: String, author: String, context: String = "") -> Dictionary:
 	# 1. Queue it and write it to disk **before** sending: from here on the idea
 	#    survives a crash, an exit and a reboot.
@@ -167,26 +194,17 @@ func submit_suggestion(text: String, author: String, context: String = "") -> Di
 	if not dropped.is_empty():
 		suggestion_failed.emit(QueueClass.cap_warning(dropped, QueueClass.MAX_ITEMS))
 	_announce_pending()
-	if not Game.has_server():
-		# No backend is the normal state on a player's device, not a fault. The
-		# suggestion still has to reach the owner, so it goes straight to the bot
-		# from the phone; only if that is unavailable or fails does it wait here.
-		var direct := await _deliver_direct(key)
-		if not direct.is_empty():
-			return direct
-		_arm(0, 0.25)
-		return {}
 	if not _try_lock():
 		# A flush is already running; the new entry goes out with its next pass.
 		return {}
-	# 2. Send once directly — the dialog waits for the result.
-	var view := await _deliver(key)
+	# 2. Send once directly — the dialog waits for the result. `_deliver_direct()`
+	#    reports its own failure, so a second message here would be wrong.
+	var view := await _deliver_direct(key)
 	_unlock()
 	if view.is_empty():
-		suggestion_failed.emit(Loc.t("ui.queue_saved_unreachable"))
 		_arm(1)
 		return {}
-	_announce_pending()
+	_attempt = 0
 	_arm(0)
 	return view
 
@@ -226,20 +244,7 @@ func flush_queue() -> void:
 	if _queue.is_empty() or not _try_lock():
 		_arm(0)
 		return
-	if not Game.has_server():
-		# No backend, so the bot is the route. Hand over to the one attempt path
-		# that knows about it rather than re-implementing the loop here.
-		_unlock()
-		_attempt_queue()
-		return
-	var failed := false
-	# Over a copy: `_deliver()` removes successful entries from `_queue`.
-	for entry in _queue.duplicate():
-		var view := await _deliver(str((entry as Dictionary).get("clientKey", "")))
-		if view.is_empty():
-			# The first failure speaks for all; continuing would wait out N timeouts.
-			failed = true
-			break
+	var failed := await _flush_direct()
 	_unlock()
 	_announce_pending()
 	if failed:
@@ -249,71 +254,28 @@ func flush_queue() -> void:
 		_arm(0)
 
 
-## Sends one queued item; `{}` means it stays queued. Removal happens **only** after
-## the server confirmed it, so a lost response costs a retry, not the idea.
-func _deliver(client_key: String) -> Dictionary:
-	var item := QueueClass.find(_queue, client_key)
-	if item.is_empty():
-		return {}
-	var body: Dictionary = QueueClass.request_body(item)
-	var result: Variant = await _request("/api/suggestions", HTTPClient.METHOD_POST, body)
-	if not (result is Dictionary):
-		return {}
-	var view: Dictionary = result
-	QueueClass.remove(_queue, client_key)
-	_save()
-	suggestion_sent.emit(int(view.get("id", 0)), int(view.get("clusterSize", 1)))
-	return view
-
-
 # --- retry ------------------------------------------------------------------
 
 func _on_timer() -> void:
 	if _queue.is_empty():
 		return
-	if not Game.has_server() and not Telegram.is_configured():
-		# Neither a server nor a bot: nothing to try. The address or the build's
-		# credentials may still arrive, so keep the backoff running rather than
+	if not Telegram.is_configured():
+		# No route at all: nothing to try. The credentials of a build can still
+		# arrive under the player's hands, so keep the backoff running rather than
 		# dropping the idea.
 		_arm(_attempt + 1)
 		return
-	_attempt_queue()
-
-
-func _attempt_queue() -> void:
-	if _queue.is_empty() or not _try_lock():
-		_arm(_attempt)
-		return
-	if not Game.has_server():
-		# The bot is the only route. There is no health endpoint to probe first, so
-		# the send itself decides, and the backoff absorbs a phone without signal.
-		var failed := false
-		for entry in _queue.duplicate():
-			if (await _deliver_direct(str((entry as Dictionary).get("clientKey", "")))).is_empty():
-				# The first failure speaks for all; continuing would wait out N timeouts.
-				failed = true
-				break
-		_unlock()
-		if failed:
-			_arm(_attempt + 1)
-		else:
-			_attempt = 0
-			_arm(0)
-		return
-	# Health endpoint first: a forced POST with no network drains the battery.
-	var reachable: bool = await _probe_health()
-	_unlock()
-	if not reachable:
-		_arm(_attempt + 1)
-		return
+	# There is no health endpoint to probe first — the route is the bot's
+	# `sendMessage`, and that call decides on its own. The backoff absorbs a phone
+	# without signal.
 	flush_queue()
 
 
-## The manual mutex the three request paths share — `probe`, `submit_suggestion`
-## and `flush_queue`. A `Node` cannot hold a lock across an `await` any other
-## way, and skipping it is not a slow path but a wrong one: two concurrent
-## `/api/health` requests, and one of the callers walking away believing it had
-## sent the queue.
+## The manual mutex the two request paths share — `probe` and `flush_queue`, with
+## `submit_suggestion` as the third caller. A `Node` cannot hold a lock across an
+## `await` any other way, and skipping it is not a slow path but a wrong one: two
+## concurrent requests, and one of the callers walking away believing it had sent
+## the queue.
 func _try_lock() -> bool:
 	if _busy:
 		return false
@@ -329,7 +291,6 @@ func _unlock() -> void:
 ## `attempt` applies; an explicit value overrides it (startup, resume).
 func _arm(attempt: int, wait: float = -1.0) -> void:
 	_attempt = maxi(attempt, 0)
-	_armed_for = Game.server_url
 	if _queue.is_empty():
 		if _timer != null:
 			_timer.stop()
@@ -351,7 +312,7 @@ func _announce_pending() -> void:
 	pending_changed.emit(count)
 
 
-## Writes the queue to disk; callers must do this **before** the server answers.
+## Writes the queue to disk; callers must do this **before** Telegram answers.
 ## A `--script` run leaves the player's own file alone — see `_persist`.
 func _save() -> void:
 	if not _persist:

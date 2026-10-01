@@ -208,7 +208,6 @@
     "ui.queue_full": "Warteschlange voll (höchstens {limit}) — der älteste Vorschlag wurde verworfen: „{text}“",
     "ui.queue_saved_no_route": "Keine Server-Adresse hinterlegt — Vorschlag lokal gespeichert.",
     "ui.queue_saved_telegram_failed": "Noch nicht zugestellt — gespeichert und geht von allein raus, sobald es Netz gibt.",
-    "ui.queue_saved_unreachable": "Server nicht erreichbar — Vorschlag lokal gespeichert.",
     "ui.queue_waiting": {
       "one": "{count} Vorschlag wartet auf Netz",
       "other": "{count} Vorschläge warten auf Netz"
@@ -231,7 +230,6 @@
     "ui.settings_short": "⚙",
     "ui.sound_off": "♪ stumm",
     "ui.sound_on": "♪ Ton an",
-    "ui.suggest_cluster": " Ähnliche Vorschläge gibt es schon (Cluster mit {count} Einträgen) — deine Stimme zählt dort mit.",
     "ui.suggest_hint": "Neue Inhalte, Mechaniken, Balance oder Bugs — alles landet gesammelt auf dem Dashboard und wird dort priorisiert. Umsetzungen erscheinen direkt im Spiel.",
     "ui.suggest_name": "Name (optional)",
     "ui.suggest_origin": "Aus: {game}",
@@ -242,7 +240,6 @@
     "ui.suggest_sent": "Gesendet ✓",
     "ui.suggest_stored": "Gespeichert ✓",
     "ui.suggest_terms": "Nutzungsbedingungen: {url}",
-    "ui.suggest_thanks": "Danke! Dein Vorschlag läuft als #{id}.{extra}",
     "ui.suggest_thanks_direct": "Danke! Dein Vorschlag ist direkt beim Autor angekommen.",
     "ui.suggest_title": "Vorschlag einreichen",
     "ui.suggest_too_short": "Bitte schreibe mindestens ein paar Worte.",

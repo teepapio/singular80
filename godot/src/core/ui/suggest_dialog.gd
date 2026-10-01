@@ -2,8 +2,8 @@ class_name SuggestDialog
 extends RefCounted
 ## The in-game suggestion form.
 ##
-## Posts to `POST /api/suggestions` through `Api`, falling back to a persistent
-## local queue when the device is offline so a player never loses an idea.
+## Sends the idea straight to the owner's Telegram chat, with a persistent local
+## queue in `user://` underneath, so a phone without signal never loses one.
 
 const MAX_LENGTH := 2000
 const QueueClass := preload("res://src/core/logic/suggestion_queue.gd")
@@ -178,19 +178,11 @@ static func _build(tree: SceneTree, context: String = "") -> void:
 			return
 		Sfx.level_up()
 		status.add_theme_color_override("font_color", UiTheme.SUCCESS)
-		# Delivered by the bot rather than by a server: there is no suggestion
-		# number to quote and no cluster to speak of, so the thanks is its own
-		# sentence instead of one with an empty hole in it.
-		if str(view.get("via", "")) == "telegram":
-			status.text = Loc.t("ui.suggest_thanks_direct")
-			send.text = Loc.t("ui.suggest_sent")
-			_show_waiting(waiting)
-			return
-		var cluster := int(view.get("clusterSize", 1))
-		var extra := ""
-		if cluster > 1:
-			extra = Loc.t("ui.suggest_cluster", {"count": str(cluster)})
-		status.text = Loc.t("ui.suggest_thanks", {"id": str(int(view.get("id", 0))), "extra": extra})
+		# A delivered suggestion is a message in the owner's Telegram chat. There
+		# is no backend behind it, so there is no number to quote and no cluster to
+		# speak of — the thanks is its own sentence instead of one with an empty
+		# hole in it.
+		status.text = Loc.t("ui.suggest_thanks_direct")
 		send.text = Loc.t("ui.suggest_sent")
 		_show_waiting(waiting)
 	)

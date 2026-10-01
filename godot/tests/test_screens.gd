@@ -521,11 +521,28 @@ func _suggest_dialog_posts() -> void:
 	t.check(_suggest_script().is_open(), "Dialog meldet 'offen'")
 	t.check(_suggest_layer().get_child_count() == 1, "Dialog besteht aus einer Ebene")
 
-	# Without a server the suggestion is queued and reported as saved.
+	# A build made with `npm run telegram:bake` carries real credentials, so a
+	# suite that submits a suggestion in such a build would post it into the
+	# owner's chat for real. The credentials are therefore emptied for the length
+	# of this suite and put back afterwards — the same reason `test_core` forces
+	# them rather than assuming a plain checkout has none.
+	var relay: Node = tree.root.get_node_or_null("/root/Telegram")
+	var baked_token := ""
+	var baked_chat := ""
+	if relay != null:
+		baked_token = str(relay._token)
+		baked_chat = str(relay._chat_id)
+		relay._token = ""
+		relay._chat_id = ""
+
+	# Without a route the suggestion is queued and reported as saved.
 	var view: Dictionary = await api.submit_suggestion("Testvorschlag aus dem GDScript-Test", "Test")
-	t.check(view.is_empty(), "Ohne Server wird nichts gesendet")
+	t.check(view.is_empty(), "Ohne Weg nach draußen wird nichts zugestellt")
 	t.check(api._queue.size() == 1, "Der Vorschlag landet in der Offline-Warteschlange")
 	api._queue.clear()
+	if relay != null:
+		relay._token = baked_token
+		relay._chat_id = baked_chat
 	t.suite_done()
 
 

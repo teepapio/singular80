@@ -1,12 +1,17 @@
 /**
- * The routes the dashboard and the game actually call, at the HTTP level.
+ * The routes the dashboard actually calls, at the HTTP level.
  *
  * `api.test.ts` covers the runner's controls, `suggestionIdempotency.test.ts` the
- * offline retry; what was missing is everything a person clicks once: the vote
- * button (the only route a *player* ever uses), the content the game loads, the
- * run list, the split, the two "test" buttons and the read-only ends of the check
- * queue. The pure functions behind them are unit-tested; what is tested here is
- * that the route reaches them, and answers the way the panel expects.
+ * `clientKey` machinery at the store level; what is missing is everything a person
+ * clicks once: the vote button, the content the game loads, the run list, the
+ * split, the two "test" buttons and the read-only ends of the check queue. The
+ * pure functions behind them are unit-tested; what is tested here is that the
+ * route reaches them, and answers the way the panel expects.
+ *
+ * There is no route that creates a suggestion: what a player writes goes from the
+ * device straight into the owner's Telegram chat. The cases below therefore seed
+ * their rows through the store — `api.suggestion()` — and test the routes that are
+ * still there.
  *
  * `app.inject` binds no port. `OPENCODE_BIN` points at a stub and `projectRoot` at
  * a temp directory, so the `implement` route — which really enqueues a run — cannot
@@ -19,7 +24,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../server/app';
 import type { Store } from '../server/db';
-import type { BusEvent, RunRecord, SuggestionView } from '../src/shared/types';
+import { classify } from '../src/shared/sorting';
+import type { BusEvent, RunRecord, Suggestion, SuggestionView } from '../src/shared/types';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const opened: { close: () => Promise<void>; dir: string }[] = [];
@@ -65,8 +71,15 @@ interface Api {
   call: <T>(method: Method, path: string, body?: unknown) => Promise<{ status: number; body: T }>;
   get: <T>(path: string) => Promise<{ status: number; body: T }>;
   post: <T>(path: string, body?: unknown) => Promise<{ status: number; body: T }>;
-  /** A new suggestion, created the way the game creates one. */
-  suggestion: (text: string) => Promise<SuggestionView>;
+  /**
+   * A suggestion row, written the way the server writes one today.
+   *
+   * No route creates a suggestion any more, so a case that needs one seeds it
+   * itself. `canonicalId` is a parameter because the clustering that used to happen
+   * in the create route does not happen anywhere now: a cluster is what the store
+   * was told about.
+   */
+  suggestion: (text: string, canonicalId?: number | null) => Suggestion;
   store: () => Store;
   events: () => BusEvent[];
   dir: string;
@@ -110,7 +123,14 @@ async function boot(): Promise<Api> {
     call,
     get: <T>(path: string) => call<T>('GET', path),
     post: <T>(path: string, body?: unknown) => call<T>('POST', path, body),
-    suggestion: async (text: string) => (await call<SuggestionView>('POST', '/api/suggestions', { text })).body,
+    suggestion: (text: string, canonicalId: number | null = null) =>
+      internals.store.createSuggestion({
+        text,
+        author: 'Spiel',
+        source: 'game',
+        category: classify(text),
+        canonicalId,
+      }),
     store: () => internals.store,
     events: () => seen,
     dir,
@@ -123,7 +143,7 @@ describe('POST /api/suggestions/:id/vote', () => {
     // re-animates a vote that counted; a second vote from the same device must not
     // claim it did.
     const api = await boot();
-    const view = await api.suggestion('Der Slime soll schneller werden');
+    const view = api.suggestion('Der Slime soll schneller werden');
     const first = await api.post<{ votes: number; changed: boolean }>(`/api/suggestions/${view.id}/vote`, {
       voterId: 'geraet-eins',
     });
@@ -145,7 +165,7 @@ describe('POST /api/suggestions/:id/vote', () => {
     // A counter without a row is a vote the backup cannot restore, and one the
     // delete of a suggestion would leave behind.
     const api = await boot();
-    const view = await api.suggestion('Pang: die Bälle sollen schneller fliegen');
+    const view = api.suggestion('Pang: die Bälle sollen schneller fliegen');
     await api.post(`/api/suggestions/${view.id}/vote`, { voterId: 'geraet-eins' });
     await api.post(`/api/suggestions/${view.id}/vote`, { voterId: 'geraet-eins' });
     const rows = api.store().listVotes().filter((v) => v.suggestionId === view.id);
@@ -158,8 +178,10 @@ describe('POST /api/suggestions/:id/vote', () => {
     // There is no score any more; what a vote still does is reorder the list, and
     // that is worth a test of its own: it is the one effect a player can see.
     const api = await boot();
-    const view = await api.suggestion('Tetris: die Level sollen schneller kommen');
-    const plain = await api.suggestion('Pang: die Bälle sollen langsamer fliegen');
+    // `suggestion()` is synchronous: it seeds the row through the store, because
+    // the route that used to create one over HTTP is gone with the game's.
+    const view = api.suggestion('Tetris: die Level sollen schneller kommen');
+    const plain = api.suggestion('Pang: die Bälle sollen langsamer fliegen');
     await api.post(`/api/suggestions/${view.id}/vote`, { voterId: 'geraet-eins' });
     const list = (await api.get<{ suggestions: SuggestionView[] }>('/api/suggestions')).body.suggestions;
     expect(list.find((s) => s.id === view.id)?.votes).toBe(1);
@@ -169,14 +191,18 @@ describe('POST /api/suggestions/:id/vote', () => {
 
   it('meldet die Stimme im Bus, damit offene Panels sie sehen', async () => {
     const api = await boot();
-    const view = await api.suggestion('Siedler: Handelsweg optimieren');
+    const view = api.suggestion('Siedler: Handelsweg optimieren');
     await api.post(`/api/suggestions/${view.id}/vote`, { voterId: 'geraet-eins' });
-    expect(api.events().map((e) => e.type)).toEqual(['suggestion:new', 'suggestion:vote']);
+    // Exactly one event, and it is the vote: the row was seeded through the store,
+    // so nothing announced its arrival. `suggestion:new` still reaches open panels
+    // from the routes that do create rows — `POST /api/tasks`, the split, a
+    // promoted check.
+    expect(api.events().map((e) => e.type)).toEqual(['suggestion:vote']);
   });
 
   it('lehnt eine zu kurze voterId ab, statt sie zu speichern', async () => {
     const api = await boot();
-    const view = await api.suggestion('Merge: die Steine sollen schneller fallen');
+    const view = api.suggestion('Merge: die Steine sollen schneller fallen');
     for (const voterId of ['', '   ', 'kurz', undefined]) {
       const res = await api.post<{ error: string }>(`/api/suggestions/${view.id}/vote`, { voterId });
       expect(res.status, JSON.stringify(voterId)).toBe(400);
@@ -197,13 +223,16 @@ describe('POST /api/suggestions/:id/vote', () => {
 });
 
 describe('Cluster über HTTP', () => {
-  it('hängt einen zweiten, fast gleichen Vorschlag an den ersten', async () => {
-    // The same pair `sorting.test.ts` pins as "similar enough"; here it is the
-    // route that has to carry the decision into the row, and the list that has to
-    // show the cluster on *both* entries, not only on the newcomer.
+  // No route clusters a new suggestion any more: `POST /api/suggestions` was the
+  // only caller of `findCanonical`, and the rows it would have clustered are gone
+  // with it. What survives is the read side, and it is worth pinning here: the
+  // panel decides whether two entries are one idea from the stored `canonicalId`,
+  // and a cluster of two has to read as two on *both* rows, not only on the one
+  // that carries the link. `sorting.test.ts` covers the matching itself.
+  it('zeigt einen bestehenden Cluster auf beiden Einträgen', async () => {
     const api = await boot();
-    const first = await api.suggestion('Füge einen Slime Gegner hinzu, der in kleine Slimes zerfällt');
-    const second = await api.suggestion('Neuer Gegner: Slime der sich teilt');
+    const first = api.suggestion('Füge einen Slime Gegner hinzu, der in kleine Slimes zerfällt');
+    const second = api.suggestion('Neuer Gegner: Slime der sich teilt', first.id);
     expect(second.canonicalId).toBe(first.id);
     const listed = (await api.get<{ suggestions: SuggestionView[] }>('/api/suggestions')).body.suggestions;
     expect(listed).toHaveLength(2);
@@ -211,11 +240,15 @@ describe('Cluster über HTTP', () => {
     expect(listed.every((s) => s.clusterIds.length === 2)).toBe(true);
   });
 
-  it('lässt unähnliche Texte getrennt', async () => {
+  it('lässt unverbundene Zeilen bei clusterSize 1', async () => {
+    // The counterpart: a row without a `canonicalId` is its own cluster, so the list
+    // must not invent a second member for it.
     const api = await boot();
-    await api.suggestion('Füge einen Slime Gegner hinzu');
-    const other = await api.suggestion('Bitte die Lautstärke der Musik senken');
+    api.suggestion('Füge einen Slime Gegner hinzu');
+    const other = api.suggestion('Bitte die Lautstärke der Musik senken');
     expect(other.canonicalId).toBeNull();
+    const listed = (await api.get<{ suggestions: SuggestionView[] }>('/api/suggestions')).body.suggestions;
+    expect(listed.every((s) => s.clusterSize === 1)).toBe(true);
   });
 });
 
@@ -243,7 +276,7 @@ describe('Die Bewertung ist abgeschafft', () => {
 describe('GET /api/suggestions/:id', () => {
   it('liefert den Vorschlag mit seinen Läufen', async () => {
     const api = await boot();
-    const view = await api.suggestion('Poker: Chips anders verteilen');
+    const view = api.suggestion('Poker: Chips anders verteilen');
     const res = await api.get<{ suggestion: SuggestionView; runs: RunRecord[] }>(
       `/api/suggestions/${view.id}`,
     );
@@ -263,7 +296,7 @@ describe('GET und POST /api/suggestions/:id/split', () => {
 
   it('zeigt erst nur die Vorschau, ohne etwas anzulegen', async () => {
     const api = await boot();
-    const view = await api.suggestion(TEXT);
+    const view = api.suggestion(TEXT);
     const res = await api.get<{ tasks: string[] }>(`/api/suggestions/${view.id}/split`);
     expect(res.status).toBe(200);
     expect(res.body.tasks).toEqual(['Neue Waffe hinzufügen', 'Neuen Gegner einbauen']);
@@ -272,7 +305,7 @@ describe('GET und POST /api/suggestions/:id/split', () => {
 
   it('legt je Teilauftrag eine eigene Zeile mit Elternbezug an', async () => {
     const api = await boot();
-    const view = await api.suggestion(TEXT);
+    const view = api.suggestion(TEXT);
     const res = await api.post<{ parent: SuggestionView; created: SuggestionView[] }>(
       `/api/suggestions/${view.id}/split`,
     );
@@ -290,7 +323,7 @@ describe('GET und POST /api/suggestions/:id/split', () => {
 
   it('lehnt einen Vorschlag ab, aus dem nichts herauszuholen ist', async () => {
     const api = await boot();
-    const view = await api.suggestion('Bitte die Lautstärke leiser machen');
+    const view = api.suggestion('Bitte die Lautstärke leiser machen');
     const res = await api.post<{ error: string }>(`/api/suggestions/${view.id}/split`);
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('Einzelaufträge');
@@ -298,7 +331,7 @@ describe('GET und POST /api/suggestions/:id/split', () => {
 
   it('nimmt eine eigene Liste, wenn eine geliefert wird', async () => {
     const api = await boot();
-    const view = await api.suggestion('Irgendetwas');
+    const view = api.suggestion('Irgendetwas');
     const res = await api.post<{ created: SuggestionView[] }>(`/api/suggestions/${view.id}/split`, {
       tasks: ['Erster Teil', 'Zweiter Teil'],
     });
@@ -308,7 +341,7 @@ describe('GET und POST /api/suggestions/:id/split', () => {
 
   it('lehnt eine kaputte Liste ab, statt eine Zeile ohne Kinder anzulegen', async () => {
     const api = await boot();
-    const view = await api.suggestion('Irgendetwas');
+    const view = api.suggestion('Irgendetwas');
     for (const tasks of ['nope', [], ['nur einer'], [42]]) {
       const res = await api.post<{ error: string }>(`/api/suggestions/${view.id}/split`, { tasks });
       expect(res.status, JSON.stringify(tasks)).toBe(400);
@@ -326,7 +359,7 @@ describe('GET und POST /api/suggestions/:id/split', () => {
 describe('GET /api/health', () => {
   it('meldet den Zustand, den die Statusseite anzeigt', async () => {
     const api = await boot();
-    await api.suggestion('Neue Waffe hinzufügen');
+    api.suggestion('Neue Waffe hinzufügen');
     const res = await api.get<{
       ok: boolean;
       uptime: number;
@@ -372,8 +405,8 @@ describe('GET /api/content und POST /api/content/reload', () => {
 describe('GET /api/stats', () => {
   it('zählt Status, Stimmen und Cluster über alle Vorschläge', async () => {
     const api = await boot();
-    const first = await api.suggestion('Tetris: eine neue Level-Serie');
-    await api.suggestion('Tetris: noch eine Level-Serie');
+    const first = api.suggestion('Tetris: eine neue Level-Serie');
+    api.suggestion('Tetris: noch eine Level-Serie');
     await api.post(`/api/suggestions/${first.id}/vote`, { voterId: 'geraet-eins' });
     const res = await api.get<{
       stats: { total: number; votes: number; implemented: number; byStatus: Record<string, number> };
@@ -390,7 +423,7 @@ describe('GET /api/stats', () => {
 describe('Die Run-Routen', () => {
   it('listet die Läufe und findet einen einzelnen', async () => {
     const api = await boot();
-    const view = await api.suggestion('Pang: Bounce-Anzeige');
+    const view = api.suggestion('Pang: Bounce-Anzeige');
     const started = await api.post<{ run: RunRecord }>(`/api/suggestions/${view.id}/implement`, {});
     const list = await api.get<{ runs: RunRecord[] }>('/api/runs');
     expect(list.status).toBe(200);
@@ -409,7 +442,7 @@ describe('Die Run-Routen', () => {
     // Paused first: the run must stay `queued`, so nothing spawns and the state
     // cannot change under the assertion.
     await api.post('/api/runner/pause', { paused: true });
-    const view = await api.suggestion('Pang: Bounce-Anzeige');
+    const view = api.suggestion('Pang: Bounce-Anzeige');
     const started = await api.post<{ run: RunRecord }>(`/api/suggestions/${view.id}/implement`, {});
     const cancelled = await api.post<{ ok: boolean }>(`/api/runs/${started.body.run.id}/cancel`);
     expect(cancelled.status).toBe(200);

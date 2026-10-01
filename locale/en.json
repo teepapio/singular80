@@ -208,7 +208,6 @@
     "ui.queue_full": "Queue full (at most {limit}) — the oldest suggestion was dropped: “{text}”",
     "ui.queue_saved_no_route": "No server address in this build — suggestion saved locally.",
     "ui.queue_saved_telegram_failed": "Not delivered yet — saved, and sent on its own as soon as there is a network.",
-    "ui.queue_saved_unreachable": "Server unreachable — suggestion saved locally.",
     "ui.queue_waiting": {
       "one": "{count} suggestion is waiting for the network",
       "other": "{count} suggestions are waiting for the network"
@@ -231,7 +230,6 @@
     "ui.settings_short": "⚙",
     "ui.sound_off": "♪ muted",
     "ui.sound_on": "♪ sound on",
-    "ui.suggest_cluster": " Similar suggestions already exist (a cluster of {count} entries) — your vote counts there too.",
     "ui.suggest_hint": "New content, mechanics, balance or bugs — everything is collected on the dashboard and prioritised there. What gets built shows up in the game directly.",
     "ui.suggest_name": "Name (optional)",
     "ui.suggest_origin": "From: {game}",
@@ -242,7 +240,6 @@
     "ui.suggest_sent": "Sent ✓",
     "ui.suggest_stored": "Saved ✓",
     "ui.suggest_terms": "Terms of use: {url}",
-    "ui.suggest_thanks": "Thank you! Your suggestion is in as #{id}.{extra}",
     "ui.suggest_thanks_direct": "Thank you! Your suggestion went straight to the author.",
     "ui.suggest_title": "Submit a suggestion",
     "ui.suggest_too_short": "Please write at least a few words.",
