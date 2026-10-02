@@ -48,3 +48,4 @@ session. Written by the runner on success, or by
 - **#40** Die Lobby-Mitte ist weg: kein Podest, kein Rand, kein Lagerfeuer und keine Felsen, Büsche und Pilze im Weg — die Mitte ist jetzt der freie Durchgang zwischen den Plazas, und die Minikarte zeigt das Galerie-Portal statt eines Punktes, auf dem nichts war. — `33c22c8`
 - **#33** I'll start by understanding the current state of the Crystal Jumper game and the scope boundaries.N… — `af1c267` <!-- 33:run_muq5ryho_b0c66f -->
 - **#32** I'll start by reading the project documentation and understanding the current state of the Jumper g… — `ee821aa` <!-- 32:run_muq5s081_780f33 -->
+- **#31** I'll start by reading AGENTS.md and understanding the FreeCell implementation.Foreign work is in th… — `05fc178` <!-- 31:run_muq5s0xs_b3b924 -->
