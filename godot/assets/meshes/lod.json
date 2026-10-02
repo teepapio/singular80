@@ -155,9 +155,9 @@
     "med": 1277
   },
   "flight/golem": {
-    "high": 10960,
-    "low": 685,
-    "med": 1549
+    "high": 10208,
+    "low": 638,
+    "med": 1417
   },
   "flight/harpy": {
     "high": 10280,

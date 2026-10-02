@@ -546,30 +546,68 @@ def build_ballista() -> bpy.types.Object:
 
 
 def build_golem() -> bpy.types.Object:
-    """A heavy floating rock golem that soaks a lot of fire."""
-    core = _ico("GolemCore", (0.72, 0.72, 0.78), (0.0, 0.0, 0.0), (0.42, 0.42, 0.46), 0.0, 0.9, 0.1)
-    for i in range(7):
-        angle = i * 0.8976
-        _ico(
-            f"GolemChunk{i}",
-            (0.3, 0.3, 0.28),
-            (0.66 * math.cos(angle), 0.66 * math.sin(angle), 0.2 * math.sin(i)),
-            STONE_DARK if i % 2 else STONE,
-            0.0,
-            0.95,
-            0.05,
-        )
-    for side in (-1.0, 1.0):
-        _ico(
-            f"GolemEye{'L' if side < 0 else 'R'}",
-            (0.14, 0.14, 0.14),
-            (side * 0.24, -0.62, 0.2),
-            ORANGE,
-            2.4,
-            0.2,
-            0.1,
-        )
-    return core
+    """A heavy stone golem: broad shoulders, small sunken head, oversized fists.
+
+    Facing +Y, feet at z=0, 2.48 tall, 1.68 wide and 0.99 deep. It is a ground
+    enemy that keeps its feet under it and turns towards the player, so the
+    silhouette has to carry the whole read — the game paints every mesh with a
+    single flat material, and a heap of rocks says nothing from any angle.
+
+    What the references agree on: the shoulders are the widest point of the
+    whole figure and a small head is sunk in the notch between them (Poznan
+    golem, Semeria drawing, the Prague golem's brow-and-socket face); the legs
+    are short and thick and the trunk is a tall trapezoid narrowing in three
+    visible steps toward the hips, built from stacked flat stone scales rather
+    than smooth panels; the arms hang straight down clear of the body and end
+    in fists at hip height; the head stands far enough in front of the chest to
+    read as a head in profile.
+    """
+    # Three stacked plates of falling width — 0.74, 0.66, 0.58 — with visible
+    # steps at z=1.44 and z=1.15. They keep the trunk from reading as one smooth
+    # block, the taper keeps it from reading as a plank, and the chest stays
+    # narrower than the shoulder span so the shoulders really are the widest
+    # point of the figure.
+    torso = _box("GolemTorso", (0.74, 0.86, 0.56), (0.0, -0.06, 1.72), STONE, 0.0, 0.9, 0.0)
+    _box("GolemTorsoMid", (0.66, 0.76, 0.38), (0.0, -0.04, 1.34), STONE_DARK, 0.0, 0.92, 0.0)
+    _box("GolemPelvis", (0.58, 0.7, 0.38), (0.0, -0.02, 0.98), STONE, 0.0, 0.9, 0.0)
+    # A narrow collar on top of the wide chest. Without it the head rises out of
+    # a broad flat plate and reads as a chimney instead of a head.
+    _box("GolemCollar", (0.56, 0.66, 0.2), (0.0, 0.02, 2.04), STONE, 0.0, 0.9, 0.0)
+
+    for side, tag in ((-1.0, "L"), (1.0, "R")):
+        # Round rock joints at the shoulders and fists against a boxy trunk: the
+        # contrast is what says "assembled out of stone" instead of "stacked
+        # crates". The shoulder ball reaches above the chest and the head sinks
+        # into the notch between the pair, as in all three references; it also
+        # has to overlap the arm by more than a hair or it floats out to the
+        # side like a wingnut. The 0.14 gap between arm and waist is what makes
+        # the arm an arm.
+        _ico(f"GolemShoulder{tag}", (0.25, 0.3, 0.27), (side * 0.6, -0.06, 1.87), STONE, 0.0, 0.95, 0.0)
+        _box(f"GolemArm{tag}", (0.36, 0.58, 0.7), (side * 0.65, 0.05, 1.3), STONE_DARK, 0.0, 0.92, 0.0)
+        _ico(f"GolemFist{tag}", (0.21, 0.26, 0.26), (side * 0.65, 0.06, 0.78), STONE, 0.0, 0.95, 0.0)
+        # Short thick legs: everything below the hips is a third of the height.
+        _box(f"GolemThigh{tag}", (0.36, 0.6, 0.46), (side * 0.23, 0.0, 0.8), STONE_DARK, 0.0, 0.92, 0.0)
+        _box(f"GolemShin{tag}", (0.34, 0.54, 0.5), (side * 0.23, 0.0, 0.43), STONE, 0.0, 0.9, 0.0)
+        _box(f"GolemFoot{tag}", (0.46, 0.84, 0.22), (side * 0.25, 0.08, 0.11), STONE_DARK, 0.0, 0.95, 0.0)
+
+    # Small head, its own mass in every view: the 0.08 notch on either side of
+    # it is background, so the head never merges into the shoulders. The brow
+    # overhangs the eyes by 0.05, which is the Prague golem's deep-set sockets
+    # under a heavy ledge — and the eyes still clear the face, or a flat
+    # material in the game would swallow them whole.
+    _box("GolemHead", (0.54, 0.56, 0.5), (0.0, 0.12, 2.23), STONE, 0.0, 0.9, 0.0)
+    _box("GolemBrow", (0.58, 0.24, 0.15), (0.0, 0.34, 2.31), STONE_DARK, 0.0, 0.92, 0.0)
+    _box("GolemJaw", (0.42, 0.42, 0.2), (0.0, 0.18, 2.02), STONE_DARK, 0.0, 0.92, 0.0)
+    for side, tag in ((-1.0, "L"), (1.0, "R")):
+        _ico(f"GolemEye{tag}", (0.085, 0.08, 0.08), (side * 0.13, 0.33, 2.1), ORANGE, 2.4, 0.2, 0.1)
+
+    # Hairline seams along the plate edges — the only place the heat shows from
+    # outside. Long bars in the middle of the chest read as a badge, not as
+    # cracks, so these stay short, thin and off-centre.
+    _box("GolemCrack0", (0.05, 0.08, 0.26), (-0.32, 0.37, 1.72), ORANGE, 2.4, 0.2, 0.1, rotation=(0.0, -0.18, 0.0))
+    _box("GolemCrack1", (0.05, 0.08, 0.16), (0.31, 0.37, 1.62), ORANGE, 2.4, 0.2, 0.1, rotation=(0.0, 0.26, 0.0))
+    _box("GolemCrack2", (0.2, 0.08, 0.05), (0.1, 0.37, 1.93), ORANGE, 2.4, 0.2, 0.1, rotation=(0.0, 0.0, -0.28))
+    return torso
 
 
 def build_fireball() -> bpy.types.Object:
