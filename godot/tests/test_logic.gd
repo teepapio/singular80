@@ -921,7 +921,211 @@ func _mechanics() -> void:
 		t.check(dash.hud(null) == "Dash bereit", "Dash ist anfangs bereit")
 		t.check(dash.movement_override(null, 0.016) == null, "Ohne Dash keine Bewegungsänderung")
 	t.check(MechanicsIndex.by_id("nope") == null, "Unbekannte Mechanik liefert null")
+	_merge_drag()
 	t.suite_done()
+
+
+# --- merge drag ---------------------------------------------------------------
+
+## The merge boards drag to merge, with the rules researched from Merge Dragons
+## (suggestion #28). The rules live in one place so the Christmas and the
+## Halloween edition cannot drift apart, and the suite pins the six behaviours
+## they were read off the original for: dragging merges, three pays one and five
+## pays two, fives come first, standing together is not merging, a drop with
+## nothing to merge with is a move, and chain reactions are off.
+func _merge_drag() -> void:
+	t.check(MechanicsIndex.FACTORIES.has("merge_drag"), "Drag-Merge ist in der Mechanik-Liste")
+	var drag := MechanicsIndex.by_id("merge_drag") as MergeDrag
+	t.check(drag != null, "Drag-Merge-Mechanik ist registriert")
+	if drag == null:
+		return
+	t.equal(drag.id, "merge_drag", "ID stimmt")
+	t.equal(drag.max_tier, Merge3D.MAX_MERGE_TIER, "Ihre Leiter endet bei derselben Stufe wie das Brett")
+	t.check(not drag.chain_merges, "Kettenreaktionen sind aus")
+	t.equal(drag.hud(null), "", "Sie schreibt dem HUD nichts")
+
+	# --- the plan: three pays one, five pays two, fives come first -----------
+	t.equal(MergeDrag.merge_plan(2, 1).size(), 0, "Zwei Gleiche ergeben keinen Merge")
+	t.check(MergeDrag.group_merges(3), "Ab drei ist eine Gruppe mergebar")
+	t.check(not MergeDrag.group_merges(2), "Zwei noch nicht")
+	var three := MergeDrag.merge_plan(3, 1)
+	t.equal(three.size(), 1, "Drei ergeben genau einen Merge")
+	t.equal(int(three[0]["required"]), Merge3D.MERGE_3, "und zwar den 3er")
+	t.equal(int(three[0]["created"]), 1, "Der 3er zahlt ein Item")
+	var five := MergeDrag.merge_plan(5, 1)
+	t.equal(int(five[0]["required"]), Merge3D.MERGE_5, "Fünf werden als Fünfer verschmolzen")
+	t.equal(int(five[0]["created"]), 2, "und zahlen zwei")
+	t.equal(MergeDrag.plan_yield(4, 1), 1, "Vier zahlen den 3er, einer bleibt übrig")
+	t.equal(MergeDrag.plan_yield(6, 1), 2, "Sechs zahlen den Fünfer")
+	# Eight is the case the fives-first rule exists for: 5 → 2 and then 3 → 1,
+	# instead of one 3-merge plus five items left over.
+	t.equal(MergeDrag.merge_plan(8, 1).size(), 2, "Acht werden zweimal verschmolzen")
+	t.equal(MergeDrag.plan_yield(8, 1), 3, "und zahlen drei")
+	t.equal(MergeDrag.merge_plan(9, 1).size(), 2, "Neun ebenso")
+	t.equal(MergeDrag.plan_yield(9, 1), 3, "Neun zahlen drei")
+	t.equal(MergeDrag.merge_plan(6, Merge3D.MAX_MERGE_TIER).size(), 0,
+		"Auf der obersten Stufe zahlt gar nichts")
+
+	# --- the board a screen hands over --------------------------------------
+	# A 6x6 board, the shape `Merge3D` uses: cell 0 is top left, right is +1 and
+	# down is +6. Passing the game's own board is the point — no conversion.
+	var row_board := _drag_board([1, 1, 1, 1])
+	t.equal(row_board.size(), 36, "Ein 6x6-Brett hat 36 Felder")
+
+	# Five neighbours merge by themselves in no merge game. Dropping one of them
+	# on an empty tile next to the rest is a move, and the five stay five.
+	var mover := MergeDrag.new()
+	mover.max_tier = Merge3D.MAX_MERGE_TIER
+	t.check(mover.begin(_drag_board([1, 1, 1, 1, 0, 0, 1]), 0, 6), "Ein Item lässt sich aufnehmen")
+	mover.hover(5)
+	var moved := mover.release()
+	t.equal(str(moved["outcome"]), MergeDrag.MOVED, "Ein Drop auf ein freies Feld ist ein Zug")
+	var after_move: PackedInt32Array = moved["board"]
+	t.equal(after_move[0], 0, "Das Item hat sein Feld verlassen")
+	t.equal(after_move[5], 1, "und steht auf dem Feld daneben")
+	t.equal(after_move[6], 1, "Sein Nachbar ist nicht mitverschwunden")
+	t.equal((moved["consumed"] as PackedInt32Array).size(), 1, "Ein Feld wurde freigemacht")
+	t.equal((moved["left"] as Array).size(), 1, "und ein Item bleibt auf dem Brett")
+
+	# Putting an item back on its own cell does nothing at all.
+	var sitter := MergeDrag.new()
+	var untouched := _drag_board([1, 1, 1, 1, 1])
+	t.check(sitter.begin(untouched, 2, 6), "Ein Item lässt sich aufnehmen")
+	var put_back := sitter.release()
+	t.equal(str(put_back["outcome"]), MergeDrag.SAME_CELL, "Ein Drop auf das eigene Feld tut nichts")
+	t.check((put_back["board"] as PackedInt32Array) == untouched, "und das Brett bleibt unangetastet")
+
+	# --- the three-merge ----------------------------------------------------
+	var three_way := MergeDrag.new()
+	t.check(three_way.begin(_drag_board([1, 1, 1]), 0, 6), "Ein Item lässt sich aufnehmen")
+	three_way.hover(1)
+	var look := three_way.preview()
+	t.equal(str(look["outcome"]), MergeDrag.MERGED, "Der Zähler sagt den Merge voraus")
+	t.equal(int(look["tier"]), 1, "und nennt die Stufe")
+	t.equal(int(look["group"]), 3, "und die Größe der Gruppe")
+	t.equal(int(look["created"]), 1, "und was herauskommt")
+	t.equal(three_way.group_count(), 2, "Die Nachbarschaft zählt das aufgenommene Feld nicht mit")
+	t.equal(three_way.group_at(0), 1, "Die Felder kommen von klein nach groß")
+	var merged := three_way.release()
+	t.equal(str(merged["outcome"]), MergeDrag.MERGED, "Der Drop verschmilzt")
+	var after_merge: PackedInt32Array = merged["board"]
+	t.equal(after_merge[1], 2, "Ein Item über Stufe 1 — dort, wo der Finger losgelassen hat")
+	t.equal(after_merge[0], 0, "Das aufgenommene Feld ist wieder frei")
+	t.equal(after_merge[2], 0, "Das dritte Item ist verbraucht")
+	t.equal(int(merged["chain"]), 1, "Ein Drop, ein Merge")
+	t.equal((merged["created"] as Array).size(), 1, "und ein neues Item")
+	t.equal((merged["left"] as Array).size(), 0, "Es blieb nichts liegen")
+	var steps: Array = merged["steps"]
+	t.equal(int(steps[0]["required"]), Merge3D.MERGE_3, "Der Plan nennt den 3er")
+	t.equal(int(steps[0]["tier"]), 1, "und die Stufe, aus der er kommt")
+	# The caller scores with its own ladder: the plan reports both numbers.
+	t.equal(Merge3D.merge_score(int(steps[0]["tier"]), int(steps[0]["required"])),
+		Merge3D.merge_score(1, 3), "Der Plan zahlt mit der Brett-Leiter")
+
+	# --- the five-merge and its bonus item -----------------------------------
+	var five_way := MergeDrag.new()
+	# A block of four (0, 1, 6, 7) and one next to it (12), dragged onto 7.
+	t.check(five_way.begin(_drag_board([1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1]), 12, 6),
+		"Das fünfte Item lässt sich aufnehmen")
+	five_way.hover(7)
+	var five_plan := five_way.preview()
+	t.equal(int(five_plan["group"]), 5, "Der Zähler sieht die ganze Gruppe")
+	t.equal(int(five_plan["created"]), 2, "und kündigt den Fünfer an")
+	var big := five_way.release()
+	var grown: PackedInt32Array = big["board"]
+	t.equal(grown[7], 2, "Der Fünfer zahlt ein Item über Stufe 1")
+	t.equal(grown[0], 2, "und das zweite daneben")
+	t.equal(grown[12], 0, "Das aufgenommene Feld ist frei")
+	t.equal((big["created"] as Array).size(), 2, "Zwei neue Items")
+
+	# --- the field the item came from is not part of the group ---------------
+	# Rows 0, 1, 2 hold three baubles. Taking the one in the middle and dropping
+	# it on the last one leaves a group of two — the middle is not on the board
+	# any more, and counting it would merge a pair into a triple.
+	var pair := MergeDrag.new()
+	t.check(pair.begin(_drag_board([1, 1, 1]), 1, 6), "Das mittlere Item lässt sich aufnehmen")
+	pair.hover(2)
+	t.equal(str(pair.preview()["outcome"]), MergeDrag.TOO_SMALL,
+		"Das aufgenommene Feld trägt die Gruppe nicht zusammen")
+	var refused := pair.release()
+	t.check((refused["board"] as PackedInt32Array) == _drag_board([1, 1, 1]),
+		"und das Brett bleibt, wie es war")
+
+	# A group of four: three merge, the fourth is out of place — it was already
+	# lifted — and lands on the free tile next to the result.
+	var four := MergeDrag.new()
+	t.check(four.begin(_drag_board([1, 1, 1, 1]), 0, 6), "Ein Item lässt sich aufnehmen")
+	four.hover(1)
+	var four_plan := four.release()
+	var four_next: PackedInt32Array = four_plan["board"]
+	t.equal(four_next[1], 2, "Drei werden zu einem")
+	t.equal(four_next[2], 1, "Der vierte bleibt liegen — neben dem Ergebnis")
+	t.equal(four_next[0], 0, "Das aufgenommene Feld ist leer")
+	t.equal((four_plan["left"] as Array).size(), 1, "und wird als übrig gemeldet")
+
+	# --- refusals, each with its own reason ---------------------------------
+	var other := MergeDrag.new()
+	other.begin(_drag_board([1, 2]), 0, 6)
+	other.hover(1)
+	var mixed := other.release()
+	t.equal(str(mixed["outcome"]), MergeDrag.OTHER_TIER, "Ein anderes Item ist kein Merge")
+	t.check((mixed["board"] as PackedInt32Array) == _drag_board([1, 2]), "das Brett bleibt unangetastet")
+
+	var top := MergeDrag.new()
+	top.begin(_drag_board([5, 5]), 0, 6)
+	top.hover(1)
+	t.equal(str(top.preview()["outcome"]), MergeDrag.TOP_TIER, "Die oberste Stufe zahlt nicht")
+
+	var away := MergeDrag.new()
+	away.begin(_drag_board([1]), 0, 6)
+	away.hover(-1)
+	t.equal(str(away.preview()["outcome"]), MergeDrag.OUT_OF_RANGE, "Neben dem Brett ist nichts")
+
+	var empty := MergeDrag.new()
+	t.check(not empty.begin(_drag_board([0, 0]), 1, 6), "Ein freies Feld lässt sich nicht aufnehmen")
+	t.check(not empty.dragging(), "und es läuft auch kein Drag")
+	t.equal(str(empty.preview()["outcome"]), MergeDrag.NO_DRAG, "Der Zähler schweigt ohne Drag")
+	t.check(not empty.begin(_drag_board([1]), 99, 6), "Ein Feld außerhalb des Bretts auch nicht")
+
+	# --- chain reactions are off, and can be switched on ---------------------
+	# Three baubles on row 0 and three on row 1, so the item the 3-merge creates
+	# lands right next to a group of its own tier.
+	var chain_off := MergeDrag.new()
+	chain_off.begin(_drag_board([1, 1, 1, 0, 0, 0, 2, 2, 2]), 0, 6)
+	chain_off.hover(1)
+	var single := chain_off.release()
+	var single_next: PackedInt32Array = single["board"]
+	t.equal(int(single["chain"]), 1, "Ein Drop verschmilzt einmal — mehr nicht")
+	t.equal(single_next[1], 2, "Das neue Item bleibt Stufe 2")
+	t.equal(single_next[7], 2, "und die Reihe darunter steht noch")
+
+	var chain_on := MergeDrag.new()
+	chain_on.chain_merges = true
+	chain_on.begin(_drag_board([1, 1, 1, 0, 0, 0, 2, 2, 2]), 0, 6)
+	chain_on.hover(1)
+	var chain := chain_on.release()
+	var chain_next: PackedInt32Array = chain["board"]
+	t.equal(int(chain["chain"]), 2, "Wer Ketten erlaubt, verschmilzt weiter")
+	t.equal(chain_next[1], 3, "Das Item ist auf Stufe 3")
+	t.equal(chain_next[7], 0, "und hat seine Nachbarn mitgenommen")
+
+	# --- the board geometry a drag needs -------------------------------------
+	var centre := MergeDrag.cell_center(0, 2.0, 6)
+	t.almost(centre.x, -5.0, 0.001, "Feld 0 sitzt links oben")
+	t.almost(centre.y, -5.0, 0.001, "und in der ersten Reihe")
+	t.equal(MergeDrag.cell_at(centre, 2.0, 6), 0, "Der Mittelpunkt gehört zu Feld 0")
+	t.equal(MergeDrag.cell_at(MergeDrag.cell_center(8, 2.0, 6), 2.0, 6), 8, "Feld 8 findet sich wieder")
+	t.equal(MergeDrag.cell_at(MergeDrag.cell_center(35, 2.0, 6), 2.0, 6), 35, "und das letzte Feld auch")
+	t.equal(MergeDrag.cell_at(Vector2(99.0, 0.0), 2.0, 6), -1, "Neben dem Brett ist kein Feld")
+	t.equal(MergeDrag.cell_at(Vector2.ZERO, 0.0, 6), -1, "Und ohne Zellgröße erst recht nicht")
+
+
+## A 6x6 board with the given tiers, cell by cell.
+func _drag_board(cells: Array) -> PackedInt32Array:
+	var board := Merge3D.create_board(6)
+	for i in cells.size():
+		board[i] = int(cells[i])
+	return board
 
 
 # --- dragon flight ----------------------------------------------------------
