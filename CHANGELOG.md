@@ -49,3 +49,4 @@ session. Written by the runner on success, or by
 - **#33** I'll start by understanding the current state of the Crystal Jumper game and the scope boundaries.N… — `af1c267` <!-- 33:run_muq5ryho_b0c66f -->
 - **#32** I'll start by reading the project documentation and understanding the current state of the Jumper g… — `ee821aa` <!-- 32:run_muq5s081_780f33 -->
 - **#31** I'll start by reading AGENTS.md and understanding the FreeCell implementation.Foreign work is in th… — `05fc178` <!-- 31:run_muq5s0xs_b3b924 -->
+- **#26** I'll start by reading the project structure and understanding the flying mechanic.The tree is dirty… — `22b46c5` <!-- 26:run_muq5s57a_e95d14 -->
