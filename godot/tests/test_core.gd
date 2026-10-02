@@ -19,6 +19,15 @@ const LegalClass := preload("res://src/core/logic/app_legal.gd")
 
 const ServerDialogClass := preload("res://src/core/ui/server_dialog.gd")
 
+## The theme picker decides, from the registry alone, which of a game's lobby
+## tiles are editions of one game — and how the top bar offers them.
+const ThemePickerClass := preload("res://src/core/ui/theme_picker.gd")
+
+## A bare 2D screen to hang the dialog on. The real jumpers are `WorldScreen`s
+## built by another scope's files; what is under test here is the core's half,
+## and `Screen` is the cheapest host that has a `modal()` and a top bar.
+const ScreenClass := preload("res://src/core/ui/screen.gd")
+
 ## The suggestion flow composes the label and the player's text before the
 ## entry is born.
 const SuggestionContextClass := preload("res://src/core/logic/suggestion_context.gd")
@@ -45,6 +54,7 @@ func run(kit: TestKit, scene_tree: SceneTree) -> void:
 	await _delivery()
 	await _telegram_route()
 	_legal()
+	await _themed_editions()
 	_server_address()
 
 
@@ -673,6 +683,110 @@ func _legal() -> void:
 		LegalClass.report_body(7, "Beleidigung", "Grund", "n"),
 		"Zwischenablage und Mail tragen denselben Text")
 	t.suite_done()
+
+
+# --- Themed editions --------------------------------------------------------
+
+## Three lobby tiles for one screen is a lobby that sells one game three times.
+## The picker is the other half of folding them into one tile: the screen offers
+## the editions itself. This suite pins both halves of that contract — which
+## entries count as editions, and that a screen with them gets a working button
+## and a dialog listing all of them.
+func _themed_editions() -> void:
+	t.suite("Themenwahl")
+
+	# The family is read, not declared: three registry entries that open one
+	# screen script are three editions of one game. That is what makes the
+	# folding safe — nothing has to be listed twice and kept in step.
+	t.equal(ThemePickerClass.family_of("crystal3d").size(), 3,
+		"Die drei Jumper-Fassungen sind eine Familie")
+	t.equal(ThemePickerClass.family_of("tetris").size(), 1,
+		"Tetris ist ein Spiel fuer sich")
+	t.equal(ThemePickerClass.family_of("lobby").size(), 0,
+		"Der Lobby gehoert gar keinem Spiel")
+
+	# The current screen is not one of its own alternatives — that would give the
+	# dialog a card for where the player already is.
+	t.equal(ThemePickerClass.editions_for("crystal3d").size(), 2,
+		"Das Kristall-Thema kennt die beiden anderen")
+	t.check(ThemePickerClass.has_editions("crystal3d"),
+		"Und genau die bekommt einen Knopf")
+	t.check(not ThemePickerClass.has_editions("tetris"),
+		"Ein Spiel ohne Fassungen behaelt seine Leiste")
+	t.check(not ThemePickerClass.has_editions("lobby"),
+		"Der Lobby auch nicht")
+
+	# A card without a target is a picture: every edition has to name the screen
+	# it opens, and none of them may be the one already open.
+	var sound := true
+	for edition in ThemePickerClass.editions_for("crystal3d_halloween"):
+		var target := str(edition.get("screen", ""))
+		sound = sound and target in ["crystal3d", "crystal3d_christmas"]
+		sound = sound and not str(edition.get("name", "")).is_empty()
+	t.check(sound, "Jede Fassung nennt ihr Ziel und ihren Namen")
+
+	# Each edition keeps its own record, which is what the merge must not cost a
+	# player: the three highscore keys stay with the three themes.
+	var keys := 0
+	for edition in ThemePickerClass.editions_for("crystal3d"):
+		if not str(edition.get("highscore_key", "")).is_empty():
+			keys += 1
+	t.equal(keys, 2, "Jede Fassung fuehrt ihren eigenen Highscore")
+
+	t.equal(str(ThemePickerClass.current_edition("crystal3d_halloween").get("screen", "")),
+		"crystal3d_halloween", "Das Halloween-Thema erkennt sich selbst")
+	t.check(ThemePickerClass.current_edition("lobby").is_empty(),
+		"Der Lobby gehoert zu keinem Thema")
+
+	# On a real screen: the top bar carries the button, and the dialog it opens
+	# lists the other two editions plus the way back.
+	var host := ScreenClass.new()
+	host.screen_id = "crystal3d_christmas"
+	tree.root.add_child(host)
+
+	# One button, not three: it wears the edition that is on screen, and the
+	# dialog it opens is where the others are named. Three extra captions would
+	# have cost more of a phone's top bar than the switch is worth.
+	var captions := ""
+	for node in host.find_children("*", "Button", true, false):
+		captions += str((node as Button).text)
+	t.check("✧" in captions, "Die Leiste traegt das Zeichen der offenen Fassung")
+	t.check("☠" not in captions, "Die anderen beiden stehen im Dialog, nicht in der Leiste")
+
+	var layer := ThemePickerClass.open(host)
+	t.check(layer != null, "Der Dialog baut sich ueber den Bildschirm")
+	t.check(host.has_modal(), "Er liegt auf der Modal-Ebene des Bildschirms")
+	t.check(ThemePickerClass.is_open(), "und weiss, dass er offen ist")
+	t.equal(_cards_in(layer), 2, "Eine Karte je anderer Fassung")
+	t.check(ThemePickerClass.open(host) == layer, "Ein zweiter Tap stapelt keinen zweiten Dialog")
+
+	ThemePickerClass.close()
+	# `queue_free()` frees at the end of the frame, so the layer is still a child
+	# for the rest of this one. Reading `has_modal()` immediately would prove
+	# nothing about whether it ever goes away.
+	await tree.process_frame
+	t.check(not host.has_modal(), "Schliessen nimmt die Ebene mit")
+	t.check(not ThemePickerClass.is_open(), "und der Dialog weiss es")
+
+	host.screen_id = "tetris"
+	t.check(ThemePickerClass.open(host) == null, "Ein Spiel ohne Fassungen baut keinen Dialog")
+	t.check(not host.has_modal(), "und legt auch keine Ebene an")
+	host.queue_free()
+	t.suite_done()
+
+
+## Counts the edition cards below `node`. Marked with a meta rather than counted
+## by type, because the dialog also holds the panel the cards sit in.
+func _cards_in(node: Node) -> int:
+	var found := 0
+	var stack: Array[Node] = [node]
+	while not stack.is_empty():
+		var current: Node = stack.pop_back()
+		if current.has_meta(ThemePickerClass.CARD_META):
+			found += 1
+		for child in current.get_children():
+			stack.append(child)
+	return found
 
 
 # --- Server address ---------------------------------------------------------

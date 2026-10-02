@@ -192,6 +192,7 @@ const SCOPE_SUITES = {
   meshes: ['Asset-Registry', 'Mesh-Galerie', 'Mesh — Detailstufen', 'Mesh-Galerie — Halle'],
   lobby: ['Lobby-Geometrie', 'Vorschlagsdialog'],
   core: ['Mechaniken', 'Inventar', 'Vorschlag — Herkunft', 'Auftragsweg', 'Server-Adresse',
+    'Themenwahl',
     'Vorschlags-Warteschlange', 'Vorschlags-Warteschlange — Ablage',
     'Vorschlags-Warteschlange — Backoff', 'Vorschlags-Warteschlange — Obergrenze',
     'Vorschlags-Warteschlange — Zustellung',

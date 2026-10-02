@@ -170,6 +170,13 @@ static func set_bar(node: ProgressBar, ratio: float, color: Color) -> void:
 ## dictionary. They sit in front of "◀ Lobby", because they are the screen's own
 ## action and the bar's stock buttons are the ways out of it. An empty list is
 ## the normal answer and adds nothing to the bar.
+##
+## Ahead of the companions sits the theme button, and only where there is one:
+## `ThemePicker` answers from the registry whether this screen has other
+## editions of its game, and a game that has none gets exactly the bar it had.
+## The button wears the current edition's own icon and accent, because that is
+## what the editions differ in — and it is 60 wide rather than a caption, so
+## three more of them would still fit a phone.
 static func top_bar(height: float, owner: Node, on_suggest: Callable, companions: Array = []) -> HBoxContainer:
 	var bar := HBoxContainer.new()
 	bar.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
@@ -188,6 +195,19 @@ static func top_bar(height: float, owner: Node, on_suggest: Callable, companions
 	var spacer := Ui.spacer()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(spacer)
+
+	var screen_id := ThemePicker.screen_id_of(owner)
+	if ThemePicker.has_editions(screen_id):
+		var edition := ThemePicker.current_edition(screen_id)
+		var accent: Color = edition.get("accent", UiTheme.ACCENT)
+		var theme_button := button(str(edition.get("icon", "")), Vector2(60.0, TOP_BAR_BUTTON), accent, func() -> void:
+			Sfx.select()
+			ThemePicker.open(owner)
+		)
+		# A tooltip costs nothing on a desktop run and says nothing on a phone —
+		# which is fine, the dialog spells every edition out.
+		theme_button.tooltip_text = Loc.resolve(str(edition.get("name", "")))
+		bar.add_child(theme_button)
 
 	for entry in companions:
 		var companion := _companion_button(entry as Dictionary)
