@@ -105,8 +105,11 @@ generic logic modules, and `godot/tests/test_core.gd`.
 
 ## Done when
 
-`npm run test:game -- --scope core` is green, and the `Screens` sweep still
-opens every game. A base-class change that only passes `core` is not done.
+`npm run test:affected` is green. For a base-class change that means the **full**
+game suite, not `--scope core`: the tool knows that `godot/src/core/ui/**` and
+`godot/src/core/autoload/**` are the foundation every screen is built on, and it
+runs the `Screens` sweep that opens every game, because a base-class change that
+only passes `core` is not done.
 
 ## Escalate when
 

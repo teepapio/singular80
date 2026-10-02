@@ -84,11 +84,15 @@ npm run agent:prune    # drop merged and clean worktrees
    to `main` and **regenerated**, never reconciled. Merging two versions of a
    900-entry catalogue produces a conflict nobody can resolve by reading;
    regenerating it from the sources cannot conflict at all.
-4. `typecheck`, `npm test`, the full game suite — against the *merged* result
+4. the checks the merge reaches — `scripts/test-affected.mjs`, against the
+   *merged* result. A Tetris branch runs the Tetris suites; a branch that
+   touched `game_registry.gd`, `godot/src/core/ui/**` or a file no scope owns
+   runs the whole game catalogue. `npm run gate -- --full` runs all of it.
 5. only then fast-forward `main` and push
 
 A red suite costs one throwaway worktree, not the branch of somebody who worked
-forty minutes for it.
+forty minutes for it. The full catalogue is not gone: `npm run test:full` runs it
+before every APK build, and `--full` forces it here.
 
 ## The rules
 

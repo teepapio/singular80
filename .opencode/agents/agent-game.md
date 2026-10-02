@@ -104,10 +104,13 @@ node scripts/scopes.mjs scope-for   # which suites my change makes worth running
 
 ## Done when
 
-`npm run test:game -- --scope <id>` is green, a new `class_name` has been
-imported once (`npm run godot:import`), and a new suite is registered in **both**
-`SCOPE_SUITES` and `godot/tests/run_tests.gd`. A test in neither runs in no
-scope, and the scope is green without it.
+`npm run test:affected` is green — it reads the files you touched and runs the
+suites your game owns (nine for Tetris, not the catalogue of sixteen games), a
+new `class_name` has been imported once (`npm run godot:import`), and a new
+suite is registered in **both** `SCOPE_SUITES` and `godot/tests/run_tests.gd`. A
+test in neither runs in no scope, and the scope is green without it. You do not
+run `npm test` or the full game suite: a game change cannot reach either, and
+the merge step and the APK build run the whole catalogue.
 
 ## Escalate when
 

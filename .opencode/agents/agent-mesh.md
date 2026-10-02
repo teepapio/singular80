@@ -135,9 +135,10 @@ to edit a binary to change it.
 
 ## Done when
 
-All three levels exist, `lod.json` was regenerated, and `npm run test:game --
---scope meshes` is green: it checks that the registry keys and the folders still
-agree, and that `med ≥ low` and `high ≥ med`.
+All three levels exist, `lod.json` was regenerated, and `npm run test:affected`
+is green: for `godot/assets/meshes/**` that is `--scope meshes`, which checks
+that the registry keys and the folders still agree, and that `med ≥ low` and
+`high ≥ med`.
 
 ## Escalate when
 

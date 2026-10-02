@@ -66,11 +66,20 @@ export function gateRefusals(input: {
 /** The files the sync tools own: their output is committed, never merged. */
 export function syncPaths(): string[];
 
-export function verificationSteps(options: { hasNodeModules: boolean }): {
+/**
+ * The steps the gate runs: whatever `scripts/test-affected.mjs` derives from the
+ * files the merge touched, or the whole catalogue with `full`.
+ */
+export function verificationSteps(options: { hasNodeModules: boolean; files?: string[]; full?: boolean }): {
   name: string;
   bin: string;
   args: string[];
-  needsModules: boolean;
+  /** Why this step is in the plan — the merge's file list, in one line. */
+  reasons: string[];
+  timeout?: number;
+  /** Suite and screen counts, for a scoped Godot run. */
+  suites?: number;
+  screens?: number;
 }[];
 
 export function runGate(options?: {
@@ -79,6 +88,8 @@ export function runGate(options?: {
   push?: boolean;
   advance?: boolean;
   keep?: boolean;
+  /** Run the complete catalogue instead of only what the merge touched. */
+  full?: boolean;
   repoRoot?: string;
   log?: (line: string) => void;
 }): GateReport;

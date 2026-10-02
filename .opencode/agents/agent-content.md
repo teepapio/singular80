@@ -93,7 +93,9 @@ is a changelog line; "rebalanced the slime" is not.
 
 ## Done when
 
-`npm run content:sync` has run, `npm test` is green, and a new pack or a new
+`npm run content:sync` has run, `npm run test:affected` is green (for a content
+pack that is `content:check` plus the `content` suites plus
+`tests/content*.test.ts` — not the sixteen other games), and a new pack or a new
 field is mentioned in your report together with the screen that reads it.
 
 ## Escalate when

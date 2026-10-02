@@ -99,10 +99,11 @@ met, say which and why — a smaller honest change beats a larger unproven one.
 
 ## Done when
 
-`npm run test:game -- --scope <dein-scope>` is green, a new `class_name` has
-been imported, and a new suite is registered in **both** `SCOPE_SUITES` and
-`godot/tests/run_tests.gd`. A test that is not registered runs in no scope and
-the scope stays green without it.
+`npm run test:affected` is green — it reads the files you touched and runs what
+those files reach, which for a game is that game's suites and nothing else. A
+new `class_name` has been imported, and a new suite is registered in **both**
+`SCOPE_SUITES` and `godot/tests/run_tests.gd`. A test that is not registered
+runs in no scope and the scope stays green without it.
 
 ## Escalate when
 

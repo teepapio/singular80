@@ -100,10 +100,13 @@ phone, the dashboard and the runner.
 
 ## Done when
 
-`npm run typecheck` and `npm test` are green. `typecheck` is not a formality: the
-database layer and the type definition can disagree, the suite stays green, and
-`main` is broken for everyone until the next gate. When you add a column, add it
-in **both** places in the same commit.
+`npm run test:affected` is green. For a change under `server/` or `src/` that is
+`typecheck` and the whole Node suite — `vitest related` follows static imports
+only, and this tree reaches its own scripts through `createRequire`, so a
+narrowed selection would be a green run that checked nothing. `typecheck` is not
+a formality: the database layer and the type definition can disagree, the suite
+stays green, and `main` is broken for everyone until the next gate. When you add
+a column, add it in **both** places in the same commit.
 
 ## Escalate when
 

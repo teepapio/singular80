@@ -225,7 +225,9 @@ Sitzung trotzdem — die Freigabe ist die Notverpflegung, nicht der Plan.
 2. Merge der Agent-Zweige, je ein Merge-Commit
 3. abgeleitete Dateien zurücksetzen und **neu erzeugen**, nicht zusammenführen
    (`godot/assets/content`, `godot/assets/locale`, `locale`)
-4. `typecheck`, `npm test`, voller Spieltestlauf — gegen das gemergte Ergebnis
+4. die Prüfungen, die der Merge berührt (`scripts/test-affected.mjs`, gegen das
+   gemergte Ergebnis) — ein Tetris-Zweig fährt die Tetris-Suiten, ein Zweig in
+   geteilter Fläche den ganzen Spieltestlauf
 5. erst danach Fast-Forward von `main` und Push
 
 Ein roter Lauf kostet damit **einen Worktree, nicht den Branch eines Spielers**,
@@ -236,6 +238,7 @@ Spielzeile ist ein Fehler, kein Ergebnis.
 ```bash
 npm run gate:status        # was würde gemergt, welcher Zweig ist offen
 npm run gate               # prüfen, mergen, fast-forwarden, pushen
+npm run gate -- --full         # den ganzen Katalog prüfen statt nur des Merge-Umfangs
 npm run gate -- --no-verify    # ohne die Suiten (nur mit Begründung)
 npm run gate -- --no-advance   # prüfen, main aber unangetastet lassen
 npm run gate -- --keep         # Gate-Worktree liegen lassen zum Nachsehen
@@ -560,7 +563,7 @@ Vier Sekunden, die in dieser Sitzung einen halben Tag ersetzt haben:
    committen. Ohne den Spiegel übersetzt das Gerät einen Katalog, den das
    Repository nicht hat — und `npm run locale:check` fällt bei genau dem
    Unterschied um. Steht man dabei als Agent in einer Unterteilung, ist
-   `sync` Sache der Leitsitzung: siehe „Tests gehören der Leitsitzung".
+   `sync` Sache der Leitsitzung: siehe „Tests: nur, was die Änderung erreicht".
 
 ## Keine Prozesse nach Namensmuster töten
 
@@ -588,51 +591,71 @@ Ein Namensmuster ist keine Unterscheidung, sondern eine Vermutung. Gilt:
   hängender Prozess ist ein Ärgernis; ein zerstörtes Fenster des Besitzers ist
   ein Vertrauensverlust.
 
-## Tests gehören der Leitsitzung
+## Tests: nur, was die Änderung erreicht
 
-**Ein Agent aus einer Unterteilung prüft nichts. Das Testen ist die Arbeit der
-Leitsitzung, die den Auftrag verteilt hat.**
+**Ein Agent prüft seine Änderung — mit `npm run test:affected`, und nur damit.
+Der volle Lauf gehört dem Merge-Gate und dem APK-Bau.**
 
-Das ist keine Formalie, und der Grund ist nicht die Laufzeit. Der Arbeitsbaum
-wird geteilt, und zwei Prüfungen desselben Baums sind keine zwei Prüfungen,
-sondern ein Rennen:
+Gemessen am 2026-10-02 auf diesem Baum: `typecheck` 3 s, `npm test` 24 s, der
+volle Spieltestlauf 42 s. Ein Tetris-Agent, der alle drei fährt, braucht 69 s,
+davon 66 s die nicht Tetris betreffen — die neun Tetris-Suiten sagen es in 6 s.
+Das war keine Dummheit, das war die Vorschrift: „Prüfe deine Änderung mit
+`npm run typecheck` und `npm test`" verlangt genau das. `scripts/test-affected.mjs`
+beantwortet stattdessen die Frage, die wirklich gestellt wird — *was erreicht
+diese Änderung?* — und zwar aus demselben Manifest, das auch Dateieigentum und
+Suitenzuordnung entscheidet.
 
-- **Die Suites sind überschneidend.** Zwei Agenten, die zur selben Zeit
-  `npm run test:game` starten, sehen beide denselben Zwischenstand — auch wenn
-  beide nur ihre *eigenen* Dateien geändert haben. Der Fehlschlag, den der eine
-  meldet, gehört dann zu der halben Arbeit des anderen, und beide Teile
-  verlieren Zeit an derselben Diagnose.
-- **Zwei der Werkzeuge schreiben.** `npm run locale:sync` überschreibt
-  `godot/assets/locale/`, und `npm run locale:lock` schreibt
-  `locale/identical.json`. Ein Agent, der `lock` nebenbei laufen lässt, während
-  jemand anderes gerade übersetzt, schreibt den unübersetzten englischen Satz
-  auf die Liste der absichtlich gleichen Einträge — und der Zähler, der ihn
-  eben noch als offen gemeldet hat, meldet danach 100 %. Das ist die
-  gefährlichste Folge: aus einer echten Lücke wird eine grüne Zahl, und niemand
-  hat etwas kaputtgemacht, es ist nur unsichtbar geworden.
-- **Ein Fehlschlag, den man nicht verursacht hat, wird zum Auftrag.** Der Agent,
-  der ihn sieht, fängt an, fremden Code zu reparieren, und beide Änderungen
-  landen am Ende in einem Commit, den niemand mehr zuordnen kann.
+```bash
+npm run test:affected                    # liest die geänderten Dateien, fährt das Erreichbare
+npm run test:affected -- --dry-run       # zeigt den Plan mit dem Grund je Schritt
+npm run test:affected -- --staged        # nur, was im Index liegt
+npm run test:affected -- --full          # der ganze Katalog
+```
 
-**Was ein Agent stattdessen tut:** die eigene Änderung liest, den Pfad und die
-Zeile nennt, und im Bericht **den Befehl aufschreiben, den die Leitsitzung
-fahren soll** — nicht das Ergebnis behaupten. „`Loc.f` in
-`mesh_gallery_screen.gd:409` ist jetzt aufgelöst, `npm run locale:check` war
-vor dieser Änderung grün und sollte es danach auch sein" ist ein brauchbarer
-Befund. „Der Test ist grün" ist keiner, wenn drei andere Agenten zur selben
-Zeit am selben Baum arbeiten.
+Die Regeln dahinter, jede mit ihrer Begründung im Werkzeug:
 
-Ausgenommen ist das **Lesen** von Dateien und das Nachschlagen in Ausgaben,
-die schon da sind: `git status`, `git diff`, `git log`, `grep`, und das Lesen
-eines Katalogs. Das kostet niemanden etwas und verändert nichts. Die Grenze
-verläuft genau dort, wo ein Befehl den Baum anfasst — und `sync` und `lock`
-fassen ihn an, auch wenn sie nach Kontrolle aussehen.
+- **Ein Spiel** fährt `--scope <das spiel>`: `godot/src/game/tetris/**` →
+  neun Suiten, ein Screen.
+- **Eine geteilte oder herrenlose Datei** fährt den ganzen Spieltestlauf.
+  `game_registry.gd` liest jeder Screen, `godot/src/core/ui/**` ist die
+  Basisklasse jedes 3D-Screens, und eine Datei ohne Besitzer hat niemand
+  bewiesen — das ist der Fall, in dem 42 s die richtige Antwort sind.
+- **Content** fährt die Content-Suiten plus `tests/content*.test.ts`, **ein
+  Sprachkatalog** die sechzehn Sprachsuiten von `core` (die laufen in keinem
+  anderen Scope) plus `tests/locale.test.ts`.
+- **TypeScript** fährt `typecheck` und den ganzen Node-Teil. `vitest related`
+  verfolgt nur statische Importe, und dieser Baum lädt seine eigenen
+  `scripts/*.mjs` über `createRequire` und liest JSON zur Laufzeit — eine
+  eingegrenzte Auswahl, die eine Datei übersieht, ist ein grüner Lauf, der nichts
+  geprüft hat.
+- **Immer** fährt `content:check` und `locale:check`, zusammen 0,4 s. Sie sind
+  das Einzige, was einen Spiegel bemerkt, der von seiner Quelle abgewandert ist.
 
-**Die Leitsitzung prüft einmal, am Ende, für alle.** Das ist nicht nur billiger,
-sondern das einzige, was eine Aussage wert ist: ein Lauf, der nach allen
-Agenten kommt, sieht einen Baum, den niemand mehr anfasst. Wer die Prüfungen
-verstreut, bekommt am Ende fünf Teilergebnisse, von denen keines aussagt, ob der
-Stand als Ganzes stimmt.
+**Was nicht eingegrenzt wird, ist nicht der Test, sondern das Schreiben.**
+`npm run locale:sync` überschreibt `godot/assets/locale/`, `locale:lock` schreibt
+`locale/identical.json`, und `content:sync` schreibt den Inhaltsspiegel. Läuft
+das nebenbei, während jemand anderes übersetzt, landet ein unübersetzter
+englischer Satz auf der Liste der absichtlich gleichen Einträge — und der Zähler,
+der ihn eben noch als offen gemeldet hat, meldet danach 100 %. Das ist die
+gefährlichste Folge: aus einer echten Lücke wird eine grüne Zahl, und niemand hat
+etwas kaputtgemacht, es ist nur unsichtbar geworden. Diese drei Werkzeuge gehören
+der Leitsitzung, `sync` und `lock` auch dann, wenn sie nach Kontrolle aussehen.
+
+**Der volle Lauf verschwindet nicht, er zieht um.** Er läuft an zwei Stellen:
+das Merge-Gate prüft das, was der Merge berührt (derselbe Plan, gegen das
+gemergte Ergebnis), und `npm run godot:apk*` fährt `npm run test:full` vor dem
+Export — ein Release beweist sich ganz, ein Agent nicht. `npm run gate -- --full`
+ erzwingt es auch im Gate.
+
+**Ein Fehlschlag, den man nicht verursacht hat, wird zum Auftrag.** Der Agent,
+der ihn sieht, fängt an, fremden Code zu reparieren, und beide Änderungen landen
+am Ende in einem Commit, den niemand mehr zuordnen kann. Was er stattdessen
+tut: die eigene Änderung liest, den Pfad und die Zeile nennt, und im Bericht
+den Befehl, den die Leitsitzung fahren soll — nicht das Ergebnis behaupten.
+
+Ausgenommen ist das **Lesen** von Dateien und das Nachschlagen in Ausgaben, die
+schon da sind: `git status`, `git diff`, `git log`, `grep`, und das Lesen eines
+Katalogs.
 
 ## Neue `class_name` → sofort importieren
 
@@ -745,11 +768,18 @@ als Beweis für ein fehlendes Gerät gilt.
 
 ## Befehle
 
+- `npm run test:affected` — **der Befehl für eine Änderung.** Liest die
+  geänderten Dateien und fährt genau die Prüfungen, die diese Dateien erreichen
+  (siehe „Tests: nur, was die Änderung erreicht"). `--dry-run` zeigt den Plan,
+  `--staged` nimmt nur den Index, `--full` fährt alles.
+- `npm run test:full` — der ganze Katalog (`typecheck`, `npm test`, alle
+  Spieltests). Läuft von `npm run godot:apk*` vor dem Export.
 - `npm run typecheck` — `tsc --noEmit`, muss fehlerfrei sein.
 - `npm test` — prüft zuerst den Content-Sync, dann `locale:check` (Kataloge
   gegen den Code, Platzhalter gegen Werte, Spiegel gegen Quelle), dann
   `vitest run` (Server/Dashboard).
-- `npm run test:game` — **headless GDScript-Suite** (Regeln *und* echte Screens).
+- `npm run test:game` — **headless GDScript-Suite** (Regeln *und* echte Screens),
+  mit `-- --scope <spiel>` auf einen Scope eingegrenzt.
 - `npm run build` — Vite-Build des Dashboards.
 - `npm run content:sync` — `content/*.json` nach `godot/assets/content/` spiegeln
   (Pflicht vor jedem Godot-Build; `npm test` schlägt bei Abweichung fehl).
@@ -778,7 +808,8 @@ als Beweis für ein fehlendes Gerät gilt.
   gemergte und saubere entfernen.
 - `npm run gate:status` / `npm run gate` — Merge-Gate: was würde gemergt, dann
   mergen, prüfen, fast-forwarden, pushen.
-- Reihenfolge für Änderungen: `typecheck` → `test` → `test:game` → `build` → `godot:apk`.
+- Reihenfolge für Änderungen: `test:affected` → `build` → `godot:apk` (der APK-Bau
+  fährt `test:full` von selbst).
 
 ## Struktur
 

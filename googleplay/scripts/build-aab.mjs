@@ -69,6 +69,17 @@ if (!existsSync(path)) {
 ensureDir(BUILD_DIR);
 const aab = join(BUILD_DIR, 'singular80-play.aab');
 
+// The full catalogue, before the export. Every other lane in this repository
+// runs `npm run test:affected` and pays only for what its change reaches; a
+// Play upload is the one build that ships to everybody, so it is where the
+// 69 seconds are spent on purpose.
+const suite = tryRun('node', ['scripts/test-affected.mjs', '--full'], { cwd: REPO, timeout: 1_800_000 });
+if (suite.code !== 0) {
+  console.log(suite.out.split('\n').slice(-40).join('\n'));
+  abort('Voller Testlauf rot — es wurde nichts exportiert.');
+}
+ok('Voller Testlauf grün (typecheck, npm test, alle Spieltests).');
+
 // Strip the keystore password out of the preset again — before *and* after the
 // export, so an aborted build never leaves it behind in the working tree.
 function scrubPreset() {

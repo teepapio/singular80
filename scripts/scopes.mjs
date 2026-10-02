@@ -313,6 +313,12 @@ const staticScopes = {
       // The types for the gate, for the same reason as `worktree.d.mts`: the
       // test imports the module, and an untyped import is a typecheck error.
       'scripts/merge-gate.d.mts',
+      // The gate's verification steps come from here: it decides what a merge
+      // has to prove, and it is the same answer an agent gets for its own
+      // change. Two files, because the gate needs the plan and the test needs
+      // the shape.
+      'scripts/test-affected.mjs',
+      'scripts/test-affected.d.mts',
       // Die Typen für den Test, der das Werkzeug benutzt. `.d.mts`, weil der
       // Import auf `locale.mjs` zeigt und TypeScript daneben genau das sucht.
       'scripts/locale.d.mts',

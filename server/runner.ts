@@ -285,7 +285,7 @@ ${siblingBlock}${scopeBlock}${retryBlock}${resumeBlock}REGELN:
 4. Für neue Code-Mechaniken: lege eine Datei unter godot/src/core/logic/mechanics/<id>.gd an und registriere sie in godot/src/core/logic/mechanics/mechanics_index.gd. Halte dich an das Mechanic-Interface dort.
 5. Performance ist wichtig: keine Allokationen pro Frame, vorhandene Pools nutzen, Entity-Limits beachten. Das Spiel muss flüssig auf Handy und Tablet laufen.
 6. Touch-Steuerung ist Pflicht: jedes Spiel muss per virtuellem Stick und Buttons bedienbar sein, Tastatur ist optional.
-7. Prüfe deine Änderung mit: "npm run typecheck" und "npm test". Im Godot-Bereich reicht der gezielte Lauf "npm run test:game -- --scope <dein-scope>"; der volle Lauf ist der Merge-Schritt.
+7. Prüfe deine Änderung mit EINEM Befehl: "npm run test:affected". Er liest die Dateien, die du wirklich angefasst hast, und führt genau die Prüfungen aus, die diese Dateien erreichen — für ein Spiel die Suiten dieses Spiels, für content die Content-Suiten, für TypeScript den Node-Teil. "npm run test:affected -- --dry-run" zeigt den Plan, ohne etwas zu starten. Der volle Lauf ist der Merge-Schritt und der APK-Bau; brauchst du ihn, weil deine Änderung in eine geteilte Datei ging, sage das im Bericht, statt ihn hier zu fahren.
 8. Committe am Ende ausschließlich deine eigenen Dateien. "git add -A" ist verboten, weil im selben Baum andere Agenten arbeiten. Nutze einen eigenen Index:
    export GIT_INDEX_FILE=/tmp/opencode/idx-$(date +%s)-$$ ; git read-tree HEAD ; git add <deine Dateien> ; git commit -m "feat(suggestion-${suggestion.id}): <kurze Beschreibung>"
 9. Wenn du eine Datei außerhalb deines Scopes brauchst (z. B. game_registry.gd, router.gd, asset_registry.gd), lege sie NICHT an, sondern schreibe sie in deine Zusammenfassung — das ist Sache des Merge-Schritts.
@@ -313,7 +313,7 @@ Dein Arbeitsverzeichnis ist "${isolation.path}" — ein eigener Checkout dieses 
 - Bleibe hier. Der gemeinsame Baum ist die Arbeit anderer Agenten.
 - Committiere auf "${isolation.branch}", niemals auf main. Hier ist "git add -A" richtig: es gibt in diesem Checkout nichts zu stehlen.
 - Der Merge auf main ist Sache des Merge-Schritts, nicht deiner: "npm run merge-gate ${label}".
-- Prüfe wie gewohnt mit "npm run test:game -- --scope <dein-scope>".
+- Prüfe mit "npm run test:affected" — es liest deine Änderung und fährt nur, was sie erreicht.
 `;
 }
 

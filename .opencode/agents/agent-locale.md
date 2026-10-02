@@ -104,9 +104,11 @@ have a different structure, and that is not a question a program can answer.
 
 ## Done when
 
-`npm run locale:check` is green, and `npm run test:game -- --scope core` is
-green. The second one is not optional: it holds sixteen language suites that run
-in no other scope.
+`npm run test:affected` is green. For a catalogue change that means
+`locale:check`, `tests/locale.test.ts` and the sixteen language suites of
+`--scope core`, which run in no other scope — the tool picks them from the files
+you touched. The second part is not optional: it holds the runtime half of the
+language layer.
 
 ## Escalate when
 

@@ -100,10 +100,10 @@ discover it as a mystery merge.
 
 ## Done when
 
-`npm run build` produces a bundle, `npm test` is green, and the view you touched
-answers its question without a second click. Escape every interpolated string —
-`innerHTML` with a suggestion text in it is an XSS on a page that is deliberately
-open.
+`npm run build` produces a bundle, `npm run test:affected` is green, and the view
+you touched answers its question without a second click. Escape every
+interpolated string — `innerHTML` with a suggestion text in it is an XSS on a
+page that is deliberately open.
 
 ## Escalate when
 

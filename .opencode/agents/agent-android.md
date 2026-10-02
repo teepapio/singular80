@@ -84,12 +84,18 @@ release pipeline, and the act of getting a build onto a device.
 ```bash
 npm run godot:import        # content AND locale mirror, then the Godot import
 npm run godot:android-template
-npm run godot:apk:release   # or :debug
+npm run godot:apk:release   # or :debug — runs the full catalogue first
 ```
 
 `godot:import` mirrors the locale step as well as content. Skip it and the
 device translates a catalogue the repository does not have, and `npm test` fails
 on the difference at the worst possible moment.
+
+**The APK build is where the full run lives.** `npm run godot:apk*` starts with
+`npm run test:full` — `typecheck`, `npm test` and every Godot suite, 69 s on this
+tree. Everywhere else an agent runs `npm run test:affected`, which drives only
+what its change reaches; that division is the reason a build is the only place
+that costs 69 s on purpose.
 
 ## After the build, look inside it
 

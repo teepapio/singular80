@@ -199,6 +199,18 @@ if (!verifyOnly) {
     );
   }
 
+  // The full catalogue before the export, for the same reason as in
+  // `build-aab.mjs`: this APK is what a player installs, and it is the one build
+  // that pays for the whole suite. Everything else in the repository runs
+  // `npm run test:affected` and sees only what its change reaches.
+  step('1b/5 Voller Testlauf');
+  const suite = tryRun('node', ['scripts/test-affected.mjs', '--full'], { cwd: REPO, timeout: 1_800_000 });
+  if (suite.code !== 0) {
+    console.log(suite.out.split('\n').slice(-40).join('\n'));
+    abort('Voller Testlauf rot — es wurde nichts exportiert.');
+  }
+  ok('Voller Testlauf grün (typecheck, npm test, alle Spieltests).');
+
   step('2/5 Content spiegeln + Import');
   if (tryRun('node', ['scripts/sync-content.mjs'], { cwd: REPO }).code !== 0) abort('content:sync fehlgeschlagen.');
   tryRun('godot', ['--headless', '--path', 'godot', '--import'], { cwd: REPO, timeout: 900_000 });

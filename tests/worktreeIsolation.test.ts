@@ -333,12 +333,41 @@ describe('Gate: Entscheidungen', () => {
     expect(DERIVED_MIRRORS).toEqual(['godot/assets/content', 'godot/assets/locale']);
   });
 
-  it('prüft erst das billige, dann das teure', () => {
-    const steps = verificationSteps({ hasNodeModules: true }).map((s) => s.name);
-    expect(steps).toEqual(['typecheck', 'npm test', 'Spieltests']);
-    // Without node_modules the two JS steps cannot run, and skipping them silently
-    // would report a green gate that checked nothing.
-    expect(verificationSteps({ hasNodeModules: false }).map((s) => s.name)).toEqual(['Spieltests']);
+  /**
+   * The gate judges what the merge brought in, not the whole tree.
+   *
+   * `verificationSteps` is `test-affected.mjs` with the merge's file list, so
+   * these three cases are the contract between the two: a game branch is checked
+   * by that game's suites, a branch that touched shared ground by the whole
+   * catalogue, and `--full` by the catalogue regardless.
+   */
+  it('prüft nur, was der Merge berührt', () => {
+    const game = verificationSteps({ hasNodeModules: true, files: ['godot/src/game/tetris/tetris_screen.gd'] });
+    expect(game.map((s) => s.name)).toEqual(['content:check', 'locale:check', 'Spieltests (tetris)']);
+    expect(game.at(-1)?.args).toEqual(['scripts/test-game.mjs', '--scope', 'tetris']);
+
+    const shared = verificationSteps({ hasNodeModules: true, files: ['godot/src/core/logic/game_registry.gd'] });
+    expect(shared.at(-1)?.args).toEqual(['scripts/test-game.mjs']);
+
+    const server = verificationSteps({ hasNodeModules: true, files: ['server/runner.ts'] });
+    expect(server.map((s) => s.name)).toEqual(['content:check', 'locale:check', 'typecheck', 'npm test']);
+  });
+
+  it('prüft den ganzen Katalog, wenn er das verlangt', () => {
+    expect(verificationSteps({ hasNodeModules: true, files: ['README.md'], full: true }).map((s) => s.name))
+      .toEqual(['content:check', 'locale:check', 'typecheck', 'npm test', 'Spieltests']);
+  });
+
+  it('nennt bei jedem Schritt, warum er im Plan ist', () => {
+    for (const step of verificationSteps({ hasNodeModules: true, files: ['server/runner.ts'] })) {
+      expect(step.reasons?.length, `${step.name} ohne Grund`).toBeGreaterThan(0);
+    }
+  });
+
+  it('springt die JavaScript-Schritte ohne node_modules, statt sie zu melden', () => {
+    // Skipping them silently would report a green gate that checked nothing.
+    const steps = verificationSteps({ hasNodeModules: false, files: ['server/runner.ts'] }).map((s) => s.name);
+    expect(steps).toEqual(['content:check', 'locale:check']);
   });
 });
 
@@ -493,6 +522,47 @@ describe('Gate: Ende zu Ende', () => {
     const report = runGate({ branches: ['agent/egal'], verify: false, repoRoot: repo, log: () => {} });
     expect(report.refused.join(' ')).toContain('main');
     expect(report.mergeSha).toBeNull();
+  });
+
+  /**
+   * The whole point of the derived plan, end to end: the gate spawns the checks
+   * the merge actually reaches, and a red one stops it before the
+   * fast-forward. `scripts/sync-content.mjs` and `scripts/locale.mjs` are the
+   * two steps that run in *every* plan, so two stubs in the throwaway repository
+   * stand in for the suites — the red one is the interesting half, and it is
+   * what proves the gate does not report green after a failed check.
+   */
+  it('fährt den Plan des Merges und stoppt bei einem roten Schritt', () => {
+    const repo = makeRepo();
+    process.env.S80_WORKTREE_DIR = mkdtempSync(join(tmpdir(), 's80-wt-dir-'));
+    mkdirSync(join(repo, 'scripts'), { recursive: true });
+    // Two stubs: the catalogue checks are in every plan, so this plan is exactly
+    // them and nothing else — the merged file (`Z.md`) reaches no scope.
+    writeFileSync(join(repo, 'scripts', 'sync-content.mjs'), 'process.exit(0);\n');
+    writeFileSync(join(repo, 'scripts', 'locale.mjs'), 'process.exit(Number(process.env.S80_LOCALE_ROT ?? 0));\n');
+    git(repo, ['add', 'scripts']);
+    git(repo, ['commit', '-qm', 'Prüfwerkzeuge als Stubs']);
+
+    createWorktree('plan', { repoRoot: repo, doImport: false });
+    agentCommit(repo, 'plan', 'Z.md', 'z', 'feat(suggestion-4): Z');
+
+    const ok = runGate({ branches: ['agent/plan'], verify: true, repoRoot: repo, log: () => {} });
+    const verified = ok.steps.filter((s) => s.kind === 'verify').map((s) => s.name);
+    expect(verified).toEqual(['content:check', 'locale:check']);
+    expect(ok.refused).toEqual([]);
+    expect(ok.fastForwarded).toBe(true);
+
+    // The same merge with a red catalogue check: `main` must stay where it was.
+    process.env.S80_LOCALE_ROT = '1';
+    const before = git(repo, ['rev-parse', 'HEAD']);
+    createWorktree('rot', { repoRoot: repo, doImport: false });
+    agentCommit(repo, 'rot', 'R.md', 'r', 'feat(suggestion-5): R');
+    const red = runGate({ branches: ['agent/rot'], verify: true, repoRoot: repo, log: () => {} });
+    expect(red.steps.find((s) => s.kind === 'verify' && !s.ok)?.name).toBe('locale:check');
+    expect(red.refused.join(' ')).toContain('locale:check');
+    expect(red.fastForwarded).toBe(false);
+    expect(git(repo, ['rev-parse', 'HEAD'])).toBe(before);
+    delete process.env.S80_LOCALE_ROT;
   });
 });
 

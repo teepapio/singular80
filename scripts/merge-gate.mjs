@@ -37,6 +37,7 @@ import {
   dirtyFiles,
   listAgentWorktrees,
 } from './worktree.mjs';
+import { affectedSteps } from './test-affected.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -117,14 +118,17 @@ export function syncPaths() {
 /**
  * What the gate verifies, and in which order. Cheap and specific first, so a
  * mistake is named before the 15 minutes are spent.
+ *
+ * The steps come from `test-affected.mjs`: the gate judges the files the merge
+ * actually brought in, so a Tetris branch does not pay 42 s for the catalogue of
+ * sixteen games. What the merge touched nobody owns, or touches a shared file,
+ * is exactly the case where the whole catalogue runs — that is the same rule the
+ * agent gets, applied to the merged result instead of to a working tree.
+ *
+ * `full` is what the APK build uses, and what `--full` forces here.
  */
-export function verificationSteps({ hasNodeModules }) {
-  const steps = [
-    { name: 'typecheck', bin: 'npx', args: ['tsc', '--noEmit'], needsModules: true },
-    { name: 'npm test', bin: 'npm', args: ['test'], needsModules: true },
-    { name: 'Spieltests', bin: 'node', args: ['scripts/test-game.mjs'], needsModules: false },
-  ];
-  return steps.filter((s) => !s.needsModules || hasNodeModules);
+export function verificationSteps({ hasNodeModules, files = [], full = false }) {
+  return affectedSteps(files, { full, hasNodeModules }).filter((s) => s.bin);
 }
 
 /* ------------------------------------------------------------------ gate --- */
@@ -133,7 +137,7 @@ export function verificationSteps({ hasNodeModules }) {
  * The whole cycle, in a throwaway checkout. Returns a report; never throws for
  * a merge conflict, because a conflict is an answer and not a crash.
  */
-export function runGate({ branches, verify = true, push = true, advance = true, keep = false, repoRoot = root, log = console.log } = {}) {
+export function runGate({ branches, verify = true, push = true, advance = true, keep = false, full = false, repoRoot = root, log = console.log } = {}) {
   const head = git(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']).out;
   const base = git(repoRoot, ['rev-parse', '--verify', '--quiet', 'refs/heads/main']).out;
   const hasOrigin = git(repoRoot, ['remote']).out.split('\n').includes('origin');
@@ -153,6 +157,9 @@ export function runGate({ branches, verify = true, push = true, advance = true, 
       report.refused.push(`Gate-Worktree nicht anlegbar: ${added.err}`);
       return report;
     }
+    // `main` as the gate found it: the difference between this commit and the
+    // merged result is what the verification has to cover.
+    const baseSha = git(gateDir, ['rev-parse', 'HEAD']).out;
     // `node_modules` is a symlink, not a copy: 104 MB per gate would be the
     // largest thing in the process, and the packages are read-only here.
     if (existsSync(join(repoRoot, 'node_modules')) && !existsSync(join(gateDir, 'node_modules'))) {
@@ -211,9 +218,15 @@ export function runGate({ branches, verify = true, push = true, advance = true, 
     }
 
     if (verify) {
-      for (const step of verificationSteps({ hasNodeModules })) {
-        log(`prüfe    ${step.name} …`);
-        const res = run(gateDir, step.bin, step.args, { timeout: step.name === 'Spieltests' ? 1_200_000 : 600_000 });
+      // The files the merge brought in, not the files a branch happened to name:
+      // `baseSha..HEAD` after the merges and after the regenerated mirrors is
+      // exactly the difference the gate is about to make `main`.
+      const files = git(gateDir, ['diff', '--name-only', baseSha, 'HEAD']).out.split('\n').filter(Boolean);
+      const steps = verificationSteps({ hasNodeModules, files, full });
+      if (!steps.length) log('         nichts zu prüfen — der Merge brachte keine Datei mit');
+      for (const step of steps) {
+        log(`prüfe    ${step.name} …${step.reasons?.length ? `  (${step.reasons[0]})` : ''}`);
+        const res = run(gateDir, step.bin, step.args, { timeout: step.timeout ?? 600_000 });
         const ok = res.status === 0;
         report.steps.push({
           kind: 'verify',
@@ -283,7 +296,8 @@ function tail(...parts) {
 const HELP = `Merge-Gate — node scripts/merge-gate.mjs [branch …] [optionen]
 
   --status      nur berichten, nichts mergen
-  --no-verify   ohne typecheck, npm test und Spieltests mergen
+  --no-verify   ohne Prüfung mergen
+  --full        den vollen Katalog prüfen statt nur dessen, was der Merge berührt
   --no-advance  prüfen, aber main nicht fast-forwarden
   --no-push     main fast-forwarden, aber nicht pushen
   --keep        den Gate-Worktree liegen lassen zum Nachsehen
@@ -336,6 +350,7 @@ function main(argv) {
     advance: !flags.has('--no-advance'),
     push: !flags.has('--no-push'),
     keep: flags.has('--keep'),
+    full: flags.has('--full'),
     repoRoot,
   });
 
