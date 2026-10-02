@@ -133,9 +133,6 @@ func _hatchery_camera() -> void:
 	t.check(not screen.cam.pointer_up(0), "Und der Abschluss ist kein Tipp")
 	t.check(screen.parent_a == 0 and screen.parent_b == 0, "Ein Zug wählt keinen Drachen aus")
 
-	# Panned all the way left, the pedestal the panel used to hide is in the open
-	# part of the screen — which is the complaint, measured.
-	#
 	# A fresh profile has two dragons, so the two pedestals on the left stand
 	# empty and there is nothing to reach for. The ring is filled the way the
 	# game fills it — one more dragon per free plinth, then the screen's own
@@ -145,10 +142,6 @@ func _hatchery_camera() -> void:
 		if int(screen.pedestals[i]["uid"]) == 0:
 			screen.dragons.append(DragonFlight.random_dragon(900 + i, ["ember"]))
 	screen._place_dragons()
-	screen.cam.pointer_down(0, from)
-	for step in 60:
-		screen.cam.pointer_move(0, from + Vector2(float(step) * 20.0, 0.0))
-	screen.cam.pointer_up(0)
 	var left: int = -1
 	for i in screen.pedestals.size():
 		var spot: Vector3 = screen.pedestals[i]["spot"]
@@ -157,11 +150,21 @@ func _hatchery_camera() -> void:
 			break
 	t.check(left >= 0, "Der Stable hat einen Drachen ganz links")
 	if left >= 0:
-		var spot: Vector3 = screen.pedestals[left]["spot"]
+		# The complaint, measured and not argued. The panel sits at x = 20 and is
+		# 430 wide, so it ends at 450 and swallows every tap left of it: in the
+		# framing this screen was drawn at, the left pedestal is behind it …
+		screen.cam.reset()
+		screen.cam.snap(screen.camera)
+		var hidden: Vector2 = screen.camera.unproject_position(screen._aim[left])
+		t.check(hidden.x < 450.0, "Im alten Bild steht der linke Drache hinter dem Panel")
+		# … and after a drag he stands clear of it. That is the whole suggestion.
+		screen.cam.pointer_down(0, from)
+		for step in 60:
+			screen.cam.pointer_move(0, from + Vector2(float(step) * 20.0, 0.0))
+		screen.cam.pointer_up(0)
 		screen.cam.apply(screen.camera, 1.0)
-		var seen: Vector2 = screen.camera.unproject_position(spot + Vector3(0.0, 1.5, 0.0))
-		# The panel ends at 430 px, so anything right of it can be tapped.
-		t.check(seen.x > 440.0, "Linksher geschoben steht der linke Drachen rechts vom Panel")
+		var seen: Vector2 = screen.camera.unproject_position(screen._aim[left])
+		t.check(seen.x > 470.0, "Linksher geschoben steht derselbe Drache frei")
 		# And a tap there really is that dragon.
 		# 3.4 is the hatchery's own pick radius, in the framing it was drawn at.
 		var picked: int = screen.cam.pick(screen.camera, seen, screen._aim, 3.4)
@@ -206,6 +209,32 @@ func _hatchery_camera() -> void:
 	var nearer: float = screen.camera.position.distance_to(cam.goal())
 	t.check(nearer < away - 0.001, "Und der Bildschirm zieht die Kamera in jedem Frame nach")
 	t.check(nearer > 0.0, "wobei ein Frame nicht die ganze Strecke überspringt")
+
+	# Godot delivers every finger twice: `emulate_mouse_from_touch` and
+	# `emulate_touch_from_mouse` are both on, so a touch arrives again as a mouse
+	# click and a click again as a touch. Handled, both copies reach the rig and
+	# the second one opens a phantom pointer — the valley then pans by itself and
+	# one finger fires a pinch. Godot marks its own copies
+	# `InputEvent.DEVICE_ID_EMULATION` (4.5 class reference, `InputEvent`), and
+	# the screen drops exactly those. Called directly here, because a test that
+	# pushed the event through the input pipeline would be testing Godot's
+	# routing as much as the screen's answer to it.
+	var echo := InputEventScreenTouch.new()
+	echo.index = 0
+	echo.position = Vector2(1240.0, 700.0)
+	echo.pressed = true
+	echo.device = InputEvent.DEVICE_ID_EMULATION
+	screen._unhandled_input(echo)
+	t.equal(cam.tracking(), 0, "Ein emuliertes Touch-Echo kommt im Rig nicht an")
+	var finger := InputEventScreenTouch.new()
+	finger.index = 0
+	finger.position = Vector2(1240.0, 700.0)
+	finger.pressed = true
+	screen._unhandled_input(finger)
+	t.equal(cam.tracking(), 1, "Der echte Touch schon")
+	finger.pressed = false
+	screen._unhandled_input(finger)
+	t.equal(cam.tracking(), 0, "und sein Loslassen schließt den Zug ab")
 	t.suite_done()
 
 
