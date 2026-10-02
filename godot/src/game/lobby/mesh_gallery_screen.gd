@@ -1,37 +1,53 @@
 class_name MeshGalleryScreen
 extends WorldScreen
-## One long hall. Two rows of pedestals on either side, every mesh of the
-## registry in walking order — walk down the nave and they pass on either side,
-## step into the aisle between the rows and the far ones do. Three detail levels
-## can be switched, and in front of a mesh the player presses E for the ordinary
-## suggestion dialog, with that mesh named.
+## One long hall. Rows of pedestals on either side, every mesh of the registry in
+## walking order — walk down the nave and they pass on either side, step into an
+## aisle and the ones behind it do. Three detail levels can be switched, and in
+## front of a mesh the player presses E for the ordinary suggestion dialog, with
+## that mesh named.
 ##
 ## The geometry lives in `MeshGallery`, so it is testable without a screen.
 
-const MOVE_SPEED := 7.5
-const CAMERA_HEIGHT := 9.0
-const CAMERA_DISTANCE := 11.0
+## Metres per second. A player asked for twice the old pace, and 15 m/s is about
+## what a full-height hall lets through: the camera has to keep up (see
+## `CAMERA_LERP`) and a depth of pedestals goes by in 0.7 s, which is still four
+## times as long as a press of the interact button needs.
+const MOVE_SPEED := 15.0
+## The camera chases the player with a first-order lag, so its steady-state
+## distance behind the target is `speed / lerp_speed`. At the old 7.5 m/s and 7.0
+## that was a metre; doubled without this it would have been two, and the knight
+## would have visibly skated away from the camera.
+const CAMERA_LERP := 12.0
+## Height and distance behind the player. Measured against the frustum of the
+## gallery camera (58° vertical, so 42°/48° horizontal on a 16:10 tablet and a
+## 20:9 phone): at the old 9/11 only 12.6 m of floor was visible either side of
+## the player, and the outermost of ten rows stands 19.6 m out. 15/16 puts the
+## player at the centre of a hall they can see across.
+const CAMERA_HEIGHT := 15.0
+const CAMERA_DISTANCE := 16.0
 const SPIN_SPEED := 0.9
 ## Fallback rate for the info caption when nothing flagged a change. The change
 ## flag is what normally drives it; this bounds the staleness if a flag is missed.
 const INFO_INTERVAL := 0.1
 
-## How tall a mesh appears on its pedestal, whatever its real size is.
-const MESH_ON_PEDESTAL := 1.75
+## How tall a mesh appears on its pedestal, whatever its real size is. Ninety per
+## cent more than the 1.75 m it stood at before, which a player asked for; the
+## rows keep their 4.2 m spacing, so neighbours leave 0.9 m between them.
+const MESH_ON_PEDESTAL := 3.3
 
 # --- the hall ---------------------------------------------------------------
 
-## How far the outer row stands from the middle line plus the aisle behind it,
-## and with it the walls.
-const HALL_HALF_WIDTH := 8.6
-const WALL_HEIGHT := 4.2
+## How tall the walls stand. How far to the side they do is not a number here
+## any more: it follows the outermost row, so widening the hall cannot leave the
+## wall standing in the aisle.
+const WALL_HEIGHT := 5.4
 
 ## How far away a mesh may be before it goes into the scene — and how far it may
-## have walked on before it leaves it again. Four pedestals to a step means
-## twice as many meshes stand in as much hall, and a mesh on "high" carries
-## fifty times the triangles of one on "low", so the window follows the level:
-## on "high" it is narrower than the one this hall had with two rows, so it
-## costs about what it did then while showing twice as much per screen.
+## have walked on before it leaves it again. Ten pedestals share a depth now, and
+## the depths are 2.2 times further apart, so the window holds about as many
+## meshes as it did with four to a depth: measured over the whole hall, 84 → 90
+## resident meshes on "low" and 52 → 50 on "high", which carries fifty times the
+## triangles each.
 const LOAD_DISTANCE := {"low": 48.0, "med": 40.0, "high": 30.0}
 ## Meshes taken into the scene per frame. One every 0.6 s of walking, so the
 ## hitch stays a few milliseconds instead of a visible pause.
@@ -41,13 +57,13 @@ const SWEEP_STEP := 1.0
 
 ## The far end of the hall has to disappear into something, and the fog does
 ## the culling the eye expects.
-const VIEW_FAR := 170.0
+const VIEW_FAR := 190.0
 const FOG_COLOR := "060a14"
 const FOG_DENSITY := 0.02
 
 var tier := "low"
 
-## Every key of the registry, in walking order. The four rows take them in turn.
+## Every key of the registry, in walking order. The ten rows take them in turn.
 var keys: Array[String] = []
 
 var pos := Vector3(0, 0, 0)
@@ -75,6 +91,13 @@ var _info_hint: Label
 var _info_dirty := true
 var _info_timer := 0.0
 
+## The two colours of the pedestal ring, read once. `Color("facc15")` parses a
+## string every time it is constructed, and the animation asks for it for every
+## resident mesh in every frame — ninety times over, for a caption the player
+## reads once.
+var _ring_idle := Color("64748b")
+var _ring_active := Color("facc15")
+
 
 func _ready_world() -> void:
 	tier = str(data.get("tier", "low")) if str(data.get("tier", "")) in AssetRegistry.TIERS else "low"
@@ -98,38 +121,35 @@ func _build_hall() -> void:
 	var bounds := MeshGallery.walk_bounds(keys.size())
 	var length: float = absf(bounds.x) + absf(bounds.y) + 8.0
 	var middle: float = (bounds.x + bounds.y) * 0.5
+	var half_width := MeshGallery.hall_half_width()
 
 	camera.far = VIEW_FAR
 	set_fog(Color(FOG_COLOR), FOG_DENSITY)
 
 	var floor := MeshInstance3D.new()
 	var plane := BoxMesh.new()
-	plane.size = Vector3(HALL_HALF_WIDTH * 2.0, 0.2, length)
+	plane.size = Vector3(half_width * 2.0, 0.2, length)
 	floor.mesh = plane
 	floor.material_override = WorldScreen.standard_material(Color("111827"), 0.85)
 	floor.position = Vector3(0, -0.1, middle)
 	add_child(floor)
 
-	# A stripe down the middle makes the walk forward readable at a glance.
-	var runner := MeshInstance3D.new()
-	var stripe := BoxMesh.new()
-	stripe.size = Vector3(1.4, 0.02, length)
-	runner.mesh = stripe
-	runner.material_override = WorldScreen.standard_material(Color("1e3a5f"), 0.4)
-	runner.position = Vector3(0, 0.01, middle)
-	add_child(runner)
-
+	# There is no stripe down the middle any more. A player wrote "remove the
+	# path in the middle", and the stripe was what made it one: it ran the length
+	# of a 165 m hall and read as a road through it, while what tells the player
+	# how far they have come is the pedestals themselves. Ten rows to a depth
+	# frame the nave on both sides without a mark on the floor.
 	for side: float in [-1.0, 1.0]:
 		var wall := MeshInstance3D.new()
 		var box := BoxMesh.new()
 		box.size = Vector3(0.4, WALL_HEIGHT, length)
 		wall.mesh = box
 		wall.material_override = WorldScreen.standard_material(Color("1f2937"), 0.7)
-		wall.position = Vector3(side * HALL_HALF_WIDTH, WALL_HEIGHT * 0.5, middle)
+		wall.position = Vector3(side * half_width, WALL_HEIGHT * 0.5, middle)
 		add_child(wall)
 
 
-## One pedestal per mesh, four to a depth — inner and outer, left and right.
+## One pedestal per mesh, one per row and side to a depth.
 func _build_slots() -> void:
 	for i in keys.size():
 		var root := Node3D.new()
@@ -160,13 +180,16 @@ func _build_slots() -> void:
 		holder.position.y = MeshGallery.PEDESTAL_HEIGHT
 		root.add_child(holder)
 
-		# A label standing on the pedestal, always facing the player.
+		# A label standing on the pedestal, always facing the player. It has to
+		# clear the mesh above it, so its height follows `MESH_ON_PEDESTAL`
+		# rather than sitting at a fixed 1.9 m — with a mesh ninety per cent
+		# taller the sign would have been inside the knight's shield.
 		var sign := Label3D.new()
 		sign.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		sign.font_size = 44
 		sign.outline_size = 14
 		sign.outline_modulate = Color("020617")
-		sign.position = Vector3(0, 1.9, 0)
+		sign.position = Vector3(0, MESH_ON_PEDESTAL * 1.18, 0)
 		# A `Label3D` resolves nothing on its own, so the display name has to be
 		# translated where it is assigned.
 		sign.text = Loc.resolve(AssetRegistry.display_name(str(keys[i])))
@@ -290,17 +313,17 @@ func _update_world(delta: float) -> void:
 	if vector.length() > 0.05:
 		var walk := MeshGallery.walk_bounds(keys.size())
 		facing = atan2(-vector.x, -vector.y)
-		# The hall is a nave with an aisle on either side: the middle lane, the
-		# band the inner row closes off, the aisle between the two rows. z is
-		# clamped first, because whether the player may stand beside a pedestal
-		# at all depends on how far along they got — and which side they came
-		# from decides which way a blocked one pushes them out.
+		# The hall is a nave with an aisle in front of every row: the middle
+		# lane, then one aisle per row behind it. z is clamped first, because
+		# whether the player may stand beside a pedestal at all depends on how
+		# far along they got — and which side they came from decides which way a
+		# blocked one pushes them out.
 		pos.z = clampf(pos.z + vector.y * MOVE_SPEED * delta, walk.x, walk.y)
 		pos.x = MeshGallery.lane_x(pos.x + vector.x * MOVE_SPEED * delta, pos.z, pos.x)
 
 	player.position = Vector3(pos.x, sin(elapsed * 3.0) * 0.04, pos.z)
 	player.rotation.y = facing
-	follow_camera(player.position, CAMERA_HEIGHT, CAMERA_DISTANCE, 7.0, delta)
+	follow_camera(player.position, CAMERA_HEIGHT, CAMERA_DISTANCE, CAMERA_LERP, delta)
 
 	var nearest := MeshGallery.nearest_slot(keys, _ground())
 	if nearest != active_slot:
@@ -345,7 +368,7 @@ func _animate_slots(delta: float) -> void:
 		var ring_material := ring.material_override as StandardMaterial3D
 		if ring_material == null:
 			continue
-		var ring_color := Color("facc15") if i == active_slot else Color("64748b")
+		var ring_color := _ring_active if i == active_slot else _ring_idle
 		ring_material.albedo_color = ring_material.albedo_color.lerp(ring_color, 0.12)
 
 
@@ -418,14 +441,33 @@ func _load_slot(index: int) -> void:
 	# If this one mesh misses the chosen level, fall back to the finest that
 	# exists — otherwise a low-poly mesh stands under the label "High".
 	var use_tier := AssetRegistry.best_available(key, tier)
-	var node := WorldScreen.mesh(AssetRegistry.tier_path_of(key, use_tier), AssetRegistry.color_of(key))
+	# Loaded **untinted**, and that is the whole fix for "they seem to have
+	# random colours".
+	#
+	# The standard colours of a mesh are the ones it was drawn with, and they
+	# are in the `.glb`: the knight is steel with a gold trim, a red shield and
+	# tan gloves, the metro car is white with a cyan light stripe, the dragon
+	# lord is violet with an orange belly. This used to hand `color_of()` to
+	# `WorldScreen.mesh()`, which sets `material_override` on *every* surface in
+	# the subtree — so all of that was flattened into one hue, and that hue came
+	# from a hash of the key's spelling. Steel, red and gold became a single
+	# arbitrary colour, twice as many pedestals as before stood in it, and the
+	# hall read as a paint mixer.
+	#
+	# So the mesh keeps its own materials here. The standard palette in
+	# `AssetRegistry` is still the answer wherever one colour really is called
+	# for: the sign on the pedestal, the info card, and the primitive below
+	# that stands in for a mesh nobody bundled.
+	var node := WorldScreen.mesh(AssetRegistry.tier_path_of(key, use_tier))
 	if node == null:
-		node = WorldScreen.mesh(key, AssetRegistry.color_of(key))
+		node = WorldScreen.mesh(key)
 	if node == null:
 		var box := MeshInstance3D.new()
 		var box_mesh := BoxMesh.new()
 		box_mesh.size = Vector3(0.6, 0.6, 0.6)
 		box.mesh = box_mesh
+		# A primitive has no materials of its own, so here the standard colour
+		# *is* the mesh — and it is a chosen one rather than a hashed one.
 		box.material_override = WorldScreen.standard_material(AssetRegistry.color_of(key))
 		node = box
 	_fitted(node)
@@ -519,7 +561,7 @@ func _refresh_panel() -> void:
 
 
 ## Where in the hall the player is. The counter is the answer to "how many of
-## these do I still have to walk past" in a hall of nearly two hundred metres.
+## these do I still have to walk past" in a hall of a hundred and sixty metres.
 func _refresh_counter() -> void:
 	if _counter_label == null:
 		return

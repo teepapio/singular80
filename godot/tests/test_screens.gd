@@ -679,6 +679,48 @@ func _mesh_gallery_flow() -> void:
 	t.check(gallery != null, "Die Galerie öffnet")
 	if gallery == null:
 		return
+
+	# Standard colours, not hashed ones. A player wrote "can there be Standard
+	# colors vor the meshes? they seem to have random colours", and the cause
+	# was `AssetRegistry.color_of()` deriving a hue from a hash of the key.
+	#
+	# The check is the closed set: `standard_palette()` is every colour
+	# `color_of()` can answer with, so holding all 155 keys against it is what
+	# actually proves no unchosen colour can reach a pedestal. The old
+	# implementation passed a suite that only asked whether the colour was not
+	# black — which a hash satisfies on every one of the 155 meshes.
+	var palette := AssetRegistry.standard_palette()
+	var unlisted: Array[String] = []
+	for registry_key in AssetRegistry.KEYS:
+		if not (AssetRegistry.color_of(registry_key) in palette):
+			unlisted.append(registry_key)
+	t.equal(unlisted.size(), 0,
+		"Jedes Mesh trägt eine Farbe aus der Standardpalette" + (" — fremd: %s" % ", ".join(unlisted) if not unlisted.is_empty() else ""))
+	# A palette of one colour would also be closed, and it would look worse than
+	# the hash: 155 pedestals in one colour is not "standard colours", it is a
+	# missing table.
+	t.check(palette.size() >= 24,
+		"Die Palette ist eine Auswahl und kein einzelner Ton (%d Farben)" % palette.size())
+	# The colour follows the family, not the spelling: both dragons of the
+	# flight pack are the same sky-blue dragon, both bone props are bone-white,
+	# and a coin is never the same colour as a rune stone.
+	t.check(AssetRegistry.color_of("rpg/dragon_bone").is_equal_approx(
+			AssetRegistry.color_of("rpg/skull")),
+		"Gleiche Familie, gleiche Farbe")
+	t.check(not AssetRegistry.color_of("rpg/coin").is_equal_approx(
+			AssetRegistry.color_of("rpg/rune_stone")),
+		"Zwei verschiedene Familien, zwei Farben")
+	# The colour is the mesh's, not the pedestal's: every level of the same key
+	# reads the same, because the level only says how fine the silhouette is.
+	t.check(AssetRegistry.color_of("rpg/dragon_ember").is_equal_approx(
+			AssetRegistry.color_of("rpg/dragon_ember")),
+		"Die Farbe hängt am Key, nicht an der Detailstufe")
+	# A key the table has never heard of still gets a colour somebody chose —
+	# the section it stands in. Without this the fallback would be a hash again.
+	t.check(AssetRegistry.color_of("rpg/brand_neuer_schatz").is_equal_approx(
+			AssetRegistry.group_color(AssetRegistry.group_of("rpg/brand_neuer_schatz"))),
+		"Ein unbekannter Key erbt die Farbe seiner Sektion")
+
 	# The whole registry stands in the hall — that is what the collections and
 	# the pages used to hide.
 	t.equal((gallery.keys as Array).size(), AssetRegistry.KEYS.size(),
@@ -687,27 +729,67 @@ func _mesh_gallery_flow() -> void:
 		"Jeder Sockel ist gebaut")
 	t.equal(str(gallery.tier), "low", "Die Galerie startet in der Fassung, die die Spiele benutzen")
 
+	# A player asked for three things about the hall itself: no path down the
+	# middle, ten rows, and meshes ninety per cent taller. The rows are
+	# `MeshGallery`'s business and its own suite pins them; these three are the
+	# screen's, and each one is a number a regression would show up in.
+	t.equal(str(MeshGalleryScreen.MESH_ON_PEDESTAL), 3.3,
+		"Die Meshes auf den Sockeln sind rund neunzig Prozent größer")
+	t.equal(str(MeshGalleryScreen.MOVE_SPEED), 15.0, "Der Spieler läuft doppelt so schnell")
+	var floor_marks := 0
+	for child in gallery.get_children():
+		if child is MeshInstance3D and (child as MeshInstance3D).mesh is BoxMesh:
+			var size: Vector3 = ((child as MeshInstance3D).mesh as BoxMesh).size
+			# The stripe down the middle was the only mesh that lay flat on the
+			# floor and was longer than it was wide; the floor slab and the two
+			# walls are the only boxes left, and the walls stand upright.
+			if size.y < 0.1 and size.z > size.x:
+				floor_marks += 1
+	t.equal(floor_marks, 0, "Es gibt keinen Weg mehr in der Mitte der Halle")
+	t.check(MeshGallery.hall_half_width() > MeshGallery.OUTER_ROW_OFFSET,
+		"Die Wand steht hinter der äußersten Reihe, nicht auf ihr")
+
 	# Every level loads.
 	for tier_id in AssetRegistry.TIERS:
 		gallery._set_tier(tier_id)
 		t.equal(str(gallery.tier), tier_id, "Stufe '%s' lässt sich einschalten" % tier_id)
 	gallery._set_tier("low")
 
-	# Walk forward until a pedestal is close enough to look at. The nave is
-	# `LANE_MID` from either inner row and that is less than `NEAR_DISTANCE`, so
-	# the player in the middle of the hall already looks at a mesh — standing in
-	# the nave finds one, however far forward. The position goes through
-	# `lane_x` because the pedestal stands in the band the inner row closes off,
-	# and a player is never allowed to stand there.
-	var here := MeshGallery.slot_position(4)
-	gallery.pos = Vector3(MeshGallery.lane_x(here.x, here.z, here.x), 0, here.z)
+	# Walk forward until a pedestal is close enough to look at. Every row has an
+	# aisle a `CLEAR` short of it, and the nave is the aisle of the inner row, so
+	# a player walking down the middle already looks at a mesh — however far
+	# forward. The position goes through `lane_x` because the pedestal stands in
+	# the band that row closes off, and a player is never allowed to stand there.
+	# The row is the second one, so this also covers a pedestal the nave cannot
+	# see: from the middle, the row in front always wins.
+	var row := 2
+	var here := MeshGallery.slot_position(row * 2)
+	var lane := float(MeshGallery.side_of(row * 2)) * MeshGallery.lane_of(row)
+	gallery.pos = Vector3(MeshGallery.lane_x(lane, here.z, lane), 0, here.z)
 	gallery._update_world(0.016)
 	await tree.create_timer(0.5).timeout
-	t.check(gallery.active_slot >= 0, "Vor einem Sockel steht ein Mesh im Vordergrund")
+	t.equal(int(gallery.active_slot), row * 2,
+		"Aus dem Gang vor einer Reihe steht genau diese Reihe vorn")
 	var key := str(gallery.active_key())
 	t.check(AssetRegistry.exists(key), "Sockel '%s' zeigt ein gebündeltes Mesh" % key)
 	t.check((gallery.slot_nodes[int(gallery.active_slot)]["mesh"] as Node) != null,
 		"Das Mesh ist in die Szene geladen")
+
+	# The mesh keeps the colours it was drawn with. A `material_override` on any
+	# surface means the gallery painted over them, which is what a player
+	# reported as "they seem to have random colours": the override came from a
+	# hash of the key's spelling, so the knight's steel, gold and red shield all
+	# became one arbitrary hue, and the next pedestal a different one.
+	var painted := _overridden(gallery.slot_nodes[int(gallery.active_slot)]["mesh"] as Node)
+	t.equal(painted, 0,
+		"Kein Mesh im Sockel ist übermalt — '%s' behält seine eigenen Materialien" % key)
+
+	# The name on the pedestal is the one place a single colour is right, and it
+	# is the standard palette's colour for this key.
+	var slot: Dictionary = gallery.slot_nodes[int(gallery.active_slot)]
+	var sign: Label3D = slot["sign"]
+	t.check(sign.modulate.is_equal_approx(AssetRegistry.color_of(key)),
+		"Das Schild am Sockel trägt die Standardfarbe von '%s'" % key)
 
 	# The card names it, with the level that really stands there.
 	gallery._refresh_info()
@@ -732,20 +814,52 @@ func _mesh_gallery_flow() -> void:
 	await tree.create_timer(0.2).timeout
 	t.check(not _suggest_script().is_open(), "Der Dialog schließt wieder")
 
-	# The aisle between the two rows is not decoration. Standing in it puts the
-	# outer row in front of the player, and that is the only way the far half of
-	# the hall can be read or written about at all — from the nave the inner row
-	# is always the nearer one, and no distance rule can change that.
-	var far := MeshGallery.slot_position(6)
-	var aisle: float = float(MeshGallery.side_of(6)) * MeshGallery.LANE_SIDE
-	gallery.pos = Vector3(MeshGallery.lane_x(aisle, far.z, aisle), 0, far.z)
+	# The aisles are not decoration. Standing in front of a row puts that row in
+	# front of the player, and it is the only way the rows behind it can be read
+	# or written about at all — from the nave the row in front is always the
+	# nearer one, and no distance rule can change that. The outermost row is the
+	# claim worth pinning: it stands twice as far out as the second one, and the
+	# hall now has five rows a side.
+	var far_row := MeshGallery.ROWS_PER_SIDE - 1
+	for probe_row in [0, 1, far_row]:
+		var far := MeshGallery.slot_position(probe_row * 2)
+		var aisle := float(MeshGallery.side_of(probe_row * 2)) * MeshGallery.lane_of(probe_row)
+		gallery.pos = Vector3(MeshGallery.lane_x(aisle, far.z, aisle), 0, far.z)
+		gallery._update_world(0.016)
+		t.equal(int(gallery.active_slot), probe_row * 2,
+			"Im Gang vor Reihe %d steht das Mesh dieser Reihe vorn" % probe_row)
+		t.check(AssetRegistry.exists(str(gallery.active_key())),
+			"Das ferne Mesh ist gebündelt")
+	# And the middle of the nave still finds the inner row, which is the one a
+	# player who never leaves it ever sees.
+	var nave := MeshGallery.slot_position(0)
+	gallery.pos = Vector3(0.0, 0.0, nave.z)
 	gallery._update_world(0.016)
-	t.equal(int(gallery.active_slot), 6, "Im Gang zwischen den Reihen steht das ferne Mesh vorn")
-	t.check(AssetRegistry.exists(str(gallery.active_key())),
-		"Das ferne Mesh ist gebündelt")
+	t.check(gallery.active_slot >= 0, "Auch auf dem Mittelstrich steht ein Mesh vorn")
 
 	await _goto("lobby")
 	t.suite_done()
+
+
+## How many surfaces below `node` carry a `material_override`.
+##
+## `material_override` is the blunt instrument `WorldScreen.tint()` uses, and it
+## wins over every material a `.glb` shipped with. Counting it is therefore the
+## way to ask "is this mesh still wearing its own colours?" — and the answer has
+## to be zero for the mesh gallery, which is where the "random colours" came
+## from. The fallback primitive is the one exception and is never reached while
+## the mesh is bundled.
+func _overridden(node: Node) -> int:
+	var count := 0
+	var stack: Array[Node] = [node]
+	while not stack.is_empty():
+		var current: Node = stack.pop_back()
+		if current is GeometryInstance3D \
+				and (current as GeometryInstance3D).material_override != null:
+			count += 1
+		for child in current.get_children():
+			stack.append(child)
+	return count
 
 
 ## Everything the open dialog has to say, as one string.

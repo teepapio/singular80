@@ -602,22 +602,27 @@ func _gallery_layout() -> void:
 	t.equal(MeshGallery.key_at(["a"], 5), "", "Hinter dem Ende ist nichts")
 	t.equal(MeshGallery.key_at([], 0), "", "Eine leere Sammlung hat nichts")
 
-	# Two rows on either side, and they alternate — a neighbour is never on the
+	# Ten rows — five a side — and they alternate: a neighbour is never on the
 	# same side at the same depth.
+	t.equal(MeshGallery.ROWS_PER_SIDE, 5, "Fünf Reihen stehen auf jeder Seite")
+	t.equal(MeshGallery.PER_STEP, 10, "Zehn Sockel teilen sich eine Höhe")
 	t.equal(MeshGallery.side_of(0), -1, "Der erste Sockel steht links")
 	t.equal(MeshGallery.side_of(1), 1, "Der zweite steht rechts")
 	t.equal(MeshGallery.side_of(2), -1, "Der dritte wieder links")
+	t.equal(MeshGallery.row_of(0), 0, "Sockel 0 steht in der Reihe am Schiff")
+	t.equal(MeshGallery.row_of(3), 1, "Sockel 3 in der nächsten Reihe")
+	t.equal(MeshGallery.row_of(MeshGallery.PER_STEP - 1), MeshGallery.ROWS_PER_SIDE - 1,
+		"Der letzte Sockel einer Höhe steht in der äußersten Reihe")
 	for i in 24:
 		var position := MeshGallery.slot_position(i)
-		var inner := (i % MeshGallery.PER_STEP) < 2
-		var expected_x: float = MeshGallery.INNER_ROW_OFFSET if inner else MeshGallery.OUTER_ROW_OFFSET
+		var expected_x: float = MeshGallery.ROW_OFFSETS[MeshGallery.row_of(i)]
 		t.almost(absf(position.x), expected_x, 0.001,
-			"Sockel %d steht in einer Reihe" % i)
+			"Sockel %d steht in seiner Reihe" % i)
 		t.equal(int(signf(position.x)), MeshGallery.side_of(i),
 			"Sockel %d steht auf seiner Seite" % i)
-		# Four pedestals share a depth — two per side — and the next set of four
-		# stands one spacing further down the hall. `slot_position` is
-		# `index / 4`, so the set of four is the invariant and the step is
+		# Ten pedestals share a depth — one per row and side — and the next set of
+		# ten stands one spacing further down the hall. `slot_position` is
+		# `index / 10`, so the set of ten is the invariant and the step is
 		# between sets.
 		if i % MeshGallery.PER_STEP != 0:
 			t.almost(MeshGallery.slot_position(i - 1).z, position.z, 0.001,
@@ -630,10 +635,35 @@ func _gallery_layout() -> void:
 			t.check(position.distance_to(MeshGallery.slot_position(j)) > 2.0,
 				"Sockel %d und %d überlappen nicht" % [i, j])
 
-	# "Which mesh is in front of me" hangs on distance, not on list order. The
-	# nave is `LANE_MID` from either inner row and `NEAR_DISTANCE` is wider than
-	# that, so a player who walks down the middle already looks at a mesh — and
-	# the aisle has to reach as far, or the outer row could never be the answer.
+	# The rows are a list of ten offsets that starts at the nave, ends at
+	# `OUTER_ROW_OFFSET` and is evenly spaced. Written out three times they drift
+	# apart, and the hall that comes out of it is either two rows wide or a
+	# hundred metres; this is the one check that says which of the two happened.
+	t.equal(MeshGallery.ROW_OFFSETS.size(), MeshGallery.ROWS_PER_SIDE,
+		"Es gibt eine Reihe weniger, als Reihen benannt sind")
+	t.almost(MeshGallery.ROW_OFFSETS[0], MeshGallery.INNER_ROW_OFFSET, 0.001,
+		"Die erste Reihe steht am Schiff")
+	t.almost(MeshGallery.ROW_OFFSETS[MeshGallery.ROWS_PER_SIDE - 1],
+		MeshGallery.OUTER_ROW_OFFSET, 0.001, "Die letzte Reihe ist die äußerste")
+	for spacing_row in MeshGallery.ROWS_PER_SIDE - 1:
+		t.almost(MeshGallery.ROW_OFFSETS[spacing_row + 1] - MeshGallery.ROW_OFFSETS[spacing_row],
+			MeshGallery.ROW_SPACING, 0.001,
+			"Die Reihen %d und %d stehen gleich weit auseinander" % [spacing_row, spacing_row + 1])
+	# The extra distance a player asked for went into the depths, not sideways:
+	# sideways there is only room for a mesh ninety per cent taller, and at 2.2
+	# times `ROW_SPACING` the hall would be 88 m wide with its outer rows 40 m
+	# from the middle, where neither the camera nor the fog reaches them.
+	t.check(MeshGallery.SLOT_SPACING > 4.6 * 2.2 - 0.001,
+		"Der Abstand in der Halle ist um mehr als das Doppelte gewachsen")
+	t.check(MeshGallery.ROW_SPACING < MeshGallery.ROW_OFFSETS[1],
+		"Die Reihen stehen nicht so weit, dass der Gang dazwischen verschwindet")
+	t.check(MeshGallery.ROW_SPACING > MeshGallery.CLEAR * 1.5,
+		"Zwischen zwei Reihen ist noch Gang")
+
+	# "Which mesh is in front of me" hangs on distance, not on list order. Every
+	# row has an aisle a `CLEAR` short of it, so a player who walks down the
+	# middle already looks at a mesh — and each aisle has to reach as far, or the
+	# row behind it could never be the answer.
 	var keys: Array[String] = []
 	for i in 12:
 		keys.append("k%d" % i)
@@ -641,56 +671,118 @@ func _gallery_layout() -> void:
 		"Am Sockel 0 ist Sockel 0 der nächste")
 	t.equal(MeshGallery.nearest_slot(keys, MeshGallery.slot_position(5)), 5,
 		"Am Sockel 5 ist Sockel 5 der nächste")
-	# Every pedestal has to be reachable, each from the band it stands in —
-	# otherwise the hall shows meshes the player can neither read nor write
+	# Every pedestal has to be reachable, each from the aisle in front of its own
+	# row — otherwise the hall shows meshes the player can neither read nor write
 	# about, and no distance rule can repair it: the nearer row wins from
 	# everywhere the player is allowed to stand.
 	for i in 12:
 		var home := MeshGallery.slot_position(i)
-		var outer := (i % MeshGallery.PER_STEP) >= 2
-		var reach: float = MeshGallery.LANE_SIDE if outer else MeshGallery.LANE_MID
-		var stand := Vector3(float(MeshGallery.side_of(i)) * reach, 0.0, home.z)
+		var stand := Vector3(
+			float(MeshGallery.side_of(i)) * MeshGallery.lane_of(MeshGallery.row_of(i)),
+			0.0, home.z)
 		t.equal(MeshGallery.nearest_slot(keys, stand), i,
 			"Vor Sockel %d steht Sockel %d im Vordergrund" % [i, i])
+	# All ten rows, not only the two the player happens to walk past first: each
+	# one is the answer from its own aisle, on both sides.
+	for reach_row in MeshGallery.ROWS_PER_SIDE:
+		for slot_index in [reach_row * 2, reach_row * 2 + 1]:
+			var home := MeshGallery.slot_position(slot_index)
+			var stand := Vector3(
+				float(MeshGallery.side_of(slot_index)) * MeshGallery.lane_of(reach_row), 0.0, home.z)
+			t.equal(MeshGallery.nearest_slot(keys, stand), slot_index,
+				"Reihe %d, Sockel %d ist aus seinem Gang vorn" % [reach_row, slot_index])
 
-	t.equal(MeshGallery.nearest_slot(keys, Vector3(0, 0, MeshGallery.slot_position(6).z)), 4,
+	t.equal(MeshGallery.nearest_slot(keys, Vector3(0, 0, MeshGallery.slot_position(1).z)), 0,
 		"In der Mitte zählt der innere Sockel auf gleicher Höhe")
 	t.equal(MeshGallery.nearest_slot(keys, Vector3(0, 0, MeshGallery.FIRST_SLOT_Z + 20.0)), -1,
 		"Weit vor dem ersten Sockel ist keiner nah genug")
+
+	# The middle of a depth gap is the one place in the hall with no pedestal in
+	# front of the player, and it is half a `SLOT_SPACING` away from the nearest
+	# one. The old 5.2 m sat under that, so the hall had a dead zone every ten
+	# metres and the info card flickered while walking. `NEAR_DISTANCE` has to
+	# cover the worst of it: from the middle of the nave, which is the walkable
+	# position furthest from any row.
+	t.check(MeshGallery.NEAR_DISTANCE >=
+			sqrt(MeshGallery.INNER_ROW_OFFSET * MeshGallery.INNER_ROW_OFFSET
+				+ pow(MeshGallery.SLOT_SPACING * 0.5, 2.0)),
+		"Zwischen zwei Höhen bleibt ein Sockel im Blick")
+	# Walk every aisle across every gap of the hall and count the ones with
+	# nothing in front of the player. Any of them is a place where the info card
+	# says "walk along the hall" while the player is walking.
+	var blind := 0
+	var checked := 0
+	var gaps_sampled := int(-MeshGallery.end_z(40) * 2.0)
+	for s in gaps_sampled:
+		var gz := -MeshGallery.slot_position(0).z - MeshGallery.SLOT_SPACING * 0.5 - float(s)
+		if MeshGallery.depth_gap(gz) < MeshGallery.CLEAR:
+			continue
+		for gap_row in MeshGallery.ROWS_PER_SIDE:
+			for side: float in [-1.0, 1.0]:
+				checked += 1
+				if MeshGallery.nearest_slot(keys, Vector3(side * MeshGallery.lane_of(gap_row), 0.0, gz)) < 0:
+					blind += 1
+	t.equal(blind, 0,
+		"Aus jedem Gang und jeder Lücke steht ein Sockel vorn (%d geprüft)" % checked)
 	t.equal(MeshGallery.nearest_slot([], MeshGallery.slot_position(0)), -1,
 		"Ohne Meshes gibt es keinen Sockel")
 
-	# The walkable floor: a nave, the band the inner pedestals close off, and an
-	# aisle between the rows. The aisle runs the whole length of the hall, and
-	# the gap between two depths is the one place the player gets across.
+	# The walkable floor: the nave in front of the inner row, the band that row
+	# closes off, and then one aisle in front of every row behind it. Each aisle
+	# runs the whole length of the hall, and the gap between two depths is the
+	# one place the player gets across.
 	t.almost(MeshGallery.depth_gap(MeshGallery.slot_position(0).z), 0.0, 0.001,
 		"Auf einer Reihe ist kein Abstand zur Reihe")
 	t.almost(MeshGallery.depth_gap(MeshGallery.slot_position(0).z - MeshGallery.SLOT_SPACING * 0.5),
 		MeshGallery.SLOT_SPACING * 0.5, 0.001, "Zwischen zwei Reihen ist halber Abstand")
 	t.check(MeshGallery.depth_gap(MeshGallery.FIRST_SLOT_Z + 4.0) > MeshGallery.CLEAR,
 		"Vor der ersten Reihe ist der ganze Boden frei")
-	t.check(MeshGallery.LANE_MID < MeshGallery.BAND_EDGE
-		and MeshGallery.BAND_EDGE < MeshGallery.LANE_SIDE,
-		"Schiff, gesperrtes Band und Gang liegen auseinander")
+	t.almost(MeshGallery.lane_of(0), MeshGallery.LANE_MID, 0.001,
+		"Das Schiff ist der Gang vor der ersten Reihe")
+	t.almost(MeshGallery.lane_of(MeshGallery.ROWS_PER_SIDE - 1), MeshGallery.LANE_SIDE, 0.001,
+		"Der äußerste Gang gehört der äußersten Reihe")
+	# Every aisle is ordered, and every aisle is closer to its own row than to
+	# the next one — otherwise the row behind it could never be the answer.
+	for aisle_row in MeshGallery.ROWS_PER_SIDE - 1:
+		t.check(MeshGallery.lane_of(aisle_row) < MeshGallery.lane_of(aisle_row + 1),
+			"Die Gänge %d und %d liegen auseinander" % [aisle_row, aisle_row + 1])
+		t.almost(MeshGallery.ROW_OFFSETS[aisle_row] - MeshGallery.lane_of(aisle_row),
+			MeshGallery.CLEAR, 0.001, "Gang %d hält den Abstand zu seiner Reihe" % aisle_row)
+		t.check(MeshGallery.ROW_OFFSETS[aisle_row] - MeshGallery.lane_of(aisle_row)
+			< MeshGallery.lane_of(aisle_row) - MeshGallery.ROW_OFFSETS[aisle_row - 1],
+			"Reihe %d ist näher als Reihe %d" % [aisle_row, aisle_row - 1])
 	# Walking the nave: the inner row pushes back, both sides, at its own depth.
 	t.almost(MeshGallery.lane_x(3.0, MeshGallery.slot_position(0).z, 0.0),
-		MeshGallery.LANE_MID, 0.001, "Das Schiff endet an der inneren Reihe")
+		MeshGallery.LANE_MID, 0.001, "Das Schiff endet an der ersten Reihe")
 	t.almost(MeshGallery.lane_x(-3.0, MeshGallery.slot_position(0).z, 0.0),
 		-MeshGallery.LANE_MID, 0.001, "Das Schiff endet auch links")
 	# A player caught in the band is pushed back to the side they came from
-	# rather than across the hall.
-	t.almost(MeshGallery.lane_x(2.0, MeshGallery.slot_position(0).z, MeshGallery.BAND_EDGE),
-		MeshGallery.BAND_EDGE, 0.001, "Aus dem Gang geht es nicht nach innen")
-	t.almost(MeshGallery.lane_x(-2.0, MeshGallery.slot_position(0).z, -MeshGallery.BAND_EDGE),
-		-MeshGallery.BAND_EDGE, 0.001, "Aus dem linken Gang auch nicht")
+	# rather than across the hall — and with ten rows that means into the aisle
+	# *behind* the row, which is the one they were walking towards.
+	t.almost(MeshGallery.lane_x(2.0, MeshGallery.slot_position(0).z, MeshGallery.lane_of(1)),
+		MeshGallery.lane_of(1), 0.001, "Aus dem Gang geht es nicht nach innen")
+	t.almost(MeshGallery.lane_x(-2.0, MeshGallery.slot_position(0).z, -MeshGallery.lane_of(1)),
+		-MeshGallery.lane_of(1), 0.001, "Aus dem linken Gang auch nicht")
+	# The same for every row, not only the first: the band in front of row three
+	# throws the player back into the aisle in front of it.
+	for blocked_row in MeshGallery.ROWS_PER_SIDE:
+		var depth := MeshGallery.slot_position(blocked_row * 2).z
+		var from_ahead: float = MeshGallery.lane_of(mini(blocked_row + 1, MeshGallery.ROWS_PER_SIDE - 1))
+		var want := MeshGallery.ROW_OFFSETS[blocked_row]
+		t.almost(MeshGallery.lane_x(want, depth, from_ahead), from_ahead, 0.001,
+			"Reihe %d schiebt in den Gang, aus dem der Spieler kommt" % blocked_row)
+		t.almost(MeshGallery.lane_x(-want, depth, -from_ahead), -from_ahead, 0.001,
+			"Reihe %d schiebt links genauso" % blocked_row)
 	# The aisle is continuous: at every depth of the hall the player stands in it
-	# wherever they want, which is what makes the outer row reachable at all.
+	# wherever they want, which is what makes the outer rows reachable at all.
 	for i in 24:
 		var z := MeshGallery.slot_position(i).z
-		t.almost(MeshGallery.lane_x(MeshGallery.LANE_SIDE, z, MeshGallery.LANE_SIDE),
-			MeshGallery.LANE_SIDE, 0.001, "Der Gang geht bei Sockel %d durch" % i)
-		t.almost(MeshGallery.lane_x(-MeshGallery.LANE_SIDE, z, -MeshGallery.LANE_SIDE),
-			-MeshGallery.LANE_SIDE, 0.001, "Der linke Gang auch bei %d" % i)
+		for aisle_row in MeshGallery.ROWS_PER_SIDE:
+			var at: float = MeshGallery.lane_of(aisle_row)
+			t.almost(MeshGallery.lane_x(at, z, at), at, 0.001,
+				"Der Gang %d geht bei Sockel %d durch" % [aisle_row, i])
+			t.almost(MeshGallery.lane_x(-at, z, -at), -at, 0.001,
+				"Der linke Gang %d auch bei %d" % [aisle_row, i])
 	# And nowhere along the hall does the resolution leave the knight inside a
 	# pedestal's gap, while the aisle stays open the whole way and the gap
 	# between two depths lets the player across at all.
@@ -699,21 +791,21 @@ func _gallery_layout() -> void:
 	var samples := int(-MeshGallery.end_z(40) * 2.0)
 	for s in samples:
 		var z := -float(s) * 0.5
-		for side: float in [-1.0, 1.0]:
-			var x := MeshGallery.lane_x(side * MeshGallery.LANE_SIDE, z, side * MeshGallery.LANE_SIDE)
-			if absf(x) < MeshGallery.BAND_EDGE:
-				blocked += 1
-			for j in 40:
-				var pedestal := MeshGallery.slot_position(j)
-				# The limit is the clearance itself and the positions come out of
-				# a `Vector3`, whose components are single precision: the edge of
-				# the aisle is the gap minus a rounding error, not above it.
-				if Vector2(x, z).distance_to(Vector2(pedestal.x, pedestal.z)) < MeshGallery.CLEAR - 0.001:
-					blocked += 1
+		for probe_row in MeshGallery.ROWS_PER_SIDE:
+			var want: float = MeshGallery.lane_of(probe_row)
+			for side: float in [-1.0, 1.0]:
+				var x := MeshGallery.lane_x(side * want, z, side * want)
+				for j in 40:
+					var pedestal := MeshGallery.slot_position(j)
+					# The limit is the clearance itself and the positions come out of
+					# a `Vector3`, whose components are single precision: the edge of
+					# an aisle is the gap minus a rounding error, not above it.
+					if Vector2(x, z).distance_to(Vector2(pedestal.x, pedestal.z)) < MeshGallery.CLEAR - 0.001:
+						blocked += 1
 		if absf(MeshGallery.lane_x(MeshGallery.LANE_SIDE, z, 0.0)) >= MeshGallery.BAND_EDGE:
 			crossed = true
 	t.equal(blocked, 0, "Der Spieler bleibt in der ganzen Halle im Abstand der Sockel")
-	t.check(crossed, "Zwischen zwei Reihen kommt der Spieler in den Gang")
+	t.check(crossed, "Zwischen zwei Höhen kommt der Spieler in den äußersten Gang")
 
 	# The hall reaches exactly as far as its last mesh, and the player may not
 	# walk past it or through the rows.
