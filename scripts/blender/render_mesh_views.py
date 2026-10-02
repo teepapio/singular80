@@ -31,10 +31,21 @@ from mathutils import Vector
 #: Camera directions to shoot from. Each entry is (label, azimuth, elevation)
 #: in degrees. Four angles is the smallest set that catches a shape which only
 #: reads correctly from one side — the classic failure of a lollipop or a wing.
+#:
+#: **Azimuth 0 photographs the back, not the face.** Every builder here works in
+#: Blender space and builds its creatures "facing +Y" (see the docstrings of
+#: `build_dragon` and `build_knight`), but the camera offset `_place_camera`
+#: builds is ``(sin az * cos el, -cos az * cos el, sin el)``, so azimuth 0 puts
+#: the camera on -Y, behind the face. A sheet shot at 0 showed the back of every
+#: character in the project: the knight's cape, and a golem with no eyes in the
+#: picture. Since the point of the sheet is to answer "does this read as the
+#: thing?", the first three views sit on the face side instead — 180 straight
+#: ahead, 235 the three-quarter, 270 the flank in profile with the face to the
+#: left of the frame. From above there is no front to pick, so 35/72 stays.
 VIEWS = (
-    ("front", 0.0, 12.0),
-    ("three-quarter", 55.0, 18.0),
-    ("side", 90.0, 8.0),
+    ("face", 180.0, 12.0),
+    ("face-quarter", 235.0, 18.0),
+    ("side", 270.0, 8.0),
     ("top", 35.0, 72.0),
 )
 
