@@ -27,6 +27,14 @@ const PARTICLE_COUNT := 220
 const PARTICLE_SPREAD := 46.0
 const PARTICLE_MARGIN := 14.0
 const LABEL_POOL_SIZE := 8
+## Entry screen: three columns of level cards, and the camera's slow orbit
+## around the tower while the choice is still open.
+const SELECT_COLUMNS := 3
+const SELECT_CARD := Vector2(198, 172)
+const SELECT_ORBIT := 27.0
+const SELECT_CAM_HEIGHT := 13.0
+const SELECT_LOOK_HEIGHT := 8.0
+const SELECT_TURN := 0.22
 
 const PHASE_IDLE := 0
 const PHASE_GATHER := 1
@@ -46,6 +54,17 @@ var air_jumps := 0
 var jump_held := false
 var checkpoint := 0
 var running := true
+
+## The entry screen (#33): the climb waits until a level has been picked, so the
+## player comes out of the lobby into a screen where the six towers can be
+## chosen instead of into whichever one was last played. `select_level` is the
+## card the finger is on; the tower itself is already built for `config`.
+var selecting := true
+var select_level := 1
+## Cosmetic clock, running from the moment the screen opens. `elapsed` stays the
+## run clock the rules read — a drifting crystal or a sliding floor that jumped
+## the instant the player pressed Climb would be a bug, not a flourish.
+var clock := 0.0
 
 var counts: Array = []
 var collected := 0
@@ -111,6 +130,11 @@ var _hint_label: Label
 var _hud_layer: Control
 var _label_pool: Array = []
 var _floating: Array = []
+## The entry screen's own nodes, kept so a press can repaint the chosen card
+## without rebuilding the grid under the finger.
+var _select_cards: Array = []
+var _select_numbers: Array = []
+var _select_detail: Label
 ## Last chain length written to the label, so colours are only touched on change.
 var _flow_shown := -1
 ## Last point total written to the label.
@@ -132,14 +156,31 @@ func _ready_world() -> void:
 	pickup_radius = float(bonus["pickupRadius"])
 	air_jumps = int(bonus["extraJumps"])
 
-	var unlocked: int = clampi(int(Game.get_number("%s_unlocked" % prefix, 1.0)), 1, CrystalTower.MAX_LEVEL)
-	var level: int = clampi(int(Game.get_number("%s_level" % prefix, 1.0)), 1, unlocked)
+	var level: int = CrystalTower.stored_level(theme_id)
+	# A payload that names a level means "build this one and start", the way
+	# Pang's menu hands its choice over: whoever names the level has already made
+	# the choice, and asking for it twice is the second question the entry screen
+	# is there to avoid. Without a payload the theme's own key decides, clamped to
+	# the levels that exist rather than to the progress marker — the entry screen
+	# offers every tower.
+	var auto_start := data.has("level")
+	if auto_start:
+		level = int(data["level"])
 	config = CrystalTower.level_config(level)
 	drift_orbit = float(config["driftOrbit"])
 	flow_window_ms = float(config["flowWindowMs"])
 	counts = []
 	for i in CrystalTower.MAX_CRYSTAL_TIER:
 		counts.append(0)
+
+	# The entry screen opens on the level select, the climb on the press that
+	# follows it. `running` is what the physics below reads, so it is cleared here
+	# rather than inside the panel: a tower that is still climbing while the cards
+	# are up is a run the player cannot see.
+	selecting = not auto_start
+	running = auto_start
+	select_level = int(config["level"])
+	clock = 0.0
 
 	_setup_theme()
 	_build_tower()
@@ -149,6 +190,8 @@ func _ready_world() -> void:
 	_build_ui()
 	hide_loading()
 	_refresh_bag()
+	if selecting:
+		_open_level_select()
 
 
 func _theme_for_screen() -> String:
@@ -499,43 +542,11 @@ func _build_ui() -> void:
 ## The caption naming this level's shape and its rules, e.g.
 ## "Level 3 · Zigzag · Sliding platforms".
 ##
-## Written as one sentence per part rather than as one template, so that every
-## part can be a catalogue key: a shape and a rule are words a translator
-## reorders, and a template with the number already baked into it is one they
-## cannot.
+## One implementation, in `CrystalTower`: the HUD line and the level cards of the
+## entry screen have to say the same thing about the same tower, and two copies
+## of a caption is one copy that stops being true.
 func _level_caption() -> String:
-	var parts: Array[String] = []
-	var level := int(config["level"])
-	parts.append(Loc.t("crystal.level", {"level": str(level)}))
-	parts.append(_shape_name(str(config["shape"])))
-	for rule in CrystalTower.level_rules(level):
-		parts.append(_rule_name(str(rule)))
-	return " · ".join(parts)
-
-
-## The name of a silhouette. Every key is a literal at its own call site because
-## that is where the catalogue finds them: `"crystal.shape.%s"` is a key the
-## extractor never sees, and a key with no call site reads as one the game no
-## longer needs.
-func _shape_name(shape_id: String) -> String:
-	match shape_id:
-		"spire":
-			return Loc.t("crystal.shape.spire")
-		"coil":
-			return Loc.t("crystal.shape.coil")
-		_:
-			return Loc.t("crystal.shape.zigzag")
-
-
-## The name of a rule, for the same reason as `_shape_name`.
-func _rule_name(rule: String) -> String:
-	match rule:
-		"drift":
-			return Loc.t("crystal.rule.drift")
-		"slide":
-			return Loc.t("crystal.rule.slide")
-		_:
-			return Loc.t("crystal.rule.tight_flow")
+	return CrystalTower.level_caption(int(config["level"]))
 
 
 ## One caption/value pair of the top-right status block.
@@ -599,11 +610,190 @@ func _update_floating(dt: float) -> void:
 			_floating.remove_at(i)
 
 
+# --- level select ------------------------------------------------------------
+##
+## The entry screen the suggestion asked for (#33): six cards, one per tower, and
+## a climb that starts on the press that follows.
+##
+## It is a layer over the built tower rather than a screen of its own, and that
+## is a deliberate choice with two reasons. The tower is already standing there —
+## the cards describe the silhouette the player is looking at, not a list of
+## words — and the registry maps all three editions to this one script, so a
+## second registered screen would have to be routed, listed and swept three
+## times over to say what six buttons on the screen the player already entered
+## say.
+##
+## Cards are drawn once and repainted on a press; nothing is rebuilt under the
+## finger.
+
+## Opens the level select and puts the entry camera where it belongs.
+func _open_level_select() -> void:
+	close_modals()
+	selecting = true
+	running = false
+	select_level = clampi(select_level, 1, CrystalTower.MAX_LEVEL)
+	_camera_goal = Vector3(SELECT_ORBIT, SELECT_CAM_HEIGHT, 0.0)
+	_camera_look = Vector3(0.0, SELECT_LOOK_HEIGHT, 0.0)
+	camera.position = _camera_goal
+	camera.look_at(_camera_look, Vector3.UP)
+
+	var layer := modal()
+	layer.add_child(Ui.backdrop(0.72))
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(center)
+
+	var panel := Ui.panel(Color(0.031, 0.047, 0.086, 0.94), theme["accent"], 16)
+	center.add_child(panel)
+	var column := Ui.vbox(10)
+	panel.add_child(column)
+
+	column.add_child(Ui.title(str(theme["title"]), 30, theme["accent"]))
+	column.add_child(Ui.label("Level select", 17, UiTheme.TEXT_DIM))
+
+	var grid := GridContainer.new()
+	grid.columns = SELECT_COLUMNS
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	column.add_child(grid)
+	_select_cards = []
+	_select_numbers = []
+	for level in range(1, CrystalTower.MAX_LEVEL + 1):
+		var card := _level_card(level)
+		_select_cards.append(card)
+		_select_numbers.append(_headline_of(card))
+		grid.add_child(card)
+
+	# The record and the goal of the chosen tower, under the cards where there is
+	# room for a sentence. The same line the summit panel ends a run with, so the
+	# number the player is asked for on the way in is the one they are judged by
+	# on the way out.
+	_select_detail = Ui.label("", 16, UiTheme.TEXT_DIM)
+	_select_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_select_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	column.add_child(_select_detail)
+
+	var actions := Ui.hbox(10)
+	actions.alignment = BoxContainer.ALIGNMENT_CENTER
+	column.add_child(actions)
+	actions.add_child(Ui.button("Climb", Vector2(240, 52), theme["accent"], _climb))
+	actions.add_child(Ui.button("◀ Lobby", Vector2(200, 52), UiTheme.PANEL_LIGHT, func() -> void: Router.to_lobby()))
+
+	_refresh_select()
+
+
+## One card: the level's number, the shape and rules that make it that level,
+## how tall it is, and the record on it. The whole card is the button, so a
+## thumb has the card and not the number to aim at.
+func _level_card(level: int) -> Control:
+	var row := CrystalTower.level_card(level)
+	var box := Ui.panel(UiTheme.PANEL, UiTheme.BORDER, 12)
+	box.custom_minimum_size = SELECT_CARD
+	var inner := Ui.vbox(2)
+	box.add_child(inner)
+
+	var headline := Ui.label(str(int(row["level"])), 30, UiTheme.TEXT, true)
+	headline.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inner.add_child(headline)
+
+	var shape_label := Ui.label(str(row["shapeName"]), 17, UiTheme.TEXT_DIM)
+	shape_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inner.add_child(shape_label)
+
+	var rules: Array[String] = row["ruleNames"]
+	var rule_text := " · ".join(rules) if rules.size() > 0 else "—"
+	var rule_label := Ui.label(rule_text, 13, Color("f472b6"))
+	rule_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	rule_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	inner.add_child(rule_label)
+
+	var floors := Ui.label(Loc.t("crystal.floor", {"floor": str(int(row["floors"]))}), 13, UiTheme.TEXT_MUTED)
+	floors.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inner.add_child(floors)
+
+	var best: float = CrystalTower.level_best_ms(theme_id, level)
+	var record := Ui.label(Loc.f("Best: %s", [CrystalTower.format_time(best)]) if best > 0.0 else "—",
+		18, Color("facc15") if best > 0.0 else UiTheme.TEXT_MUTED, true)
+	record.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inner.add_child(record)
+
+	var button := Button.new()
+	button.flat = true
+	button.focus_mode = Control.FOCUS_NONE
+	button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	button.pressed.connect(func() -> void: _choose(level))
+	box.add_child(button)
+	return box
+
+
+## The big level number of a card: the first label inside its column. Looked up
+## rather than counted, because the press repaint must not depend on how many
+## lines somebody gave a card six months from now.
+func _headline_of(card: Control) -> Label:
+	for child in card.get_children():
+		for grandchild in child.get_children():
+			if grandchild is Label:
+				return grandchild
+	return null
+
+
+## Marks one card as the chosen tower and rewrites the line under the grid.
+func _choose(level: int) -> void:
+	select_level = clampi(level, 1, CrystalTower.MAX_LEVEL)
+	Sfx.select()
+	_refresh_select()
+
+
+## Repaints the cards for `select_level`. The grid is not rebuilt: a press that
+## replaced the node under the finger loses the next press.
+func _refresh_select() -> void:
+	var chosen := clampi(select_level, 1, CrystalTower.MAX_LEVEL)
+	for i in _select_cards.size():
+		var card := _select_cards[i] as Control
+		if card == null:
+			continue
+		var on := i + 1 == chosen
+		card.add_theme_stylebox_override("panel", UiTheme.flat(
+			UiTheme.PANEL_LIGHT if on else UiTheme.PANEL,
+			theme["accent"] if on else UiTheme.BORDER, 12))
+		# The number in the theme's own colour is what says "this one" at a glance;
+		# a border two pixels wide does not, on a phone, across a room.
+		var number := _select_numbers[i] as Label
+		if number != null:
+			number.add_theme_color_override("font_color", theme["accent"] if on else UiTheme.TEXT)
+	if _select_detail == null:
+		return
+	var row := CrystalTower.level_card(chosen)
+	var best: float = CrystalTower.level_best_ms(theme_id, chosen)
+	_select_detail.text = Loc.f("%s · Level %d · Time: %s · Goal: %s", [
+		str(theme["title"]), chosen, CrystalTower.format_time(best) if best > 0.0 else "—",
+		CrystalTower.format_time(float(row["targetMs"])),
+	])
+
+
+## Starts the climb. Another tower means another one has to be built, and the
+## screen rebuilds itself the same way "Again" does; the chosen level is stored
+## first, so the fresh screen comes up on it.
+func _climb() -> void:
+	Sfx.select()
+	if select_level != int(config["level"]):
+		CrystalTower.store_level(theme_id, select_level)
+		Router.go_to(screen_id)
+		return
+	close_modals()
+	selecting = false
+	running = true
+
+
 # --- loop -------------------------------------------------------------------
 
 func _update_world(delta: float) -> void:
 	var dt: float = minf(delta, CrystalTower.MAX_STEP)
 	var prev_y := pos.y
+	# Runs whether or not the climb has started, so the tower behind the level
+	# cards is a tower and not a still image.
+	clock += dt
 
 	# Before the physics, not after: the landing check below reads `x`/`z`, and a
 	# floor that has already moved this frame is the floor the player is over.
@@ -661,7 +851,7 @@ func _update_world(delta: float) -> void:
 			flow_chain = 0
 			flow_last_ms = -1.0
 
-	ship.position = Vector3(pos.x, pos.y + sin(elapsed * 4.0) * 0.06, pos.z)
+	ship.position = Vector3(pos.x, pos.y + sin(clock * 4.0) * 0.06, pos.z)
 
 	_update_crystals(dt)
 	_update_flow(dt)
@@ -671,7 +861,13 @@ func _update_world(delta: float) -> void:
 	_update_merge(dt)
 	_update_inventory(dt)
 
-	if summit_reached:
+	if selecting:
+		# The entry camera: a slow turn around the tower, far enough back that the
+		# whole climb is in the frame behind the cards.
+		var turn := clock * SELECT_TURN
+		_camera_goal = Vector3(cos(turn) * SELECT_ORBIT, SELECT_CAM_HEIGHT, sin(turn) * SELECT_ORBIT)
+		_camera_look = Vector3(0.0, SELECT_LOOK_HEIGHT, 0.0)
+	elif summit_reached:
 		var summit: Dictionary = platforms[platforms.size() - 1]
 		_camera_goal = Vector3(float(summit["x"]), float(summit["y"]) + 7.0, float(summit["z"]) + 13.0)
 		_camera_look = Vector3(float(summit["x"]), float(summit["y"]) + 1.0, float(summit["z"]))
@@ -725,7 +921,7 @@ func _update_crystals(dt: float) -> void:
 		var crystal: Dictionary = crystals[i]
 		var node: Node3D = crystal["node"]
 		node.rotation.y += dt * 1.5
-		var y: float = float(crystal["y"]) + sin(elapsed * 2.0 + float(crystal["phase"])) * 0.22
+		var y: float = float(crystal["y"]) + sin(clock * 2.0 + float(crystal["phase"])) * 0.22
 		node.position.y = y
 		# The drift is a circle around the spot the crystal was placed on, and the
 		# pickup test reads the same two numbers the mesh is drawn at — a crystal
@@ -735,7 +931,7 @@ func _update_crystals(dt: float) -> void:
 		var z: float = float(crystal["z"])
 		var orbit: float = crystal["drift"]
 		if orbit > 0.0:
-			var turn: float = elapsed * 0.8 + float(crystal["phase"])
+			var turn: float = clock * 0.8 + float(crystal["phase"])
 			x += cos(turn) * orbit
 			z += sin(turn) * orbit
 			node.position.x = x
@@ -851,6 +1047,10 @@ func _reach_summit() -> void:
 		flow_record = true
 		Game.set_number("%s_best_flow" % prefix, float(best_flow))
 	if summit_within_target:
+		# Per level, so every card of the entry screen can carry the record of its
+		# own tower. The single best time of the theme stays as the one number the
+		# forge and the lobby have always shown.
+		CrystalTower.record_level_ms(theme_id, int(config["level"]), summit_time)
 		var best_time := Game.get_number("%s_best_time" % prefix, 0.0)
 		if best_time == 0.0 or summit_time < best_time:
 			Game.set_number("%s_best_time" % prefix, summit_time)
@@ -919,7 +1119,7 @@ func _update_inventory(_dt: float) -> void:
 	for child in inventory_root.get_children():
 		if child is Node3D and child != burst_ring and child != burst_light:
 			child.rotation.y += _dt * 0.6
-			child.position.y += sin(elapsed * 2.0 + child.position.x) * _dt * 0.02
+			child.position.y += sin(clock * 2.0 + child.position.x) * _dt * 0.02
 
 
 func start_merge() -> void:
@@ -1113,6 +1313,10 @@ func _equip(tier: int) -> void:
 
 func _next_level() -> void:
 	var prefix := str(theme["keyPrefix"])
-	Game.set_number("%s_unlocked" % prefix, maxf(Game.get_number("%s_unlocked" % prefix, 1.0), float(config["level"]) + 1.0))
-	Game.set_number("%s_level" % prefix, float(config["level"]) + 1.0)
-	Router.go_to(screen_id)
+	var target := int(config["level"]) + 1
+	Game.set_number("%s_unlocked" % prefix, maxf(Game.get_number("%s_unlocked" % prefix, 1.0), float(target)))
+	CrystalTower.store_level(theme_id, target)
+	# The level travels in the payload, so the climb starts on this tower instead
+	# of asking the same question the button just answered. `store_level` above is
+	# what makes the next visit to the entry screen land here too.
+	Router.go_to(screen_id, {"level": target})

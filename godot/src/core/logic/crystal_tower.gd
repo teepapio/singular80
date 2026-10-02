@@ -246,6 +246,97 @@ static func equip_bonus(tier: int) -> Dictionary:
 	}
 
 
+# --- level select ------------------------------------------------------------
+##
+## The six towers as the entry screen shows them, and the names they are shown
+## under. A level select has to answer two questions before the climb starts —
+## what does this tower look like, and have I beaten it — and both answers are
+## numbers this module already keeps. So the rows live here, next to the table
+## they are built from, and the screen only draws them.
+##
+## Free choice, deliberately: every level of every theme can be started at any
+## time. `unlocked` stays the progress marker (it is what the goal time moves),
+## not a gate in front of the card — a player who asks for a level select and is
+## then offered one card is served a locked door, not a choice.
+
+## One row of the level select. `level_config` is the single source; this is the
+## same table under the names the cards read, so a tower can never be drawn one
+## way and built another.
+static func level_card(level: int) -> Dictionary:
+	var l: int = clampi(level, 1, MAX_LEVEL)
+	var config := level_config(l)
+	var rules: Array = level_rules(l)
+	var labels: Array[String] = rule_names(l)
+	return {
+		"level": l,
+		"shape": str(config["shape"]),
+		"shapeName": shape_name(str(config["shape"])),
+		"rules": rules,
+		"ruleNames": labels,
+		"caption": level_caption(l),
+		"floors": int(config["floors"]),
+		"crystals": crystals_in_level(l),
+		"targetMs": float(config["targetMs"]),
+	}
+
+
+## How many crystals a whole climb of this level can yield — every floor's share
+## plus the one on the summit. The count is what the card promises, so it is
+## computed from the same two numbers `_build_tower` uses and not estimated.
+static func crystals_in_level(level: int) -> int:
+	var config := level_config(level)
+	var floors: int = int(config["floors"])
+	return floors * int(config["crystalsPerFloor"]) + 1
+
+
+## The caption naming a level's shape and its rules, e.g.
+## "Level 3 · Zigzag · Sliding platforms".
+##
+## Written as one sentence per part rather than as one template, so that every
+## part can be a catalogue key: a shape and a rule are words a translator
+## reorders, and a template with the number already baked into it is one they
+## cannot.
+static func level_caption(level: int) -> String:
+	var l: int = clampi(level, 1, MAX_LEVEL)
+	var parts: Array[String] = [Loc.t("crystal.level", {"level": str(l)}), shape_name(level_shape(l))]
+	for label in rule_names(l):
+		parts.append(label)
+	return " · ".join(parts)
+
+
+## The name of a silhouette. Every key is a literal at its own call site because
+## that is where the catalogue finds them: `"crystal.shape.%s"` is a key the
+## extractor never sees, and a key with no call site reads as one the game no
+## longer needs.
+static func shape_name(shape_id: String) -> String:
+	match shape_id:
+		"spire":
+			return Loc.t("crystal.shape.spire")
+		"coil":
+			return Loc.t("crystal.shape.coil")
+		_:
+			return Loc.t("crystal.shape.zigzag")
+
+
+## The name of a rule, for the same reason as `shape_name`.
+static func rule_name(rule: String) -> String:
+	match rule:
+		"drift":
+			return Loc.t("crystal.rule.drift")
+		"slide":
+			return Loc.t("crystal.rule.slide")
+		_:
+			return Loc.t("crystal.rule.tight_flow")
+
+
+## The rule names of a level, in the order `LEVELS` lists them.
+static func rule_names(level: int) -> Array[String]:
+	var out: Array[String] = []
+	for rule in level_rules(level):
+		out.append(rule_name(str(rule)))
+	return out
+
+
 # --- tower tuning ------------------------------------------------------------
 ## The numbers the ship obeys. They live in this module and not in the screen so
 ## that a level can be *proved* playable: `jump_reach` walks the same integration
@@ -507,3 +598,91 @@ static func unreachable_level() -> String:
 static func format_time(ms: float) -> String:
 	var total := int(maxf(0.0, ms) / 1000.0)
 	return "%d:%02d" % [total / 60, total % 60]
+
+
+# --- save data ---------------------------------------------------------------
+##
+## Progression lives in `Game`'s generic number store, so it needs no new autoload
+## and survives next to the other games' highscores — the same place Pang keeps
+## its ladder.
+##
+## The store is reached through the scene tree rather than the `Game` autoload
+## identifier: the headless rule-test runner boots without autoloads, and a plain
+## `Game.…` reference would not even parse there (same trick as `Pang`).
+##
+## Three editions, one set of keys: every key carries the theme's prefix, so a
+## christmas record is not read back as a halloween one.
+
+## The number store, or `null` while the headless runner has no scene tree.
+static func _store() -> Node:
+	var loop := Engine.get_main_loop()
+	if not (loop is SceneTree):
+		return null
+	return (loop as SceneTree).root.get_node_or_null("/root/Game")
+
+
+static func _read(key: String, fallback: float) -> float:
+	var store := _store()
+	return store.get_number(key, fallback) if store != null else fallback
+
+
+static func _write(key: String, value: float) -> void:
+	var store := _store()
+	if store != null:
+		store.set_number(key, value)
+
+
+## The player-file prefix of a theme, e.g. `singular80_crystal3d`. An unknown id
+## falls back to the classic theme rather than throwing: the router hands a
+## screen its id, and an id from an older build may name a theme that is gone.
+static func theme_prefix(theme_id: String) -> String:
+	return str(theme_by_id(theme_id)["keyPrefix"])
+
+
+## Player-file key of the level a theme's next climb should build.
+static func level_key(theme_id: String) -> String:
+	return "%s_level" % theme_prefix(theme_id)
+
+
+## Player-file key of one level's record time, in ms. 0 means "never climbed".
+static func level_best_key(theme_id: String, level: int) -> String:
+	return "%s_best_time_l%d" % [theme_prefix(theme_id), clampi(level, 1, MAX_LEVEL)]
+
+
+## The level this theme continues at, clamped to the levels that exist.
+##
+## Clamped to `MAX_LEVEL` and *not* to the unlocked counter: the entry screen
+## lets a player start any tower, so a stored level above the progress marker is
+## a level the player chose, not a broken save.
+static func stored_level(theme_id: String) -> int:
+	return clampi(int(_read(level_key(theme_id), 1.0)), 1, MAX_LEVEL)
+
+
+## Stores the level to build next and returns the level now stored.
+static func store_level(theme_id: String, level: int) -> int:
+	var target: int = clampi(level, 1, MAX_LEVEL)
+	_write(level_key(theme_id), float(target))
+	return target
+
+
+## How far this theme's progress marker has come — the highest level reached,
+## one until a goal time is beaten. A marker, not a gate: see `level_card`.
+static func unlocked_level(theme_id: String) -> int:
+	return clampi(int(_read("%s_unlocked" % theme_prefix(theme_id), 1.0)), 1, MAX_LEVEL)
+
+
+## The fastest climb of one level in ms, 0 when the summit has never been reached.
+static func level_best_ms(theme_id: String, level: int) -> float:
+	return _read(level_best_key(theme_id, level), 0.0)
+
+
+## Stores a climb time for one level when it beats the record there. Reports a
+## new record, so the caller can say so.
+static func record_level_ms(theme_id: String, level: int, ms: float) -> bool:
+	if ms <= 0.0:
+		return false
+	var best := level_best_ms(theme_id, level)
+	if best > 0.0 and ms >= best:
+		return false
+	_write(level_best_key(theme_id, level), ms)
+	return true

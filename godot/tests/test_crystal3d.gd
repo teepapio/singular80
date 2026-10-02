@@ -363,9 +363,10 @@ func _screen_flow(tree: SceneTree) -> void:
 		"Ketten- und Punkteanzeige sind gebaut")
 	t.equal(screen._label_pool.size(), 8, "Acht schwebende Texte liegen bereit")
 
-	# The spawn point already collects a crystal on entry, and the engine keeps
-	# ticking while the suite waits, so the run is zeroed first — otherwise every
-	# expectation would hang on the moment it happened to be checked.
+	# The engine keeps ticking while the suite waits, so the run is zeroed first —
+	# otherwise every expectation would hang on the moment it happened to be
+	# checked. Nothing is collected while the entry screen is up, because the
+	# climb has not started; the reset keeps that true for the rest of the suite.
 	_reset_run(screen)
 	screen._update_flow(0.016)
 	t.equal(screen.flow_chain, 0, "Zu Beginn läuft keine Kette")
@@ -410,6 +411,56 @@ func _screen_flow(tree: SceneTree) -> void:
 		screen._update_floating(0.4)
 	t.equal(screen._floating.size(), 0, "Schwebende Texte verschwinden wieder")
 	t.check(screen._label_pool.size() == 8, "Der Pool waechst nicht")
+
+	# --- entry screen (#33) ----------------------------------------------------
+	# The level select the player asked for: the screen opens on it, one card per
+	# tower, and the climb waits for the press that follows.
+	t.check(screen.selecting, "Der Screen startet in der Levelauswahl")
+	t.check(not screen.running, "Der Lauf wartet, bis ein Level gewaehlt ist")
+	t.equal(screen._select_cards.size(), CrystalTower.MAX_LEVEL, "Ein Feld je Level")
+	t.check(screen.has_modal(), "Die Auswahl liegt als Ebene ueber dem Turm")
+
+	# The cards read their numbers out of `CrystalTower` and not out of the screen,
+	# so a card cannot promise a tower the climb then builds differently.
+	var card := CrystalTower.level_card(3)
+	t.equal(str(card["shapeName"]), Loc.t("crystal.shape.zigzag"), "Level 3 ist ein Zickzack")
+	t.equal(int(card["floors"]), 11, "Level 3 hat 11 Etagen")
+	t.equal(int(card["crystals"]), 34, "Und verspricht 34 Kristalle")
+	t.almost(float(card["targetMs"]), 150000.0, 1.0, "Zielzeit 2:30")
+	t.check(str(card["caption"]).begins_with(Loc.t("crystal.level", {"level": "3"})),
+		"Die Kartenzeile nennt das Level")
+
+	# Choosing another tower repaints the cards; it does not rebuild them under the
+	# finger that just landed on one.
+	var first_card = screen._select_cards[0]
+	screen._choose(3)
+	t.equal(screen.select_level, 3, "Die Wahl steht auf Level 3")
+	t.check(screen._select_cards[0] == first_card, "Die Karten werden nicht neu gebaut")
+	# The line under the grid, in the language of the run — the suite pins `de`, so
+	# the English sentence would fail here.
+	t.equal(screen._select_detail.text, Loc.f("%s · Level %d · Time: %s · Goal: %s", [
+		str(screen.theme["title"]), 3, "—", CrystalTower.format_time(float(card["targetMs"])),
+	]), "Die Zeile unter den Karten nennt Turm, Zeit und Ziel")
+
+	# The stored level is clamped at both ends and left as it was found: a suite
+	# that changed the tower the developer climbs next would be writing to the
+	# player file behind their back.
+	var was: int = CrystalTower.stored_level(str(screen.theme_id))
+	CrystalTower.store_level(str(screen.theme_id), 99)
+	t.equal(CrystalTower.stored_level(str(screen.theme_id)), CrystalTower.MAX_LEVEL,
+		"Ein Level ueber dem letzten wird auf den letzten Turm geklemmt")
+	CrystalTower.store_level(str(screen.theme_id), 0)
+	t.equal(CrystalTower.stored_level(str(screen.theme_id)), 1, "Eines darunter auf den ersten")
+	CrystalTower.store_level(str(screen.theme_id), was)
+	t.equal(CrystalTower.stored_level(str(screen.theme_id)), was, "Der gespeicherte Level bleibt wie er war")
+
+	# Climb on the tower that is already standing there starts the run without a
+	# rebuild — the everyday case stays one tap, exactly as "Again" was.
+	screen.select_level = int(screen.config["level"])
+	screen._climb()
+	t.check(screen.running and not screen.selecting, "Der Klick auf Klettern startet den Lauf")
+	await tree.process_frame
+	t.check(not screen.has_modal(), "Und die Auswahl ist vom Bild")
 
 	await _summit_panel_has_a_way_out(screen, tree)
 	t.suite_done()
