@@ -864,11 +864,14 @@ func _mesh_gallery_flow() -> void:
 
 	# A player asked for three things about the hall itself: no path down the
 	# middle, ten rows, and meshes ninety per cent taller. The rows are
-	# `MeshGallery`'s business and its own suite pins them; these three are the
-	# screen's, and each one is a number a regression would show up in.
-	t.equal(str(MeshGalleryScreen.MESH_ON_PEDESTAL), 3.3,
+	# `MeshGallery`'s business and its own suite pins them; these two are the
+	# screen's, read off the running screen — see the note in `_hatchery_camera`
+	# for why the class must not be named here.
+	t.equal(float(gallery.MESH_ON_PEDESTAL), 3.3,
 		"Die Meshes auf den Sockeln sind rund neunzig Prozent größer")
-	t.equal(str(MeshGalleryScreen.MOVE_SPEED), 15.0, "Der Spieler läuft doppelt so schnell")
+	t.equal(float(gallery.MOVE_SPEED), 15.0, "Der Spieler läuft doppelt so schnell")
+	t.check(MeshGallery.hall_half_width() > MeshGallery.OUTER_ROW_OFFSET,
+		"Die Wand steht hinter der äußersten Reihe, nicht auf ihr")
 	var floor_marks := 0
 	for child in gallery.get_children():
 		if child is MeshInstance3D and (child as MeshInstance3D).mesh is BoxMesh:
@@ -879,8 +882,6 @@ func _mesh_gallery_flow() -> void:
 			if mark_size.y < 0.1 and mark_size.z > mark_size.x:
 				floor_marks += 1
 	t.equal(floor_marks, 0, "Es gibt keinen Weg mehr in der Mitte der Halle")
-	t.check(MeshGallery.hall_half_width() > MeshGallery.OUTER_ROW_OFFSET,
-		"Die Wand steht hinter der äußersten Reihe, nicht auf ihr")
 
 	# Every level loads.
 	for tier_id in AssetRegistry.TIERS:
@@ -935,8 +936,8 @@ func _mesh_gallery_flow() -> void:
 	# front of the player, and it is the only way the rows behind it can be read
 	# or written about at all — from the nave the row in front is always the
 	# nearer one, and no distance rule can change that. The outermost row is the
-	# claim worth pinning: it stands five times as far out as the first one, and
-	# the hall now has five rows a side.
+	# claim worth pinning: it stands nineteen metres out where the second row
+	# stands seven, and the hall now has five rows a side.
 	var far_row := MeshGallery.ROWS_PER_SIDE - 1
 	for probe_row in [0, 1, far_row]:
 		var far := MeshGallery.slot_position(probe_row * 2)
