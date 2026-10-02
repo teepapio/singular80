@@ -516,10 +516,9 @@ func _collect_group(board: PackedInt32Array, start: int, tier: int, blocked: int
 	if start < 0 or start >= board.size() or board[start] != tier:
 		return
 	_stamp += 1
-	var top := 0
 	_seen[start] = _stamp
 	_stack[0] = start
-	top = 1
+	var top := 1
 	while top > 0:
 		top -= 1
 		var cell: int = _stack[top]
