@@ -1462,7 +1462,11 @@ func _flight_profile() -> void:
 	DragonFlight.save_path = "user://dragonflight_test.json"
 	DragonFlight.reset_profile()
 	var profile := DragonFlight.default_profile()
-	t.equal(int(profile["gold"]), 0, "Neues Profil startet ohne Gold")
+	# Not zero any more: a fresh stable used to sit on an empty purse while the
+	# cheapest pairing cost 300 ◈, so breeding — the game's whole progression —
+	# was unreachable until about three flown levels. The start budget has to
+	# pay for a pairing; the size itself is pinned in test_dragonflight.gd.
+	t.check(DragonFlight.gold_of(profile) >= 300, "Neues Profil startet mit Zuchtbudget")
 	var first_cost := DragonFlight.upgrade_cost("firepower", profile)
 	t.check(first_cost > 0, "Ein Upgrade kostet Gold")
 	profile["gold"] = 100000

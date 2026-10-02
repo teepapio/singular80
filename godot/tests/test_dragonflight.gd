@@ -29,6 +29,8 @@ func run(kit: TestKit) -> void:
 	t.close_suite()
 	_egg_readout()
 	t.close_suite()
+	_purse()
+	t.close_suite()
 
 
 ## A dragon with exactly these alleles; the other genes are left empty on
@@ -285,4 +287,61 @@ func _egg_readout() -> void:
 		"Ein häufiges Gen ist kein Grund zu warten")
 	t.equal(DragonFlight.egg_readout(_dragon(12, {}))["rarest"], "", "Ein leeres Genom hat nichts Seltenes")
 	t.equal(DragonFlight.egg_readout(_dragon(13, {}))["traits"].size(), 0, "und keine Merkmale")
+	t.suite_done()
+
+
+# --- purse & breeding affordability ------------------------------------------
+
+## Why this suite exists: a player reported that breeding was impossible to
+## try. Two things were true at once — the hatchery showed what every action
+## *cost* but never what the player *had*, and a fresh profile started on an
+## empty purse while the cheapest pairing costs 300 ◈. So the balance is now
+## one reader, the affordability one answer, and the start budget is pinned to
+## a pairing the player can actually pay.
+func _purse() -> void:
+	t.suite("Drachenflug — Gold & Paarbarkeit")
+
+	# One reader, so the purse line, the buttons and these tests cannot drift.
+	var profile := _profile_with([])
+	t.equal(DragonFlight.gold_of(profile), DragonFlight.STARTING_GOLD, "Ein neues Profil trägt das Startbudget")
+	profile["gold"] = 480
+	t.equal(DragonFlight.gold_of(profile), 480, "Der Purse folgt dem Spielstand")
+	profile["gold"] = -50
+	t.equal(DragonFlight.gold_of(profile), 0, "Und kann nie negativ werden")
+	t.check(DragonFlight.can_afford(profile, 0), "Null kostet immer")
+	t.check(not DragonFlight.can_afford(profile, 1), "Aber ein Gold zu wenig reicht nicht")
+	profile["gold"] = 50
+	t.check(DragonFlight.can_afford(profile, 50), "Genau der Preis reicht")
+
+	# "Kann ich züchten?" — one question with three ways to answer no.
+	var a := _dragon(1, {"riesenwuchs": "Rr"})
+	var b := _dragon(2, {"riesenwuchs": "Rr"})
+	profile["gold"] = 99999
+	t.check(DragonFlight.can_pair(profile, a, b), "Zwei verschiedene Drachen mit Gold ergeben eine Paarung")
+	t.check(not DragonFlight.can_pair(profile, a, a), "Ein Drache paart nicht mit sich selbst")
+	t.check(not DragonFlight.can_pair(profile, a, {}), "Ein leerer Platz ist keine Paarung")
+	var cost := DragonFlight.pairing_cost(a, b)
+	profile["gold"] = cost
+	t.check(DragonFlight.can_pair(profile, a, b), "Genau der Paarungspreis reicht")
+	profile["gold"] = cost - 1
+	t.check(not DragonFlight.can_pair(profile, a, b), "Ein Gold zu wenig sperrt die Paarung")
+
+	# The price has a real ceiling, and the budget has to clear it: two dragons
+	# with the very same genome share all twelve genes, which is the worst a
+	# starter pair can ever be.
+	var genome := DragonFlight.random_genome()
+	var twin_a := _dragon(3, genome.duplicate())
+	var twin_b := _dragon(4, genome.duplicate())
+	t.equal(DragonFlight.pairing_cost(twin_a, twin_b), 600, "Zwei Zwillinge sind der teuerste Fall der Startlinie")
+	t.check(DragonFlight.STARTING_GOLD >= DragonFlight.pairing_cost(twin_a, twin_b),
+		"Und das Startbudget deckt ihn")
+
+	# And that holds for every random starter pair, not just for a lucky draw.
+	var always := true
+	for i in 64:
+		var fresh := DragonFlight.starter_profile()
+		var owned := DragonFlight.dragons_of(fresh)
+		if owned.size() < 2 or not DragonFlight.can_pair(fresh, owned[0], owned[1]):
+			always = false
+	t.check(always, "Jedes Startpaar ist von Anfang an zuchtbar")
 	t.suite_done()

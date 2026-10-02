@@ -24,6 +24,7 @@ var hover_uid := 0
 
 var dragon_nodes: Array[Dictionary] = []
 var _label_title: Label
+var _label_purse: Label
 var _label_slots: Label
 var _label_info: Label
 var _label_pedigree: Label
@@ -175,6 +176,14 @@ func _build_ui() -> void:
 	panel.add_child(box)
 	_label_title = Ui.label("BREEDING ALLEY", 24, UiTheme.ACCENT, true)
 	box.add_child(_label_title)
+	# The purse, above everything that scrolls. The hatchery is the only place
+	# that spends the stable's gold — pairing, eggs, hatching and breeds all
+	# charge it — and until now the balance was on no screen here at all: the
+	# panel showed what each action *cost* and stayed silent about what the
+	# player had, so a disabled button gave no reason. It is also why a fresh
+	# player never learned that breeding was affordable.
+	_label_purse = Ui.label("", 18, Color("fbbf24"), true)
+	box.add_child(_label_purse)
 
 	# Everything below scrolls, so a long breed list can never reach the button.
 	var scroll := ScrollContainer.new()
@@ -406,15 +415,26 @@ func _place_eggs() -> void:
 func _refresh_panel() -> void:
 	var a := DragonFlight.dragon_by_uid(profile, parent_a)
 	var b := DragonFlight.dragon_by_uid(profile, parent_b)
+	# The one line that answers "can I afford this" — kept outside the scroll so
+	# it stays put while the roster below it moves.
+	_label_purse.text = Loc.f("◈ %s gold   ·   %d eggs", [
+		Ui.format_number(DragonFlight.gold_of(profile)), int(profile.get("eggs", 0)),
+	])
 	_label_slots.text = Loc.f("Parent A: %s\nParent B: %s", [_dragon_label(a), _dragon_label(b)])
 	var cost := 0
 	if not a.is_empty() and not b.is_empty() and parent_a != parent_b:
 		cost = DragonFlight.pairing_cost(a, b)
 		_label_info.text = Loc.f("Cost %d ◈", [cost])
-		_pair_button.disabled = int(profile.get("gold", 0)) < cost
+		# Green while the pairing is payable, red when it is not. The purse line
+		# above gives the number, the colour gives the answer, and neither costs
+		# a translation.
+		_label_info.add_theme_color_override("font_color",
+			UiTheme.SUCCESS if DragonFlight.can_afford(profile, cost) else UiTheme.DANGER)
+		_pair_button.disabled = not DragonFlight.can_pair(profile, a, b)
 		_pair_button.text = Loc.f("Pair (%d ◈)", [cost])
 	else:
 		_label_info.text = Loc.f("Pick two different dragons on the pedestals.", [])
+		_label_info.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
 		_pair_button.disabled = true
 		_pair_button.text = Loc.f("Pair", [])
 	for spot in pedestals:
@@ -592,7 +612,7 @@ func _refresh_egg_button() -> void:
 	var price := DragonFlight.egg_cost(profile)
 	var eggs := int(profile.get("eggs", 0))
 	_lay_button.text = Loc.f("Lay an egg (%d eggs, %d ◈)", [eggs, price])
-	_lay_button.disabled = eggs < 1 or int(profile.get("gold", 0)) < price
+	_lay_button.disabled = eggs < 1 or not DragonFlight.can_afford(profile, price)
 	var free_nest := _free_nest()
 	_lay_button.text = "Lay an egg — no nest free" if free_nest < 0 else _lay_button.text
 	_lay_button.disabled = _lay_button.disabled or free_nest < 0
@@ -607,7 +627,7 @@ func _free_nest() -> int:
 
 func _on_lay_egg() -> void:
 	var price := DragonFlight.egg_cost(profile)
-	if int(profile.get("eggs", 0)) < 1 or int(profile.get("gold", 0)) < price:
+	if int(profile.get("eggs", 0)) < 1 or not DragonFlight.can_afford(profile, price):
 		notify("Not enough eggs or gold")
 		return
 	profile["eggs"] = int(profile["eggs"]) - 1
@@ -635,7 +655,7 @@ func _refresh_breeds() -> void:
 	for breed in missing:
 		var id := str(breed["id"])
 		var price := DragonFlight.breed_price(id)
-		var affordable: bool = int(profile.get("gold", 0)) >= price
+		var affordable: bool = DragonFlight.can_afford(profile, price)
 		var row := Ui.hbox(6)
 		_breed_box.add_child(row)
 		row.add_child(Ui.label(str(breed["name"]), 14, Color(str(breed["body"])), true))
@@ -778,7 +798,7 @@ func _on_pair() -> void:
 	if a.is_empty() or b.is_empty() or parent_a == parent_b:
 		return
 	var cost := DragonFlight.pairing_cost(a, b)
-	if int(profile.get("gold", 0)) < cost:
+	if not DragonFlight.can_pair(profile, a, b):
 		notify("Not enough gold")
 		return
 	profile["gold"] = int(profile["gold"]) - cost
@@ -797,7 +817,7 @@ func _on_pair() -> void:
 
 
 func _hatch_now(dragon: Dictionary, cost: int) -> void:
-	if int(profile.get("gold", 0)) < cost:
+	if not DragonFlight.can_afford(profile, cost):
 		notify("Not enough gold")
 		return
 	profile["gold"] = int(profile["gold"]) - cost

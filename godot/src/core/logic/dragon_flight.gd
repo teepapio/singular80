@@ -38,6 +38,25 @@ const MAX_PICKUPS := 40
 ## A run is scored on distance, kills and the gold left in the air.
 const GOLD_PER_KILL_BASE := 2
 
+## Drachengold a fresh save starts with.
+##
+## Breeding is the progression of this game, and it was unreachable in the
+## first minutes: a fresh profile had an empty purse, while the cheapest
+## pairing is `180 + 1 tier × 120` = 300 ◈ and skipping an 80 s incubation
+## costs another 240 ◈. A new stable therefore had to fly roughly three levels
+## before it could pair its two starter dragons at all — the one feature the
+## game is built around was hidden behind the corridor.
+##
+## What that has to cover, from `pairing_cost()` = 180 + tier × 120 + 25 per
+## gene both parents share: the two starter dragons are tier 1, so their
+## ceiling is 180 + 120 + 12 × 25 = 600 ◈ (two dragons with the very same
+## genome, i.e. clones), and the priciest pair in the whole game — two tier-5
+## dragons that are clones of each other — comes to 180 + 600 + 300 = 1080 ◈.
+## 1200 ◈ clears the starter ceiling twice over. One flown level is worth
+## roughly 180 ◈, so the economy still pulls the player into the corridor; they
+## simply start out able to breed.
+const STARTING_GOLD := 1200
+
 ## Flight control. The dragon does not accelerate: a held direction sets the
 ## speed at once, a released one coasts out over `1 / GLIDE_DECAY` seconds.
 const GLIDE_DECAY := 6.0
@@ -958,6 +977,33 @@ static func pairing_cost(parent_a: Dictionary, parent_b: Dictionary) -> int:
 	return int(180.0 + float(tier) * 120.0 + float(shared) * 25.0)
 
 
+## Gold in the purse, never negative. The hatchery is the only place that
+## spends it, and it used to ask `profile["gold"]` in six places on that one
+## screen — so the balance was on no display at all while every one of them
+## decided whether a button was live. One reader, one answer.
+static func gold_of(profile: Dictionary) -> int:
+	return maxi(0, int(profile.get("gold", 0)))
+
+
+## Whether a price can be paid right now.
+static func can_afford(profile: Dictionary, price: int) -> bool:
+	return gold_of(profile) >= price
+
+
+## Whether this exact pairing can be bred right now: two different dragons and
+## enough gold for the pairing. The pair button, its disabled state and the
+## tests all ask this one question, so "am I able to breed?" has a single
+## answer instead of three comparisons that can drift apart.
+static func can_pair(profile: Dictionary, parent_a: Dictionary, parent_b: Dictionary) -> bool:
+	if parent_a.is_empty() or parent_b.is_empty():
+		return false
+	# Pairing a dragon with itself is not a cross, it is the same bloodline
+	# twice — and `pairing_cost` would happily price it.
+	if int(parent_a.get("uid", 0)) == int(parent_b.get("uid", 0)):
+		return false
+	return can_afford(profile, pairing_cost(parent_a, parent_b))
+
+
 # --- stats ------------------------------------------------------------------
 
 ## The resolved numbers of one dragon: breed base, then traits, then upgrades,
@@ -1226,7 +1272,7 @@ static func upgrade_cost(id: String, profile: Dictionary) -> int:
 ## Buys one upgrade step. Returns the new level, or -1 when it cannot be paid.
 static func buy_upgrade(id: String, profile: Dictionary) -> int:
 	var cost := upgrade_cost(id, profile)
-	if cost < 0 or int(profile.get("gold", 0)) < cost:
+	if cost < 0 or not can_afford(profile, cost):
 		return -1
 	profile["gold"] = int(profile["gold"]) - cost
 	var upgrades: Dictionary = profile.get("upgrades", {})
@@ -1239,7 +1285,7 @@ static func buy_upgrade(id: String, profile: Dictionary) -> int:
 
 static func default_profile() -> Dictionary:
 	return {
-		"gold": 0,
+		"gold": STARTING_GOLD,
 		"eggs": 2,
 		"next_uid": 1,
 		"dragons": [],
@@ -1323,7 +1369,7 @@ static func buy_breed(profile: Dictionary, breed_id: String) -> Dictionary:
 	if has_breed(profile, breed_id):
 		return {}
 	var price := breed_price(breed_id)
-	if int(profile.get("gold", 0)) < price:
+	if not can_afford(profile, price):
 		return {}
 	profile["gold"] = int(profile["gold"]) - price
 	var dragon := random_dragon(next_uid(profile), [breed_id])

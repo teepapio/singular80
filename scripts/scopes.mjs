@@ -165,7 +165,7 @@ const SCOPE_SUITES = {
     'Drachenflug — Elemente', 'Drachenflug — Werte', 'Drachenflug — Profil & Zucht',
     'Drachenflug — Allele', 'Drachenflug — Blutbild', 'Drachenflug — Zuchtziel',
     'Drachenflug — Beste Paarung', 'Drachenflug — Ei-Vorschau',
-    'Drachenflug — Flugsteuerung',
+    'Drachenflug — Flugsteuerung', 'Drachenflug — Gold & Paarbarkeit',
   ],
   pang: ['Pang', 'Pang — Treffer', 'Pang — Doppelgriff', 'Pang — Kugelbudget', 'Pang — Wellenwarnung'],
   metro3d: [
