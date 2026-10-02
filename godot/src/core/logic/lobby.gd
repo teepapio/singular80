@@ -28,6 +28,22 @@ const PEDESTAL_MESH_SIZE := 1.8
 const GALLERY_DISTANCE := 13.0
 const GALLERY_TRIGGER := 3.0
 
+## The circles drawn on the lobby ground, in world units: the ring the plazas
+## stand on, and the edge `clamp_to_lobby()` stops the player at.
+##
+## They took the place of the grid of lines that lay across the middle. A
+## rectangle of lines with four-metre spacing drew a square in the middle of the
+## lobby, and a square reads as a place — an area with a marking on it, which is
+## exactly what the player asked to have removed. A circle has no middle, so the
+## same two numbers now say "walk around this" instead of "there is something
+## here", and both of them mean something: one is where the games are, the other
+## is where the walkable ground ends.
+const GROUND_RINGS: Array[float] = [CATEGORY_RING_RADIUS, LOBBY_WALK_RADIUS]
+## Half the width of a guide ring — a drawn line, not a curb.
+const GROUND_RING_HALF_WIDTH := 0.09
+## How far outside the first plaza's rim the player starts.
+const START_CLEARANCE := 3.0
+
 ## Scenery ringing the lobby beyond the plazas: `count` objects of `key` placed
 ## at a random angle and a random radius in `[minR, maxR]`, scaled into
 ## `[minS, maxS]`.
@@ -124,6 +140,38 @@ static func scenery_in_the_middle() -> Array[String]:
 			out.append(str(spec["key"]))
 	out.sort()
 	return out
+
+
+## Where the player starts: on the way to the first plaza, `START_CLEARANCE`
+## outside its rim.
+##
+## The start used to be the middle of the crossing, which is the one place in the
+## lobby with nothing to do — the player arrived in it, saw empty ground and had
+## to walk out of it. It also keeps the start clear of the gallery portal, which
+## stands a quarter turn away and would otherwise swallow a spawn standing in it.
+static func start_position() -> Vector2:
+	var layout := zone_layout()
+	if layout.is_empty():
+		return Vector2(0.0, CATEGORY_RING_RADIUS - ZONE_RADIUS - START_CLEARANCE)
+	var first: Dictionary = layout[0]
+	var centre := Vector2(float(first["x"]), float(first["z"]))
+	if centre.length() == 0.0:
+		return Vector2(0.0, CATEGORY_RING_RADIUS - ZONE_RADIUS - START_CLEARANCE)
+	return centre.normalized() * (centre.length() - ZONE_RADIUS - START_CLEARANCE)
+
+
+## The yaw the knight starts with: it looks along the line from the crossing to
+## the first plaza, the same convention as `_update_world()`'s stick reading.
+static func start_facing() -> float:
+	var start := start_position()
+	var layout := zone_layout()
+	if layout.is_empty():
+		return 0.0
+	var first: Dictionary = layout[0]
+	var to_first := Vector2(float(first["x"]), float(first["z"])) - start
+	if to_first.length() == 0.0:
+		return 0.0
+	return atan2(-to_first.x, -to_first.y)
 
 
 ## One plaza per category, evenly on a ring. The first plaza sits north of the

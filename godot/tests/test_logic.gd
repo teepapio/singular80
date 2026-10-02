@@ -770,6 +770,32 @@ func _lobby() -> void:
 	t.equal(Lobby.scenery_in_the_middle().size(), 0,
 		"Zwischen den Plazas und der Mitte steht nichts")
 
+	# Der Boden trägt zwei Kreise und kein Quadrat: der Ring, auf dem die Plazas
+	# stehen, und die Kante, an der das Laufen endet. Ein Gitter aus Linien lag
+	# früher quer durch die Mitte und zeichnete dort ein Rechteck — und ein
+	# Rechteck liest sich als Ort.
+	t.equal(Lobby.GROUND_RINGS.size(), 2, "Zwei Kreise auf dem Lobbyboden")
+	t.check(Lobby.GROUND_RINGS[0] == Lobby.CATEGORY_RING_RADIUS, "Der erste ist der Ring der Plazas")
+	t.check(Lobby.GROUND_RINGS[1] == Lobby.LOBBY_WALK_RADIUS, "Der zweite die Grenze des Laufcircles")
+
+	# Der Start liegt nicht in der Mitte: wer dort ankommt, sieht als Erstes genau
+	# den Platz, den der Vorschlag weghaben wollte. Er steht auch in keiner Plaza
+	# und nicht im Galerieportal, das ihn sonst beim Starten direkt öffnen würde.
+	var start := Lobby.start_position()
+	t.check(Lobby.distance_sq(start.x, start.y, 0.0, 0.0) > Lobby.ZONE_RADIUS * Lobby.ZONE_RADIUS,
+		"Der Start liegt nicht in der Mitte")
+	t.check(start.length() < Lobby.LOBBY_WALK_RADIUS, "Der Start liegt im begehbaren Kreis")
+	for zone in zones:
+		t.check(Lobby.distance_sq(start.x, start.y, float(zone["x"]), float(zone["z"])) > Lobby.ZONE_RADIUS * Lobby.ZONE_RADIUS,
+			"Der Start liegt in keiner Plaza")
+	var gallery_spot := Lobby.gallery_position()
+	t.check(Lobby.distance_sq(start.x, start.y, gallery_spot.x, gallery_spot.y) > Lobby.GALLERY_TRIGGER * Lobby.GALLERY_TRIGGER,
+		"Der Start liegt nicht im Galerieportal")
+	var first_zone: Dictionary = zones[0]
+	var to_first := Vector2(float(first_zone["x"]), float(first_zone["z"])) - start
+	t.almost(Lobby.start_facing(), atan2(-to_first.x, -to_first.y), 0.001,
+		"Der Ritter schaut vom Start auf die erste Plaza")
+
 	# Registry: every entry points at a real screen.
 	for game in GameRegistry.GAMES:
 		var screen := str(game["screen"])

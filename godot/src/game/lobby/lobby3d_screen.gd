@@ -8,9 +8,13 @@ extends WorldScreen
 ## plus pressing the interact button (or tapping its card) starts the game.
 ##
 ## The middle of the map is the crossing and nothing else: no disc, no rim, no
-## props. It used to be a raised platform with a turning ring, a campfire, four
-## torches and a rune-stone signpost — the one place a player arrives at, stands
-## in and leaves again, because none of it did anything.
+## props, and no marking either. It used to be a raised platform with a turning
+## ring, a campfire, four torches and a rune-stone signpost — the one place a
+## player arrives at, stands in and leaves again, because none of it did
+## anything. The grid of lines that lay across it afterwards did nothing either,
+## and drew a square in the middle, which is the one shape that reads as a place.
+## Two circles took its place: the ring the plazas stand on and the edge the
+## player may not walk past. A circle has no middle.
 
 const MOVE_SPEED := 15.0
 const RUN_MULT := 1.7
@@ -28,8 +32,8 @@ const ZONE_PROPS := {
 	"puzzle": ["rpg/crystal_cluster", "rpg/stalagmite", "rpg/rock_large"],
 }
 
-var pos := Vector3(0, 0, 7)
-var facing := PI
+var pos := Vector3.ZERO
+var facing := 0.0
 var player: Node3D
 var zones: Array[Dictionary] = []
 var pedestals: Array[Dictionary] = []
@@ -59,6 +63,13 @@ var _interact_held := false
 
 
 func _ready_world() -> void:
+	# The knight starts on the way to the first plaza instead of in the middle of
+	# the crossing: arriving in the one place with nothing to do meant the first
+	# thing on screen was empty ground.
+	var start := Lobby.start_position()
+	pos = Vector3(start.x, 0.0, start.y)
+	facing = Lobby.start_facing()
+
 	set_fog(Color("05070d"), 0.0)
 	environment_node.environment.fog_enabled = false
 	sun.light_energy = 1.15
@@ -94,29 +105,21 @@ func _build_ground() -> void:
 	ground.position.y = -0.1
 	add_child(ground)
 
-	var grid := ImmediateMesh.new()
-	var previous := Vector3.ZERO
-	for i in range(49):
-		var x := -96.0 + float(i) * 4.0
-		if i == 0:
-			grid.surface_begin(Mesh.PRIMITIVE_LINES)
-		grid.surface_add_vertex(Vector3(x, 0.02, -48))
-		grid.surface_add_vertex(Vector3(x, 0.02, 48))
-	for i in range(25):
-		var z := -48.0 + float(i) * 4.0
-		grid.surface_add_vertex(Vector3(-48, 0.02, z))
-		grid.surface_add_vertex(Vector3(48, 0.02, z))
-	grid.surface_end()
-	var grid_mesh := MeshInstance3D.new()
-	grid_mesh.mesh = grid
-	var grid_mat := StandardMaterial3D.new()
-	grid_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	grid_mat.vertex_color_use_as_albedo = true
-	grid_mat.albedo_color = Color("334155")
-	grid_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	grid_mat.albedo_color.a = 0.35
-	grid_mesh.material_override = grid_mat
-	add_child(grid_mesh)
+	# Two circles instead of the grid of lines that used to lie across the middle.
+	# Lines every four metres drew a square there, and a square is a place: the
+	# middle read as an area with a marking on it rather than the way through the
+	# lobby. A circle has no middle, and both of these mean something — the ring
+	# the plazas stand on, and the edge `Lobby.clamp_to_lobby()` stops at.
+	for radius in Lobby.GROUND_RINGS:
+		var guide := MeshInstance3D.new()
+		var ring := TorusMesh.new()
+		ring.inner_radius = radius - Lobby.GROUND_RING_HALF_WIDTH
+		ring.outer_radius = radius + Lobby.GROUND_RING_HALF_WIDTH
+		ring.rings = 96
+		guide.mesh = ring
+		guide.material_override = WorldScreen.standard_material(Color("334155"), 0.7)
+		guide.position.y = 0.03
+		add_child(guide)
 
 
 func _build_zones() -> void:
