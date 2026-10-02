@@ -20,7 +20,7 @@ import os
 import sys
 
 import bpy
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 
 _MATERIAL_CACHE: dict[tuple[object, ...], bpy.types.Material] = {}
@@ -1000,57 +1000,272 @@ HORSE_DARK = (0.20, 0.11, 0.05, 1.0)
 HORSE_MUZZLE = (0.78, 0.62, 0.50, 1.0)
 HOOF_COLOR = (0.13, 0.11, 0.10, 1.0)
 
+#: Near-black and glossy. A horse's eye is a wet dark bead, and the reference
+#: photograph shows it catching the light — a matte brown one disappears into
+#: the coat at gallery distance, which is where this mesh is actually seen.
+EYE_COLOR = (0.05, 0.04, 0.04, 1.0)
+
+
+def _horse_segment(
+    name: str,
+    start: tuple[float, float, float],
+    end: tuple[float, float, float],
+    r0: float,
+    r1: float,
+    color: tuple[float, float, float, float],
+    sides: int = 6,
+    flatten: float = 1.0,
+    pivot_at_start: bool = False,
+    roll: float = 0.0,
+) -> bpy.types.Object:
+    """A tapered limb segment running from ``start`` to ``end``.
+
+    The cone primitive stands on +Z, so the segment is rotated onto the
+    direction it actually runs: a straight prism for a cannon bone, a steeply
+    pitched one for a neck. ``flatten`` squashes the cross-section along the
+    mesh's own X *before* that rotation, which is only safe because a rotation
+    about X leaves X alone — it is how a neck gets to be deeper than it is wide
+    without becoming a cylinder.
+
+    ``pivot_at_start`` puts the object's origin on the shoulder or hip instead
+    of halfway down the bone, so the screen can swing the whole leg around the
+    joint a real leg turns on.
+
+    ``roll`` spins the cross-section about the segment's own axis. It is what
+    turns an eight-sided prism from a roof ridge into a barrel: half a step of
+    roll moves the single top vertex aside and leaves one flat facet facing up.
+    """
+    a = Vector(start)
+    b = Vector(end)
+    delta = b - a
+    length = delta.length
+    if length <= 1e-6:
+        raise ValueError(f"{name}: segment start and end are the same point")
+    obj = _cone(name, sides, r0, r1, length, (0.0, 0.0, 0.0), color, 0.0, 0.7, 0.0)
+    if flatten != 1.0:
+        obj.data.transform(Matrix.Diagonal((flatten, 1.0, 1.0, 1.0)))
+    if pivot_at_start:
+        # The cone's data is centred on its own origin, spanning -length/2 to
+        # +length/2. Shifting it by *half* the length puts the whole segment in
+        # front of the origin, so the origin ends up on `start`. Shifting the
+        # other way would mirror the segment across `start` and send it off the
+        # other side of the shoulder it is supposed to hang from.
+        obj.data.transform(Matrix.Translation((0.0, 0.0, length / 2.0)))
+        obj.location = a
+    else:
+        obj.location = (a + b) * 0.5
+    rotation = Vector((0.0, 0.0, 1.0)).rotation_difference(delta)
+    if roll:
+        rotation = rotation @ Quaternion((0.0, 0.0, 1.0), roll)
+    obj.rotation_euler = rotation.to_euler()
+    return obj
+
+
+def _horse_joint(
+    name: str,
+    x: float,
+    y: float,
+    z: float,
+    radius: float,
+    color: tuple[float, float, float, float],
+) -> bpy.types.Object:
+    """The knob at a joint — carpus, hock, fetlock.
+
+    A leg bone meeting at an angle with nothing at the corner reads as two
+    cylinders that happen to touch. These are what make the bend visible.
+    """
+    return _ico(name, (radius, radius, radius), (x, y, z), color, 0.0, 0.65, 0.0, 1)
+
 
 def _horse_leg(
     name: str,
     x: float,
-    y: float,
-    hip_z: float,
-    length: float,
-    hoof_name: str,
+    joints: tuple[tuple[float, float, float], ...],
+    hoof: tuple[float, float],
 ) -> bpy.types.Object:
-    """A leg whose origin sits at the hip so three.js can swing it around it."""
-    leg = _cone(name, 8, 0.055, 0.09, length, (x, y, hip_z), HORSE_COAT, 0.0, 0.7, 0.0)
-    # Move the mesh data down so the object's pivot is the top of the leg.
-    leg.data.transform(Matrix.Translation((0.0, 0.0, -length / 2.0)))
-    bpy.ops.mesh.primitive_cylinder_add(
-        vertices=8, radius=0.095, depth=0.13, location=(x, y, hip_z - length + 0.065)
+    """One leg, built from a chain of ``(y, z, radius)`` joints.
+
+    The chain is walked once: a tapered segment between every pair of joints, a
+    knob at each interior one, and a hoof at the end. The first segment keeps
+    the name ``name`` and its origin on the shoulder or hip — the screen looks
+    the legs up by exactly that name and swings them about that point.
+
+    ``hoof`` is the ``(y, z)`` of the hoof's bottom face; the pastern angle is
+    taken from where the chain ends, so the hoof always points the way that
+    leg's fetlock does.
+    """
+    points = [(x, y, z) for (y, z, _radius) in joints]
+    radii = [radius for (_y, _z, radius) in joints]
+
+    leg = _horse_segment(
+        name, points[0], points[1], radii[0], radii[1], HORSE_COAT, pivot_at_start=True
     )
-    hoof = _primitive(hoof_name, HOOF_COLOR, 0.0, 0.5, 0.0)
-    hoof.parent = leg
-    hoof.matrix_parent_inverse = leg.matrix_world.inverted()
+    parts = [leg]
+    for i in range(1, len(points) - 1):
+        parts.append(_horse_joint(f"{name}Joint{i}", x, points[i][1], points[i][2], radii[i] * 1.35, HORSE_COAT))
+        parts.append(
+            _horse_segment(f"{name}Seg{i}", points[i], points[i + 1], radii[i], radii[i + 1], HORSE_COAT)
+        )
+    # The hoof is wider at the ground than at the coronet, which is the one
+    # detail that stops the bottom of a leg reading as a cut-off cylinder.
+    pastern_top = points[-1]
+    parts.append(
+        _horse_segment(
+            f"{name}Hoof",
+            pastern_top,
+            (x, hoof[0], hoof[1]),
+            radii[-1] * 1.02,
+            radii[-1] * 1.72,
+            HOOF_COLOR,
+        )
+    )
+
+    bpy.context.view_layer.update()
+    for part in parts[1:]:
+        part.parent = leg
+        part.matrix_parent_inverse = leg.matrix_world.inverted()
     return leg
 
 
+#: Shoulder, elbow, carpus (the knee a horse actually has), fetlock and the top
+#: of the pastern. The foreleg hangs plumb — every one of these shares almost
+#: the same ``y``, and only the pastern steps forward at the end.
+HORSE_FORE_LEG = (
+    (0.55, 1.40, 0.145),
+    (0.52, 1.02, 0.105),
+    (0.50, 0.72, 0.088),
+    (0.50, 0.25, 0.062),
+    (0.545, 0.115, 0.054),
+)
+
+#: Hip, hock, fetlock, pastern. The thigh goes down and **back** to the hock at
+#: ``y = -0.84`` and the cannon below it comes forward again to ``y = -0.755``:
+#: that reversal is the hind leg.
+HORSE_HIND_LEG = (
+    (-0.58, 1.36, 0.185),
+    (-0.84, 0.80, 0.090),
+    (-0.755, 0.25, 0.062),
+    (-0.715, 0.115, 0.054),
+)
+
+
 def build_horse() -> bpy.types.Object:
-    """A low-poly horse facing +Y (Blender).
+    """A low-poly horse facing +Y (Blender), hooves on z = 0.
 
-    The four legs are separate nodes whose pivot is the hip, named
-    ``HorseLegFL`` … ``HorseLegBR``, so the three.js scene can drive a proper
-    gallop and a tucked jump pose. Body, neck, head, mane and tail are siblings.
+    A **prism** is the barrel, not a box, and the eight sides are rolled half a
+    step so one facet faces straight up: a horse's back is a flat line between
+    the withers and the croup, an ellipsoid can only ever give a dome, and a
+    box gives the right back and the wrong everything else. The chest and the
+    rump are rounded so the prism's ends close off. The legs, neck, head and
+    tail keep their node names (``HorseLegFL`` … ``HorseLegBR``,
+    ``HorseNeck``, ``HorseHead``, ``HorseTail``), which is what the runner
+    screen animates.
     """
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=1.0, location=(0.0, 0.0, 1.20))
-    body = bpy.context.active_object
-    body.name = "HorseBody"
-    body.scale = (0.40, 0.78, 0.34)
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    bpy.ops.object.shade_flat()
-    _apply_material(body, HORSE_COAT, 0.0, 0.7, 0.0)
+    # Radius 0.285 rolled by half a step: back flat at 1.59, belly at 1.07.
+    body = _horse_segment(
+        "HorseBody", (0.0, -0.46, 1.33), (0.0, 0.36, 1.33), 0.285, 0.285, HORSE_COAT, 8, roll=math.pi / 8.0
+    )
+    _ico("HorseChest", (0.31, 0.30, 0.30), (0.0, 0.40, 1.30), HORSE_COAT, 0.0, 0.7, 0.0, 2)
+    _ico("HorseRump", (0.31, 0.32, 0.31), (0.0, -0.58, 1.32), HORSE_COAT, 0.0, 0.7, 0.0, 2)
+    # Fills the corner where the neck meets the shoulder, and carries the
+    # withers — the highest point of the back. Without it the neck sits on a
+    # stalk and the front view reads as wings either side of a pole.
+    _ico("HorseShoulder", (0.27, 0.22, 0.26), (0.0, 0.48, 1.40), HORSE_COAT, 0.0, 0.7, 0.0, 1)
 
-    _box("HorseNeck", (0.19, 0.22, 0.46), (0.0, 0.70, 1.72), HORSE_COAT, 0.0, 0.7, 0.0, rotation=(-0.55, 0.0, 0.0))
-    _box("HorseHead", (0.16, 0.26, 0.17), (0.0, 1.02, 2.10), HORSE_COAT, 0.0, 0.7, 0.0, rotation=(0.18, 0.0, 0.0))
-    _box("HorseMuzzle", (0.12, 0.18, 0.12), (0.0, 1.24, 2.06), HORSE_MUZZLE, 0.0, 0.8, 0.0, rotation=(0.18, 0.0, 0.0))
-    _box("HorseMane", (0.06, 0.11, 0.42), (0.0, 0.60, 1.92), HORSE_DARK, 0.0, 0.9, 0.0, rotation=(-0.55, 0.0, 0.0))
-    _box("HorseForelock", (0.06, 0.10, 0.20), (0.0, 0.86, 2.34), HORSE_DARK, 0.0, 0.9, 0.0, rotation=(0.4, 0.0, 0.0))
+    # The neck is short, steep and **deep** — a horse's neck is the deepest
+    # part of the animal relative to its width, and a thin pole reads as a
+    # giraffe's. It carries the head on its far end.
+    _horse_segment(
+        "HorseNeck", (0.0, 0.60, 1.50), (0.0, 1.00, 1.98), 0.25, 0.145, HORSE_COAT, 6, 0.60, True
+    )
+    # The head hangs down and forward at about 41°, and its origin sits on the
+    # poll so a nod turns it on the neck joint rather than in mid-air.
+    _horse_segment(
+        "HorseHead", (0.0, 1.00, 1.98), (0.0, 1.42, 1.62), 0.155, 0.075, HORSE_COAT, 6, 0.76, True
+    )
+    _ico("HorseJaw", (0.09, 0.12, 0.105), (0.0, 1.08, 1.86), HORSE_COAT, 0.0, 0.7, 0.0, 1)
+    _box("HorseMuzzle", (0.105, 0.13, 0.10), (0.0, 1.43, 1.61), HORSE_MUZZLE, 0.0, 0.8, 0.0, rotation=(-0.86, 0.0, 0.0))
+
+    # An eye on each side, high on the head just behind the brow. The close-up
+    # photograph spends most of its frame on it, and it is the one feature that
+    # separates a head from a wedge: a head with no eye reads as a box from the
+    # front. Set into the cheek, so the sphere is mostly inside the skull.
+    for i, x in enumerate((-0.108, 0.108)):
+        _ico(f"HorseEye{i}", (0.035, 0.055, 0.048), (x, 1.12, 1.90), EYE_COLOR, 0.0, 0.35, 0.0, 1)
+
+    # Nostrils, one each side of the muzzle. Small, but the muzzle is the one
+    # part of the head that points at the player in the runner game, and a
+    # featureless pale block there is the weakest thing on the animal.
+    for i, x in enumerate((-0.052, 0.052)):
+        _ico(f"HorseNostril{i}", (0.026, 0.030, 0.036), (x, 1.47, 1.63), HORSE_DARK, 0.0, 0.8, 0.0, 1)
 
     for i, x in enumerate((-0.075, 0.075)):
-        _cone(f"HorseEar{i}", 4, 0.055, 0.0, 0.18, (x, 0.90, 2.30), HORSE_DARK, 0.0, 0.9, 0.0)
+        ear = _cone(f"HorseEar{i}", 4, 0.050, 0.0, 0.26, (x, 0.99, 2.02), HORSE_DARK, 0.0, 0.9, 0.0)
+        # Pricked up, tipped forward and splayed out: a horse's ears stand, and
+        # the splay is what the front view is read by.
+        ear.rotation_euler = (-0.25, 0.0, 0.32 if x < 0.0 else -0.32)
 
-    _cone("HorseTail", 6, 0.03, 0.13, 0.78, (0.0, -0.78, 1.02), HORSE_DARK, 0.0, 0.9, 0.0)
+    # The mane is a **band lying on the crest**, not a row of spikes standing
+    # off it. Both references agree and neither leaves room for argument: the
+    # PSF anatomy plate draws it as a scalloped ridge sitting on the top line
+    # of the neck, and the Mongolia photograph has it falling down the near
+    # side. What the previous mane did instead was fan its four shards from
+    # -0.695 to -0.425 about X, which tips them progressively further off the
+    # neck's own axis; from the side they clear the silhouette and read as a
+    # mohawk. Keeping every shard on one rotation is what puts the hair back on
+    # the horse.
+    #
+    # The crest is the *surface* of the neck, not its axis: the axis runs from
+    # the withers to the poll, and the crest is that line pushed sideways by
+    # the neck's own radius. Shards placed on the axis end up inside the neck.
+    crest_a = Vector((0.0, 0.42, 1.66))
+    crest_b = Vector((0.0, 0.89, 2.07))
+    _horse_segment(
+        "HorseManeRidge", crest_a, crest_b, 0.105, 0.070, HORSE_DARK, 6, 0.70, True
+    )
+    # The locks hang down the **side** of the neck rather than out along the
+    # crest, so they are offset in X — the neck is flattened to 0.60, so its own
+    # surface there is only about 0.15 from the axis and a lock on the axis
+    # would be buried in it. Seen from the side these are the serrated edge that
+    # tells the neck it is a horse and not a pole.
+    for i, t in enumerate((0.14, 0.40, 0.64, 0.85)):
+        p = crest_a.lerp(crest_b, t)
+        _horse_segment(
+            f"HorseManeLock{i}",
+            (p.x - 0.055, p.y, p.z - 0.01),
+            (p.x - 0.080, p.y + 0.07, p.z - 0.21),
+            0.055,
+            0.022,
+            HORSE_DARK,
+            4,
+            0.80,
+        )
+    # The forelock falls off the poll forward over the forehead, which is the
+    # one part of a horse's hair that hangs in front of the face rather than
+    # along the neck.
+    _box("HorseForelock", (0.09, 0.12, 0.26), (0.0, 1.06, 2.03), HORSE_DARK, 0.0, 0.9, 0.0, rotation=(-0.9, 0.0, 0.0))
 
+    # Tail: a dock leaving the croup downwards, then the lock hanging behind
+    # the hocks. Both references put it close to vertical — the anatomy plate
+    # has it falling straight down the buttock to the level of the hock, and the
+    # photograph has the same — and the previous version ran the dock out at
+    # 45 degrees to the rear, which from the side reads as a flag on a pole.
+    # The dock starts well inside the rump; starting it on the croup's upper
+    # edge leaves it floating.
+    _horse_segment("HorseTail", (0.0, -0.70, 1.44), (0.0, -0.84, 1.26), 0.155, 0.115, HORSE_DARK)
+    _horse_segment(
+        "HorseTailLock", (0.0, -0.84, 1.27), (0.0, -0.95, 0.82), 0.115, 0.070, HORSE_DARK, 6, 0.85
+    )
+    _horse_segment(
+        "HorseTailLock2", (0.0, -0.80, 1.24), (0.0, -0.88, 0.92), 0.085, 0.050, HORSE_DARK, 5, 0.90
+    )
+
+    # Shoulder-width apart, at the widest part of the barrel: a horse stands on
+    # legs under its own body, and pulling them inwards makes the front view a
+    # set of knees almost touching.
     for side, x in (("L", -0.30), ("R", 0.30)):
-        _horse_leg(f"HorseLegF{side}", x, 0.54, 1.06, 1.06, f"HorseHoofF{side}")
-        _horse_leg(f"HorseLegB{side}", x, -0.54, 1.06, 1.06, f"HorseHoofB{side}")
+        _horse_leg(f"HorseLegF{side}", x, HORSE_FORE_LEG, hoof=(0.565, 0.0))
+        _horse_leg(f"HorseLegB{side}", x, HORSE_HIND_LEG, hoof=(-0.700, 0.0))
     return body
 
 
