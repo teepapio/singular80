@@ -166,22 +166,43 @@ const GAMES: Array[Dictionary] = [
 		"highscore_key": Game.HS_CRYSTAL_HALLOWEEN,
 	},
 	{
+		# One tile for one game (suggestion #30). "Christmas Merge 3D" and
+		# "Halloween Merge 3D" were two lobby tiles over one screen script, and
+		# they differ in colours and meshes, not in what a player does — the
+		# lobby sold the same game twice. The editions live in `themes` now and
+		# the theme button in the top bar chooses between them, so the fold costs
+		# no record: each edition keeps its own highscore key and the dialog
+		# shows both records side by side, which two tiles never did.
+		#
+		# The id stays `merge3d-christmas` and the screen with it. The lobby's
+		# totem table is keyed by id, one mesh per entry, and a new id would put
+		# the default crystal on this plinth until that table — which belongs to
+		# the lobby lane — learned the name. The tile is the family, its screen
+		# is the edition the family opens on, and nothing else in the registry
+		# refers to either id.
 		"id": "merge3d-christmas",
-		"name": "Christmas Merge 3D",
+		"name": "Merge 3D",
 		"icon": "✦",
 		"screen": "merge3d_christmas",
 		"accent": Color(0.133, 0.773, 0.369),
 		"category": CATEGORY_PUZZLE,
 		"highscore_key": Game.HS_MERGE_CHRISTMAS,
-	},
-	{
-		"id": "merge3d-halloween",
-		"name": "Halloween Merge 3D",
-		"icon": "☽",
-		"screen": "merge3d_halloween",
-		"accent": Color(0.973, 0.451, 0.086),
-		"category": CATEGORY_PUZZLE,
-		"highscore_key": Game.HS_MERGE_HALLOWEEN,
+		"themes": [
+			{
+				"screen": "merge3d_christmas",
+				"name": "Christmas Merge 3D",
+				"icon": "✦",
+				"accent": Color(0.133, 0.773, 0.369),
+				"highscore_key": Game.HS_MERGE_CHRISTMAS,
+			},
+			{
+				"screen": "merge3d_halloween",
+				"name": "Halloween Merge 3D",
+				"icon": "☽",
+				"accent": Color(0.973, 0.451, 0.086),
+				"highscore_key": Game.HS_MERGE_HALLOWEEN,
+			},
+		],
 	},
 	{
 		"id": "horserunner",

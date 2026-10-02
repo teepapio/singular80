@@ -195,6 +195,11 @@ const SCOPE_SUITES = {
   lobby: ['Lobby-Geometrie', 'Vorschlagsdialog'],
   core: ['Mechaniken', 'Inventar', 'Vorschlag — Herkunft', 'Auftragsweg', 'Server-Adresse',
     'Themenwahl',
+    'Themenwahl',
+    // The fold itself: one lobby tile instead of one per edition, with the
+    // editions declared by that tile. It belongs here rather than to the merge
+    // game, because what it holds is the theme dialog and the registry read.
+    'Ein Spiel, eine Kachel',
     // The touch layer every 3D screen builds its action buttons from. It belongs
     // to the core and not to a game: the report said "Drachenflug: i cannot
     // fire while steering", but the fault was in `godot/src/core/ui/` and every
