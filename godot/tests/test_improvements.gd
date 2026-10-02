@@ -709,18 +709,25 @@ func _gallery_layout() -> void:
 		"Zwischen zwei Höhen bleibt ein Sockel im Blick")
 	# Walk every aisle across every gap of the hall and count the ones with
 	# nothing in front of the player. Any of them is a place where the info card
-	# says "walk along the hall" while the player is walking.
+	# says "walk along the hall" while the player is walking. The keys have to
+	# cover the gaps that are scanned, or the scan measures an empty hall.
+	var hall_keys: Array[String] = []
+	for i in MeshGallery.PER_STEP * 4:
+		hall_keys.append("h%d" % i)
 	var blind := 0
 	var checked := 0
-	var gaps_sampled := int(-MeshGallery.end_z(40) * 2.0)
+	var gaps_sampled := int(-MeshGallery.end_z(hall_keys.size()) * 2.0)
 	for s in gaps_sampled:
-		var gz := -MeshGallery.slot_position(0).z - MeshGallery.SLOT_SPACING * 0.5 - float(s)
+		var gz := MeshGallery.slot_position(0).z - MeshGallery.SLOT_SPACING * (0.5 + float(s))
+		if gz < MeshGallery.end_z(hall_keys.size()):
+			break
 		if MeshGallery.depth_gap(gz) < MeshGallery.CLEAR:
 			continue
 		for gap_row in MeshGallery.ROWS_PER_SIDE:
 			for side: float in [-1.0, 1.0]:
 				checked += 1
-				if MeshGallery.nearest_slot(keys, Vector3(side * MeshGallery.lane_of(gap_row), 0.0, gz)) < 0:
+				if MeshGallery.nearest_slot(hall_keys,
+						Vector3(side * MeshGallery.lane_of(gap_row), 0.0, gz)) < 0:
 					blind += 1
 	t.equal(blind, 0,
 		"Aus jedem Gang und jeder Lücke steht ein Sockel vorn (%d geprüft)" % checked)
@@ -748,6 +755,9 @@ func _gallery_layout() -> void:
 			"Die Gänge %d und %d liegen auseinander" % [aisle_row, aisle_row + 1])
 		t.almost(MeshGallery.ROW_OFFSETS[aisle_row] - MeshGallery.lane_of(aisle_row),
 			MeshGallery.CLEAR, 0.001, "Gang %d hält den Abstand zu seiner Reihe" % aisle_row)
+	for aisle_row in range(1, MeshGallery.ROWS_PER_SIDE):
+		# The aisle in front of a row has to be nearer to *that* row than to the
+		# one behind it, or the row behind could never be the answer.
 		t.check(MeshGallery.ROW_OFFSETS[aisle_row] - MeshGallery.lane_of(aisle_row)
 			< MeshGallery.lane_of(aisle_row) - MeshGallery.ROW_OFFSETS[aisle_row - 1],
 			"Reihe %d ist näher als Reihe %d" % [aisle_row, aisle_row - 1])

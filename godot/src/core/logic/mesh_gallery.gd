@@ -169,20 +169,26 @@ static func lane_x(want: float, z: float, was_x: float) -> float:
 	var x := clampf(want, -LANE_SIDE, LANE_SIDE)
 	if depth_gap(z) >= CLEAR:
 		return x
+	# The bands are the gaps *between* two aisles, and they are measured with
+	# `lane_of()` rather than with `ROW_OFFSETS[row] ± CLEAR`: those are two
+	# different subtractions, and they land a rounding error apart, so a player
+	# standing exactly on an aisle fell inside the band and was pushed one row
+	# further in. An aisle is an endpoint of the two bands around it and belongs
+	# to neither.
 	var reach := absf(x)
-	for row in ROWS_PER_SIDE:
-		var offset: float = ROW_OFFSETS[row]
-		if absf(reach - offset) >= CLEAR:
+	for band in ROWS_PER_SIDE - 1:
+		var near: float = lane_of(band)
+		var far: float = lane_of(band + 1)
+		if reach <= near or reach >= far:
 			continue
 		# Caught in a closed band. Push out into the neighbouring aisle, on the
 		# side the player came from, so nobody standing in the nave is yanked
 		# across the hall.
-		var near: float = lane_of(maxi(row - 1, 0))
-		var far: float = lane_of(mini(row + 1, ROWS_PER_SIDE - 1))
 		var was := absf(was_x)
-		if was >= offset + CLEAR or (was > offset - CLEAR and absf(was - far) < absf(was - near)):
-			return signf(x) * far
-		return signf(x) * near
+		var target := near
+		if was >= far or (was > near and absf(was - far) < absf(was - near)):
+			target = far
+		return signf(x) * target
 	return x
 
 
