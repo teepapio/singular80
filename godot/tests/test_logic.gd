@@ -774,6 +774,18 @@ func _lobby() -> void:
 	t.equal(str(GameRegistry.game_by_id("pang")["category"]), GameRegistry.CATEGORY_ACTION, "Pang liegt in den Action-Spielen")
 	t.equal(str(GameRegistry.screen_of("pang")), "pang_menu", "Pang startet in der Level-Auswahl")
 	t.equal(str(GameRegistry.screen_of("nope")), "arena", "Unbekanntes Spiel fällt auf die Arena zurück")
+
+	# The plaza floor is a tint the ground shows through, not a slab on top of it.
+	# This is the one place the three properties that make a surface actually
+	# translucent are checked — an alpha value alone does nothing until
+	# `transparency` is switched on.
+	var plaza := WorldScreen.translucent_material(Color(1, 0, 0), Lobby.PLAZA_FLOOR_ALPHA)
+	t.equal(plaza.transparency, BaseMaterial3D.TRANSPARENCY_ALPHA, "Der Plaza-Boden wird gemischt, nicht verdeckt")
+	t.equal(plaza.blend_mode, BaseMaterial3D.BLEND_MODE_MIX, "Der Plaza-Boden mischt sich mit dem Grund")
+	t.almost(plaza.albedo_color.a, Lobby.PLAZA_FLOOR_ALPHA, 0.001, "Der Plaza-Boden trägt die gewünschte Deckkraft")
+	t.check(Lobby.PLAZA_FLOOR_ALPHA > 0.0 and Lobby.PLAZA_FLOOR_ALPHA < 1.0,
+		"Der Plaza-Boden ist durchsichtig, aber nicht unsichtbar")
+	t.check(Lobby.PLAZA_RIM_EMISSION < 1.0, "Der Plaza-Rand leuchtet nicht mehr, er markiert nur")
 	t.suite_done()
 
 

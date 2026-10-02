@@ -17,6 +17,32 @@ const MINIMAP_WORLD_RADIUS := LOBBY_WALK_RADIUS + 6.0
 const GALLERY_DISTANCE := 13.0
 const GALLERY_TRIGGER := 3.0
 
+## How loud a plaza is allowed to be.
+##
+## A plaza used to be an opaque slab in the ground's own near-black, edged by a
+## rim glowing at emission 1.3 and lit from above by a 14-unit omni light in the
+## category colour. From the middle of the map that made five lit islands the
+## loudest thing on screen — louder than the eighteen games standing on them,
+## which is backwards: the circle is supposed to say where a category is, the
+## games are what the player came for.
+##
+## Now the floor is a translucent wash of the accent over the ground and the rim
+## is a plain accent line that does not glow, so an area reads as a tint and an
+## outline. The light stays, at well under half its energy and a shorter reach,
+## because a pool of coloured light is the same statement made louder.
+##
+## The old floor was `1a2436` against a ground of `1b2436` — one 255th apart,
+## which means its dominance was never its colour but being an opaque raised
+## island with a glowing rim on top. That is also why the wash carries the
+## accent instead of the old near-black: a merely transparent `1a2436` disc
+## would have made the areas *invisible*, not quieter. At 0.22 each category
+## moves the ground 14–18 % in its strongest channel, measured over all five
+## accents.
+const PLAZA_FLOOR_ALPHA := 0.22
+const PLAZA_RIM_EMISSION := 0.4
+const PLAZA_LIGHT_ENERGY := 6.0
+const PLAZA_LIGHT_RANGE := 22.0
+
 
 ## One plaza per category, evenly on a ring. The first plaza sits north of the
 ## hub so the camera sees a plaza straight ahead.

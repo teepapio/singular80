@@ -188,7 +188,10 @@ func _build_zones() -> void:
 		mesh.height = 0.4
 		mesh.radial_segments = 48
 		platform.mesh = mesh
-		platform.material_override = WorldScreen.standard_material(Color("1a2436"))
+		# Translucent, and in the category colour rather than the ground's own
+		# near-black: the floor is a tint the ground grid shows through, not a
+		# slab standing on it. See `Lobby.PLAZA_FLOOR_ALPHA`.
+		platform.material_override = WorldScreen.translucent_material(accent, Lobby.PLAZA_FLOOR_ALPHA)
 		platform.position = Vector3(cx, 0.2, cz)
 		add_child(platform)
 
@@ -197,14 +200,17 @@ func _build_zones() -> void:
 		torus.inner_radius = Lobby.ZONE_RADIUS * 0.94 - 0.16
 		torus.outer_radius = Lobby.ZONE_RADIUS * 0.94
 		rim.mesh = torus
-		rim.material_override = WorldScreen.standard_material(accent, 1.3)
+		# Opaque on purpose: an area still needs a readable boundary, it just
+		# must not light up. Glowing rims at emission 1.3 turned every plaza
+		# into a neon sign.
+		rim.material_override = WorldScreen.standard_material(accent, Lobby.PLAZA_RIM_EMISSION)
 		rim.position = Vector3(cx, 0.44, cz)
 		add_child(rim)
 
 		var light := OmniLight3D.new()
 		light.light_color = accent
-		light.light_energy = 14.0
-		light.omni_range = 30.0
+		light.light_energy = Lobby.PLAZA_LIGHT_ENERGY
+		light.omni_range = Lobby.PLAZA_LIGHT_RANGE
 		light.position = Vector3(cx, 6, cz)
 		add_child(light)
 

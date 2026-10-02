@@ -299,6 +299,30 @@ static func standard_material(color: Color, emission: float = 0.0) -> StandardMa
 	return material
 
 
+## The same surface, blended over whatever is behind it at `alpha`.
+##
+## Three things in the 4.5 docs decide how this behaves, and all three are why
+## the alpha is written into `albedo_color` and not left to a texture:
+##
+## * `TRANSPARENCY_ALPHA` "is the slowest to render, and disables shadow
+##   casting" — so the surface stops dropping a shadow. That is the point for a
+##   floor: a translucent disc that still cast a shadow would still read as a
+##   solid island sitting on the ground.
+## * `depth_draw_mode` defaults to `DEPTH_DRAW_OPAQUE_ONLY`, so a blended
+##   surface never writes depth and never sorts against itself. One material over
+##   one closed mesh therefore costs exactly one blend layer, whatever the
+##   camera angle — no `DEPTH_DRAW_ALWAYS`, which would make the near side of a
+##   disc hide its far side.
+## * `blend_mode` defaults to `BLEND_MODE_MIX`, which is what "a colour washed
+##   over the ground" means. `BLEND_MODE_ADD` would make a pale accent glow.
+static func translucent_material(color: Color, alpha: float) -> StandardMaterial3D:
+	var tinted := color
+	tinted.a = clampf(alpha, 0.0, 1.0)
+	var material := standard_material(tinted)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	return material
+
+
 ## Loads one of the bundled Blender meshes, scaled and tinted. Returns `null`
 ## when the import failed so callers can fall back to a primitive.
 static func mesh(key: String, color: Color = Color.WHITE, scale: float = 1.0, emission: float = 0.0) -> Node3D:
