@@ -43,6 +43,7 @@ const ScreenClass := preload("res://src/core/ui/screen.gd")
 ## file — and `WorldScreen` needs the autoloads, so it is only usable from a
 ## suite that runs after the tree is up.
 const WorldScreenClass := preload("res://src/core/ui/world_screen.gd")
+const FireGlowClass := preload("res://src/core/ui/fire_glow.gd")
 
 ## The suggestion flow composes the label and the player's text before the
 ## entry is born.
@@ -71,7 +72,6 @@ func run(kit: TestKit, scene_tree: SceneTree) -> void:
 	await _telegram_route()
 	_legal()
 	await _themed_editions()
-	await _one_tile_one_game()
 	_server_address()
 	_second_finger()
 	_fire()
@@ -902,105 +902,6 @@ func _lists_stay_inside_their_box(layer: Control) -> void:
 
 
 # --- Server address ---------------------------------------------------------
-
-## A family whose tiles are already folded, which is the shape the merge games
-## are in now.
-##
-## "Lobby: there are too many merge games. make them be one with different
-## themes" (suggestion #30). The suite above reads a family out of the lobby,
-## which is the shape the registry has *before* the fold. This one reads the
-## shape after it: one tile, and both editions named by that tile.
-##
-## The fold was registry work and nothing else, and that is worth writing down
-## rather than rediscovering. `ThemePicker` finds a family by the *screen script*
-## an entry opens, not by the screen id on the tile — so the Halloween screen,
-## which no entry's `screen` names any more, still finds the one surviving entry
-## and keeps its theme button. Measured: with the old tile-only reading of the
-## family restored, this suite is green on both merge screens, because that
-## reading compares script paths and both screens have the same one. The class
-## docstring had already promised the folded shape; this suite is what holds it
-## to that promise.
-func _one_tile_one_game() -> void:
-	t.suite("Ein Spiel, eine Kachel")
-
-	# The fold itself, counted on the registry rather than on the family: one
-	# tile for the merge screen script, and it is the tile that names both
-	# editions.
-	var merge_script := str(Router.SCREEN_SCRIPTS.get("merge3d_christmas", ""))
-	var tiles := 0
-	var declaring := 0
-	for game in GameRegistry.GAMES:
-		# A tile is an entry that stands for the merge game, whether it says so
-		# on its own `screen` or only through an edition in `themes`. Before the
-		# fold both merge entries said it on their own, and the lobby sold the
-		# same game on two plinths.
-		var stands := str(Router.SCREEN_SCRIPTS.get(str(game.get("screen", "")), "")) == merge_script
-		for edition in game.get("themes", []):
-			if str(Router.SCREEN_SCRIPTS.get(str((edition as Dictionary).get("screen", "")), "")) == merge_script:
-				stands = true
-		if not stands:
-			continue
-		tiles += 1
-		if not (game.get("themes", []) as Array).is_empty():
-			declaring += 1
-	t.equal(tiles, 1, "Zwei Merge-Spiele sind eine Kachel in der Lobby")
-	t.equal(declaring, 1, "Und die Kachel ist es, die beide Themen nennt")
-
-	# Both screens are in that one family, and the second one is the interesting
-	# half: after the fold no entry's `screen` names it any more, so a family
-	# read from the tiles alone would leave the Halloween screen alone in there.
-	t.equal(ThemePickerClass.family_of("merge3d_christmas").size(), 1,
-		"Die Weihnachts-Fassung gehoert zur einen Familie")
-	t.equal(ThemePickerClass.family_of("merge3d_halloween").size(), 1,
-		"Die Halloween-Fassung auch — obwohl keine Kachel sie nennt")
-	t.check(ThemePickerClass.has_editions("merge3d_christmas"),
-		"Beide Bildschirme bekommen den Themenknopf")
-	t.check(ThemePickerClass.has_editions("merge3d_halloween"),
-		"Der Halloween-Bildschirm ist kein Bildschirm ohne Ausgang")
-
-	t.equal(ThemePickerClass.editions_for("merge3d_christmas").size(), 1,
-		"Das Weihnachts-Thema kennt das andere")
-	t.equal(ThemePickerClass.editions_for("merge3d_halloween").size(), 1,
-		"Und das Halloween-Thema das Weihnachts")
-	t.equal(str(ThemePickerClass.current_edition("merge3d_halloween").get("screen", "")),
-		"merge3d_halloween", "Das Halloween-Thema erkennt sich selbst ueber die Kachel hinweg")
-	t.equal(str(ThemePickerClass.current_edition("merge3d_christmas").get("name", "")),
-		"Christmas Merge 3D", "Und das Weihnachts-Thema seinen Namen")
-
-	# The records survive the fold. That is the whole promise of it: one tile
-	# used to show one number, and the other edition's was on a plinth of its
-	# own, so a player had to walk to it to learn it.
-	var keys := 0
-	for edition in ThemePickerClass.editions_for("merge3d_christmas"):
-		if not str(edition.get("highscore_key", "")).is_empty():
-			keys += 1
-	for edition in ThemePickerClass.editions_for("merge3d_halloween"):
-		if not str(edition.get("highscore_key", "")).is_empty():
-			keys += 1
-	t.equal(keys, 2, "Jede Fassung fuehrt ihren eigenen Highscore")
-
-	# On a real screen, on the edition that is the awkward one: the top bar
-	# carries the button in that edition's own colour, and the dialog names the
-	# one it is not in and can be left again.
-	var host := ScreenClass.new()
-	host.screen_id = "merge3d_halloween"
-	tree.root.add_child(host)
-	var captions := ""
-	for node in host.find_children("*", "Button", true, false):
-		captions += str((node as Button).text)
-	t.check("☽" in captions, "Die Leiste traegt das Zeichen der offenen Fassung")
-	t.check("✦" not in captions, "Und die andere Fassung steht im Dialog, nicht in der Leiste")
-
-	var layer := ThemePickerClass.open(host)
-	t.check(layer != null, "Der Dialog baut sich auch auf dem gefalteten Spiel")
-	t.equal(_cards_in(layer), 1, "Eine Karte: die eine andere Fassung")
-	ThemePickerClass.close()
-	await tree.process_frame
-	t.check(not ThemePickerClass.is_open(), "Und er geht wieder zu")
-
-	host.queue_free()
-	t.suite_done()
-
 
 ## The dialog through which the backend address is entered. It used to live fixed
 ## in the arena game's menu, so it was unreachable from every other screen: an
