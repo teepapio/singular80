@@ -52,3 +52,4 @@ session. Written by the runner on success, or by
 - **#26** I'll start by reading the project structure and understanding the flying mechanic.The tree is dirty… — `22b46c5` <!-- 26:run_muq5s57a_e95d14 -->
 - **#28** I'll start by reading AGENTS.md and understanding the repository structure.Now let me research Merg… — `6cd4bf7` <!-- 28:run_muq5s39v_1a6b9e -->
 - **#29** I'll start by reading the project structure and understanding the scope.Now let me write a probe to… — `7537a0e` <!-- 29:run_muq5s2gw_65b489 -->
+- **#22** I'll start by researching the repository structure and the dragon breeding feature.Now I have the f… — `e0b9ef5` <!-- 22:run_muq5s9el_65aca9 -->
