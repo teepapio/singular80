@@ -64,3 +64,4 @@ session. Written by the runner on success, or by
 - **#47** ow update the stale sign note in the shared primitive, since the second pack now uses it.Now rebuil… — `b43ebc3` <!-- 47:run_muq7q973_b920e6 -->
 - **#21** I'll start by understanding the current state: the run log, the working tree, and the previous atte… — `35dd97a` <!-- 21:run_muqcihqb_b6201e -->
 - **#30** I'll start by reading AGENTS.md and understanding the current state, plus checking the previous fai… — `e09f26e` <!-- 30:run_muqb5pwf_204ef3 -->
+- **#44** I'll start by understanding the current state — the previous failed attempts, the working tree, and… — `4dc776e` <!-- 44:run_muqcocj1_03ddb7 -->
