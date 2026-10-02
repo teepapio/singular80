@@ -10,6 +10,11 @@ const COLUMNS := 3
 const CARD := Vector2(152, 104)
 const PANEL_WIDTH := 330
 const DRAGONS_PER_PAGE := 3
+## One dragon in the selector. Three of them and the two gaps have to fit into
+## the panel's *content* width, which is `PANEL_WIDTH` minus the 14 px content
+## margin `UiTheme.flat()` puts on each side — hence 97, not 96:
+## `3 × 97 + 2 × 5 = 301 ≤ 302`.
+const DRAGON_CARD := Vector2(97, 84)
 
 var profile: Dictionary = {}
 var selected_level := 1
@@ -17,6 +22,7 @@ var selected_dragon := 0
 
 var _level_grid: GridContainer
 var _dragon_row: HBoxContainer
+var _dragon_nav: HBoxContainer
 var _upgrades: VBoxContainer
 var _stats: VBoxContainer
 var _gold_label: Label
@@ -80,7 +86,10 @@ func _build_hangar() -> void:
 	# --- footer ---------------------------------------------------------------
 	var footer := Ui.hbox(12)
 	column.add_child(footer)
-	_detail = Ui.label("", 16, UiTheme.TEXT_DIM)
+	# Wrapped, so a long biome or boss name folds instead of shoving the start
+	# button off the right edge. The row is 52 px tall and two lines of 16 px
+	# text fit into it.
+	_detail = _wrap("", 16, UiTheme.TEXT_DIM)
 	_detail.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(_detail)
@@ -113,11 +122,32 @@ func _vscroll(inner: Control, width: float) -> ScrollContainer:
 
 
 ## A label that wraps instead of stretching its container.
+##
+## `custom_minimum_size.x = 40` is not a width but a *floor*: a container asks
+## its child for `get_combined_minimum_size()` and takes the larger of the two.
+## Autowrap is what keeps the answer at the longest word — without it a label
+## reports the whole line, and one long breed name is enough to push a panel
+## past the screen.
 func _wrap(text: String, size: int, color: Color, bold: bool = false) -> Label:
 	var node := Ui.label(text, size, color, bold)
 	node.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	node.custom_minimum_size = Vector2(40, 0)
 	return node
+
+
+## A panel with its own, small content margins.
+##
+## `UiTheme.flat()` reserves 14 px per side, which is right for a button and
+## too much on a 97 px card: it would eat 28 of the 97 px and force the breed
+## name onto three lines.
+func _card(fill: Color, border: Color, radius: int = 8) -> PanelContainer:
+	var panel := Ui.panel(fill, border, radius)
+	var box: StyleBoxFlat = panel.get_theme_stylebox("panel")
+	box.content_margin_left = 5
+	box.content_margin_right = 5
+	box.content_margin_top = 4
+	box.content_margin_bottom = 4
+	return panel
 
 
 func _build_dragon_panel() -> Control:
@@ -126,6 +156,12 @@ func _build_dragon_panel() -> Control:
 	var box: VBoxContainer = parts[1]
 	_dragon_row = Ui.hbox(5)
 	box.add_child(_dragon_row)
+	# The page arrows are their own row. They used to be a fourth child of
+	# `_dragon_row`, so their width was added to the three cards instead of
+	# sitting under them.
+	_dragon_nav = Ui.hbox(6)
+	_dragon_nav.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_child(_dragon_nav)
 	_stats = Ui.vbox(3)
 	box.add_child(_vscroll(_stats, PANEL_WIDTH - 30))
 	return panel
@@ -167,6 +203,8 @@ func _refresh() -> void:
 func _rebuild_dragons() -> void:
 	for child in _dragon_row.get_children():
 		child.queue_free()
+	for child in _dragon_nav.get_children():
+		child.queue_free()
 	var owned := DragonFlight.dragons_of(profile)
 	if owned.is_empty():
 		_dragon_row.add_child(Ui.label("No dragon yet", 16, UiTheme.TEXT_DIM))
@@ -175,34 +213,73 @@ func _rebuild_dragons() -> void:
 	var pages: int = maxi(1, int(ceil(float(owned.size()) / float(per_page))))
 	_dragon_page = clampi(_dragon_page, 0, pages - 1)
 	for i in range(_dragon_page * per_page, mini(owned.size(), (_dragon_page + 1) * per_page)):
-		var dragon: Dictionary = owned[i]
-		var breed := DragonFlight.breed_by_id(str(dragon["breed"]))
-		var uid := int(dragon["uid"])
-		var is_active: bool = uid == selected_dragon
-		var traits: Array[String] = DragonFlight.expressed_traits(dragon.get("alleles", {}))
-		# "+2" is the hidden part of the dragon's value: two recessive genes
-		# this one carries without showing them.
-		var carried := DragonFlight.carried_traits(dragon.get("alleles", {}))
-		var caption := Loc.t("dragon_flight.dragon_caption", {
-			"name": str(breed["name"]), "gen": int(dragon.get("gen", 1)), "traits": traits.size(),
-		})
-		if not carried.is_empty():
-			caption += " · +%d" % carried.size()
-		var button := Ui.button(caption, Vector2(100, 78), Color(str(breed["accent"])) if is_active else UiTheme.PANEL_LIGHT, _on_pick_dragon.bind(uid))
-		button.add_theme_font_size_override("font_size", 12)
-		_dragon_row.add_child(button)
+		_dragon_row.add_child(_dragon_card(owned[i], selected_dragon == int(owned[i]["uid"])))
 	if pages > 1:
-		var nav := Ui.hbox(4)
-		nav.add_child(Ui.button("◀", Vector2(34, 30), UiTheme.PANEL_LIGHT, func() -> void:
+		_dragon_nav.add_child(Ui.button("◀", Vector2(34, 30), UiTheme.PANEL_LIGHT, func() -> void:
 			_dragon_page = wrapi(_dragon_page - 1, 0, pages)
 			_refresh()
 		))
-		nav.add_child(Ui.label(Loc.f("%d/%d", [_dragon_page + 1, pages]), 14, UiTheme.TEXT_MUTED))
-		nav.add_child(Ui.button("▶", Vector2(34, 30), UiTheme.PANEL_LIGHT, func() -> void:
+		_dragon_nav.add_child(Ui.label(Loc.f("%d/%d", [_dragon_page + 1, pages]), 14, UiTheme.TEXT_MUTED))
+		_dragon_nav.add_child(Ui.button("▶", Vector2(34, 30), UiTheme.PANEL_LIGHT, func() -> void:
 			_dragon_page = wrapi(_dragon_page + 1, 0, pages)
 			_refresh()
 		))
-		_dragon_row.add_child(nav)
+
+
+## One dragon in the selector.
+##
+## It used to be a `Ui.button` whose text was the whole caption, and that is
+## what pushed the right-hand side off the screen. A `Button` is exactly as
+## wide as its own text and `custom_minimum_size` is a floor, not a ceiling:
+## measured, "Ember Dragon / Generation {generation} · {count} Merkmale · +1"
+## wanted 370 px at font size 12, so three buttons plus the page arrows made
+## this panel 1262 px wide and the whole hangar row 2134 px — against the
+## `1280 − 36 = 1244` px the viewport has. The upgrades panel on the right was
+## simply gone, which is what the player reported.
+##
+## So the card pins its own size and carries the caption as wrapped labels, the
+## same shape `_level_card` already uses, with a transparent button on top for
+## the touch target.
+func _dragon_card(dragon: Dictionary, is_active: bool) -> Control:
+	var breed := DragonFlight.breed_by_id(str(dragon["breed"]))
+	var uid := int(dragon["uid"])
+	var traits: Array[String] = DragonFlight.expressed_traits(dragon.get("alleles", {}))
+	# "+2" is the hidden part of the dragon's value: two recessive genes this
+	# one carries without showing them.
+	var carried := DragonFlight.carried_traits(dragon.get("alleles", {}))
+	# The catalogue names its placeholders `{name}`, `{generation}` and
+	# `{count}`. The old call passed `gen` and `traits`, so `{generation}` and
+	# `{count}` reached the player as literal text — longer than the numbers
+	# they were meant to be, and the reason one caption measured 370 px.
+	var caption := Loc.t("dragon_flight.dragon_caption", {
+		"name": str(breed["name"]),
+		"generation": int(dragon.get("gen", 1)),
+		"count": traits.size(),
+	})
+	if not carried.is_empty():
+		# Not a catalogue string: a middot, a plus and a number read the same in
+		# every language, and `Loc.f` would only add a `%d` contract the extractor
+		# then insists on finding in `en.json`.
+		caption += " · +%d" % carried.size()
+	var accent := Color(str(breed["accent"]))
+	var panel := _card(accent if is_active else UiTheme.PANEL_LIGHT, accent if is_active else UiTheme.BORDER)
+	panel.custom_minimum_size = DRAGON_CARD
+	var box := Ui.vbox(1)
+	panel.add_child(box)
+	# The template is two lines — the name and its pedigree — and the name is
+	# worth its own colour, so the label is cut at that newline. A caption with
+	# no newline still works: it becomes the single heading line.
+	var lines := caption.split("\n", true)
+	box.add_child(_wrap(str(lines[0]), 11, accent if is_active else UiTheme.TEXT, true))
+	for i in range(1, lines.size()):
+		box.add_child(_wrap(str(lines[i]), 10, UiTheme.TEXT_MUTED))
+	var button := Button.new()
+	button.flat = true
+	button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	button.focus_mode = Control.FOCUS_NONE
+	button.pressed.connect(_on_pick_dragon.bind(uid))
+	panel.add_child(button)
+	return panel
 
 
 func _refresh_stats() -> void:
@@ -279,7 +356,11 @@ func _rebuild_upgrades() -> void:
 		var text := Ui.vbox(0)
 		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(text)
-		text.add_child(Ui.label(Loc.f("%s  (tier %d/%d)", [str(upgrade["name"]), level, int(upgrade["max"])]), 15, UiTheme.TEXT, true))
+		# Wrapped, not a bare `Ui.label`: "Rapid Fire  (tier 0/10)" measured
+		# 312 px next to the 96 px price button, which made this panel 350 px
+		# wide while it declares 330. The upgrade name is the one line in the
+		# hangar that a translator can make arbitrarily longer.
+		text.add_child(_wrap(Loc.f("%s  (tier %d/%d)", [str(upgrade["name"]), level, int(upgrade["max"])]), 15, UiTheme.TEXT, true))
 		text.add_child(_wrap(str(upgrade["desc"]), 12, UiTheme.TEXT_MUTED))
 		if maxed:
 			row.add_child(Ui.label("MAX", 16, Color("fbbf24"), true))

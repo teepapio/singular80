@@ -98,6 +98,23 @@ func _boot_content() -> void:
 	t.suite_done()
 
 
+## Screens whose layout must fit the narrowest viewport the game will ever be
+## given. Add an id here once its layout has been checked.
+##
+## The defect is general, so the measurement is: a `Button` is exactly as wide
+## as its own text and `custom_minimum_size` is a floor rather than a ceiling,
+## so one long caption inside a fixed-width panel pushes the whole row — and
+## with it everything to the right of it — past the edge of the screen. The
+## dragon hangar did exactly that: its "Your dragons" panel wanted 1262 px
+## instead of the 330 it declares, and the row 2134 px against the 1244 px a
+## 1280-wide viewport leaves. Measured on the device layout, not estimated.
+##
+## `pang_menu` has the same shape — its level cards put a non-wrapping
+## "Reinforcements: …" caption into a fixed card and reach x = 1425 — and
+## belongs to another lane, so it is named here rather than silently ignored.
+const WIDTH_CHECKED := ["dragonflight"]
+
+
 func _every_screen_opens() -> void:
 	t.suite("Screens")
 	var checked := 0
@@ -115,6 +132,14 @@ func _every_screen_opens() -> void:
 		# all of them; see `_unreachable_controls()` for what that measures.
 		for dead in _unreachable_controls(router.current_screen):
 			t.check(false, "'%s': %s" % [screen_id, dead])
+		if WIDTH_CHECKED.has(str(screen_id)):
+			# Two frames: a container answers `size` from its children's minimums
+			# on the next sort, so measuring in the frame the screen arrives would
+			# read the layout it had before the last rebuild.
+			await tree.process_frame
+			await tree.process_frame
+			var over := _right_overflow(router.current_screen)
+			t.check(over <= 1.0, "'%s' ragt %.0f px über den rechten Rand" % [screen_id, over])
 	# Every registry entry must lead to a working screen.
 	for game in GameRegistry.GAMES:
 		if not _wants(str(game["screen"])):
@@ -132,6 +157,41 @@ func _every_screen_opens() -> void:
 	else:
 		await _goto("lobby")
 	t.suite_done()
+
+
+## How far the screen's content reaches past the right edge, in pixels.
+##
+## A container never shrinks below what its children demand, so an overflowing
+## layout does not get clipped at the screen border — it pushes its own rect
+## past it, and whatever sits on the right (here: the upgrades panel and the
+## start button) is simply not there any more.
+##
+## The budget is `min(screen width, Screen.DESIGN.x)`: `stretch/aspect` is
+## `expand`, which gives the viewport `max(1280, 1280 × aspect)` and therefore
+## never less than the design width, so 1280 is the narrowest case the layout
+## has to survive and it is the one worth asserting.
+func _right_overflow(screen: Node) -> float:
+	if screen == null or not (screen is Control):
+		return 0.0
+	var budget := minf((screen as Control).size.x, Screen.DESIGN.x)
+	return _rightmost(screen, 0.0) - budget
+
+
+## The rightmost visible pixel any descendant reaches.
+##
+## The accumulator travels as the *return* value: GDScript hands a `float` to a
+## callee by copy, so `acc` written inside the recursion never reaches the
+## caller. The first version of this function returned `-1280` on a screen that
+## was 2134 px wide, and a check that is always negative never fails.
+func _rightmost(node: Node, right: float) -> float:
+	var best := right
+	if node is Control:
+		var control := node as Control
+		if control.is_visible_in_tree():
+			best = maxf(best, control.global_position.x + control.size.x)
+	for child in node.get_children():
+		best = _rightmost(child, best)
+	return best
 
 
 ## True when a screen should be opened: everything without a filter, otherwise
