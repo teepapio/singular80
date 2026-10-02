@@ -41,3 +41,4 @@ session. Written by the runner on success, or by
 - **#51** I'll start by reading the project structure and understanding the Siedler game.Clean tree. — `535a2be` <!-- 51:run_muq5rehc_7cb35a -->
 - **#45** I'll start by researching the repository state and the suggestion.Let me check one thing — the sibl… <!-- 45:run_muq5rkgg_91bbe0 -->
 - **#37** I'll start by reading the project docs and understanding the structure.Baseline is green. — `acfd1b0` <!-- 37:run_muq5rujl_fb7925 -->
+- **#39** I'll start by reading AGENTS.md and understanding the lobby structure.Now setting up an isolated wo… <!-- 39:run_muq5rrvl_649374 -->
