@@ -62,3 +62,4 @@ session. Written by the runner on success, or by
 - **#41** I'll start by investigating the previous failed attempt and the current state of the worktree.Workt… <!-- 41:run_muq8gw3a_c43cbd -->
 - **#40** I'll start by understanding the current state — the previous attempt, the working tree, and the lob… — `7635625` <!-- 40:run_muq8hme3_c6b983 -->
 - **#47** ow update the stale sign note in the shared primitive, since the second pack now uses it.Now rebuil… — `b43ebc3` <!-- 47:run_muq7q973_b920e6 -->
+- **#21** I'll start by understanding the current state: the run log, the working tree, and the previous atte… — `35dd97a` <!-- 21:run_muqcihqb_b6201e -->
