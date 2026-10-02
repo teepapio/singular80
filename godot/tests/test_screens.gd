@@ -131,7 +131,32 @@ func _every_screen_opens() -> void:
 		t.check(false, "Screen-Filter '%s' passt zu keinem bekannten Screen" % _screen_filter)
 	else:
 		await _goto("lobby")
+		if _wants("lobby"):
+			_ground_faces_up(router.current_screen)
 	t.suite_done()
+
+
+## Every ground surface the lobby builds must face up.
+##
+## The lawn, the paths and the flagstones are flat vertex-coloured meshes, and
+## their winding is chosen so that `generate_normals()` points up. A quad wound
+## the other way round still draws — it just gets a downward normal, so the
+## surface is lit from underneath and reads as a black hole in the middle of the
+## grass. Nothing else in this suite would notice, which is why it is measured
+## here instead of looked at once.
+func _ground_faces_up(screen: Node) -> void:
+	for surface_name in ["lawn", "dirt", "stone_floors"]:
+		var node := screen.find_child(surface_name, true, false) as MeshInstance3D
+		t.check(node != null, "Bodenflaeche '%s' ist gebaut" % surface_name)
+		if node == null or node.mesh == null or node.mesh.get_surface_count() == 0:
+			continue
+		var normals: PackedVector3Array = node.mesh.surface_get_arrays(0)[Mesh.ARRAY_NORMAL]
+		t.check(normals.size() > 0, "'%s' traegt Normalen" % surface_name)
+		var pointing_down := 0
+		for normal in normals:
+			if normal.dot(Vector3.UP) < 0.99:
+				pointing_down += 1
+		t.equal(pointing_down, 0, "'%s' zeigt nach oben (%d Normalen)" % [surface_name, normals.size()])
 
 
 ## True when a screen should be opened: everything without a filter, otherwise

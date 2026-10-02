@@ -765,6 +765,8 @@ func _lobby() -> void:
 	t.almost(Lobby.minimap_point(0.0, 0.0, map_size, map_padding, Lobby.MINIMAP_WORLD_RADIUS).x, map_size * 0.5, 0.001, "Mittelpunkt liegt in der Kartenmitte")
 	t.equal(Lobby.distance_sq(0, 0, 3, 4), 25.0, "Abstandsquadrat")
 
+	_lobby_ground()
+
 	# Registry: every entry points at a real screen.
 	for game in GameRegistry.GAMES:
 		var screen := str(game["screen"])
@@ -775,6 +777,124 @@ func _lobby() -> void:
 	t.equal(str(GameRegistry.screen_of("pang")), "pang_menu", "Pang startet in der Level-Auswahl")
 	t.equal(str(GameRegistry.screen_of("nope")), "arena", "Unbekanntes Spiel fällt auf die Arena zurück")
 	t.suite_done()
+
+
+## The ground the lobby is walked on: grass, the dirt paths that lead to the
+## areas, and the stone floor of each area.
+##
+## Everything here is a measurement rather than a picture, because the failure
+## modes are all geometric: a ring that is too coarse steps visibly, a crossing
+## disc that is too small leaves wedges of grass between the spurs, and a path
+## that runs past the edge of a plaza disappears under the stone it leads to.
+func _lobby_ground() -> void:
+	# The lawn's rings: fine where the player walks, coarse at the horizon.
+	t.almost(Lobby.lawn_ring_radius(0), 0.0, 0.0001, "Der erste Ring ist die Mitte")
+	t.almost(Lobby.lawn_ring_radius(Lobby.LAWN_RINGS), Lobby.GROUND_RADIUS, 0.0001, "Der letzte Ring ist der Rand")
+	var grew := true
+	var even := true
+	for i in Lobby.LAWN_RINGS:
+		var step := Lobby.lawn_ring_radius(i + 1) - Lobby.lawn_ring_radius(i)
+		if step <= 0.0:
+			grew = false
+		if i > 0:
+			var previous := Lobby.lawn_ring_radius(i) - Lobby.lawn_ring_radius(i - 1)
+			if step < previous:
+				even = false
+	t.check(grew, "Jeder Ring liegt weiter draußen als der vorige")
+	t.check(even, "Die Ringe werden nach außen gröber, nicht feiner")
+	var inner_step := Lobby.lawn_ring_radius(11) - Lobby.lawn_ring_radius(10)
+	var outer_step := Lobby.lawn_ring_radius(Lobby.LAWN_RINGS) - Lobby.lawn_ring_radius(Lobby.LAWN_RINGS - 1)
+	t.check(inner_step < outer_step, "Nahe der Plätze ist der Boden feiner als am Horizont")
+	# The plazas and their paths are inside the lawn, not out at its edge.
+	t.check(Lobby.CATEGORY_RING_RADIUS + Lobby.ZONE_RADIUS < Lobby.GROUND_RADIUS,
+		"Die Plätze liegen auf der Wiese")
+	t.check(Lobby.CATEGORY_RING_RADIUS + Lobby.PATH_WIDTH * 0.5 < Lobby.GROUND_RADIUS,
+		"Der Weg läuft nicht über den Wiesenrand")
+
+	# Mottling: deterministic, in range, and more than one tone per surface —
+	# a single tone over forty units of ground is the flat paint this replaced.
+	for surface in [Lobby.GRASS_TONES, Lobby.DIRT_TONES, Lobby.STONE_TONES]:
+		t.check((surface as Array).size() > 1, "Jede Fläche hat mehr als einen Ton")
+	t.equal(Lobby.tone_pick(7, 11, 4), Lobby.tone_pick(7, 11, 4), "Der Ton bleibt über Läufe hinweg derselbe")
+	var picks := {}
+	for i in 24:
+		for j in 24:
+			var pick := Lobby.tone_pick(i, j, Lobby.GRASS_TONES.size())
+			t.check(pick >= 0 and pick < Lobby.GRASS_TONES.size(), "Ton liegt in der Palette")
+			picks[pick] = true
+	t.check(picks.size() == Lobby.GRASS_TONES.size(), "Alle Grastöne werden tatsächlich vergeben")
+	t.check(Lobby.GRASS_TONES.has(Lobby.grass_tone(3, 5)), "Gras kommt aus der Palette")
+	t.check(Lobby.DIRT_TONES.has(Lobby.dirt_tone(3, 5)), "Erde kommt aus der Palette")
+	t.equal(Lobby.tone_pick(1, 2, 1), 0, "Eine einfarbige Fläche ist immer Ton 0")
+	t.equal(Lobby.tone_pick(1, 2, 0), 0, "Eine leere Fläche ist kein Absturz")
+
+	# The paths: one per plaza, one to the gallery, each stopping at the stone.
+	var targets := Lobby.path_targets()
+	t.equal(targets.size(), GameRegistry.CATEGORIES.size() + 1, "Jede Plaza und die Galerie haben einen Weg")
+	for zone in Lobby.zone_layout():
+		var centre := Vector2(float(zone["x"]), float(zone["z"]))
+		t.almost(centre.length(), Lobby.CATEGORY_RING_RADIUS, 0.001, "Die Plaza liegt auf dem Wegering")
+		t.check(_has_target_at(targets, centre.normalized() * Lobby.PATH_PLAZA_EDGE),
+			"Der Weg zur Plaza '%s' endet an ihrem Rand" % str(zone["category"]["id"]))
+	t.check(_has_target_at(targets, Lobby.gallery_position()), "Die Galerie hat einen Weg")
+	for target in targets:
+		t.check(target.length() > Lobby.PATH_CROSSING_RADIUS, "Jeder Weg startet außerhalb der Kreuzung")
+	t.almost(Lobby.PATH_PLAZA_EDGE, Lobby.CATEGORY_RING_RADIUS - Lobby.ZONE_RADIUS, 0.001,
+		"Der Weg endet am Rand des Steinbodens, nicht in seiner Mitte")
+
+	# The crossing has to be wide enough to swallow the spurs' inner ends, or
+	# grass shows in wedges where they meet.
+	t.check(Lobby.PATH_CROSSING_RADIUS >= Lobby.spoke_merge_radius(targets.size(), Lobby.PATH_WIDTH),
+		"Die Kreuzung deckt die Enden aller Wege ab")
+	t.almost(Lobby.spoke_merge_radius(6, 5.0), 5.0, 0.001, "Sechs Wege verschmelzen ab 5 Einheiten")
+	t.almost(Lobby.spoke_merge_radius(2, 5.0), 2.5, 0.001, "Zwei gegenläufige Wege verschmelzen ab der halben Breite")
+	t.equal(Lobby.spoke_merge_radius(1, 5.0), 0.0, "Ein einzelner Weg hat nichts zu decken")
+	t.equal(Lobby.spoke_merge_radius(6, 0.0), 0.0, "Ein Weg ohne Breite hat nichts zu decken")
+
+	# The layers overlap, so they must not share a height.
+	t.check(Lobby.PATH_Y > 0.0, "Die Wege liegen über der Wiese")
+	t.check(Lobby.PATH_Y < Lobby.SPOKE_Y, "Die Wege liegen über dem Ring")
+	t.check(Lobby.SPOKE_Y < Lobby.CROSSING_Y, "Die Kreuzung liegt über den Wegen")
+	t.check(Lobby.FLAGSTONE_Y > Lobby.ZONE_PLATFORM_HEIGHT, "Der Steinboden liegt über der Plattform")
+
+	# The flagstones: paving, not a texture — inset, non-overlapping, on the disc.
+	var cells := Lobby.flagstone_cells(Lobby.ZONE_RADIUS * 0.94)
+	t.check(cells.size() > 50, "Eine Plaza ist gepflastert (%d Steine)" % cells.size())
+	t.equal(cells.size(), Lobby.flagstone_cells(Lobby.ZONE_RADIUS * 0.94).size(), "Die Pflasterung ist reproduzierbar")
+	t.equal(Lobby.flagstone_cells(0.0).size(), 0, "Kein Steinboden ohne Radius")
+	t.equal(Lobby.flagstone_cells(9.4, 0.0).size(), 0, "Kein Steinboden ohne Zellengröße")
+	var covers_centre := false
+	var widest := 0.0
+	for cell in cells:
+		var x0: float = cell["x0"]
+		var z0: float = cell["z0"]
+		var x1: float = cell["x1"]
+		var z1: float = cell["z1"]
+		widest = maxf(widest, x1 - x0)
+		t.check(x1 > x0 and z1 > z0, "Ein Stein hat eine Fläche")
+		t.check(Vector2(x0, z0).length() <= Lobby.ZONE_RADIUS * 0.94
+			and Vector2(x1, z1).length() <= Lobby.ZONE_RADIUS * 0.94,
+			"Ein Stein liegt auf der Plattform")
+		var tone := int(cell["tone"])
+		t.check(tone >= 0 and tone < Lobby.STONE_TONES.size(), "Der Steinston liegt in der Palette")
+		if x0 <= 0.0 and x1 >= 0.0 and z0 <= 0.0 and z1 >= 0.0:
+			covers_centre = true
+	t.check(covers_centre, "Die Mitte der Plaza ist gepflastert")
+	t.almost(widest, Lobby.FLAGSTONE_CELL - Lobby.FLAGSTONE_GAP, 0.001,
+		"Die Fuge liegt zwischen den Steinen, nicht auf ihnen")
+	# No two stones share an edge to the depth: the gap is what shows between them.
+	var seen := {}
+	for cell in cells:
+		var key := "%.3f/%.3f" % [float(cell["x0"]), float(cell["z0"])]
+		t.check(not (key in seen), "Zwei Steine beginnen nicht am selben Punkt")
+		seen[key] = true
+
+
+func _has_target_at(targets: Array[Vector2], want: Vector2) -> bool:
+	for target in targets:
+		if target.distance_to(want) < 0.001:
+			return true
+	return false
 
 
 # --- asset registry ---------------------------------------------------------

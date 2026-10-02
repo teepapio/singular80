@@ -73,9 +73,11 @@ func _ready_world() -> void:
 	camera.fov = 58.0
 	camera.far = 320.0
 
+	# `zones` before the ground: the stone floors are laid on the plazas, so the
+	# ground builder needs the layout it is paving.
+	zones = Lobby.zone_layout()
 	_build_ground()
 	_build_hub()
-	zones = Lobby.zone_layout()
 	_build_zones()
 	_build_scenery()
 	_build_gallery_portal()
@@ -90,40 +92,184 @@ func _ready_world() -> void:
 # --- world ------------------------------------------------------------------
 
 func _build_ground() -> void:
-	var ground := MeshInstance3D.new()
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = 130.0
-	mesh.bottom_radius = 130.0
-	mesh.height = 0.2
-	mesh.radial_segments = 64
-	ground.mesh = mesh
-	ground.material_override = WorldScreen.standard_material(Color("1b2436"))
-	ground.position.y = -0.1
-	add_child(ground)
+	# Named so that a test can find the three surfaces by name and measure them:
+	# the lawn, the paths and the flagstones are the only flat vertex-coloured
+	# meshes in the screen, and they are the only ones whose winding matters.
+	_ground_child(_lawn(), &"lawn")
+	_ground_child(_dirt(), &"dirt")
+	_ground_child(_stone_floors(), &"stone_floors")
 
-	var grid := ImmediateMesh.new()
-	var previous := Vector3.ZERO
-	for i in range(49):
-		var x := -96.0 + float(i) * 4.0
-		if i == 0:
-			grid.surface_begin(Mesh.PRIMITIVE_LINES)
-		grid.surface_add_vertex(Vector3(x, 0.02, -48))
-		grid.surface_add_vertex(Vector3(x, 0.02, 48))
-	for i in range(25):
-		var z := -48.0 + float(i) * 4.0
-		grid.surface_add_vertex(Vector3(-48, 0.02, z))
-		grid.surface_add_vertex(Vector3(48, 0.02, z))
-	grid.surface_end()
-	var grid_mesh := MeshInstance3D.new()
-	grid_mesh.mesh = grid
-	var grid_mat := StandardMaterial3D.new()
-	grid_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	grid_mat.vertex_color_use_as_albedo = true
-	grid_mat.albedo_color = Color("334155")
-	grid_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	grid_mat.albedo_color.a = 0.35
-	grid_mesh.material_override = grid_mat
-	add_child(grid_mesh)
+
+func _ground_child(node: MeshInstance3D, node_name: StringName) -> void:
+	if node == null:
+		return
+	node.name = node_name
+	add_child(node)
+
+
+## The grass: one vertex-coloured polar mesh, built once and never touched
+## again.
+##
+## It used to be a flat dark disc under a glowing blue grid, which said "test
+## level" rather than "outdoors". The lawn replaces both, and the mottling is
+## per vertex rather than per patch so that forty units of ground read as grass
+## instead of as one colour of paint.
+func _lawn() -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for ring in Lobby.LAWN_RINGS:
+		var inner := Lobby.lawn_ring_radius(ring)
+		var outer := Lobby.lawn_ring_radius(ring + 1)
+		for sector in Lobby.LAWN_SECTORS:
+			var a0 := TAU * float(sector) / float(Lobby.LAWN_SECTORS)
+			var a1 := TAU * float(sector + 1) / float(Lobby.LAWN_SECTORS)
+			_lawn_quad(st, inner, outer, a0, a1, ring, sector)
+	return _ground_node(st)
+
+
+## One cell of the lawn. The tone is picked from the grid cell rather than from
+## the quad, so a vertex shared with a neighbour is drawn the same colour in
+## both and the lawn never shows its own tessellation.
+func _lawn_quad(st: SurfaceTool, inner: float, outer: float, a0: float, a1: float, ring: int, sector: int) -> void:
+	_lawn_vertex(st, inner, a0, ring, sector)
+	_lawn_vertex(st, outer, a0, ring + 1, sector)
+	_lawn_vertex(st, outer, a1, ring + 1, sector + 1)
+	_lawn_vertex(st, inner, a0, ring, sector)
+	_lawn_vertex(st, outer, a1, ring + 1, sector + 1)
+	_lawn_vertex(st, inner, a1, ring, sector + 1)
+
+
+func _lawn_vertex(st: SurfaceTool, radius: float, angle: float, ring: int, sector: int) -> void:
+	_ground_vertex(st, _polar(radius, angle, 0.0), Lobby.grass_tone(ring, sector))
+
+
+## The dirt: a ring the plazas stand on, one spur per plaza and one to the mesh
+## gallery, and the disc the spurs meet in.
+##
+## Three overlapping surfaces, one mesh, one draw call. They overlap on purpose,
+## so each is laid a hundredth of a unit above the one beneath it rather than
+## fighting it for the same depth.
+func _dirt() -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var half := Lobby.PATH_WIDTH * 0.5
+	var outer := Lobby.CATEGORY_RING_RADIUS + half
+	var inner := Lobby.CATEGORY_RING_RADIUS - half
+	for sector in Lobby.LAWN_SECTORS:
+		var a0 := TAU * float(sector) / float(Lobby.LAWN_SECTORS)
+		var a1 := TAU * float(sector + 1) / float(Lobby.LAWN_SECTORS)
+		# The tone is picked from the sector, so neighbouring segments agree along
+		# the seam they share and the ring does not show 72 stripes.
+		_ground_quad(st,
+			_polar(inner, a0, Lobby.PATH_Y), _polar(outer, a0, Lobby.PATH_Y),
+			_polar(outer, a1, Lobby.PATH_Y), _polar(inner, a1, Lobby.PATH_Y),
+			Lobby.dirt_tone(sector, 0))
+
+	for target in Lobby.path_targets():
+		# Spurs are rectangles, so their side is the target's direction turned a
+		# quarter turn — and they start inside the crossing disc, which swallows
+		# their inner ends instead of leaving a wedge of grass at the junction.
+		var from := target.normalized() * Lobby.PATH_CROSSING_RADIUS
+		var side := Vector2(-target.y, target.x).normalized() * half
+		# Wound from-side → target-side → target+side → from+side: the reverse of
+		# the intuitive order, because a spur's left edge runs *outward* while the
+		# ring's runs clockwise. The normal is what tells the two apart.
+		_ground_quad(st,
+			_from_xz(from - side, Lobby.SPOKE_Y), _from_xz(target - side, Lobby.SPOKE_Y),
+			_from_xz(target + side, Lobby.SPOKE_Y), _from_xz(from + side, Lobby.SPOKE_Y),
+			Lobby.dirt_tone(int(target.x), int(target.y)))
+
+	for sector in Lobby.LAWN_SECTORS:
+		var a0 := TAU * float(sector) / float(Lobby.LAWN_SECTORS)
+		var a1 := TAU * float(sector + 1) / float(Lobby.LAWN_SECTORS)
+		_ground_tri(st,
+			_from_xz(Vector2.ZERO, Lobby.CROSSING_Y),
+			_polar(Lobby.PATH_CROSSING_RADIUS, a0, Lobby.CROSSING_Y),
+			_polar(Lobby.PATH_CROSSING_RADIUS, a1, Lobby.CROSSING_Y),
+			Lobby.dirt_tone(sector, 1))
+	return _ground_node(st)
+
+
+## The flagstone floor of every plaza, as one mesh laid over the platforms.
+##
+## The stones are inset from one another so the joint shows between them, which
+## is why they are separate quads on a darker platform rather than a texture on
+## its top face — the project ships no textures to map one with.
+func _stone_floors() -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var radius := Lobby.ZONE_RADIUS * 0.94
+	for zone in zones:
+		var cx: float = zone["x"]
+		var cz: float = zone["z"]
+		for cell in Lobby.flagstone_cells(radius):
+			var x0 := cx + float(cell["x0"])
+			var z0 := cz + float(cell["z0"])
+			var x1 := cx + float(cell["x1"])
+			var z1 := cz + float(cell["z1"])
+			_ground_quad(st,
+				Vector3(x0, Lobby.FLAGSTONE_Y, z0), Vector3(x1, Lobby.FLAGSTONE_Y, z0),
+				Vector3(x1, Lobby.FLAGSTONE_Y, z1), Vector3(x0, Lobby.FLAGSTONE_Y, z1),
+				Lobby.STONE_TONES[int(cell["tone"])])
+	return _ground_node(st)
+
+
+## Commits `st` into a mesh node carrying the shared ground material, or `null`
+## when the surface came out empty — a registry without categories must not
+## leave a screen that throws while it builds its own floor.
+func _ground_node(st: SurfaceTool) -> MeshInstance3D:
+	st.generate_normals()
+	var mesh := st.commit()
+	if mesh == null:
+		return null
+	var node := MeshInstance3D.new()
+	node.mesh = mesh
+	node.material_override = _ground_material()
+	return node
+
+
+## One material for every ground surface: lawn, dirt and stone.
+##
+## `vertex_color_use_as_albedo` is what lets a single mesh carry three surfaces,
+## and `CULL_DISABLED` means a floor seen from above is never lost to a winding
+## mistake — the price is a second pass over a flat, back-facing layer, which on
+## three static meshes is cheaper than the bug it rules out.
+func _ground_material() -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.vertex_color_use_as_albedo = true
+	material.roughness = 0.95
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return material
+
+
+func _ground_vertex(st: SurfaceTool, at: Vector3, color: Color) -> void:
+	st.set_color(color)
+	st.add_vertex(at)
+
+
+## A horizontal quad wound so that its normal points up: the corners are given
+## clockwise seen from above, which is the winding Godot treats as front-facing.
+func _ground_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, color: Color) -> void:
+	_ground_vertex(st, a, color)
+	_ground_vertex(st, b, color)
+	_ground_vertex(st, c, color)
+	_ground_vertex(st, a, color)
+	_ground_vertex(st, c, color)
+	_ground_vertex(st, d, color)
+
+
+func _ground_tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, color: Color) -> void:
+	_ground_vertex(st, a, color)
+	_ground_vertex(st, b, color)
+	_ground_vertex(st, c, color)
+
+
+func _polar(radius: float, angle: float, height: float) -> Vector3:
+	return Vector3(cos(angle) * radius, height, sin(angle) * radius)
+
+
+func _from_xz(at: Vector2, height: float) -> Vector3:
+	return Vector3(at.x, height, at.y)
 
 
 func _build_hub() -> void:
@@ -181,15 +327,17 @@ func _build_zones() -> void:
 		var cx: float = zone["x"]
 		var cz: float = zone["z"]
 
+		# The platform is the joint colour and the flagstones are laid on it, so a
+		# plaza reads as paving rather than as a raised disc of the floor's colour.
 		var platform := MeshInstance3D.new()
 		var mesh := CylinderMesh.new()
 		mesh.top_radius = Lobby.ZONE_RADIUS * 0.94
 		mesh.bottom_radius = Lobby.ZONE_RADIUS
-		mesh.height = 0.4
+		mesh.height = Lobby.ZONE_PLATFORM_HEIGHT
 		mesh.radial_segments = 48
 		platform.mesh = mesh
-		platform.material_override = WorldScreen.standard_material(Color("1a2436"))
-		platform.position = Vector3(cx, 0.2, cz)
+		platform.material_override = WorldScreen.standard_material(Lobby.STONE_JOINT)
+		platform.position = Vector3(cx, Lobby.ZONE_PLATFORM_HEIGHT * 0.5, cz)
 		add_child(platform)
 
 		var rim := MeshInstance3D.new()
