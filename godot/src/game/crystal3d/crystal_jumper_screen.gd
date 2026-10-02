@@ -1069,7 +1069,19 @@ func _show_summit_panel() -> void:
 	# under the bag for the whole climb (#16), and this is its short form next to
 	# the button that runs it.
 	column.add_child(Ui.label(Loc.t("crystal.merge_rule"), 15, UiTheme.TEXT_DIM))
-	column.add_child(Ui.button(Loc.f("Merge (%d×)", [merge_count]), Vector2(320, 52), UiTheme.ACCENT, start_merge).with_disabled(merge_phase != PHASE_IDLE or merge_count == 0))
+	# `Ui.with_disabled` is a *static* helper and takes the button as its first
+	# argument. Written the other way round — `Ui.button(...).with_disabled(...)` —
+	# it reads as if the factory returned a disabled button, and it is a runtime
+	# error rather than a parse error: measured on the summit panel, the call threw
+	# "Nonexistent function 'with_disabled' in base 'Button'" and *everything below
+	# this line was never built*. The player stood at the top of the tower in the
+	# equip window with no Merge, no "Again" and no "Lobby" — and the modal
+	# backdrop takes the top bar's taps as well, so the window had no way out at
+	# all. A half-built panel is the one failure a screen cannot report, so the
+	# suite now presses this panel open and asks it for a way out.
+	column.add_child(Ui.with_disabled(
+		Ui.button(Loc.f("Merge (%d×)", [merge_count]), Vector2(320, 52), UiTheme.ACCENT, start_merge),
+		merge_phase != PHASE_IDLE or merge_count == 0))
 	column.add_child(Ui.label(Loc.f("Merged so far: %d×  ·  Active bonuses: +%d%% speed · +%d%% jump · %d bonus jumps", [summit_merges,
 		int(round((float(bonus["speedMult"]) - 1.0) * 100.0)),
 		int(round((float(bonus["jumpMult"]) - 1.0) * 100.0)),

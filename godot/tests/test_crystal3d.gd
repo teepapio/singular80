@@ -410,7 +410,91 @@ func _screen_flow(tree: SceneTree) -> void:
 		screen._update_floating(0.4)
 	t.equal(screen._floating.size(), 0, "Schwebende Texte verschwinden wieder")
 	t.check(screen._label_pool.size() == 8, "Der Pool waechst nicht")
+
+	await _summit_panel_has_a_way_out(screen, tree)
 	t.suite_done()
+
+
+## The summit panel is the last thing a climb shows, so it is also the last place
+## a player can be trapped: `WorldScreen.modal()` puts a full-screen backdrop over
+## the HUD, and that backdrop is `MOUSE_FILTER_STOP` — measured, a tap on the top
+## bar's "◀ Lobby" and on "⚙" lands on the `ColorRect` while the panel is open.
+## Everything below therefore has to be built, or the player stands at the top of
+## the tower with nothing to press (#34).
+##
+## The panel used to lose its last three lines. `Ui.button(...)` returns a
+## `Button` and `Ui.with_disabled(...)` is a *static* helper that takes the button
+## as an argument; written the other way round it is a **runtime** error, not a
+## parse error, so the build simply stopped: no Merge button, no "Nochmal", no
+## "Lobby". A GDScript error is invisible in an exported APK, which is why this is
+## a test and not a code review.
+func _summit_panel_has_a_way_out(screen: Node, tree: SceneTree) -> void:
+	# Frozen run: the panel is opened by hand here, so nothing may move underneath.
+	screen.running = false
+	screen.summit_reached = true
+	screen.summit_within_target = true
+	screen.summit_time = 2000.0
+	screen.elapsed = 2.0
+	screen.counts = [3, 0, 0, 0, 0]
+	screen._show_summit_panel()
+	await tree.process_frame
+
+	t.equal(_buttons_labelled(screen.hud_root, Loc.resolve("Again")).size(), 1,
+		"Am Gipfel gibt es ein 'Nochmal'")
+	t.equal(_buttons_labelled(screen.hud_root, Loc.resolve("Lobby")).size(), 1,
+		"Und einen Weg zur Lobby")
+	var merge := _buttons_labelled(screen.hud_root, Loc.f("Merge (%d×)", [1]))
+	t.equal(merge.size(), 1, "Der Merge-Knopf steht auf der Tafel")
+	if merge.size() == 1:
+		t.check(not (merge[0] as Button).disabled, "Drei gleiche lassen ihn zu")
+		t.check((merge[0] as Button).pressed.get_connections().size() > 0,
+			"Und er ist an die Merge gebunden")
+	# Read from the screen's own level rather than from a fixed number: the suite
+	# may run against a store that has already climbed.
+	var next_level: int = int(screen.config["level"]) + 1
+	if next_level <= CrystalTower.MAX_LEVEL:
+		t.equal(_buttons_labelled(screen.hud_root, Loc.f("Level %d", [next_level])).size(), 1,
+			"Im Ziel gibt es den Sprung auf die naechste Ebene")
+
+	# Nothing to merge: the same button, greyed — not missing.
+	screen.counts = [1, 0, 0, 0, 0]
+	screen._show_summit_panel()
+	await tree.process_frame
+	var idle := _buttons_labelled(screen.hud_root, Loc.f("Merge (%d×)", [0]))
+	t.equal(idle.size(), 1, "Ohne Merge bleibt der Knopf da und zaehlt 0")
+	if idle.size() == 1:
+		t.check((idle[0] as Button).disabled, "Er ist dann aus")
+
+	# A run that missed the target time is the case that used to end the game:
+	# no next level, so "Nochmal" and "Lobby" are the whole way out.
+	screen.summit_within_target = false
+	screen._show_summit_panel()
+	await tree.process_frame
+	t.equal(_buttons_labelled(screen.hud_root, Loc.resolve("Again")).size(), 1,
+		"Verpasste Zeit: 'Nochmal' bleibtmoeglich")
+	t.equal(_buttons_labelled(screen.hud_root, Loc.resolve("Lobby")).size(), 1,
+		"Und die Lobby auch")
+	t.equal(_buttons_labelled(screen.hud_root, Loc.f("Level %d", [next_level])).size(), 0,
+		"Ohne die Zeit gibt es keinen Sprung auf die naechste Ebene")
+
+	# The panel is rebuilt from scratch on every action: a second summit must not
+	# stack a second one on top of it.
+	t.equal(_modal_layers(screen.hud_root).size(), 1, "Genau eine Gipfel-Tafel steht offen")
+
+	screen.summit_reached = false
+	screen.running = true
+	screen._show_summit_panel()
+	await tree.process_frame
+	t.equal(_modal_layers(screen.hud_root).size(), 0, "Ohne Gipfel auch keine Tafel")
+
+
+## The modal layers `WorldScreen.modal()` left in the tree, in order.
+func _modal_layers(root: Control) -> Array:
+	var out: Array = []
+	for child in root.get_children():
+		if child.has_meta("modal"):
+			out.append(child)
+	return out
 
 
 ## Puts the run back to its first second: no crystals, no chain, no bonus. The
