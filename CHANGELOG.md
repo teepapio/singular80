@@ -38,6 +38,9 @@ session. Written by the runner on success, or by
 
 ## 2026-10-02
 
+- **edi:** Standardfarben für die Meshes: jedes trägt eine gewählte Farbe statt einer aus dem Namen gehashten, und die Schilder an den Sockeln bleiben auf dem dunklen Saal lesbar.
+- **edi:** Der Spieltestlauf findet seine Suiten wieder: sieben Klassen ließen sich gar nicht mehr laden, weil sie vor den Autoloads übersetzt wurden — 7532 Prüfungen laufen wieder.
+
 - **#51** I'll start by reading the project structure and understanding the Siedler game.Clean tree. — `535a2be` <!-- 51:run_muq5rehc_7cb35a -->
 - **#45** I'll start by researching the repository state and the suggestion.Let me check one thing — the sibl… <!-- 45:run_muq5rkgg_91bbe0 -->
 - **#37** I'll start by reading the project docs and understanding the structure.Baseline is green. — `acfd1b0` <!-- 37:run_muq5rujl_fb7925 -->

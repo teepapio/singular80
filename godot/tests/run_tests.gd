@@ -87,8 +87,15 @@ func _run() -> void:
 	Loc.reset()
 	Loc.set_code("de")
 
-	var logic := TestLogic.new()
-	logic.run(kit)
+	# By path, and the reason is the one the screen suites below spell out: a
+	# `class_name` used here is resolved while this file *compiles*, which is
+	# before `--script` mode has registered the autoloads. A suite whose chain
+	# reaches `ui.gd` then dies on "Identifier not found: Sfx" and takes every
+	# assertion in it with it. `load()` happens in `_initialize()`'s deferred
+	# call, which is after the autoloads exist.
+	var logic_suite: GDScript = load("res://tests/test_logic.gd")
+	if logic_suite != null:
+		logic_suite.new().run(kit)
 
 	# Each extra suite class is skipped wholesale when the scope does not touch
 	# it. The filter has to skip whole classes, not just their assertions: an
@@ -104,7 +111,11 @@ func _run() -> void:
 		var metro3d: GDScript = load("res://tests/test_metro3d.gd")
 		await metro3d.new().run(kit, self)
 	if _wants_class("res://tests/test_crystal3d.gd", only):
-		await TestCrystal3d.new().run(kit, self)
+		# By path: the crystal screen is a `WorldScreen`, and `WorldScreen`
+		# reaches `fire_glow.gd` -> `ui.gd` -> `Sfx`.
+		var crystal_suite: GDScript = load("res://tests/test_crystal3d.gd")
+		if crystal_suite != null:
+			await crystal_suite.new().run(kit, self)
 	if _wants_class("res://tests/test_dame.gd", only):
 		var dame_suite: GDScript = load("res://tests/test_dame.gd")
 		if dame_suite != null:
@@ -112,7 +123,11 @@ func _run() -> void:
 	if _wants_class("res://tests/test_dragonflight.gd", only):
 		TestDragonFlight.new().run(kit)
 	if _wants_class("res://tests/test_candy_match3.gd", only):
-		TestCandyMatch3.new().run(kit)
+		# By path: the match-3 rules reach `asset_registry.gd`, which formats a
+		# number through `Ui`, and `Ui` reaches `Sfx`.
+		var match3_suite: GDScript = load("res://tests/test_candy_match3.gd")
+		if match3_suite != null:
+			match3_suite.new().run(kit)
 	if _wants_class("res://tests/test_tetris.gd", only):
 		var tetris_suite: GDScript = load("res://tests/test_tetris.gd")
 		if tetris_suite != null:
@@ -154,7 +169,11 @@ func _run() -> void:
 		if siedler_suite != null:
 			siedler_suite.new().run(kit)
 	if _wants_class("res://tests/test_improvements.gd", only):
-		TestImprovements.new().run(kit)
+		# By path for the same reason as `test_logic.gd` above: it reaches
+		# `virtual_stick.gd`, and `virtual_stick.gd` reaches `ui.gd`.
+		var improvements_suite: GDScript = load("res://tests/test_improvements.gd")
+		if improvements_suite != null:
+			improvements_suite.new().run(kit)
 	if _wants_class("res://tests/test_loc.gd", only):
 		var loc_suite: GDScript = load("res://tests/test_loc.gd")
 		if loc_suite != null:
@@ -166,10 +185,20 @@ func _run() -> void:
 			# autoloads only exist in a running tree.
 			await core_suite.new().run(kit, self)
 	if _wants_class("res://tests/test_metro_screens.gd", only):
-		await TestMetroScreens.new().run(kit, self)
+		var metro_screens_suite: GDScript = load("res://tests/test_metro_screens.gd")
+		if metro_screens_suite != null:
+			await metro_screens_suite.new().run(kit, self)
 
-	var screens := TestScreens.new()
-	await screens.run(kit, self, screen_filter)
+	# The screen sweep is the suite that opens every screen, so it is the one
+	# that must not be named as a `class_name` here: `mesh_gallery_screen.gd`
+	# and every other screen reach `ui.gd`, and `ui.gd` reaches `Sfx`.
+	var screens_suite: GDScript = load("res://tests/test_screens.gd")
+	if screens_suite == null:
+		print("FEHLGESCHLAGEN")
+		print("test_screens.gd liess sich nicht laden — die Screen-Suite ist nicht gelaufen.")
+		quit(1)
+		return
+	await screens_suite.new().run(kit, self, screen_filter)
 
 	var failures := kit.report()
 	if failures > 0:

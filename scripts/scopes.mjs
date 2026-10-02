@@ -195,7 +195,6 @@ const SCOPE_SUITES = {
   lobby: ['Lobby-Geometrie', 'Vorschlagsdialog'],
   core: ['Mechaniken', 'Inventar', 'Vorschlag — Herkunft', 'Auftragsweg', 'Server-Adresse',
     'Themenwahl',
-    'Themenwahl',
     // The fold itself: one lobby tile instead of one per edition, with the
     // editions declared by that tile. It belongs here rather than to the merge
     // game, because what it holds is the theme dialog and the registry read.
@@ -211,6 +210,7 @@ const SCOPE_SUITES = {
     'Vorschlags-Warteschlange — Zustellung an den Bot', 'Rechtliches & Melden',
     // What a burning mesh is made to do beyond being a shape: the light it
     // throws, the embers, and the pool on the ground.
+    'Feuer — Licht und Glut',
     'Sprachen — Kataloge', 'Sprachen — Auflösung', 'Sprachen — Platzhalter',
     'Sprachen — Plural', 'Sprachen — Zahlen', 'Sprachen — Wechsel',
     'Sprachen — Oberfläche',

@@ -449,14 +449,314 @@ static func keys_in_group(group_id: String) -> Array[String]:
 	return out
 
 
-## A stable colour per key, so every mesh looks the same everywhere.
+# --- standard colours -------------------------------------------------------
+
+## What a key wears when nothing more specific was chosen for it. A neutral
+## slate rather than a colour: this is the colour of a mesh nobody has looked at
+## yet, and the point of the table below is that there are as few of those as
+## possible.
+const DEFAULT_COLOR := Color("94a3b8")
+
+## The standard colour of every bundled mesh, written out.
+##
+## A player wrote: "can there be Standard colors vor the meshes? they seem to
+## have random colours". They were right, and the reason was a line of code:
+## `color_of()` hashed the key and read the hue out of the hash. So the knight
+## stood lime green, the horse magenta and the campfire whatever the letters of
+## its own name happened to add up to — and because the hue came from the
+## spelling, adding one mesh in the middle of the alphabet silently repainted
+## its neighbours. A lime-green knight and a magenta horse are not "random
+## colours" in the eye: they are objects that stopped looking like what they
+## are, one pedestal next to the other.
+##
+## So the colour is **chosen**, and the choice lives in data. Three rules:
+##
+## - It is stable. The same key wears the same colour on every device, in every
+##   run and in every build — which is what the hash was supposed to buy, and
+##   what it could not, because a hash is stable but not *chosen*.
+## - It is per family, not per spelling. A dragon is red because it is a dragon
+##   and its element says which red; a coin is gold and a rune stone is violet.
+## - A new key needs no entry. It wears its gallery section's colour
+##   (`GROUPS`), so nothing that lands in this table later can look random
+##   again. That is the whole reason the fallback exists and the only reason a
+##   missing entry is not a bug.
+const STANDARD_COLORS := {
+	# --- heroes & weapons: steel, wood and leather, not paint ---
+	"rpg/knight": Color("cbd5e1"),
+	"horse": Color("92400e"),
+	"ship": Color("92400e"),
+	"rpg/sword": Color("cbd5e1"),
+	"rpg/greatsword": Color("e2e8f0"),
+	"rpg/dagger": Color("94a3b8"),
+	"rpg/axe": Color("b45309"),
+	"rpg/staff": Color("a78bfa"),
+	"rpg/bow": Color("b45309"),
+	"rpg/shield": Color("64748b"),
+	"rpg/helmet": Color("94a3b8"),
+	"rpg/armor": Color("64748b"),
+	"rpg/boots": Color("92400e"),
+	"rpg/crown": Color("facc15"),
+
+	# --- dragons: the element names the colour ---
+	"rpg/dragon_lord": Color("dc2626"),
+	"rpg/dragon_elder": Color("e11d48"),
+	"rpg/dragon_ember": Color("f97316"),
+	"rpg/dragon_frost": Color("7dd3fc"),
+	"rpg/dragon_gold": Color("fbbf24"),
+	"rpg/dragon_hatchling": Color("34d399"),
+	"rpg/dragon_shadow": Color("7c3aed"),
+	"rpg/dragon_stone": Color("94a3b8"),
+	"rpg/dragon_storm": Color("a78bfa"),
+	"rpg/dragon_venom": Color("84cc16"),
+	"rpg/dragon_bone": Color("e7e5e4"),
+	"rpg/dragon_crystal": Color("67e8f9"),
+	"flight/dragon_cloud": Color("e2e8f0"),
+	"flight/dragon_solar": Color("fcd34d"),
+	"flight/dragon_tide": Color("38bdf8"),
+	"flight/dragon_void": Color("a855f7"),
+
+	# --- sky, breeding and the flying enemies ---
+	"flight/ballista": Color("b45309"),
+	"flight/cloud": Color("f1f5f9"),
+	"flight/cloud_storm": Color("94a3b8"),
+	"flight/egg": Color("fef3c7"),
+	"flight/egg_large": Color("fde68a"),
+	"flight/egg_crystal": Color("67e8f9"),
+	"flight/fireball": Color("f97316"),
+	"flight/golem": Color("78716c"),
+	"flight/harpy": Color("c4b5fd"),
+	"flight/imp": Color("ef4444"),
+	"flight/island": Color("4ade80"),
+	"flight/nest": Color("b45309"),
+	"flight/pedestal": Color("94a3b8"),
+	"flight/roost": Color("a16207"),
+	"flight/totem": Color("d6d3d1"),
+	"flight/wyvern": Color("10b981"),
+
+	# --- city & metro: concrete, steel and the two liveries ---
+	"metro/station": Color("94a3b8"),
+	"metro/interchange": Color("64748b"),
+	"metro/transfer_ring": Color("38bdf8"),
+	"metro/loco": Color("dc2626"),
+	"metro/car": Color("2563eb"),
+	"metro/bridge": Color("78716c"),
+	"metro/tunnel_portal": Color("475569"),
+	"metro/house": Color("cbd5e1"),
+	"metro/tower": Color("a8a29e"),
+	"metro/park": Color("4ade80"),
+	"metro/passenger": Color("f59e0b"),
+
+	# --- settler village: earth, timber, and a colour per deposit ---
+	"siedler/castle": Color("e2e8f0"),
+	"siedler/warehouse": Color("d6d3d1"),
+	"siedler/construction": Color("fbbf24"),
+	"siedler/flag": Color("94a3b8"),
+	"siedler/settler": Color("f59e0b"),
+	"siedler/knight": Color("cbd5e1"),
+	"siedler/woodcutter": Color("b45309"),
+	"siedler/forester": Color("15803d"),
+	"siedler/sawmill": Color("a16207"),
+	"siedler/quarry": Color("a8a29e"),
+	"siedler/farm": Color("4ade80"),
+	"siedler/windmill": Color("e7e5e4"),
+	"siedler/bakery": Color("d97706"),
+	"siedler/fishery": Color("0ea5e9"),
+	"siedler/coal_mine": Color("334155"),
+	"siedler/iron_mine": Color("57534e"),
+	"siedler/gold_mine": Color("ca8a04"),
+	"siedler/smelter": Color("78716c"),
+	"siedler/toolsmith": Color("64748b"),
+	"siedler/blacksmith": Color("57534e"),
+	"siedler/watchtower": Color("a8a29e"),
+	"siedler/oak": Color("15803d"),
+	"siedler/stone_node": Color("a8a29e"),
+	"siedler/coal_node": Color("334155"),
+	"siedler/iron_node": Color("94a3b8"),
+	"siedler/gold_node": Color("fbbf24"),
+	"siedler/fish_spot": Color("38bdf8"),
+
+	# --- pang objects: the ball, the harpoon and the three bonuses ---
+	"pang/orb": Color("f87171"),
+	"pang/harpoon": Color("94a3b8"),
+	"pang/platform": Color("475569"),
+	"pang/ice": Color("bae6fd"),
+	"pang/clock": Color("fbbf24"),
+	"pang/heart": Color("fb7185"),
+
+	# --- nature ---
+	"rpg/pine_tree": Color("15803d"),
+	"rpg/dead_tree": Color("78716c"),
+	"rpg/bush": Color("4ade80"),
+	"rpg/grass_tuft": Color("4ade80"),
+	"rpg/mushroom": Color("ef4444"),
+	"rpg/crystal_cluster": Color("22d3ee"),
+	"rpg/stalagmite": Color("94a3b8"),
+	"tree": Color("15803d"),
+
+	# --- loot & gear ---
+	"rpg/coin": Color("fbbf24"),
+	"rpg/gem": Color("38bdf8"),
+	"rpg/ring": Color("fcd34d"),
+	"rpg/amulet": Color("c084fc"),
+	"rpg/chest": Color("92400e"),
+	"rpg/barrel": Color("b45309"),
+	"rpg/crate": Color("b45309"),
+	"rpg/scroll": Color("fef3c7"),
+	"rpg/key": Color("fcd34d"),
+	"rpg/potion_health": Color("ef4444"),
+	"rpg/potion_mana": Color("3b82f6"),
+	"rpg/campfire": Color("f97316"),
+	"rpg/torch": Color("fb923c"),
+
+	# --- ruins & props ---
+	"rpg/stone_pillar": Color("a8a29e"),
+	"rpg/broken_pillar": Color("a8a29e"),
+	"rpg/rune_stone": Color("a78bfa"),
+	"rpg/gravestone": Color("78716c"),
+	"rpg/dungeon_arch": Color("94a3b8"),
+	"rpg/portal_gate": Color("8b5cf6"),
+	"rpg/skull": Color("e7e5e4"),
+	"rpg/bone_pile": Color("e7e5e4"),
+	"rpg/rock_small": Color("a8a29e"),
+	"rpg/rock_large": Color("a8a29e"),
+	"rock": Color("a8a29e"),
+	"log": Color("92400e"),
+	"fence": Color("b45309"),
+
+	# --- candy: a bonbon is pink and a chocolate is brown ---
+	"candy/bonbon": Color("f472b6"),
+	"candy/chocolate": Color("92400e"),
+	"candy/daisy": Color("f8fafc"),
+	"candy/gift": Color("ef4444"),
+	"candy/gumdrop": Color("fbbf24"),
+	"candy/heart": Color("fb7185"),
+	"candy/jellybean": Color("a78bfa"),
+	"candy/lily": Color("e2e8f0"),
+	"candy/lolly": Color("f87171"),
+	"candy/lotus": Color("f9a8d4"),
+	"candy/rose": Color("f43f5e"),
+	"candy/sunflower": Color("facc15"),
+	"candy/tulip": Color("fb923c"),
+
+	# --- merge tiers, crystals and the two party seasons ---
+	# The crystal ramp climbs from cyan to violet in tier order, because the
+	# board reads it: a higher tier has to look like the same stone cut finer.
+	"crystal": Color("22d3ee"),
+	"crystal1": Color("38bdf8"),
+	"crystal2": Color("60a5fa"),
+	"crystal3": Color("818cf8"),
+	"crystal4": Color("a78bfa"),
+	"crystal5": Color("c084fc"),
+	"ornament": Color("e11d48"),
+	"pumpkin": Color("f97316"),
+	"xmas_pinecone": Color("92400e"),
+	"xmas_candy_cane": Color("ef4444"),
+	"xmas_bauble": Color("dc2626"),
+	"xmas_gingerbread_star": Color("d97706"),
+	"xmas_star": Color("fbbf24"),
+	"halloween_seed": Color("84cc16"),
+	"halloween_candy": Color("f472b6"),
+	"halloween_mini_pumpkin": Color("fb923c"),
+	"halloween_pumpkin": Color("f97316"),
+	"halloween_ghost_pumpkin": Color("e2e8f0"),
+}
+
+
+## The standard colour of `key`: its own entry from `STANDARD_COLORS`, and
+## otherwise the colour of the gallery section it stands in.
+##
+## Two steps, deliberately. The second one is why a mesh nobody has thought about
+## yet still looks deliberate — it arrives in its section's colour, the same one
+## the player navigates by — and it is also why there is no third step. A hash
+## used to stand here, and it is what made the hall look like a paint mixer:
+## stable, reproducible, and completely unchosen.
 static func color_of(key: String) -> Color:
-	var text := key
-	var hash := 0
-	for i in text.length():
-		hash = (hash * 31 + text.unicode_at(i)) & 0x7FFFFFFF
-	var hue := float(hash % 360) / 360.0
-	return Color.from_hsv(hue, 0.55, 0.95)
+	if STANDARD_COLORS.has(key):
+		return STANDARD_COLORS[key]
+	return group_color(group_of(key))
+
+
+## The colour of one gallery section, `DEFAULT_COLOR` for an id nobody knows.
+static func group_color(group_id: String) -> Color:
+	for group in GROUPS:
+		if str(group.get("id", "")) == group_id:
+			return group.get("color", DEFAULT_COLOR)
+	return DEFAULT_COLOR
+
+
+# --- a colour you can read ----------------------------------------------------
+
+## How dark a standard colour may be before the name written in it stops being
+## readable, as a WCAG contrast ratio against `LABEL_BACKGROUND`.
+##
+## Not the 4.5:1 of WCAG AA, and the reason is the thing itself: a pedestal sign
+## is a 44 px `Label3D` with a 14 px outline, and a thick outline is exactly the
+## technique for putting text on a background you do not control. 2.5:1 is where
+## the sign stops reading as "faint" and starts reading as "absent" — measured on
+## the standard palette, 13 of the 155 colours fall below it.
+const LABEL_MIN_CONTRAST := 2.5
+## The colour a pedestal sign is measured against: the hall's wall. The floor is
+## darker still (`111827`) and the outline darker again (`020617`), so the wall is
+## the generous reading of the same background.
+const LABEL_BACKGROUND := Color("1f2937")
+## How much lightness one round of `label_color()` spends. Sized from the
+## palette: 13 colours need lifting and the darkest of them, a coal node, is
+## clear of the floor after two rounds.
+const LABEL_LIFT := 0.12
+
+
+## The colour to *write* a mesh's name in — a different question from the colour
+## the mesh wears.
+##
+## A coal node is genuinely almost black, and against a dark hall that name is
+## unreadable at 1.4:1. Repainting the coal node grey so its own label can be
+## read would be solving the wrong problem: the label is what adapts, not the
+## thing. So the hue is kept and the lightness is spent until the contrast clears
+## the floor — a coal node's sign stays a recognisable blue-grey, only legible.
+static func label_color(key: String) -> Color:
+	var color := color_of(key)
+	# Bounded, because this walks data: a palette entry dark enough to need a
+	# dozen rounds should reach the floor long before the guard does, and the
+	# guard is what keeps a bad entry from spinning here instead of failing.
+	var rounds := 0
+	while contrast_ratio(color, LABEL_BACKGROUND) < LABEL_MIN_CONTRAST and rounds < 8:
+		color = color.lightened(LABEL_LIFT)
+		rounds += 1
+	return color
+
+
+## WCAG 2.1 contrast ratio of two sRGB colours: 1.0 for identical, 21.0 for
+## black on white.
+##
+## `srgb_to_linear()` is the conversion Godot's own lighting does, and
+## `get_luminance()` is the Rec.709 dot product the WCAG definition uses — so
+## this is the standard's own arithmetic, not an approximation of it. It costs
+## four `pow()` calls and is only reached from the label path: once per pedestal
+## at build time and once per info card at 10 Hz, never in `_process`.
+static func contrast_ratio(a: Color, b: Color) -> float:
+	var la := a.srgb_to_linear().get_luminance()
+	var lb := b.srgb_to_linear().get_luminance()
+	return (maxf(la, lb) + 0.05) / (minf(la, lb) + 0.05)
+
+
+## Every colour `color_of()` can answer with, deduplicated and built once.
+##
+## A *closed* set, and that is what makes it worth having: the mesh gallery is
+## the only consumer, and a test can hold every key against this list to prove
+## that no colour ever reaches a pedestal that nobody picked. A hash cannot be
+## checked that way, which is how "random colours" survived in a green suite for
+## as long as it did.
+static var _palette: Array[Color] = []
+
+
+static func standard_palette() -> Array[Color]:
+	if not _palette.is_empty():
+		return _palette
+	for key in KEYS:
+		var color := color_of(key)
+		if not (color in _palette):
+			_palette.append(color)
+	return _palette
 
 
 ## Keys the registry promises but the folder does not deliver.

@@ -854,6 +854,48 @@ func _mesh_gallery_flow() -> void:
 	t.check(gallery != null, "Die Galerie öffnet")
 	if gallery == null:
 		return
+
+	# Standard colours, not hashed ones. A player wrote "can there be Standard
+	# colors vor the meshes? they seem to have random colours", and the cause
+	# was `AssetRegistry.color_of()` deriving a hue from a hash of the key.
+	#
+	# The check is the closed set: `standard_palette()` is every colour
+	# `color_of()` can answer with, so holding all 155 keys against it is what
+	# actually proves no unchosen colour can reach a pedestal. The old
+	# implementation passed a suite that only asked whether the colour was not
+	# black — which a hash satisfies on every one of the 155 meshes.
+	var palette := AssetRegistry.standard_palette()
+	var unlisted: Array[String] = []
+	for registry_key in AssetRegistry.KEYS:
+		if not (AssetRegistry.color_of(registry_key) in palette):
+			unlisted.append(registry_key)
+	t.equal(unlisted.size(), 0,
+		"Jedes Mesh trägt eine Farbe aus der Standardpalette" + (" — fremd: %s" % ", ".join(unlisted) if not unlisted.is_empty() else ""))
+	# A palette of one colour would also be closed, and it would look worse than
+	# the hash: 155 pedestals in one colour is not "standard colours", it is a
+	# missing table.
+	t.check(palette.size() >= 24,
+		"Die Palette ist eine Auswahl und kein einzelner Ton (%d Farben)" % palette.size())
+	# The colour follows the family, not the spelling: both dragons of the
+	# flight pack are the same sky-blue dragon, both bone props are bone-white,
+	# and a coin is never the same colour as a rune stone.
+	t.check(AssetRegistry.color_of("rpg/dragon_bone").is_equal_approx(
+			AssetRegistry.color_of("rpg/skull")),
+		"Gleiche Familie, gleiche Farbe")
+	t.check(not AssetRegistry.color_of("rpg/coin").is_equal_approx(
+			AssetRegistry.color_of("rpg/rune_stone")),
+		"Zwei verschiedene Familien, zwei Farben")
+	# The colour is the mesh's, not the pedestal's: every level of the same key
+	# reads the same, because the level only says how fine the silhouette is.
+	t.check(AssetRegistry.color_of("rpg/dragon_ember").is_equal_approx(
+			AssetRegistry.color_of("rpg/dragon_ember")),
+		"Die Farbe hängt am Key, nicht an der Detailstufe")
+	# A key the table has never heard of still gets a colour somebody chose —
+	# the section it stands in. Without this the fallback would be a hash again.
+	t.check(AssetRegistry.color_of("rpg/brand_neuer_schatz").is_equal_approx(
+			AssetRegistry.group_color(AssetRegistry.group_of("rpg/brand_neuer_schatz"))),
+		"Ein unbekannter Key erbt die Farbe seiner Sektion")
+
 	# The whole registry stands in the hall — that is what the collections and
 	# the pages used to hide.
 	t.equal((gallery.keys as Array).size(), AssetRegistry.KEYS.size(),
@@ -909,6 +951,33 @@ func _mesh_gallery_flow() -> void:
 	t.check((gallery.slot_nodes[int(gallery.active_slot)]["mesh"] as Node) != null,
 		"Das Mesh ist in die Szene geladen")
 
+	# The mesh keeps the colours it was drawn with. A `material_override` on any
+	# surface means the gallery painted over them, which is what a player
+	# reported as "they seem to have random colours": the override came from a
+	# hash of the key's spelling, so the knight's steel, gold and red shield all
+	# became one arbitrary hue, and the next pedestal a different one.
+	var painted := _overridden(gallery.slot_nodes[int(gallery.active_slot)]["mesh"] as Node)
+	t.equal(painted, 0,
+		"Kein Mesh im Sockel ist übermalt — '%s' behält seine eigenen Materialien" % key)
+
+	# The name on the pedestal is the one place a single colour is right, and it
+	# is the standard palette's colour for this key — lifted where the palette
+	# would otherwise be unreadable on the dark hall.
+	var slot: Dictionary = gallery.slot_nodes[int(gallery.active_slot)]
+	var sign: Label3D = slot["sign"]
+	t.check(sign.modulate.is_equal_approx(AssetRegistry.label_color(key)),
+		"Das Schild am Sockel trägt die Standardfarbe von '%s'" % key)
+	# Every sign in the hall has to be readable, not only this one: 13 of the 155
+	# standard colours are dark enough to need the lift, and a name nobody can
+	# read is not a colour scheme.
+	var unreadable: Array[String] = []
+	for registry_key in AssetRegistry.KEYS:
+		if AssetRegistry.contrast_ratio(AssetRegistry.label_color(registry_key),
+				AssetRegistry.LABEL_BACKGROUND) < AssetRegistry.LABEL_MIN_CONTRAST:
+			unreadable.append(registry_key)
+	t.equal(unreadable.size(), 0,
+		"Jedes Schild ist auf dem dunklen Saal lesbar" + (" — zu dunkel: %s" % ", ".join(unreadable) if not unreadable.is_empty() else ""))
+
 	# The card names it, with the level that really stands there.
 	gallery._refresh_info()
 	t.check(str(gallery._info_name.text) == Loc.resolve(AssetRegistry.display_name(key)),
@@ -936,8 +1005,8 @@ func _mesh_gallery_flow() -> void:
 	# front of the player, and it is the only way the rows behind it can be read
 	# or written about at all — from the nave the row in front is always the
 	# nearer one, and no distance rule can change that. The outermost row is the
-	# claim worth pinning: it stands nineteen metres out where the second row
-	# stands seven, and the hall now has five rows a side.
+	# claim worth pinning: it stands twice as far out as the second one, and the
+	# hall now has five rows a side.
 	var far_row := MeshGallery.ROWS_PER_SIDE - 1
 	for probe_row in [0, 1, far_row]:
 		var far := MeshGallery.slot_position(probe_row * 2)
@@ -957,6 +1026,27 @@ func _mesh_gallery_flow() -> void:
 
 	await _goto("lobby")
 	t.suite_done()
+
+
+## How many surfaces below `node` carry a `material_override`.
+##
+## `material_override` is the blunt instrument `WorldScreen.tint()` uses, and it
+## wins over every material a `.glb` shipped with. Counting it is therefore the
+## way to ask "is this mesh still wearing its own colours?" — and the answer has
+## to be zero for the mesh gallery, which is where the "random colours" came
+## from. The fallback primitive is the one exception and is never reached while
+## the mesh is bundled.
+func _overridden(node: Node) -> int:
+	var count := 0
+	var stack: Array[Node] = [node]
+	while not stack.is_empty():
+		var current: Node = stack.pop_back()
+		if current is GeometryInstance3D \
+				and (current as GeometryInstance3D).material_override != null:
+			count += 1
+		for child in current.get_children():
+			stack.append(child)
+	return count
 
 
 ## Everything the open dialog has to say, as one string.

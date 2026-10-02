@@ -193,7 +193,10 @@ func _build_slots() -> void:
 		# A `Label3D` resolves nothing on its own, so the display name has to be
 		# translated where it is assigned.
 		sign.text = Loc.resolve(AssetRegistry.display_name(str(keys[i])))
-		sign.modulate = AssetRegistry.color_of(str(keys[i]))
+		# `label_color()` and not `color_of()`: the sign is written on the dark
+		# hall, and a coal node's own colour sits at 1.4:1 against the wall. The
+		# name is what adapts, not the mesh.
+		sign.modulate = AssetRegistry.label_color(str(keys[i]))
 		holder.add_child(sign)
 
 		slot_nodes.append({
@@ -583,7 +586,9 @@ func _refresh_info() -> void:
 		_info_hint.text = Loc.f("The meshes stand to the left and to the right", [])
 		return
 	_info_name.text = Loc.resolve(AssetRegistry.display_name(key))
-	_info_name.add_theme_color_override("font_color", AssetRegistry.color_of(key))
+	# The card sits on the same dark panel as the pedestal sign, so it reads in
+	# the same readable variant of the key's standard colour.
+	_info_name.add_theme_color_override("font_color", AssetRegistry.label_color(key))
 	# Label and triangle count must match the level that actually stands there,
 	# or a slim build claims "1.000 triangles" over a 200-triangle mesh.
 	var shown := AssetRegistry.best_available(key, tier)
