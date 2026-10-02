@@ -12,6 +12,28 @@ extends RefCounted
 ## same bar.
 const TOP_BAR_BUTTON := 40.0
 
+## Smallest row height a list may use. 44 px is the Android minimum touch
+## target, and a list that "fits" by shrinking its rows below this is worse than
+## one that scrolls — the entries stop being something a finger can hit.
+const LIST_ROW_MIN := 44.0
+## Largest row a list shows while there is room for more. The flat list lobby and
+## the theme dialog both used 78 for their full-height entry.
+const LIST_ROW_MAX := 78.0
+## How far a finger may travel on a list before the drag counts as a scroll
+## rather than a press.
+##
+## `gui/common/default_scroll_deadzone` is 0 and Godot's own gate is
+## `abs(drag_accum) > deadzone`, so with 0 a single pixel of wobble starts a
+## scroll, `gui_input` calls `accept_event()` and the row under the finger is
+## never pressed. 30 is the value the deadzone arrived with (godot#13996, "Make
+## BaseButton not emit press when container is scrolled") and stays under the
+## travel a deliberate swipe needs. The touch branch only runs while
+## `DisplayServer.is_touchscreen_available()`, so a desktop run is unaffected.
+const LIST_SCROLL_DEADZONE := 30
+## Name of the row box inside a list from `Ui.scroll_list()`. A name rather than
+## a child index, because the `ScrollContainer` also holds two internal bars.
+const LIST_ROWS := "rows"
+
 
 ## Shared font instances, loaded once and reused by every screen.
 ## `UiTheme` owns the cache; this is the shortcut for the two hot callers.
@@ -120,6 +142,87 @@ static func rect(color: Color, radius: int = 8, border: Color = Color(0, 0, 0, 0
 	node.add_theme_stylebox_override("panel", box)
 	node.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return node
+
+
+# --- lists -------------------------------------------------------------------
+#
+# A list of rows inside a box of a fixed height has exactly two honest answers:
+# the rows fit, or the list scrolls. A plain `VBoxContainer` of rows in a fixed
+# panel has neither — nothing clips it, so with one row more than fits the lower
+# rows are painted over whatever is below the panel and then over the edge of
+# the screen, and the buttons there cannot be reached.
+#
+# That is not a hypothetical. Measured on the 3D lobby's game panel, rebuilt at
+# the size and position `lobby3d_screen.gd` gives it in a 1280x720 window: the
+# panel is a fixed 250 high, the head above the list takes 91, and the "Puzzle"
+# plaza lists six games that need 270 of the 135 that are left. Nothing clamps
+# the column, so it grows to 361 — and the last row ends at y = 793, 73 px below
+# the bottom of the screen. The "3D Adventures" plaza with five games is 27 px
+# over the edge.
+#
+# `Ui.scroll_list()` is the box that clips and `Ui.list_row()` is the arithmetic
+# that decides how tall a row may be; `test_core.gd` measures both.
+
+## The height one row of `count` rows may have so the list fits into `available`
+## pixels — never more than `row_max`, never below `LIST_ROW_MIN`.
+##
+## The floor is the point. A list with more entries than the space can hold does
+## not get its rows squeezed until they fit; it is told the truth, keeps rows a
+## finger can hit, and has to scroll. `count` of zero or less has no row to size
+## and answers with `row_max`.
+static func list_row(available: float, count: int, gap: float, row_max: float = LIST_ROW_MAX) -> float:
+	if count <= 0:
+		return row_max
+	var gaps := maxf(0.0, gap) * float(count - 1)
+	var ceiling := maxf(LIST_ROW_MIN, row_max)
+	return clampf((available - gaps) / float(count), LIST_ROW_MIN, ceiling)
+
+
+## The height a list of `count` rows of `row` occupies, gaps included — the
+## other half of `Ui.list_row()`, and what a caller compares against the room it
+## has to decide whether the list has to scroll at all.
+static func list_height(count: int, row: float, gap: float) -> float:
+	if count <= 0:
+		return 0.0
+	return row * float(count) + maxf(0.0, gap) * float(count - 1)
+
+
+## A vertical list of rows that scrolls instead of growing out of its box.
+##
+## `ScrollContainer` turns `clip_contents` on in its constructor, so a list built
+## here cannot paint a pixel outside the panel it sits in — the whole point. It
+## wants exactly one child, the row box `Ui.list_box()` hands out; `add_child`
+## on the container itself would put a second column beside the scrolled content
+## rather than inside it.
+##
+## Horizontal scrolling is off (a row is as wide as the list) and `follow_focus`
+## is on, so a caller that gives a row the focus sees it scrolled into view
+## without scrolling by hand. `scroll_deadzone` keeps a tap a tap — see
+## `LIST_SCROLL_DEADZONE`.
+static func scroll_list(separation: int = 8) -> ScrollContainer:
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.follow_focus = true
+	scroll.scroll_deadzone = LIST_SCROLL_DEADZONE
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var box := VBoxContainer.new()
+	box.name = LIST_ROWS
+	# Same rule as `Ui.vbox`: a box that only arranges pixels has no `gui_input`
+	# of its own, and a full-width one that stops the mouse eats every press meant
+	# for the rows inside it.
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_theme_constant_override("separation", separation)
+	scroll.add_child(box)
+	return scroll
+
+
+## The row box of a list from `Ui.scroll_list()`, or `null` for anything else.
+static func list_box(scroll: ScrollContainer) -> VBoxContainer:
+	if scroll == null or not is_instance_valid(scroll):
+		return null
+	return scroll.get_node_or_null(LIST_ROWS) as VBoxContainer
 
 
 ## Enables or disables a button in one call.

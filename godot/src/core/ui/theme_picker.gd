@@ -42,6 +42,16 @@ const CARD_GAP := 10
 ## Marks a card for the tests and for anyone walking the tree later.
 const CARD_META := "edition_card"
 
+## What the dialog spends on everything that is not a card: the head, the close
+## button, the two gaps around the list and the panel's own margin. The suite
+## measures the built dialog against the window, so a change to one of those
+## four that is not mirrored here fails the run instead of quietly letting the
+## dialog grow past the bottom of the screen.
+const DIALOG_CHROME := 132.0
+## Floor for the card list, so a window too small for the whole dialog still
+## shows a usable one instead of cards of height zero.
+const DIALOG_MIN_LIST := 240.0
+
 ## The one dialog that is open, if any. A screen carries its own modal layers, so
 ## this is the layer alone: closing the dialog must not take a pause overlay with
 ## it. Like the suggestion and settings dialogs it is a static, and like them it
@@ -157,11 +167,27 @@ static func open(host: Node) -> Control:
 	# reached from inside that game and says so rather than showing a bare list.
 	var head := current_edition(screen_id)
 	column.add_child(Ui.title(str(head.get("name", "")), 28, UiTheme.TEXT))
+
+	# The cards go into a list that scrolls. They used to be a bare
+	# `VBoxContainer` inside a `CenterContainer`, and nothing clips either: a
+	# family with one edition more than the window holds pushed the head off the
+	# top and the close button off the bottom, and neither could be reached.
+	var list := Ui.scroll_list(CARD_GAP)
+	column.add_child(list)
+	var rows := Ui.list_box(list)
 	for edition in editions:
-		column.add_child(_card(edition))
+		rows.add_child(_card(edition))
 	column.add_child(Ui.button(Loc.t("ui.close"), Vector2(200, 48), UiTheme.PANEL_LIGHT, func() -> void:
 		Sfx.select()
 		close()))
+
+	# The list may not ask for more room than the window has: what the cards need
+	# when they fit, and the whole budget when they do not — in which case they
+	# scroll inside the dialog instead of the dialog leaving the screen.
+	var room := maxf(DIALOG_MIN_LIST, host.get_viewport().get_visible_rect().size.y - DIALOG_CHROME)
+	var count := editions.size()
+	var row := Ui.list_row(room, count, float(CARD_GAP), CARD_SIZE.y)
+	list.custom_minimum_size.y = minf(room, Ui.list_height(count, row, float(CARD_GAP)))
 	return layer
 
 

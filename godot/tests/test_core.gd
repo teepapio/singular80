@@ -23,6 +23,16 @@ const ServerDialogClass := preload("res://src/core/ui/server_dialog.gd")
 ## tiles are editions of one game — and how the top bar offers them.
 const ThemePickerClass := preload("res://src/core/ui/theme_picker.gd")
 
+## The factories every screen builds its tree with, and the shared theme the
+## base classes put on the screen itself. By path, for the reason at the top of
+## this file.
+const UiClass := preload("res://src/core/ui/ui.gd")
+const UiThemeClass := preload("res://src/core/ui/ui_theme.gd")
+
+## The action button of every 3D screen. `WorldScreen` builds it by name, so it
+## is a fresh class today and `--script` runs do not refresh the class cache.
+const TouchButtonClass := preload("res://src/core/ui/touch_button.gd")
+
 ## A bare 2D screen to hang the dialog on. The real jumpers are `WorldScreen`s
 ## built by another scope's files; what is under test here is the core's half,
 ## and `Screen` is the cheapest host that has a `modal()` and a top bar.
@@ -56,6 +66,7 @@ func run(kit: TestKit, scene_tree: SceneTree) -> void:
 	_legal()
 	await _themed_editions()
 	_server_address()
+	_second_finger()
 
 
 func _close() -> void:
@@ -692,6 +703,11 @@ func _legal() -> void:
 ## the editions itself. This suite pins both halves of that contract — which
 ## entries count as editions, and that a screen with them gets a working button
 ## and a dialog listing all of them.
+##
+## The dialog is also where the shared list kit is exercised (`Ui.scroll_list`,
+## `Ui.list_row`): the cards used to be a bare `VBoxContainer` in a
+## `CenterContainer`, and nothing clips either, so a family with more editions
+## than the window holds pushed the head and the close button off the screen.
 func _themed_editions() -> void:
 	t.suite("Themenwahl")
 
@@ -760,6 +776,8 @@ func _themed_editions() -> void:
 	t.equal(_cards_in(layer), 2, "Eine Karte je anderer Fassung")
 	t.check(ThemePickerClass.open(host) == layer, "Ein zweiter Tap stapelt keinen zweiten Dialog")
 
+	await _lists_stay_inside_their_box(layer)
+
 	ThemePickerClass.close()
 	# `queue_free()` frees at the end of the frame, so the layer is still a child
 	# for the rest of this one. Reading `has_modal()` immediately would prove
@@ -787,6 +805,87 @@ func _cards_in(node: Node) -> int:
 		for child in current.get_children():
 			stack.append(child)
 	return found
+
+
+## The first node of `kind` below `node`, or `null`. Asked for by type rather
+## than indexed, so a tree that lost its node reports one failed check instead
+## of a null dereference in the middle of a suite.
+func _first_of(node: Node, kind: String) -> Node:
+	var found := node.find_children("*", kind, true, false)
+	return found[0] if found.size() > 0 else null
+
+
+## A list of rows inside a box of a fixed height: the fit has to be a scroll, and
+## not a row too thin to hit. A player filed this about the 3D lobby's game
+## panel, which is a fixed 250 px tall while the "Puzzle" plaza lists six games —
+## 142 px more than the panel has room for, and nothing clipped them, so the
+## lower rows were painted over the bottom edge of the screen. The fix is the
+## same here because the arithmetic and the widget are the game's, in `Ui`.
+func _lists_stay_inside_their_box(layer: Control) -> void:
+	# 1. The dialog's own cards sit in a list that clips, follows the focus and
+	#    keeps a tap a tap.
+	var list := _first_of(layer, "ScrollContainer") as ScrollContainer
+	t.check(list != null, "Die Karten stehen in einer Liste, die rollt")
+	if list != null:
+		t.check(list.clip_contents,
+			"und die Liste schneidet ab, statt ueber ihren Rand hinaus zu zeichnen")
+		t.check(list.follow_focus,
+			"sie holt einen fokussierten Eintrag von selbst in den Blick")
+		t.check(list.scroll_deadzone == UiClass.LIST_SCROLL_DEADZONE,
+			"ein Finger-Wackeln zaehlt als Tipp und nicht als Rollen")
+		t.equal(_cards_in(UiClass.list_box(list)), 2, "und beide Fassungen stehen darin")
+		t.check(list.custom_minimum_size.y > 0.0,
+			"die Liste behaelt eine Hoehe, statt auf null zusammenzufallen")
+
+	# 2. The arithmetic. Two rows in the room the dialog has keep their full
+	#    height; twelve do not get squeezed to fit, because a row below
+	#    `LIST_ROW_MIN` is no longer something a finger can hit and the answer to
+	#    "one too many" has to be a scroll.
+	var gap := float(ThemePickerClass.CARD_GAP)
+	var full := ThemePickerClass.CARD_SIZE.y
+	t.equal(UiClass.list_row(588.0, 2, gap, full), full, "Zwei Zeilen behalten ihre volle Hoehe")
+	t.equal(UiClass.list_row(588.0, 12, gap, full), UiClass.LIST_ROW_MIN,
+		"Zwelve Zeilen werden nicht duenngedrueckt")
+	t.equal(UiClass.list_height(2, 78.0, 10.0), 166.0, "Die Hoehe einer Liste zaehlt die Abstaende mit")
+	t.equal(UiClass.list_height(0, 78.0, 10.0), 0.0, "Eine leere Liste braucht keine Hoehe")
+	t.equal(UiClass.list_row(588.0, 0, gap, full), full, "Ohne Zeile wird nichts verkleinert")
+
+	# 3. The failure itself, measured rather than argued: a box of a fixed height
+	#    with far more rows than fit, and the list that keeps them inside it.
+	var probe := UiClass.scroll_list(6)
+	# What `Screen` and `WorldScreen` put on the screen, so the bar below is the
+	# one a player sees and not Godot's default theme.
+	probe.theme = UiThemeClass.shared()
+	var rows := UiClass.list_box(probe)
+	for i in 12:
+		rows.add_child(UiClass.button("Spiel %d" % i, Vector2(0, 60)))
+	probe.size = Vector2(320, 140)
+	tree.root.add_child(probe)
+	# `update_scrollbars()` runs deferred, and the page/max it needs are measured
+	# in the same pass, so one frame is not enough to read them.
+	await tree.process_frame
+	await tree.process_frame
+	t.check(probe.size.y <= 140.0, "Die Liste waechst nicht ueber ihre Box hinaus")
+	t.check(rows.get_combined_minimum_size().y > probe.size.y,
+		"der Inhalt ist groesser als der sichtbare Ausschnitt")
+	t.check(probe.get_v_scroll_bar().max_value > 0.0, "und die Liste kann ihn rollen")
+	t.check(probe.get_v_scroll_bar().get_minimum_size().x <= UiThemeClass.SCROLL_BAR_WIDTH,
+		"Die Rollleiste ist schmal und traegt keine Pfeile")
+	probe.queue_free()
+	await tree.process_frame
+
+	# 4. Where the slenderness comes from, without a layout: a vertical bar takes
+	#    its width from `MAX(increment_icon.width, track content margins)`, so
+	#    both halves are set. `Theme` cannot remove an icon, so the arrow is
+	#    replaced by a 1x1 image rather than by `null`.
+	var track := UiThemeClass.shared().get_stylebox("scroll", "VScrollBar")
+	t.check(track is StyleBoxFlat, "Die Rollleiste des Spiels hat einen eigenen Kasten")
+	if track is StyleBoxFlat:
+		t.equal((track as StyleBoxFlat).get_minimum_size().x, UiThemeClass.SCROLL_BAR_WIDTH,
+			"und der Kasten ist so schmal, wie er soll")
+	var arrow := UiThemeClass.shared().get_icon("increment", "VScrollBar")
+	t.check(arrow != null and arrow.get_width() <= UiThemeClass.SCROLL_BAR_WIDTH,
+		"Der Pfeil des Bildschirms ist durch ein 1x1-Bild ersetzt")
 
 
 # --- Server address ---------------------------------------------------------
@@ -844,4 +943,145 @@ func _server_address() -> void:
 	Api._arm(0)
 	t.equal(ServerDialogClass.label(), "Server: " + Loc.t("ui.server_offline"),
 		"Eine leere Adresse stellt den Zustand 'keine Adresse' wieder her")
+	t.suite_done()
+
+
+# --- Touch: the second finger ------------------------------------------------
+
+## Every finger has to reach the action button, and only the first one ever did.
+##
+## Godot emulates a mouse button for one finger — the index of the first
+## `InputEventScreenTouch` it sees, see `Input::_parse_input_event_impl` — and
+## `Button` reads nothing else. So the moment the virtual stick holds the first
+## finger, ◈ got a raw `InputEventScreenTouch` and nothing more, and pressing it
+## did nothing at all: "Drachenflug: i cannot fire while steering". The bare
+## `Button` below is the engine's own behaviour, kept in the suite so the reason
+## for the second class is written down where the fix lives.
+func _second_finger() -> void:
+	t.suite("Steuerung — zweiter Finger")
+
+	# What the engine hands a control: the raw touch, and the emulated mouse
+	# button only for the finger that owns `mouse_from_touch_index`.
+	var stick_touch := InputEventScreenTouch.new()
+	stick_touch.index = 0
+	stick_touch.pressed = true
+	stick_touch.position = Vector2(140.0, 600.0)
+
+	var plain := Button.new()
+	plain.size = Vector2(66.0, 66.0)
+	plain.focus_mode = Control.FOCUS_NONE
+	var host := Control.new()
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.size = Vector2(1280.0, 720.0)
+	host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	host.add_child(plain)
+	plain.position = Vector2(1186.0, 626.0)
+	tree.root.add_child(host)
+
+	# Finger 0 lands on the stick; finger 1 presses the button.
+	plain._gui_input(stick_touch)
+	var second_finger := InputEventScreenTouch.new()
+	second_finger.index = 1
+	second_finger.pressed = true
+	second_finger.position = Vector2(33.0, 33.0)
+	var plain_down := false
+	plain.button_down.connect(func() -> void: plain_down = true)
+	plain._gui_input(second_finger)
+	t.check(not plain_down,
+		"Ein normaler Button sieht den zweiten Finger nicht - das ist der Fehler")
+
+	# The same two fingers on the control the 3D screens build.
+	var fired := 0
+	var held := 0
+	var released := 0
+	var button := TouchButtonClass.new()
+	button.size = Vector2(66.0, 66.0)
+	button.position = Vector2(1186.0, 626.0)
+	button.focus_mode = Control.FOCUS_NONE
+	button.add_theme_stylebox_override("normal", UiThemeClass.flat(Color(0.1, 0.1, 0.1, 0.8), Color.WHITE, 20))
+	button.add_theme_stylebox_override("pressed", UiThemeClass.flat(Color(0.4, 0.4, 0.4, 0.9), Color.WHITE, 20))
+	host.add_child(button)
+	button.button_down.connect(func() -> void: held += 1)
+	button.button_up.connect(func() -> void: released += 1)
+	button.pressed.connect(func() -> void: fired += 1)
+
+	# The stick owns finger 0, and the button is pressed with finger 1 — the
+	# report from the tablet, and now the thing that has to work.
+	button._gui_input(stick_touch)
+	button._gui_input(second_finger)
+	t.equal(held, 1, "Der zweite Finger drueckt den Knopf, waehrend der Stick laeuft")
+	t.check(button.get_theme_stylebox("normal") != null,
+		"Der gehaltene Knopf bekommt sein eigenes Aussehen")
+
+	# And the finger coming up again fires it, which is what horse runner's
+	# ◀ and ▶ rely on.
+	var up := InputEventScreenTouch.new()
+	up.index = 1
+	up.pressed = false
+	up.position = Vector2(33.0, 33.0)
+	button._gui_input(up)
+	t.equal(fired, 1, "Und das Loslassen loest ihn aus")
+	t.equal(released, 1, "Der Knopf meldet das Ende des Druckes")
+
+	# A finger that slides off before lifting is a cancelled tap, not a press —
+	# the same as a `Button` released outside its own rect.
+	var drag_out := InputEventScreenTouch.new()
+	drag_out.index = 2
+	drag_out.pressed = true
+	drag_out.position = Vector2(33.0, 33.0)
+	var drag := InputEventScreenDrag.new()
+	drag.index = 2
+	drag.position = Vector2(300.0, 300.0)
+	var up_out := InputEventScreenTouch.new()
+	up_out.index = 2
+	up_out.pressed = false
+	up_out.position = Vector2(300.0, 300.0)
+	button._gui_input(drag_out)
+	button._gui_input(drag)
+	button._gui_input(up_out)
+	t.equal(fired, 1, "Ein Finger, der wegrutscht, drueckt nicht")
+
+	# A second finger on a held button does not steal it from the first.
+	var third := InputEventScreenTouch.new()
+	third.index = 3
+	third.pressed = true
+	third.position = Vector2(10.0, 10.0)
+	var third_up := InputEventScreenTouch.new()
+	third_up.index = 3
+	third_up.pressed = false
+	third_up.position = Vector2(10.0, 10.0)
+	button._gui_input(drag_out)
+	button._gui_input(third)
+	button._gui_input(third_up)
+	t.equal(held, 2, "Der zweite Finger nimmt den Knopf nicht dem ersten weg")
+	t.equal(released, 3, "Und beide melden ihr Ende, ohne einen dritten Knopfdruck")
+	t.equal(fired, 2, "Nur der erste Finger zaehlt als Tipp")
+
+	# The emulated mouse event for the same click must not press a second time:
+	# `emulate_touch_from_mouse` sends the touch event first, and horse runner's
+	# ◀ would otherwise shift two lanes per tap.
+	var mouse := InputEventMouseButton.new()
+	mouse.button_index = MOUSE_BUTTON_LEFT
+	mouse.pressed = true
+	mouse.device = InputEvent.DEVICE_ID_EMULATION
+	mouse.position = Vector2(33.0, 33.0)
+	button._gui_input(mouse)
+	t.equal(held, 2, "Die nachgeahmte Maus zaehlt nicht noch einmal")
+
+	# A disabled button stays dead for every finger.
+	button.disabled = true
+	var down := InputEventScreenTouch.new()
+	down.index = 4
+	down.pressed = true
+	down.position = Vector2(33.0, 33.0)
+	var down_up := InputEventScreenTouch.new()
+	down_up.index = 4
+	down_up.pressed = false
+	down_up.position = Vector2(33.0, 33.0)
+	button._gui_input(down)
+	button._gui_input(down_up)
+	t.equal(fired, 2, "Ein gesperrter Knopf antwortet keinem Finger")
+	button.disabled = false
+
+	host.queue_free()
 	t.suite_done()
