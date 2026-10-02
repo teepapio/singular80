@@ -464,7 +464,7 @@ func _suggestion_context() -> void:
 	t.suite("Vorschlag — Herkunft")
 
 	# Every game supplies its German name, not its technical id.
-	t.equal(SuggestionContext.for_screen("arena"), "Singular 80", "Die Arena kennt ihren Namen")
+	t.equal(SuggestionContext.for_screen("arena"), "Space Shoot", "Die Arena kennt ihren Namen")
 	t.equal(SuggestionContext.for_screen("tetris"), "Tetris", "Tetris kennt seinen Namen")
 	t.equal(SuggestionContext.for_screen("mesh_gallery"), "Mesh-Galerie", "Die Galerie hat einen eigenen Namen")
 	t.equal(SuggestionContext.for_screen("lobby"), "Lobby", "Die Lobby heißt Lobby")

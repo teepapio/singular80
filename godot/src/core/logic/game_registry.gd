@@ -77,9 +77,15 @@ const COMPANIONS := {
 }
 
 const GAMES: Array[Dictionary] = [
+	# Named after its genre, not after the app (suggestion #37). It used to be
+	# called "Singular 80" — the name the top bar shows as the brand directly
+	# above it — and a player filed the resulting confusion. Do not "fix" it
+	# back: the app is Singular 80, this is one of its eighteen subgames. Only
+	# the display name moved; id, screen and `Game.HS_ARENA` stayed, so the
+	# highscores a player already has survive the rename.
 	{
 		"id": "arena",
-		"name": "Singular 80",
+		"name": "Space Shoot",
 		"icon": "◉",
 		"screen": "arena",
 		"accent": Color(0.055, 0.647, 0.898),
