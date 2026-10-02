@@ -564,10 +564,13 @@ def gable_roof(
         ),
         # A +Y rotation lifts the **-X** end (measured in Blender 4.5, not
         # assumed), so the -X slab takes -slope to put its high end at the
-        # middle. `generate_siedler_meshes._gabled_roof` has these two signs the
-        # other way round, measured 2026-10-02 on its KeepRoof: its left slab
-        # runs from z=2.809 down to z=2.271 towards the middle, so the two
-        # slabs meet in a valley instead of a ridge.
+        # middle. `generate_siedler_meshes` used to build its own copy of this
+        # roof with the two signs the other way round: measured 2026-10-02 on
+        # its KeepRoof, its left slab ran from z=2.809 down to z=2.271 towards
+        # the middle, so the two slabs met in a valley instead of a ridge and
+        # the castle wore an inverted butterfly. It now calls this function,
+        # which is why the signs are pinned down in a comment rather than left
+        # to the next reader.
         _box(
             f"{name}SlabL",
             (slab_len, depth, slab),

@@ -610,19 +610,19 @@
     "med": 1057
   },
   "siedler/bakery": {
-    "high": 14464,
-    "low": 904,
-    "med": 2037
+    "high": 11455,
+    "low": 964,
+    "med": 2131
   },
   "siedler/blacksmith": {
-    "high": 12593,
-    "low": 1050,
-    "med": 2402
+    "high": 13305,
+    "low": 1110,
+    "med": 2529
   },
   "siedler/castle": {
-    "high": 15214,
-    "low": 1271,
-    "med": 2886
+    "high": 15919,
+    "low": 1328,
+    "med": 2967
   },
   "siedler/coal_mine": {
     "high": 18108,
@@ -640,9 +640,9 @@
     "med": 1898
   },
   "siedler/farm": {
-    "high": 21647,
-    "low": 1820,
-    "med": 4014
+    "high": 22390,
+    "low": 1887,
+    "med": 4205
   },
   "siedler/fish_spot": {
     "high": 10849,
@@ -650,9 +650,9 @@
     "med": 1092
   },
   "siedler/fishery": {
-    "high": 12938,
-    "low": 1087,
-    "med": 2396
+    "high": 13499,
+    "low": 1140,
+    "med": 2500
   },
   "siedler/flag": {
     "high": 11199,
@@ -660,9 +660,9 @@
     "med": 1156
   },
   "siedler/forester": {
-    "high": 11897,
-    "low": 1000,
-    "med": 2245
+    "high": 12616,
+    "low": 1060,
+    "med": 2362
   },
   "siedler/gold_mine": {
     "high": 18133,
@@ -700,9 +700,9 @@
     "med": 1126
   },
   "siedler/sawmill": {
-    "high": 13404,
-    "low": 1121,
-    "med": 2562
+    "high": 12013,
+    "low": 1003,
+    "med": 2251
   },
   "siedler/settler": {
     "high": 10542,
@@ -720,14 +720,14 @@
     "med": 1288
   },
   "siedler/toolsmith": {
-    "high": 14015,
-    "low": 1166,
-    "med": 2634
+    "high": 12394,
+    "low": 1040,
+    "med": 2338
   },
   "siedler/warehouse": {
-    "high": 45083,
-    "low": 3787,
-    "med": 8478
+    "high": 45866,
+    "low": 3847,
+    "med": 8648
   },
   "siedler/watchtower": {
     "high": 11945,
@@ -740,9 +740,9 @@
     "med": 1966
   },
   "siedler/woodcutter": {
-    "high": 15452,
-    "low": 1285,
-    "med": 2933
+    "high": 12794,
+    "low": 1070,
+    "med": 2398
   },
   "tree": {
     "high": 11806,

@@ -72,6 +72,13 @@ _ico = mm._ico
 _box = mm._box
 _cone = mm._cone
 _torus = mm._torus
+# One roof primitive for the whole gallery. This pack used to keep its own
+# `_gabled_roof`, which had the two slab rotations the other way round from
+# `mm.gable_roof` — measured 2026-10-02 on this file's KeepRoof, its left slab
+# ran from z=2.809 down to z=2.271 towards the middle, so the two slabs met in
+# a **valley** and the keep, the cottages and the warehouse all wore an
+# inverted butterfly. See the sign note in `mm.gable_roof`.
+gable_roof = mm.gable_roof
 
 
 def _cyl(
@@ -107,45 +114,6 @@ def _pivot_box(
     return obj
 
 
-def _gabled_roof(
-    name: str,
-    width: float,
-    depth: float,
-    height: float,
-    location: tuple[float, float, float],
-    color: tuple[float, float, float, float],
-) -> bpy.types.Object:
-    """Simple two-slope roof: a box scaled down at the top by a second box."""
-    lower = _box(name, (width, depth, 0.08), (location[0], location[1], location[2] + 0.04), color, 0.0, 0.7)
-    # Two slanted slabs form the gable.
-    half = width * 0.5
-    slope = math.atan2(height, half)
-    slab_len = math.hypot(half, height)
-    left = _box(
-        f"{name}SlabL",
-        (slab_len, depth, 0.07),
-        (0.0, 0.0, 0.0),
-        color,
-        0.0,
-        0.7,
-        0.05,
-        (0.0, slope, 0.0),
-    )
-    left.location = (location[0] - half * 0.5, location[1], location[2] + height * 0.5)
-    right = _box(
-        f"{name}SlabR",
-        (slab_len, depth, 0.07),
-        (0.0, 0.0, 0.0),
-        color,
-        0.0,
-        0.7,
-        0.05,
-        (0.0, -slope, 0.0),
-    )
-    right.location = (location[0] + half * 0.5, location[1], location[2] + height * 0.5)
-    return lower
-
-
 # --- the castle (headquarters) ----------------------------------------------
 def build_castle() -> bpy.types.Object:
     """Burg: stone keep with corner towers, a gate and a banner."""
@@ -165,7 +133,7 @@ def build_castle() -> bpy.types.Object:
     _box("GateFrame", (0.62, 0.3, 0.95), (0.0, -1.06, 0.72), STONE_DARK, 0.0, 0.85)
     _box("GateDoor", (0.5, 0.12, 0.8), (0.0, -1.16, 0.62), WOOD_DARK, 0.0, 0.7)
     # Keep roof + banner.
-    _gabled_roof("KeepRoof", 2.4, 2.1, 0.6, (0.0, 0.0, 2.24), SLATE)
+    gable_roof("KeepRoof", 2.4, 2.1, 0.6, (0.0, 0.0, 2.24), SLATE)
     _cyl("BannerPole", 6, 0.045, 1.5, (0.0, 0.0, 3.3), WOOD_DARK, 0.0, 0.6)
     _box("Banner", (0.06, 0.5, 0.34), (0.0, 0.26, 3.85), TUNIC, 0.35, 0.6)
     return bpy.context.active_object
@@ -246,7 +214,7 @@ def _cottage(
                 0.8,
             )
     _box(f"{name}Rail", (w + 0.02, d + 0.02, 0.08), (0.0, 0.0, h * 0.52), WOOD_DARK, 0.0, 0.8)
-    _gabled_roof(f"{name}Roof", w + 0.16, d + 0.16, 0.42, (0.0, 0.0, h), roof_color)
+    gable_roof(f"{name}Roof", w + 0.16, d + 0.16, 0.42, (0.0, 0.0, h), roof_color)
     _box(f"{name}Door", (0.24, 0.08, 0.5), (0.0, -d * 0.5 - 0.02, 0.25), WOOD_DARK, 0.0, 0.7)
     _box(f"{name}Window", (0.2, 0.06, 0.2), (w * 0.28, -d * 0.5 - 0.02, h * 0.68), GLASS, 0.3, 0.4)
     _box(f"{name}Window2", (0.2, 0.06, 0.2), (-w * 0.28, -d * 0.5 - 0.02, h * 0.68), GLASS, 0.3, 0.4)
@@ -284,7 +252,7 @@ def build_sawmill() -> bpy.types.Object:
     _box("ShedFloor", (1.1, 0.9, 0.08), (1.1, 0.1, 0.04), WOOD_DARK, 0.0, 0.9)
     for tag, sx in (("L", -0.5), ("R", 0.5)):
         _box(f"ShedPost{tag}", (0.08, 0.08, 0.9), (1.1 + sx, 0.1, 0.49), WOOD_DARK, 0.0, 0.8)
-    _gabled_roof("ShedRoof", 1.2, 1.0, 0.3, (1.1, 0.1, 0.94), THATCH)
+    gable_roof("ShedRoof", 1.2, 1.0, 0.3, (1.1, 0.1, 0.94), THATCH)
     # Vertical saw blade.
     _cyl("SawBlade", 10, 0.34, 0.06, (1.1, 0.1, 0.62), IRON, 0.0, 0.25, 0.8, )
     bpy.context.active_object.rotation_euler = (0.0, 1.5708, 0.0)
@@ -467,7 +435,7 @@ def build_toolsmith() -> bpy.types.Object:
     _cottage("Toolsmith", 1.7, 1.5, 1.0, SLATE, WOOD)
     # Lean-to workshop with an open front.
     _box("ShopFloor", (1.2, 0.9, 0.08), (1.15, -0.1, 0.04), WOOD_DARK, 0.0, 0.9)
-    _gabled_roof("ShopRoof", 1.3, 1.0, 0.32, (1.15, -0.1, 1.04), THATCH)
+    gable_roof("ShopRoof", 1.3, 1.0, 0.32, (1.15, -0.1, 1.04), THATCH)
     # Tool rack: a saw, a pick and a hammer hanging on the wall.
     _box("Rack", (1.0, 0.06, 0.06), (1.15, 0.28, 0.95), WOOD_DARK, 0.0, 0.8)
     _box("RackSaw", (0.9, 0.05, 0.16), (1.15, 0.24, 0.8), IRON, 0.0, 0.3, 0.7)
@@ -535,7 +503,7 @@ def build_warehouse() -> bpy.types.Object:
     for tag, sx in (("L", -0.9), ("R", 0.9)):
         _box(f"WarehousePost{tag}", (0.12, 0.12, 1.3), (sx, 0.78, 0.65), WOOD_DARK, 0.0, 0.8)
     _box("WarehouseRail", (2.12, 0.06, 0.1), (0.0, 0.78, 0.7), WOOD_DARK, 0.0, 0.8)
-    _gabled_roof("WarehouseRoof", 2.3, 1.9, 0.6, (0.0, 0.0, 1.3), THATCH)
+    gable_roof("WarehouseRoof", 2.3, 1.9, 0.6, (0.0, 0.0, 1.3), THATCH)
     # Wide doors for the carts.
     _box("WarehouseDoorL", (0.42, 0.1, 0.85), (-0.24, -0.87, 0.43), WOOD_DARK, 0.0, 0.75)
     _box("WarehouseDoorR", (0.42, 0.1, 0.85), (0.24, -0.87, 0.43), WOOD_DARK, 0.0, 0.75)
