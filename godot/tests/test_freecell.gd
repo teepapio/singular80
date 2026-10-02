@@ -473,6 +473,8 @@ class ScreenChecks:
 			return
 		await _open(tree)
 		t.close_suite()
+		await _grab(tree)
+		t.close_suite()
 
 	## Opens the screen and walks through everything a player does with the tip.
 	func _open(tree: SceneTree) -> void:
@@ -563,4 +565,233 @@ class ScreenChecks:
 			if child is Button:
 				out += str((child as Button).text) + "|"
 		return out
+
+	# --- picking a card up and putting it down -------------------------------
+
+	## A board with an answer to every question the player can ask of it:
+	##
+	##   column 0: 9S 7S 6H 5S     column 4: 8C
+	##   column 1: 8S 4H           column 5: 7C
+	##   column 2: JH 6H 5C        column 6: KD
+	##   column 3: 3S              column 7: 4D
+	##
+	## `7S 6H 5S` under the `9S` and `6H 5C` under the `JH` are both runs and
+	## can be lifted as one. `8S` in column 1 is buried under the `4H` and cannot
+	## move. The `5S` at the bottom of column 0 is the only card there that may
+	## go into a free cell, and the run `6H 5C` fits onto the `7C` of column 5 —
+	## but onto the `8S` of column 1 it does not.
+	func _grab_board() -> Array:
+		return [
+			[Cards.Card.new(8, 0), Cards.Card.new(6, 0), Cards.Card.new(5, 1), Cards.Card.new(4, 0)],
+			[Cards.Card.new(7, 0), Cards.Card.new(3, 1)],
+			[Cards.Card.new(10, 1), Cards.Card.new(5, 1), Cards.Card.new(4, 3)],
+			[Cards.Card.new(2, 0)],
+			[Cards.Card.new(7, 3)],
+			[Cards.Card.new(6, 3)],
+			[Cards.Card.new(12, 2)],
+			[Cards.Card.new(3, 2)],
+		]
+
+	func _put(screen: Node) -> void:
+		screen.columns = _grab_board()
+		screen.free_cells = [null, null, null, null]
+		screen.foundations = [[], [], [], []]
+		screen.selection = {}
+		screen.history = []
+		screen.moves = 0
+		screen.score = 0
+		screen.won = false
+		screen.hint_move = {}
+		screen.hint_life = 0.0
+		screen._refuse_life = 0.0
+		screen._drag_active = false
+		screen._pointer_down = false
+
+	## A point on card `card` of tableau column `col` that the player can
+	## actually hit: a buried card shows only the strip above the next one.
+	func _at(screen: Node, col: int, card: int) -> Vector2:
+		var column: Array = screen.columns[col]
+		var dy: float = screen.stack_dy(column.size())
+		var y: float = screen.TABLEAU_Y + float(card) * dy
+		var reach: float = dy if card < column.size() - 1 else screen.CARD_H
+		return Vector2(screen.col_x(col) + screen.CARD_W * 0.5, y + reach * 0.5)
+
+	func _cell_at(screen: Node, cell: int) -> Vector2:
+		return Vector2(screen.col_x(cell) + screen.CARD_W * 0.5,
+				screen.TOP_Y + screen.CARD_H * 0.5)
+
+	func _foundation_at(screen: Node, f: int) -> Vector2:
+		return Vector2(screen.col_x(4 + f) + screen.CARD_W * 0.5,
+				screen.TOP_Y + screen.CARD_H * 0.5)
+
+	## One press of the left mouse button — the event a finger arrives as.
+	func _press(screen: Node, pos: Vector2) -> void:
+		screen._on_view_input(_button(pos, true))
+
+	func _release(screen: Node, pos: Vector2) -> void:
+		screen._on_view_input(_button(pos, false))
+
+	func _button(pos: Vector2, pressed: bool) -> InputEventMouseButton:
+		var event := InputEventMouseButton.new()
+		event.button_index = MOUSE_BUTTON_LEFT
+		event.position = pos
+		event.pressed = pressed
+		return event
+
+	func _drag_to(screen: Node, from: Vector2, to: Vector2) -> void:
+		screen._on_view_input(_button(from, true))
+		screen._on_view_input(_motion(from, from.lerp(to, 0.5)))
+		screen._on_view_input(_motion(from.lerp(to, 0.5), to))
+		screen._on_view_input(_button(to, false))
+
+	func _motion(from: Vector2, to: Vector2) -> InputEventMouseMotion:
+		var event := InputEventMouseMotion.new()
+		event.position = to
+		event.relative = to - from
+		event.button_mask = MOUSE_BUTTON_MASK_LEFT
+		return event
+
+	## The player as the report describes them: FreeCell, and no card can be
+	## moved. Three things were wrong, and all three are checked here.
+	func _grab(tree: SceneTree) -> void:
+		t.suite("FreeCell — Greifen und Ablegen")
+		await t.goto(_router, tree, "freecell")
+		var screen = _router.current_screen
+		if screen == null:
+			t.fail("Der Screen wird geöffnet")
+			t.suite_done()
+			return
+
+		# --- 1. a tap makes the card selectable --------------------------------
+		_put(screen)
+		var hand := _at(screen, 0, 3)  # the 5S, the bottom card of column 0
+		_press(screen, hand)
+		_release(screen, hand)
+		t.check(not screen.selection.is_empty(), "Ein Fingertipp macht die Karte greifbar")
+		t.equal(str(screen.selection["from"]), "col", "und zwar aus dem Tableau")
+		t.equal(int(screen.selection["start"]), 3, "beginnend bei der angetippten Karte")
+
+		# The same card again lets it go again.
+		_press(screen, hand)
+		_release(screen, hand)
+		t.check(screen.selection.is_empty(), "Derselbe Tipp lässt sie wieder los")
+
+		# --- 2. the emulated double event must not count twice ----------------
+		# `project.godot` runs both emulations on, so one finger press reaches
+		# the board as an `InputEventScreenTouch` **and** as an
+		# `InputEventMouseButton`. Answering to both ran the pick twice, and the
+		# second run undid the first: no card was ever selectable.
+		_press(screen, hand)
+		_release(screen, hand)
+		var picked: Dictionary = screen.selection.duplicate()
+		t.check(not picked.is_empty(), "Die Karte ist greifbar")
+		for i in 2:
+			var touch := InputEventScreenTouch.new()
+			touch.index = 0
+			touch.pressed = true
+			touch.position = hand
+			screen._on_view_input(touch)
+		t.equal(str(screen.selection), str(picked),
+				"Die zweite, emulierte Kopie desselben Fingerdrucks ändert nichts")
+
+		# --- 3. tap the card, tap the target: the move happens ----------------
+		# The selection from above is still held, so this is one tap on the target.
+		var moves_before: int = screen.moves
+		_press(screen, _cell_at(screen, 0))
+		_release(screen, _cell_at(screen, 0))
+		t.equal(screen.moves, moves_before + 1, "Antippen und dann das Ziel antippen zieht die Karte")
+		t.check(screen.free_cells[0] != null, "und sie liegt in der freien Zelle")
+		t.check(screen.selection.is_empty(), "danach ist nichts mehr greifbar")
+
+		# --- 4. a target that refuses keeps the cards where they are ----------
+		_put(screen)
+		var run_card := _at(screen, 2, 1)  # the 6H, head of the run 6H 5C
+		_press(screen, run_card)
+		_release(screen, run_card)
+		var held: Dictionary = screen.selection.duplicate()
+		t.equal(int(held.get("start", -1)), 1, "Die Folge 6H 5C lässt sich als eine greifen")
+		# The 8S on top of column 1 takes nothing of it.
+		var buried := _at(screen, 1, 0)
+		_press(screen, buried)
+		_release(screen, buried)
+		t.equal(str(screen.selection), str(held), "Ein Ziel, das nichts annimmt, lässt die Auswahl stehen")
+		t.check(screen._refuse_life > 0.0, "und sagt mit einem roten Rahmen nein")
+		t.check(screen._refused.size != Vector2.ZERO, "und der Rahmen steht auf dem Ziel")
+
+		# --- 5. dragging moves the cards --------------------------------------
+		_put(screen)
+		var grab: Vector2 = _at(screen, 2, 1)
+		_press(screen, grab)
+		screen._on_view_input(_motion(grab, grab + Vector2(30.0, -30.0)))
+		t.check(screen._drag_active, "Eine Bewegung hebt die Karten auf")
+		t.check(screen._is_lifted_card(2, 1), "die Folge steht dann nicht mehr im Stapel")
+		t.check(screen._is_lifted_card(2, 2), "ganz unten auch nicht")
+		t.check(not screen._is_lifted_card(2, 0), "der Rest des Stapels bleibt liegen")
+		t.check(screen._drag_ghost_rect().position.y < grab.y, "und die Karten folgen dem Finger, über ihm")
+		t.check(screen._can_move_to_column(5), "Der Stapel, der die Folge annimmt, leuchtet auf")
+		t.check(not screen._can_move_to_column(1), "der andere leuchtet nicht")
+		screen._on_view_input(_motion(grab + Vector2(30.0, -30.0), _at(screen, 5, 0)))
+		_release(screen, _at(screen, 5, 0))
+		t.equal(screen.moves, 1, "Und das Ablegen zieht die Folge")
+		t.equal((screen.columns[5] as Array).size(), 3, "sie liegt jetzt auf dem 7C")
+		t.equal(str(Cards.label_of((screen.columns[5] as Array)[1])), "6♥", "mit der 6♥ oben")
+		t.check(screen.selection.is_empty(), "und ist danach losgelassen")
+		t.check(not screen._drag_active, "der Zug ist beendet")
+
+		# A drag onto nothing that takes it keeps the cards in the hand.
+		_put(screen)
+		_drag_to(screen, _at(screen, 2, 1), buried)
+		t.equal(str(screen.selection), str({"from": "col", "index": 2, "start": 1}),
+				"Ablegen auf ein Ziel, das nichts annimmt, behält die Auswahl")
+		t.check(screen._refuse_life > 0.0, "und meldet es mit einem roten Rahmen")
+		t.equal(screen.moves, 0, "ohne einen Zug zu zählen")
+
+		# --- 6. what the screen promises is what it does ----------------------
+		# The drag lights up every destination in green. A frame that promises a
+		# move the move then refuses would be worse than no frame at all — so
+		# every card of every place is asked, and the two answers compared.
+		var destinations := {
+			"cell": _cell_at(screen, 3),
+			"foundation": _foundation_at(screen, 1),
+			"column": _at(screen, 4, 0),
+		}
+		var promised_count := 0
+		for zone in destinations:
+			var pos: Vector2 = destinations[zone]
+			for from_col in 8:
+				for from_card in (screen.columns[from_col] as Array).size():
+					_put(screen)
+					screen.selection = {"from": "col", "index": from_col, "start": from_card}
+					var hit: Dictionary = screen._hit(pos)
+					if str(hit["zone"]) != zone:
+						t.fail("Der Testplatz %s liegt nicht in %s" % [str(pos), zone])
+						continue
+					var index := int(hit["index"])
+					var promised := false
+					match zone:
+						"cell":
+							promised = screen._can_move_to_cell(index)
+						"foundation":
+							promised = screen._can_move_to_foundation(index)
+						_:
+							promised = screen._can_move_to_column(index)
+					var moved: bool = screen._try_drop_at(pos)
+					if promised and moved:
+						promised_count += 1
+					elif promised != moved:
+						t.fail("Angekündigt war %s, getan wurde %s: %s %d" % [promised, moved, zone, index])
+		t.check(promised_count > 0, "Und es gab überhaupt etwas zu tun (%d Zusagen)" % promised_count)
+
+		# --- 7. the gap between two columns belongs to a column ---------------
+		_put(screen)
+		var gap: Dictionary = screen._hit(Vector2(screen.col_x(1) + screen.CARD_W + 6.0, screen.TABLEAU_Y + 40.0))
+		t.equal(str(gap["zone"]), "column", "Der Spalt zwischen zwei Stapeln gehört zu einem Stapel")
+		t.check(int(gap["index"]) >= 0 and int(gap["index"]) < 8, "und nennt einen der acht")
+		var below: Dictionary = screen._hit(Vector2(screen.col_x(0) + 20.0, screen.TABLEAU_BOTTOM + 20.0))
+		t.equal(str(below["zone"]), "column", "Der leere Raum unter einem Stapel auch")
+		t.equal(int(below["card"]), -1, "als Zielplatz ohne Karte")
+		t.equal(str(screen._hit(Vector2(4.0, screen.TABLEAU_Y + 10.0))["zone"]), "none",
+				"Links neben dem Brett ist nichts")
+		t.suite_done()
+		await t.goto(_router, tree, "lobby")
 

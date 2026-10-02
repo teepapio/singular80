@@ -20,6 +20,15 @@ const MIN_DY := 10.0
 const HINT_COST := 25
 ## Seconds the hint stays lit.
 const HINT_LIFE := 5.0
+## How far a finger travels before a tap turns into a drag. Below this the two
+## are indistinguishable to a player, and treating every touch as a drag would
+## break tap-tap.
+const DRAG_THRESHOLD := 10.0
+## The lifted run floats this far above the finger, so a hand never covers the
+## cards it is carrying.
+const DRAG_LIFT := 86.0
+## Seconds the red frame of a refused drop stays on screen.
+const REFUSE_LIFE := 0.45
 const CONTROLS := "Tap cards and then pick a target  ·  A = bank a card safely  ·  U = undo  ·  R = new  ·  F1 = tip"
 
 var free_cells: Array = [null, null, null, null]
@@ -37,6 +46,19 @@ var hints_used := 0
 var hint_move: Dictionary = {}
 var hint_life := 0.0
 var _hint_cursor := 0
+
+## Pointer state of the current gesture. `_pointer_down` spans press to release,
+## `_drag_active` only starts once the finger has travelled `DRAG_THRESHOLD`, and
+## `_drag_grab` is where inside the source card the press landed, so the lifted
+## run does not jump under the finger when the drag begins.
+var _pointer_down := false
+var _drag_active := false
+var _drag_press := Vector2.ZERO
+var _drag_pos := Vector2.ZERO
+var _drag_grab := Vector2.ZERO
+## The place that just refused a move, and how long its red frame lasts.
+var _refused := Rect2()
+var _refuse_life := 0.0
 
 var _view: BoardView
 var _moves_label: Label
@@ -132,6 +154,7 @@ func new_deal() -> void:
 	hints_used = 0
 	_hint_cursor = 0
 	_clear_hint()
+	_end_gesture()
 	highscore = Game.highscore(Game.HS_FREECELL)
 	close_modals()
 	_refresh()
@@ -145,6 +168,9 @@ func _process(delta: float) -> void:
 		if hint_life <= 0.0:
 			hint_move = {}
 			_refresh()
+		_redraw_view()
+	if _refuse_life > 0.0:
+		_refuse_life = maxf(0.0, _refuse_life - delta)
 		_redraw_view()
 	if Input.is_action_just_pressed("restart"):
 		new_deal()
@@ -170,43 +196,163 @@ func _unhandled_input(event: InputEvent) -> void:
 	auto_move()
 
 
+## Only the emulated mouse events, never the raw touch events.
+##
+## `project.godot` turns on both `emulate_mouse_from_touch` and
+## `emulate_touch_from_mouse`, so Godot hands the board **two** events for one
+## finger press: `Input::_parse_input_event_impl` (`core/input/input.cpp`, 4.5.1,
+## lines 840-877) dispatches the real `InputEventScreenTouch` *and* re-enters the
+## same function with an emulated `InputEventMouseButton` at the same position.
+## The reverse is true for a real mouse (lines 783-794). This handler used to
+## answer to both, so every tap ran `_click` twice: the first call selected the
+## card, the second one took the selection straight back off it (the
+## `selection["start"] == card_index` branch in `_click_column`). Net effect on a
+## phone: nothing was ever selectable, hence nothing was ever movable.
+##
+## `BaseButton` listens to the mouse events only, which is exactly why the
+## buttons of this game work on the tablet while the board did not.
 func _on_view_input(event: InputEvent) -> void:
 	if won:
 		return
-	var pos := Vector2.ZERO
-	if event is InputEventScreenTouch and (event as InputEventScreenTouch).pressed:
-		pos = (event as InputEventScreenTouch).position
-	elif event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
-		pos = (event as InputEventMouseButton).position
-	else:
+	if event is InputEventMouseButton:
+		var button := event as InputEventMouseButton
+		if button.button_index != MOUSE_BUTTON_LEFT:
+			return
+		if button.pressed:
+			_press(button.position)
+		else:
+			_release(button.position)
 		return
-	_click(pos)
+	# A drag is delivered to the control that owns the press (`Viewport::
+	# _gui_input_event` routes motion to `gui.mouse_focus`), so the run follows
+	# the finger even where it leaves the board.
+	if event is InputEventMouseMotion and _pointer_down:
+		_pointer_move((event as InputEventMouseMotion).position)
 
 
-func _click(pos: Vector2) -> void:
-	for i in 4:
-		if _in_rect(pos, col_x(i), TOP_Y, CARD_W, CARD_H):
-			_click_cell(i)
-			return
-	for i in 4:
-		if _in_rect(pos, col_x(4 + i), TOP_Y, CARD_W, CARD_H):
-			_click_foundation(i)
-			return
-	var col := int(floor((pos.x - MARGIN) / (CARD_W + GAP)))
-	if col < 0 or col >= COLS or pos.y < TABLEAU_Y or pos.y > TABLEAU_BOTTOM or pos.x > col_x(col) + CARD_W:
+func _press(pos: Vector2) -> void:
+	_pointer_down = true
+	_drag_active = false
+	_drag_press = pos
+	_drag_pos = pos
+	# Tap-tap first: a press on a place the selection may go moves at once,
+	# which is the two-tap move the player already knows.
+	if _try_drop_at(pos):
 		return
+	_select_at(pos)
+
+
+func _pointer_move(pos: Vector2) -> void:
+	_drag_pos = pos
+	if selection.is_empty():
+		return
+	if not _drag_active and _drag_press.distance_to(pos) >= DRAG_THRESHOLD:
+		_drag_active = true
+		_drag_grab = _drag_press - _selection_rect().position
+		Sfx.select()
+	_redraw_view()
+
+
+func _release(pos: Vector2) -> void:
+	var dragged := _drag_active
+	_drag_active = false
+	_pointer_down = false
+	if selection.is_empty():
+		return
+	if not dragged:
+		# A plain tap: the press has already selected or moved.
+		return
+	if _try_drop_at(pos):
+		return
+	# Dropped on nothing that takes it. The selection stays, so the player can
+	# carry on with a second tap instead of having to pick the run up again.
+	_refuse(_hit(pos))
+	_redraw_view()
+
+
+## What lies under the finger: a free cell, a foundation, a tableau column with
+## the card it holds, or nothing. The 18 px gap between two columns belongs to
+## both of them, each taking the half nearest to it — a finger never lands on a
+## line of maths, and the gap used to swallow the tap whole.
+func _hit(pos: Vector2) -> Dictionary:
+	var empty := {"zone": "none", "index": -1, "card": -1, "rect": Rect2()}
+	if pos.y < TABLEAU_Y:
+		for i in 4:
+			if _in_slot(pos, col_x(i)):
+				return {"zone": "cell", "index": i, "card": 0, "rect": _slot_rect(col_x(i))}
+		for i in 4:
+			if _in_slot(pos, col_x(4 + i)):
+				return {"zone": "foundation", "index": i, "card": 0, "rect": _slot_rect(col_x(4 + i))}
+		return empty
+	var col := clampi(int(floor((pos.x - MARGIN) / (CARD_W + GAP))), 0, COLS - 1)
+	if not _in_slot(pos, col_x(col)):
+		return empty
 	var cards: Array = columns[col]
+	if cards.is_empty():
+		return {"zone": "column", "index": col, "card": -1, "rect": _card_rect(col, 0, stack_dy(1))}
 	var dy := stack_dy(cards.size())
 	for j in range(cards.size() - 1, -1, -1):
-		var y := TABLEAU_Y + float(j) * dy
-		if pos.y >= y and pos.y <= y + CARD_H:
-			_click_column(col, j)
-			return
-	_click_column(col, -1)
+		# Topmost first: the cards overlap, so the one drawn on top at this
+		# height is the one whose band covers it.
+		var rect := _card_rect(col, j, dy)
+		if pos.y >= rect.position.y and pos.y <= rect.end.y:
+			return {"zone": "column", "index": col, "card": j, "rect": rect}
+	# Below the last card: still this column, and still a place to drop.
+	return {"zone": "column", "index": col, "card": -1, "rect": _card_rect(col, cards.size() - 1, dy)}
 
 
-func _in_rect(p: Vector2, x: float, y: float, w: float, h: float) -> bool:
-	return p.x >= x and p.x <= x + w and p.y >= y and p.y <= y + h
+## Is the finger within the horizontal slot of a card, gap included?
+func _in_slot(p: Vector2, x: float) -> bool:
+	return p.x >= x - GAP * 0.5 and p.x < x + CARD_W + GAP * 0.5
+
+
+func _slot_rect(x: float) -> Rect2:
+	return Rect2(Vector2(x, TOP_Y), Vector2(CARD_W, CARD_H))
+
+
+func _card_rect(col: int, card: int, dy: float) -> Rect2:
+	return Rect2(Vector2(col_x(col), TABLEAU_Y + float(card) * dy), Vector2(CARD_W, CARD_H))
+
+
+## Try to move the current selection to whatever is under `pos`.
+func _try_drop_at(pos: Vector2) -> bool:
+	var hit := _hit(pos)
+	match str(hit["zone"]):
+		"cell":
+			return _try_move_to_cell(int(hit["index"]))
+		"foundation":
+			return _try_move_to_foundation(int(hit["index"]))
+		"column":
+			return _try_move_to_column(int(hit["index"]))
+	return false
+
+
+## Select what is under `pos`. Only reached when the place does not take the
+## current selection, or when there is none.
+func _select_at(pos: Vector2) -> void:
+	var hit := _hit(pos)
+	match str(hit["zone"]):
+		"cell":
+			_click_cell(int(hit["index"]))
+		"column":
+			_click_column(int(hit["index"]), int(hit["card"]))
+		_:
+			if not selection.is_empty():
+				_refuse(hit)
+			else:
+				_refresh()
+
+
+## The place that just said no: a red frame where the cards were dropped, and
+## the selection stays where it was. Clearing the selection here is what made a
+## mis-aimed tap look like a game that had stopped listening.
+func _refuse(hit: Dictionary) -> void:
+	var rect: Rect2 = hit["rect"]
+	if rect.size == Vector2.ZERO:
+		return
+	_refused = rect
+	_refuse_life = REFUSE_LIFE
+	_redraw_view()
 
 
 func _click_cell(cell: int) -> void:
@@ -217,6 +363,8 @@ func _click_cell(cell: int) -> void:
 			return
 		if _try_move_to_cell(cell):
 			return
+		_refuse({"rect": _slot_rect(col_x(cell))})
+		return
 	if free_cells[cell] != null:
 		selection = {"from": "cell", "index": cell, "start": 0}
 	else:
@@ -224,20 +372,22 @@ func _click_cell(cell: int) -> void:
 	_refresh()
 
 
-func _click_foundation(foundation: int) -> void:
-	if selection.is_empty():
-		return
-	_try_move_to_foundation(foundation)
-
-
 func _click_column(col: int, card_index: int) -> void:
 	if not selection.is_empty():
 		if str(selection["from"]) == "col" and int(selection["index"]) == col and int(selection["start"]) == card_index:
+			# The same card again: let the run go.
 			selection = {}
 			_refresh()
 			return
 		if _try_move_to_column(col):
 			return
+		# Anything can be tapped at while something is held, but only a real
+		# destination counts as one. The held cards stay where they are.
+		var cards: Array = columns[col]
+		var dy: float = stack_dy(maxi(cards.size(), 1))
+		var rect := _card_rect(col, card_index if card_index >= 0 else maxi(cards.size() - 1, 0), dy)
+		_refuse({"rect": rect})
+		return
 	_select_column(col, card_index)
 
 
@@ -274,22 +424,126 @@ func _remove_selection(count: int) -> void:
 		column.remove_at(start)
 
 
-func _try_move_to_column(col: int) -> bool:
+## How many cards the current selection would carry, without copying the run
+## out of its column. The drag highlight asks this for every destination on
+## every frame, so it must not allocate.
+func _selection_count() -> int:
+	if selection.is_empty():
+		return 0
+	if str(selection["from"]) == "cell":
+		return 1
+	var column: Array = columns[int(selection["index"])]
+	var start := int(selection["start"])
+	if start < 0 or start >= column.size():
+		return 0
+	return column.size() - start
+
+
+## The card that would sit on top of the run — the one a target has to accept.
+func _selection_lead() -> Cards.Card:
+	if selection.is_empty():
+		return null
+	if str(selection["from"]) == "cell":
+		return free_cells[int(selection["index"])]
+	var column: Array = columns[int(selection["index"])]
+	var start := int(selection["start"])
+	if start < 0 or start >= column.size():
+		return null
+	return column[start]
+
+
+## The single card the selection could park, or null when it is a run of more
+## than one — only the bottom card of a column may go into a free cell.
+func _selection_single() -> Variant:
+	if _selection_count() != 1:
+		return null
+	return _selection_lead()
+
+
+## Where the lifted run stands while it is being dragged: the source card's
+## place, shifted by the finger and lifted clear of it.
+func _selection_rect() -> Rect2:
+	if selection.is_empty():
+		return Rect2()
+	if str(selection["from"]) == "cell":
+		return _slot_rect(col_x(int(selection["index"])))
+	var column: Array = columns[int(selection["index"])]
+	var start := int(selection["start"])
+	if start < 0 or start >= column.size():
+		return Rect2()
+	return _card_rect(int(selection["index"]), start, stack_dy(column.size()))
+
+
+func _drag_ghost_rect() -> Rect2:
+	var rect := _selection_rect()
+	rect.position = _drag_pos - _drag_grab - Vector2(0.0, DRAG_LIFT)
+	return rect
+
+
+## The `offset`-th card of the held run, read in place. A dictionary and a
+## few ints, no array — this runs for every dragged card on every redraw.
+func _card_at_selection(offset: int) -> Variant:
+	if offset < 0 or offset >= _selection_count():
+		return null
+	if str(selection["from"]) == "cell":
+		return free_cells[int(selection["index"])]
+	return (columns[int(selection["index"])] as Array)[int(selection["start"]) + offset]
+
+
+## While a run is lifted it is drawn at the finger, so its old place must not
+## be drawn as well.
+func _is_lifted_card(col: int, card: int) -> bool:
+	return _drag_active and not selection.is_empty() \
+			and str(selection["from"]) == "col" and int(selection["index"]) == col \
+			and card >= int(selection["start"])
+
+
+func _is_lifted_cell(cell: int) -> bool:
+	return _drag_active and not selection.is_empty() \
+			and str(selection["from"]) == "cell" and int(selection["index"]) == cell
+
+
+func _can_move_to_column(col: int) -> bool:
 	if selection.is_empty():
 		return false
 	if str(selection["from"]) == "col" and int(selection["index"]) == col:
 		return false
-	var moving := _selection_cards()
-	if moving.is_empty():
+	var count := _selection_count()
+	if count <= 0:
 		return false
+	var first := _selection_lead()
 	var target: Array = columns[col]
 	if not target.is_empty():
 		var top: Cards.Card = target[target.size() - 1]
-		var first: Cards.Card = moving[0]
 		if top.rank != first.rank + 1 or Cards.is_red_card(top) == Cards.is_red_card(first):
 			return false
-	if moving.size() > Cards.freecell_capacity(free_cells, columns, col):
+	return count <= Cards.freecell_capacity(free_cells, columns, col)
+
+
+func _can_move_to_cell(cell: int) -> bool:
+	if free_cells[cell] != null or _selection_single() == null:
 		return false
+	if str(selection["from"]) == "cell":
+		return int(selection["index"]) != cell
+	var column: Array = columns[int(selection["index"])]
+	return int(selection["start"]) == column.size() - 1
+
+
+func _can_move_to_foundation(foundation: int) -> bool:
+	var card: Variant = _selection_single()
+	if card == null or card.suit != foundation:
+		return false
+	var pile: Array = foundations[foundation]
+	if pile.is_empty():
+		return card.rank == 0
+	return card.rank == (pile[pile.size() - 1] as Cards.Card).rank + 1
+
+
+func _try_move_to_column(col: int) -> bool:
+	if not _can_move_to_column(col):
+		return false
+	var moving := _selection_cards()
+	var target: Array = columns[col]
 	_push_history()
 	_remove_selection(moving.size())
 	for card in moving:
@@ -303,18 +557,9 @@ func _try_move_to_column(col: int) -> bool:
 
 
 func _try_move_to_cell(cell: int) -> bool:
-	if selection.is_empty() or free_cells[cell] != null:
+	if not _can_move_to_cell(cell):
 		return false
-	var card: Variant
-	if str(selection["from"]) == "cell":
-		card = free_cells[int(selection["index"])]
-	else:
-		var column: Array = columns[int(selection["index"])]
-		if int(selection["start"]) != column.size() - 1:
-			return false
-		card = column[column.size() - 1]
-	if card == null:
-		return false
+	var card: Variant = _selection_single()
 	_push_history()
 	_remove_selection(1)
 	free_cells[cell] = card
@@ -326,24 +571,10 @@ func _try_move_to_cell(cell: int) -> bool:
 
 
 func _try_move_to_foundation(foundation: int) -> bool:
-	if selection.is_empty():
+	if not _can_move_to_foundation(foundation):
 		return false
-	var card: Variant
-	if str(selection["from"]) == "cell":
-		card = free_cells[int(selection["index"])]
-	else:
-		var column: Array = columns[int(selection["index"])]
-		card = column[column.size() - 1] if int(selection["start"]) == column.size() - 1 else null
-	if card == null or card.suit != foundation:
-		return false
+	var card: Variant = _selection_single()
 	var pile: Array = foundations[foundation]
-	var ok: bool = false
-	if pile.is_empty():
-		ok = card.rank == 0
-	else:
-		ok = card.rank == (pile[pile.size() - 1] as Cards.Card).rank + 1
-	if not ok:
-		return false
 	_push_history()
 	_remove_selection(1)
 	pile.append(card)
@@ -397,14 +628,17 @@ func auto_move() -> void:
 		_refresh()
 		return
 	selection = {}
+	_end_gesture()
 	Sfx.kill()
 	_check_win()
 	_refresh()
 
 
 func _push_history() -> void:
-	# Any board change clears the hint — it pointed at cells that have moved.
+	# Any board change clears the hint — it pointed at cells that have moved —
+	# and with it the red frame of a place that has just refused a card.
 	_clear_hint()
+	_refuse_life = 0.0
 	history.append({
 		"freeCells": free_cells.duplicate(),
 		"foundations": foundations.duplicate(true),
@@ -450,15 +684,25 @@ func undo() -> void:
 	free_cells = (snapshot["freeCells"] as Array).duplicate()
 	foundations = (snapshot["foundations"] as Array).duplicate(true)
 	columns = (snapshot["columns"] as Array).duplicate(true)
+	_refuse_life = 0.0
 	# Restoring the previous hint count keeps the cost paid, so undo/redo/undo
 	# cannot cycle the points back in.
 	var paid := maxi(0, hints_used - int(snapshot.get("hints", hints_used)))
 	moves = int(snapshot["moves"])
 	score = maxi(0, int(snapshot["score"]) - paid * HINT_COST)
 	selection = {}
+	_end_gesture()
 	_clear_hint()
 	Sfx.kill()
 	_refresh()
+
+
+## A board that changed under a finger cancels the gesture: the cards are not
+## where the hand left them.
+func _end_gesture() -> void:
+	_pointer_down = false
+	_drag_active = false
+	_refuse_life = 0.0
 
 
 func _check_win() -> void:
@@ -472,6 +716,7 @@ func _check_win() -> void:
 	won = true
 	selection = {}
 	_clear_hint()
+	_end_gesture()
 	score += 500
 	Game.submit_score(Game.HS_FREECELL, score)
 	Sfx.level_up()
@@ -535,6 +780,8 @@ class BoardView:
 			CardRenderer.slot(self, Rect2(Vector2(x, TOP_Y), Vector2(CARD_W, CARD_H)))
 			var card: Variant = screen.free_cells[i]
 			if card != null:
+				if screen._is_lifted_cell(i):
+					continue
 				var selected: bool = not screen.selection.is_empty() and str(screen.selection["from"]) == "cell" and int(screen.selection["index"]) == i
 				CardRenderer.card(self, Rect2(Vector2(x, TOP_Y), Vector2(CARD_W, CARD_H)), card, true, selected)
 			else:
@@ -548,10 +795,55 @@ class BoardView:
 				continue
 			var dy := screen.stack_dy(column.size())
 			for j in column.size():
+				if screen._is_lifted_card(c, j):
+					continue
 				var selected: bool = not screen.selection.is_empty() and str(screen.selection["from"]) == "col" and int(screen.selection["index"]) == c and j >= int(screen.selection["start"])
 				CardRenderer.card(self, Rect2(Vector2(x, TABLEAU_Y + float(j) * dy), Vector2(CARD_W, CARD_H)), column[j], true, selected)
 
+		_drag()
 		_hint()
+		_refuse_frame()
+
+	## While a run is on the move: every place that takes it lights up green,
+	## and the run itself follows the finger instead of lying in its column.
+	func _drag() -> void:
+		if not screen._drag_active or screen.selection.is_empty():
+			return
+		for i in 4:
+			if screen._can_move_to_cell(i):
+				_frame(screen._slot_rect(screen.col_x(i)), UiTheme.SUCCESS, 3.0)
+			if screen._can_move_to_foundation(i):
+				_frame(screen._slot_rect(screen.col_x(4 + i)), UiTheme.SUCCESS, 3.0)
+		for c in COLS:
+			if screen._can_move_to_column(c):
+				var column: Array = screen.columns[c]
+				var top := maxi(column.size() - 1, 0)
+				var dy: float = screen.stack_dy(maxi(column.size(), 1))
+				_frame(screen._card_rect(c, top, dy), UiTheme.SUCCESS, 3.0)
+		# The run itself, drawn from the column so no copy of it is made.
+		var count := screen._selection_count()
+		var ghost := screen._drag_ghost_rect()
+		for k in count:
+			var card: Variant = screen._card_at_selection(k)
+			if card == null:
+				continue
+			CardRenderer.card(self, Rect2(ghost.position + Vector2(0.0, float(k) * ghost_dy(count)), Vector2(CARD_W, CARD_H)),
+					card, true, true)
+
+	## The red frame on a place that has just refused the run.
+	func _refuse_frame() -> void:
+		if screen._refuse_life <= 0.0 or screen._refused.size == Vector2.ZERO:
+			return
+		var fade: float = clampf(screen._refuse_life / 0.2, 0.0, 1.0)
+		_frame(screen._refused, UiTheme.DANGER, 4.0 * fade)
+
+	func _frame(rect: Rect2, color: Color, width: float) -> void:
+		draw_rect(rect.grow(3.0), Color(color.r, color.g, color.b, 0.75), false, width)
+
+	## Vertical spacing of the lifted run: tighter than on the board, so a long
+	## run does not trail far behind its first card.
+	func ghost_dy(count: int) -> float:
+		return BASE_DY if count <= 1 else minf(screen.stack_dy(count + 1), 26.0)
 
 	## Pulses a frame around the hinted card and around its destination: blue
 	## where the card stands, green where it belongs.
