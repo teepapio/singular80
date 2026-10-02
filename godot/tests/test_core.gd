@@ -849,6 +849,11 @@ func _lists_stay_inside_their_box(layer: Control) -> void:
 	t.equal(UiClass.list_height(2, 78.0, 10.0), 166.0, "Die Hoehe einer Liste zaehlt die Abstaende mit")
 	t.equal(UiClass.list_height(0, 78.0, 10.0), 0.0, "Eine leere Liste braucht keine Hoehe")
 	t.equal(UiClass.list_row(588.0, 0, gap, full), full, "Ohne Zeile wird nichts verkleinert")
+	# A screen whose own rows are already thinner than the touch minimum keeps
+	# them: raising 40 to 44 would make the list taller than the screen asked
+	# for and still not fit.
+	t.equal(UiClass.list_row(135.0, 6, 6.0, 40.0), 40.0,
+		"Ein eigener schmalerer Wert geht der Mindesthoehe vor")
 
 	# 3. The failure itself, measured rather than argued: a box of a fixed height
 	#    with far more rows than fit, and the list that keeps them inside it.
@@ -950,112 +955,71 @@ func _server_address() -> void:
 
 ## Every finger has to reach the action button, and only the first one ever did.
 ##
-## Godot emulates a mouse button for one finger — the index of the first
+## Godot emulates a mouse button for exactly one finger — the index of the first
 ## `InputEventScreenTouch` it sees, see `Input::_parse_input_event_impl` — and
 ## `Button` reads nothing else. So the moment the virtual stick holds the first
 ## finger, ◈ got a raw `InputEventScreenTouch` and nothing more, and pressing it
-## did nothing at all: "Drachenflug: i cannot fire while steering". The bare
-## `Button` below is the engine's own behaviour, kept in the suite so the reason
-## for the second class is written down where the fix lives.
+## did nothing at all: "Drachenflug: i cannot fire while steering". Measured on
+## the dragon flight screen, the button received that bare touch while the stick
+## was held, and a touch *and* a mouse button when it was alone.
 func _second_finger() -> void:
 	t.suite("Steuerung — zweiter Finger")
 
-	# What the engine hands a control: the raw touch, and the emulated mouse
-	# button only for the finger that owns `mouse_from_touch_index`.
-	var stick_touch := InputEventScreenTouch.new()
-	stick_touch.index = 0
-	stick_touch.pressed = true
-	stick_touch.position = Vector2(140.0, 600.0)
-
-	var plain := Button.new()
-	plain.size = Vector2(66.0, 66.0)
-	plain.focus_mode = Control.FOCUS_NONE
 	var host := Control.new()
 	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	host.size = Vector2(1280.0, 720.0)
 	host.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	host.add_child(plain)
-	plain.position = Vector2(1186.0, 626.0)
 	tree.root.add_child(host)
 
-	# Finger 0 lands on the stick; finger 1 presses the button.
-	plain._gui_input(stick_touch)
-	var second_finger := InputEventScreenTouch.new()
-	second_finger.index = 1
-	second_finger.pressed = true
-	second_finger.position = Vector2(33.0, 33.0)
-	var plain_down := false
-	plain.button_down.connect(func() -> void: plain_down = true)
-	plain._gui_input(second_finger)
-	t.check(not plain_down,
-		"Ein normaler Button sieht den zweiten Finger nicht - das ist der Fehler")
-
-	# The same two fingers on the control the 3D screens build.
 	var fired := 0
 	var held := 0
 	var released := 0
 	var button := TouchButtonClass.new()
 	button.size = Vector2(66.0, 66.0)
-	button.position = Vector2(1186.0, 626.0)
 	button.focus_mode = Control.FOCUS_NONE
-	button.add_theme_stylebox_override("normal", UiThemeClass.flat(Color(0.1, 0.1, 0.1, 0.8), Color.WHITE, 20))
-	button.add_theme_stylebox_override("pressed", UiThemeClass.flat(Color(0.4, 0.4, 0.4, 0.9), Color.WHITE, 20))
+	button.add_theme_stylebox_override("normal", UiThemeClass.flat(Color(0.098, 0.141, 0.239, 0.75), UiThemeClass.ACCENT, 20))
+	button.add_theme_stylebox_override("pressed", UiThemeClass.flat(UiThemeClass.ACCENT.darkened(0.25), Color.WHITE, 20))
 	host.add_child(button)
 	button.button_down.connect(func() -> void: held += 1)
 	button.button_up.connect(func() -> void: released += 1)
 	button.pressed.connect(func() -> void: fired += 1)
 
-	# The stick owns finger 0, and the button is pressed with finger 1 — the
-	# report from the tablet, and now the thing that has to work.
-	button._gui_input(stick_touch)
-	button._gui_input(second_finger)
-	t.equal(held, 1, "Der zweite Finger drueckt den Knopf, waehrend der Stick laeuft")
-	t.check(button.get_theme_stylebox("normal") != null,
-		"Der gehaltene Knopf bekommt sein eigenes Aussehen")
+	var idle := button.get_theme_stylebox("normal")
+	var down_look := button.get_theme_stylebox("pressed")
 
-	# And the finger coming up again fires it, which is what horse runner's
-	# ◀ and ▶ rely on.
-	var up := InputEventScreenTouch.new()
-	up.index = 1
-	up.pressed = false
-	up.position = Vector2(33.0, 33.0)
-	button._gui_input(up)
+	# Finger 0 belongs to the stick throughout: it never arrives here, and that
+	# absence is the whole situation the report describes. The button is pressed
+	# with finger 1 — the tablet, and now the thing that has to work.
+	button._gui_input(_touch(0, true, Vector2(140.0, 600.0)))
+	button._gui_input(_touch(1, true, Vector2(33.0, 33.0)))
+	t.equal(held, 1, "Der zweite Finger drueckt den Knopf, waehrend der Stick laeuft")
+	t.check(button.get_theme_stylebox("normal") == down_look,
+		"Der gehaltene Knopf sieht aus wie gedrueckt")
+
+	# The finger coming up again fires it, which is what horse runner's ◀ and ▶
+	# rely on for a single tap.
+	button._gui_input(_touch(1, false, Vector2(33.0, 33.0)))
 	t.equal(fired, 1, "Und das Loslassen loest ihn aus")
 	t.equal(released, 1, "Der Knopf meldet das Ende des Druckes")
+	t.check(button.get_theme_stylebox("normal") == idle,
+		"Danach sieht er wieder ungedrueckt aus")
 
 	# A finger that slides off before lifting is a cancelled tap, not a press —
 	# the same as a `Button` released outside its own rect.
-	var drag_out := InputEventScreenTouch.new()
-	drag_out.index = 2
-	drag_out.pressed = true
-	drag_out.position = Vector2(33.0, 33.0)
-	var drag := InputEventScreenDrag.new()
-	drag.index = 2
-	drag.position = Vector2(300.0, 300.0)
-	var up_out := InputEventScreenTouch.new()
-	up_out.index = 2
-	up_out.pressed = false
-	up_out.position = Vector2(300.0, 300.0)
-	button._gui_input(drag_out)
-	button._gui_input(drag)
-	button._gui_input(up_out)
+	button._gui_input(_touch(2, true, Vector2(33.0, 33.0)))
+	button._gui_input(_drag(2, Vector2(300.0, 300.0)))
+	button._gui_input(_touch(2, false, Vector2(300.0, 300.0)))
 	t.equal(fired, 1, "Ein Finger, der wegrutscht, drueckt nicht")
 
-	# A second finger on a held button does not steal it from the first.
-	var third := InputEventScreenTouch.new()
-	third.index = 3
-	third.pressed = true
-	third.position = Vector2(10.0, 10.0)
-	var third_up := InputEventScreenTouch.new()
-	third_up.index = 3
-	third_up.pressed = false
-	third_up.position = Vector2(10.0, 10.0)
-	button._gui_input(drag_out)
-	button._gui_input(third)
-	button._gui_input(third_up)
-	t.equal(held, 2, "Der zweite Finger nimmt den Knopf nicht dem ersten weg")
-	t.equal(released, 3, "Und beide melden ihr Ende, ohne einen dritten Knopfdruck")
-	t.equal(fired, 2, "Nur der erste Finger zaehlt als Tipp")
+	# A second finger on a button that is already held must not take it over:
+	# the player may be sliding a thumb off it, or resting a second one on it.
+	button._gui_input(_touch(2, true, Vector2(33.0, 33.0)))
+	button._gui_input(_touch(3, true, Vector2(10.0, 10.0)))
+	button._gui_input(_touch(3, false, Vector2(10.0, 10.0)))
+	t.equal(held, 3, "Der zweite Finger nimmt den Knopf nicht dem ersten weg")
+	t.equal(fired, 1, "Und loest keinen weiteren Tipp aus")
+	button._gui_input(_touch(2, false, Vector2(33.0, 33.0)))
+	t.equal(fired, 2, "Erst der Finger, der den Knopf haelt, zaehlt")
+	t.equal(released, 3, "Jeder haelt nur seinen eigenen Druck")
 
 	# The emulated mouse event for the same click must not press a second time:
 	# `emulate_touch_from_mouse` sends the touch event first, and horse runner's
@@ -1066,22 +1030,36 @@ func _second_finger() -> void:
 	mouse.device = InputEvent.DEVICE_ID_EMULATION
 	mouse.position = Vector2(33.0, 33.0)
 	button._gui_input(mouse)
-	t.equal(held, 2, "Die nachgeahmte Maus zaehlt nicht noch einmal")
+	t.equal(held, 3, "Die nachgeahmte Maus zaehlt nicht noch einmal")
 
 	# A disabled button stays dead for every finger.
 	button.disabled = true
-	var down := InputEventScreenTouch.new()
-	down.index = 4
-	down.pressed = true
-	down.position = Vector2(33.0, 33.0)
-	var down_up := InputEventScreenTouch.new()
-	down_up.index = 4
-	down_up.pressed = false
-	down_up.position = Vector2(33.0, 33.0)
-	button._gui_input(down)
-	button._gui_input(down_up)
-	t.equal(fired, 2, "Ein gesperrter Knopf antwortet keinem Finger")
+	button._gui_input(_touch(4, true, Vector2(33.0, 33.0)))
+	button._gui_input(_touch(4, false, Vector2(33.0, 33.0)))
+	t.equal(held, 3, "Ein gesperrter Knopf antwortet keinem Finger")
+	t.equal(fired, 2, "und loest auch nichts aus")
 	button.disabled = false
+
+	# It has to stay a `Button` for the callers: the dragon RPG holds its dash
+	# button in a `var _dash_button: Button` and only moves and dims it.
+	t.check(button is Button, "Der Knopf bleibt ein Button fuer seine Aufrufer")
 
 	host.queue_free()
 	t.suite_done()
+
+
+## A touch event on a finger, at `at` in the coordinates of whatever control
+## receives it.
+func _touch(index: int, pressed: bool, at: Vector2) -> InputEventScreenTouch:
+	var event := InputEventScreenTouch.new()
+	event.index = index
+	event.pressed = pressed
+	event.position = at
+	return event
+
+
+func _drag(index: int, at: Vector2) -> InputEventScreenDrag:
+	var event := InputEventScreenDrag.new()
+	event.index = index
+	event.position = at
+	return event

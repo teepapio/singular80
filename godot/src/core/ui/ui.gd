@@ -168,14 +168,17 @@ static func rect(color: Color, radius: int = 8, border: Color = Color(0, 0, 0, 0
 ##
 ## The floor is the point. A list with more entries than the space can hold does
 ## not get its rows squeezed until they fit; it is told the truth, keeps rows a
-## finger can hit, and has to scroll. `count` of zero or less has no row to size
-## and answers with `row_max`.
+## finger can hit, and has to scroll. The floor yields to a caller whose own
+## `row_max` is already smaller than `LIST_ROW_MIN`, though — a screen that ships
+## 40 px rows is stating a decision, and handing back 44 would make its list
+## taller than it asked for and still not fit. `count` of zero or less has no row
+## to size and answers with `row_max`.
 static func list_row(available: float, count: int, gap: float, row_max: float = LIST_ROW_MAX) -> float:
 	if count <= 0:
 		return row_max
 	var gaps := maxf(0.0, gap) * float(count - 1)
-	var ceiling := maxf(LIST_ROW_MIN, row_max)
-	return clampf((available - gaps) / float(count), LIST_ROW_MIN, ceiling)
+	var ceiling := maxf(1.0, row_max)
+	return clampf((available - gaps) / float(count), minf(LIST_ROW_MIN, ceiling), ceiling)
 
 
 ## The height a list of `count` rows of `row` occupies, gaps included — the
