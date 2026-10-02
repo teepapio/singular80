@@ -1,17 +1,21 @@
 class_name Lobby3DScreen
 extends WorldScreen
-## Walkable 3D lobby — a circular plaza with one area per game category around a
-## central campfire. Port of `scenes/Lobby3DScene.ts` plus `lobby.ts`.
+## Walkable 3D lobby — one area per game category on a ring, with an open
+## crossing in the middle. Port of `scenes/Lobby3DScene.ts` plus `lobby.ts`.
 ##
 ## The knight is walked with the virtual stick (or WASD/arrows/gamepad), each
 ## category plaza holds one pedestal per game, and standing next to a pedestal
 ## plus pressing the interact button (or tapping its card) starts the game.
+##
+## The middle of the map is the crossing and nothing else: no disc, no rim, no
+## props. It used to be a raised platform with a turning ring, a campfire, four
+## torches and a rune-stone signpost — the one place a player arrives at, stands
+## in and leaves again, because none of it did anything.
 
 const MOVE_SPEED := 15.0
 const RUN_MULT := 1.7
 const CAMERA_HEIGHT := 11.5
 const CAMERA_DISTANCE := 12.5
-const HUB_RADIUS := 7.0
 const MAP_SIZE := 190.0
 const MAP_PADDING := 8.0
 const MAP_INTERVAL := 1.0 / 15.0
@@ -24,22 +28,9 @@ const ZONE_PROPS := {
 	"puzzle": ["rpg/crystal_cluster", "rpg/stalagmite", "rpg/rock_large"],
 }
 
-const SCENERY := [
-	{"key": "rpg/pine_tree", "count": 10, "minR": 36.0, "maxR": 45.0, "minS": 1.0, "maxS": 1.8},
-	{"key": "rpg/dead_tree", "count": 6, "minR": 36.0, "maxR": 45.0, "minS": 1.0, "maxS": 1.7},
-	{"key": "rpg/broken_pillar", "count": 5, "minR": 36.0, "maxR": 45.0, "minS": 1.0, "maxS": 1.6},
-	{"key": "rpg/rock_small", "count": 10, "minR": 9.0, "maxR": 13.0, "minS": 0.8, "maxS": 1.4},
-	{"key": "rpg/rock_large", "count": 4, "minR": 9.0, "maxR": 13.0, "minS": 1.0, "maxS": 1.5},
-	{"key": "rpg/bush", "count": 8, "minR": 9.0, "maxR": 13.0, "minS": 0.8, "maxS": 1.4},
-	{"key": "rpg/grass_tuft", "count": 10, "minR": 9.0, "maxR": 13.0, "minS": 0.9, "maxS": 1.6},
-	{"key": "rpg/mushroom", "count": 6, "minR": 9.0, "maxR": 13.0, "minS": 0.9, "maxS": 1.5},
-]
-
 var pos := Vector3(0, 0, 7)
 var facing := PI
 var player: Node3D
-var fire_light: OmniLight3D
-var hub_ring: MeshInstance3D
 var zones: Array[Dictionary] = []
 var pedestals: Array[Dictionary] = []
 var active_zone: Dictionary = {}
@@ -49,6 +40,9 @@ var gallery_portal: Node3D
 var gallery_label: Label3D
 var gallery_ring: MeshInstance3D
 var _gallery_near := false
+## Where the gallery portal stands, read once. `Lobby.gallery_position()` builds
+## the whole plaza layout, and `_at_gallery()` asks for it every frame.
+var _gallery_spot := Vector2.ZERO
 
 var _stick: VirtualStick
 var _map: Minimap
@@ -74,7 +68,6 @@ func _ready_world() -> void:
 	camera.far = 320.0
 
 	_build_ground()
-	_build_hub()
 	zones = Lobby.zone_layout()
 	_build_zones()
 	_build_scenery()
@@ -126,54 +119,6 @@ func _build_ground() -> void:
 	add_child(grid_mesh)
 
 
-func _build_hub() -> void:
-	var hub := MeshInstance3D.new()
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = HUB_RADIUS
-	mesh.bottom_radius = HUB_RADIUS
-	mesh.height = 0.5
-	mesh.radial_segments = 48
-	hub.mesh = mesh
-	hub.material_override = WorldScreen.standard_material(Color("243349"))
-	hub.position.y = 0.25
-	add_child(hub)
-
-	hub_ring = MeshInstance3D.new()
-	var torus := TorusMesh.new()
-	torus.inner_radius = HUB_RADIUS - 0.34
-	torus.outer_radius = HUB_RADIUS - 0.06
-	hub_ring.mesh = torus
-	hub_ring.material_override = WorldScreen.standard_material(Color("38bdf8"), 1.4)
-	hub_ring.position.y = 0.52
-	add_child(hub_ring)
-
-	var campfire := mesh_or_null("rpg/campfire", Color("ff9a4d"), 1.5)
-	if campfire != null:
-		campfire.position = Vector3(0, 0.5, 0)
-		add_child(campfire)
-
-	fire_light = OmniLight3D.new()
-	fire_light.light_color = Color("ffa15c")
-	fire_light.light_energy = 26.0
-	fire_light.omni_range = 34.0
-	fire_light.position = Vector3(0, 3, 0)
-	add_child(fire_light)
-
-	for i in 4:
-		var angle := (float(i) / 4.0) * TAU + PI * 0.25
-		var torch := mesh_or_null("rpg/torch", Color.WHITE, 1.0)
-		if torch == null:
-			continue
-		torch.position = Vector3(cos(angle) * (HUB_RADIUS - 1.2), 0.5, sin(angle) * (HUB_RADIUS - 1.2))
-		torch.rotation.y = angle + PI
-		add_child(torch)
-
-	var signpost := mesh_or_null("rpg/rune_stone", Color("38bdf8"), 1.6)
-	if signpost != null:
-		signpost.position = Vector3(0, 0, -3.2)
-		add_child(signpost)
-
-
 func _build_zones() -> void:
 	for zone in zones:
 		var category: Dictionary = zone["category"]
@@ -219,10 +164,13 @@ func _build_zones() -> void:
 		pole.position = Vector3(cx, 2.6, cz)
 		add_child(pole)
 
-		var totem := mesh_or_null("rpg/crystal_cluster", accent, 1.1)
-		if totem != null:
-			totem.position = Vector3(cx, 4.9, cz)
-			add_child(totem)
+		# The plaza's own landmark, high above the pedestals. Named `banner`,
+		# not `totem`: GDScript gives one function body one namespace, so two
+		# `var totem` in two different loops are a parse error.
+		var banner := mesh_or_null("rpg/crystal_cluster", accent, 1.1)
+		if banner != null:
+			banner.position = Vector3(cx, 4.9, cz)
+			add_child(banner)
 
 		var props: Array = ZONE_PROPS.get(str(category["id"]), [])
 		for i in props.size():
@@ -253,25 +201,47 @@ func _build_zones() -> void:
 			base.position = Vector3(px, 0.7, pz)
 			add_child(base)
 
+			# The rim runs around the *edge* of the plinth, not across its top
+			# face: the game's own mesh stands on that face now, and a ring
+			# underneath was covered by every wide object.
 			var ring := MeshInstance3D.new()
 			var ring_torus := TorusMesh.new()
-			ring_torus.inner_radius = 0.91
-			ring_torus.outer_radius = 1.0
+			ring_torus.inner_radius = Lobby.PEDESTAL_RIM_INNER
+			ring_torus.outer_radius = Lobby.PEDESTAL_RIM_OUTER
+			ring_torus.rings = 24
 			ring.mesh = ring_torus
 			ring.material_override = WorldScreen.standard_material(game_accent, 1.6)
-			ring.position = Vector3(px, 1.16, pz)
+			ring.position = Vector3(px, Lobby.PEDESTAL_TOP - 0.04, pz)
 			add_child(ring)
 
-			var beacon := mesh_or_null("rpg/crystal_cluster", game_accent, 0.85)
-			if beacon != null:
-				beacon.position = Vector3(px, 2.0, pz)
-				add_child(beacon)
+			var totem := _pedestal_totem(game, px, pz)
+			if totem != null:
+				add_child(totem)
 
 			pedestals.append({"game": game, "node": base, "x": px, "z": pz, "ring": ring})
 
 
+## The mesh that represents `game` on its plinth: the game's own silhouette,
+## normalised to one size and stood on the top face.
+##
+## It keeps the colours it was drawn with. The accent lives on the rim now, and
+## tinting the object as well turned every horse, castle and bonbon into the
+## same coloured lump the crystal used to be.
+func _pedestal_totem(game: Dictionary, x: float, z: float) -> Node3D:
+	var node := mesh_or_null(Lobby.totem_of(str(game["id"])), Color.WHITE, 1.0)
+	if node == null:
+		# A mesh that failed to import must not leave a bare plinth: the old
+		# crystal still says "a game is here", in the game's colour.
+		node = mesh_or_null(Lobby.DEFAULT_TOTEM, game["accent"], 1.0)
+	if node == null:
+		return null
+	WorldScreen.fit_on_base(node, Lobby.PEDESTAL_MESH_SIZE)
+	node.position = Vector3(x, Lobby.PEDESTAL_TOP, z)
+	return node
+
+
 func _build_scenery() -> void:
-	for spec in SCENERY:
+	for spec in Lobby.SCENERY:
 		for i in int(spec["count"]):
 			var angle := randf() * TAU
 			var radius: float = float(spec["minR"]) + randf() * (float(spec["maxR"]) - float(spec["minR"]))
@@ -296,6 +266,7 @@ func _build_scenery() -> void:
 ## gallery, where every bundled mesh can be inspected and marked for rework.
 func _build_gallery_portal() -> void:
 	var spot := Lobby.gallery_position()
+	_gallery_spot = spot
 	gallery_portal = Node3D.new()
 	gallery_portal.position = Vector3(spot.x, 0.0, spot.y)
 	add_child(gallery_portal)
@@ -366,8 +337,8 @@ func _build_player() -> void:
 	add_child(player)
 
 
-## Tries a bundled mesh and falls back to a coloured primitive so the lobby is
-## never empty even if an import is missing.
+## Tries a bundled mesh and returns `null` when the import is missing, so the
+## caller can decide what an absent object should look like instead.
 func mesh_or_null(key: String, color: Color, scale: float) -> Node3D:
 	var node := WorldScreen.mesh(key, color, scale)
 	if node != null:
@@ -483,9 +454,6 @@ func _update_world(delta: float) -> void:
 	player.position = Vector3(pos.x, sin(elapsed * 3.0) * 0.05, pos.z)
 	player.rotation.y = facing
 
-	fire_light.light_energy = 26.0 + sin(elapsed * 5.0) * 6.0
-	hub_ring.rotation.y += delta * 0.4
-
 	follow_camera(Vector3(pos.x, 2.2, pos.z), CAMERA_HEIGHT, CAMERA_DISTANCE, 5.0, delta)
 
 	_minimap_timer += delta
@@ -513,9 +481,11 @@ func _zone_at(p: Vector3) -> Dictionary:
 
 
 ## True while the player stands in the gallery portal.
+##
+## Reads the cached spot: `Lobby.gallery_position()` builds the whole plaza
+## layout, five dictionaries and a game list each, and this runs every frame.
 func _at_gallery(p: Vector3) -> bool:
-	var spot := Lobby.gallery_position()
-	return Lobby.distance_sq(p.x, p.z, spot.x, spot.y) <= Lobby.GALLERY_TRIGGER * Lobby.GALLERY_TRIGGER
+	return Lobby.distance_sq(p.x, p.z, _gallery_spot.x, _gallery_spot.y) <= Lobby.GALLERY_TRIGGER * Lobby.GALLERY_TRIGGER
 
 
 func _nearest_pedestal(p: Vector3) -> Dictionary:
@@ -587,7 +557,12 @@ func _start(game: Dictionary) -> void:
 	Router.play(str(game["id"]))
 
 
-## Corner minimap: world disc, hub, category plazas with icons and the player.
+## Corner minimap: world disc, gallery portal, category plazas with icons and the
+## player.
+##
+## The middle of the map carries no hub circle any more — there is nothing there
+## to point at. What is left in the middle is the gallery portal, and it is the
+## one thing on the map besides the plazas, so it gets the mark.
 class Minimap:
 	extends Control
 	var screen: Lobby3DScreen
@@ -603,7 +578,9 @@ class Minimap:
 		draw_circle(center, size.x * 0.5 - 2.0, Color(0.031, 0.047, 0.086, 0.8))
 		draw_arc(center, size.x * 0.5 - 2.0, 0.0, TAU, 48, Color(0.580, 0.639, 0.706, 0.5), 1.5, true)
 		var scale: float = (size.x * 0.5 - MAP_PADDING) / Lobby.MINIMAP_WORLD_RADIUS
-		draw_circle(center, HUB_RADIUS * scale, Color(0.141, 0.200, 0.286, 0.95))
+		var gallery_point := Lobby.minimap_point(screen._gallery_spot.x, screen._gallery_spot.y, size.x, MAP_PADDING, Lobby.MINIMAP_WORLD_RADIUS)
+		var gallery_near: bool = screen._gallery_near
+		draw_circle(gallery_point, Lobby.GALLERY_TRIGGER * scale, Color(0.216, 0.757, 0.965, 0.95 if gallery_near else 0.55))
 		var font := Ui.font_bold()
 		for zone in screen.zones:
 			var point := Lobby.minimap_point(float(zone["x"]), float(zone["z"]), size.x, MAP_PADDING, Lobby.MINIMAP_WORLD_RADIUS)

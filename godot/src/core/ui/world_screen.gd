@@ -299,6 +299,63 @@ static func standard_material(color: Color, emission: float = 0.0) -> StandardMa
 	return material
 
 
+## The bounding box of an instantiated mesh, in that node's own space.
+##
+## An imported glTF is a `Node3D` with `MeshInstance3D` children, so the bounds
+## have to be collected over the whole subtree and pulled back through each
+## child's own transform. An empty `AABB` (detectable with `has_surface()`) when
+## there is no geometry at all.
+##
+## `AABB * Transform3D` is not used here: it documents itself as an inverse
+## transform under the assumption of an orthonormal basis, and the eight corners
+## say exactly what happens instead. The transforms walked are the nodes' own,
+## before any scaling is applied to the root.
+static func bounds_of(root: Node) -> AABB:
+	var union := AABB()
+	var found := false
+	var stack: Array[Node] = [root]
+	while not stack.is_empty():
+		var current: Node = stack.pop_back()
+		if current is MeshInstance3D:
+			var surface: Mesh = (current as MeshInstance3D).mesh
+			if surface != null:
+				var xform: Transform3D = (current as MeshInstance3D).transform
+				var box: AABB = surface.get_aabb()
+				var placed := AABB(xform * box.position, Vector3.ZERO)
+				for i in 8:
+					placed = placed.expand(xform * box.get_endpoint(i))
+				union = placed if not found else union.merge(placed)
+				found = true
+		for child in current.get_children():
+			if child is Node3D:
+				stack.append(child)
+	return union
+
+
+## Scales a mesh so its largest dimension is `target` and stands it on its own
+## base: its lowest point ends up at y = 0 in the node's own space. Returns the
+## scale it applied, or `0.0` when there was no geometry to measure.
+##
+## The bundled meshes share no dimensions: a coin is a flat disc, a castle is
+## three units tall. Shown at their original size next to each other, one
+## pedestal carries a bucket and the next a flagpole, and half of them float
+## above the plinth or sink into it, because every mesh was authored standing on
+## its own origin. Normalising the largest axis gives every pedestal the same
+## visual weight; anchoring the base puts each object where it was drawn.
+static func fit_on_base(root: Node3D, target: float) -> float:
+	var box := bounds_of(root)
+	if not box.has_surface():
+		return 0.0
+	var largest := maxf(box.size.x, maxf(box.size.y, box.size.z))
+	if largest <= 0.0001:
+		return 0.0
+	var applied := clampf(target / largest, 0.01, 1000.0)
+	root.scale = Vector3.ONE * applied
+	var centre := box.get_center()
+	root.position = Vector3(-centre.x * applied, -box.position.y * applied, -centre.z * applied)
+	return applied
+
+
 ## Loads one of the bundled Blender meshes, scaled and tinted. Returns `null`
 ## when the import failed so callers can fall back to a primitive.
 static func mesh(key: String, color: Color = Color.WHITE, scale: float = 1.0, emission: float = 0.0) -> Node3D:

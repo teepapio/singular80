@@ -765,6 +765,11 @@ func _lobby() -> void:
 	t.almost(Lobby.minimap_point(0.0, 0.0, map_size, map_padding, Lobby.MINIMAP_WORLD_RADIUS).x, map_size * 0.5, 0.001, "Mittelpunkt liegt in der Kartenmitte")
 	t.equal(Lobby.distance_sq(0, 0, 3, 4), 25.0, "Abstandsquadrat")
 
+	# The middle of the lobby is the crossing and nothing else. Scenery that
+	# reaches inside the plaza ring turns it back into an area with things in it.
+	t.equal(Lobby.scenery_in_the_middle().size(), 0,
+		"Zwischen den Plazas und der Mitte steht nichts")
+
 	# Registry: every entry points at a real screen.
 	for game in GameRegistry.GAMES:
 		var screen := str(game["screen"])
@@ -774,6 +779,50 @@ func _lobby() -> void:
 	t.equal(str(GameRegistry.game_by_id("pang")["category"]), GameRegistry.CATEGORY_ACTION, "Pang liegt in den Action-Spielen")
 	t.equal(str(GameRegistry.screen_of("pang")), "pang_menu", "Pang startet in der Level-Auswahl")
 	t.equal(str(GameRegistry.screen_of("nope")), "arena", "Unbekanntes Spiel fällt auf die Arena zurück")
+
+	# Every game is represented by a mesh of its own, and that mesh is bundled.
+	# Without the table a new registry entry silently shows the default crystal,
+	# which is the eighteen-identical-pedestals problem all over again.
+	t.equal(Lobby.missing_totems().size(), 0, "Jedes Spiel hat ein eigenes Standbild")
+	t.equal(Lobby.unknown_totems().size(), 0, "Jedes Standbild ist ein gebündeltes Mesh")
+	for game in GameRegistry.GAMES:
+		var key := Lobby.totem_of(str(game["id"]))
+		t.check(AssetRegistry.exists(key), "Standbild von '%s' ist importiert" % game["id"])
+		t.check(key != Lobby.DEFAULT_TOTEM, "'%s' steht nicht auf dem Ersatzbild" % game["id"])
+	t.equal(Lobby.totem_of("nope"), Lobby.DEFAULT_TOTEM, "Unbekanntes Spiel bekommt das Ersatzbild")
+	t.check(Lobby.PEDESTAL_MESH_SIZE < Lobby.PEDESTAL_RIM_OUTER * 2.0,
+		"Das Standbild lässt den Akzentrand frei")
+
+	# `WorldScreen.fit_on_base()` is what makes one size fit every plinth: a flat
+	# coin and a tall sword both have to end up 2 units across and standing on
+	# the top face. The mesh is scaled as a child, so `bounds_of()` reports the
+	# unsized box and the assertions apply the scale themselves.
+	var coin := MeshInstance3D.new()
+	var disc := CylinderMesh.new()
+	disc.top_radius = 0.5
+	disc.bottom_radius = 0.5
+	disc.height = 0.1
+	coin.mesh = disc
+	var plinth := Node3D.new()
+	plinth.add_child(coin)
+	var coin_scale := WorldScreen.fit_on_base(plinth, 2.0)
+	var coin_box := WorldScreen.bounds_of(plinth)
+	t.almost(coin_box.size.x * coin_scale, 2.0, 0.001, "Die größte Achse trifft die Zielgröße")
+	t.almost(plinth.position.y, -coin_box.position.y * coin_scale, 0.001,
+		"Die Unterkante kommt auf y = 0 zu liegen")
+
+	var sword := MeshInstance3D.new()
+	var blade := BoxMesh.new()
+	blade.size = Vector3(0.2, 4.0, 0.2)
+	sword.mesh = blade
+	var stand := Node3D.new()
+	stand.add_child(sword)
+	var sword_scale := WorldScreen.fit_on_base(stand, 2.0)
+	var stand_box := WorldScreen.bounds_of(stand)
+	t.almost(stand_box.size.y * sword_scale, 2.0, 0.001, "Ein hohes Mesh schrumpft auf dieselbe Größe")
+	t.almost(stand.position.y, -stand_box.position.y * sword_scale, 0.001,
+		"Das hohe Mesh steht ebenfalls unten")
+	t.equal(WorldScreen.fit_on_base(Node3D.new(), 1.0), 0.0, "Ohne Geometrie wird nichts skaliert")
 	t.suite_done()
 
 
