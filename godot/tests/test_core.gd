@@ -38,6 +38,12 @@ const TouchButtonClass := preload("res://src/core/ui/touch_button.gd")
 ## and `Screen` is the cheapest host that has a `modal()` and a top bar.
 const ScreenClass := preload("res://src/core/ui/screen.gd")
 
+## The one funnel every 3D screen loads its meshes through, and the fire it
+## hangs on the meshes that burn. Both by path, for the reason at the top of this
+## file — and `WorldScreen` needs the autoloads, so it is only usable from a
+## suite that runs after the tree is up.
+const WorldScreenClass := preload("res://src/core/ui/world_screen.gd")
+
 ## The suggestion flow composes the label and the player's text before the
 ## entry is born.
 const SuggestionContextClass := preload("res://src/core/logic/suggestion_context.gd")
@@ -67,6 +73,7 @@ func run(kit: TestKit, scene_tree: SceneTree) -> void:
 	await _themed_editions()
 	_server_address()
 	_second_finger()
+	_fire()
 
 
 func _close() -> void:
@@ -1046,6 +1053,108 @@ func _second_finger() -> void:
 
 	host.queue_free()
 	t.suite_done()
+
+
+## A fire that lights nothing is a cone.
+##
+## "Mesh-Galerie · Campfire: has to be more beautiful" was written standing in
+## front of that pedestal, and both causes are in core code rather than in the
+## mesh. The gallery tints every mesh to its standard colour, and
+## `material_override` threw away all three surfaces the Blender script builds —
+## measured on the imported `rpg/campfire`: brown logs, an orange flame and a
+## gold core, the last two with an emission around 2.5. After the tint: one flat
+## `f97316`, nothing glowing. And a mesh that is only geometry gives off no
+## light at all, which is the one thing a campfire exists to do.
+func _fire() -> void:
+	t.suite("Feuer — Licht und Glut")
+
+	# The gallery asks for a detail level by path and everybody else asks by
+	# key, so the funnel has to know which of the two it was handed.
+	t.equal(str(FireGlowClass.mesh_key("rpg/campfire")), "rpg/campfire", "Ein Schluessel bleibt sich selbst")
+	t.equal(str(FireGlowClass.mesh_key("res://assets/meshes/rpg/campfire.glb")), "rpg/campfire", "Und ein Low-Pfad auch")
+	t.equal(str(FireGlowClass.mesh_key("res://assets/meshes/med/rpg/campfire.glb")), "rpg/campfire", "Wie eine Detailstufe als Pfad")
+	t.equal(str(FireGlowClass.mesh_key("candy/lolly")), "candy/lolly", "Ein Bonbon wird nicht versehentlich zum Lagerfeuer")
+
+	t.check(bool(FireGlowClass.burns("rpg/campfire")), "Das Lagerfeuer brennt")
+	t.check(not bool(FireGlowClass.burns("candy/lolly")), "Ein Bonbon nicht")
+
+	# The funnel itself: loaded through the one function every 3D screen uses.
+	var campfire: Node3D = WorldScreenClass.mesh("rpg/campfire", AssetRegistry.color_of("rpg/campfire"))
+	t.check(campfire != null, "Das Lagerfeuer laesst sich laden")
+	t.check(_fire_glow_of(campfire) != null, "Und bringt sein eigenes Feuer mit")
+	# The material override is what flattened it: the gallery's colour sits on
+	# every surface of the mesh, so an empty list is the wood and the flame again.
+	t.check(_material_overrides(campfire).is_empty(), "Es traegt nicht mehr die Farbe des Sockels ueber sich")
+	var lolly: Node3D = WorldScreenClass.mesh("candy/lolly", AssetRegistry.color_of("candy/lolly"))
+	t.check(_fire_glow_of(lolly) == null, "Ein Bonbon bekommt kein Feuer")
+	t.check(not _material_overrides(lolly).is_empty(), "Und behaelt seine Farbe des Sockels")
+
+	# The same, one detail level down: the gallery's default is the low tier, but
+	# the tiers are paths, and a fire that only burns on one of them is a bug.
+	var hall: Node3D = WorldScreenClass.mesh("res://assets/meshes/med/rpg/campfire.glb", AssetRegistry.color_of("rpg/campfire"))
+	t.check(_fire_glow_of(hall) != null, "Auch die mittlere Detailstufe brennt")
+
+	var host := Node3D.new()
+	tree.root.add_child(host)
+	var glow: FireGlow = FireGlowClass.attach(host, "rpg/campfire")
+	t.check(glow != null, "Ein Feuer haengt sich an einen Knoten")
+	t.check(FireGlowClass.attach(host, "candy/lolly") == null, "An ein Bonbon haengt sich keines")
+
+	var light: OmniLight3D = null
+	var embers: CPUParticles3D = null
+	var pool: Sprite3D = null
+	for child in glow.get_children():
+		if child is OmniLight3D:
+			light = child
+		elif child is CPUParticles3D:
+			embers = child
+		elif child is Sprite3D:
+			pool = child
+	t.check(light != null, "Es wirft Licht")
+	t.check(embers != null, "Und laesst Funken steigen")
+	t.check(pool != null, "Und legt einen Schein auf den Boden")
+	t.check(light != null and not light.shadow_enabled,
+		"Der Schein wirft keinen Schatten — der Compatibility-Renderer kann das nicht")
+	t.check(embers != null and int(embers.amount) == int(FireGlowClass.EMBER_COUNT),
+		"So viele Funken, wie festgelegt")
+	t.check(embers != null and not bool(embers.local_coords),
+		"Die Funken steigen gerade, auch wenn sich der Sockel dreht")
+
+	# Four seconds of flicker: the fire never goes out, never burns brighter than
+	# its base value, and never sits still.
+	var low := INF
+	var high := -INF
+	for i in 240:
+		glow._process(1.0 / 60.0)
+		low = minf(low, light.light_energy)
+		high = maxf(high, light.light_energy)
+	t.check(low > 0.0, "Das Feuer geht nie aus")
+	t.check(high <= float(FireGlowClass.LIGHT_ENERGY) + 0.001, "Und brennt nie heller als seine Grundstufe")
+	t.check(high - low > 0.5, "Aber es flackert")
+
+	host.queue_free()
+	t.suite_done()
+
+
+## The fire on a loaded mesh, or `null` when it does not burn.
+func _fire_glow_of(node: Node) -> FireGlow:
+	for child in node.get_children():
+		if child is FireGlow:
+			return child
+	return null
+
+
+## Every `material_override` in the subtree: what `tint()` puts on a mesh.
+func _material_overrides(node: Node) -> Array[StandardMaterial3D]:
+	var out: Array[StandardMaterial3D] = []
+	var stack: Array[Node] = [node]
+	while not stack.is_empty():
+		var current: Node = stack.pop_back()
+		if current is MeshInstance3D and (current as MeshInstance3D).material_override != null:
+			out.append((current as MeshInstance3D).material_override as StandardMaterial3D)
+		for child in current.get_children():
+			stack.append(child)
+	return out
 
 
 ## A touch event on a finger, at `at` in the coordinates of whatever control

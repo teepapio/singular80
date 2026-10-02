@@ -203,6 +203,8 @@ const SCOPE_SUITES = {
     'Vorschlags-Warteschlange — Backoff', 'Vorschlags-Warteschlange — Obergrenze',
     'Vorschlags-Warteschlange — Zustellung',
     'Vorschlags-Warteschlange — Zustellung an den Bot', 'Rechtliches & Melden',
+    // What a burning mesh is made to do beyond being a shape: the light it
+    // throws, the embers, and the pool on the ground.
     'Sprachen — Kataloge', 'Sprachen — Auflösung', 'Sprachen — Platzhalter',
     'Sprachen — Plural', 'Sprachen — Zahlen', 'Sprachen — Wechsel',
     'Sprachen — Oberfläche',
