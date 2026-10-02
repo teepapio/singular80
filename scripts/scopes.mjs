@@ -194,6 +194,11 @@ const SCOPE_SUITES = {
   lobby: ['Lobby-Geometrie', 'Vorschlagsdialog'],
   core: ['Mechaniken', 'Inventar', 'Vorschlag — Herkunft', 'Auftragsweg', 'Server-Adresse',
     'Themenwahl',
+    // The touch layer every 3D screen builds its action buttons from. It belongs
+    // to the core and not to a game: the report said "Drachenflug: i cannot
+    // fire while steering", but the fault was in `godot/src/core/ui/` and every
+    // 3D screen shared it.
+    'Steuerung — zweiter Finger',
     'Vorschlags-Warteschlange', 'Vorschlags-Warteschlange — Ablage',
     'Vorschlags-Warteschlange — Backoff', 'Vorschlags-Warteschlange — Obergrenze',
     'Vorschlags-Warteschlange — Zustellung',

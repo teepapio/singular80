@@ -226,8 +226,13 @@ func add_stick(corner: String = "bottom_left", label_text: String = "") -> Virtu
 
 
 ## Adds a round action button to the bottom-right cluster.
+##
+## A `TouchButton`, not a `Button`: the stick under the other thumb holds the
+## first finger, and a plain `Button` only ever sees the one finger Godot
+## emulates into a mouse — see `TouchButton` for the whole story. Typed as
+## `Button` because `TouchButton` is one and callers may store it as either.
 func add_action_button(text: String, radius: float = 62.0, action: StringName = &"", on_press: Callable = Callable(), offset: Vector2 = Vector2.ZERO) -> Button:
-	var node := Button.new()
+	var node := TouchButton.new()
 	node.text = text
 	node.custom_minimum_size = Vector2(radius, radius)
 	node.size = Vector2(radius, radius)

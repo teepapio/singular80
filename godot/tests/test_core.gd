@@ -970,36 +970,36 @@ func _second_finger() -> void:
 	host.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tree.root.add_child(host)
 
-	var fired := 0
-	var held := 0
-	var released := 0
+	# A Dictionary, not three Ints: a GDScript lambda captures a local *by
+	# value*, so `func(): held += 1` would count inside the lambda and leave
+	# this one at zero.
+	var seen := {"held": 0, "up": 0, "pressed": 0}
 	var button := TouchButtonClass.new()
 	button.size = Vector2(66.0, 66.0)
 	button.focus_mode = Control.FOCUS_NONE
 	button.add_theme_stylebox_override("normal", UiThemeClass.flat(Color(0.098, 0.141, 0.239, 0.75), UiThemeClass.ACCENT, 20))
 	button.add_theme_stylebox_override("pressed", UiThemeClass.flat(UiThemeClass.ACCENT.darkened(0.25), Color.WHITE, 20))
 	host.add_child(button)
-	button.button_down.connect(func() -> void: held += 1)
-	button.button_up.connect(func() -> void: released += 1)
-	button.pressed.connect(func() -> void: fired += 1)
+	button.button_down.connect(func() -> void: seen["held"] += 1)
+	button.button_up.connect(func() -> void: seen["up"] += 1)
+	button.pressed.connect(func() -> void: seen["pressed"] += 1)
 
 	var idle := button.get_theme_stylebox("normal")
 	var down_look := button.get_theme_stylebox("pressed")
 
-	# Finger 0 belongs to the stick throughout: it never arrives here, and that
-	# absence is the whole situation the report describes. The button is pressed
-	# with finger 1 — the tablet, and now the thing that has to work.
-	button._gui_input(_touch(0, true, Vector2(140.0, 600.0)))
+	# Finger 0 belongs to the stick throughout and never arrives here — the
+	# viewport routes it there — so the button is pressed with finger 1, which is
+	# the tablet, and now the thing that has to work.
 	button._gui_input(_touch(1, true, Vector2(33.0, 33.0)))
-	t.equal(held, 1, "Der zweite Finger drueckt den Knopf, waehrend der Stick laeuft")
+	t.equal(int(seen["held"]), 1, "Der zweite Finger drueckt den Knopf, waehrend der Stick laeuft")
 	t.check(button.get_theme_stylebox("normal") == down_look,
 		"Der gehaltene Knopf sieht aus wie gedrueckt")
 
 	# The finger coming up again fires it, which is what horse runner's ◀ and ▶
 	# rely on for a single tap.
 	button._gui_input(_touch(1, false, Vector2(33.0, 33.0)))
-	t.equal(fired, 1, "Und das Loslassen loest ihn aus")
-	t.equal(released, 1, "Der Knopf meldet das Ende des Druckes")
+	t.equal(int(seen["pressed"]), 1, "Und das Loslassen loest ihn aus")
+	t.equal(int(seen["up"]), 1, "Der Knopf meldet das Ende des Druckes")
 	t.check(button.get_theme_stylebox("normal") == idle,
 		"Danach sieht er wieder ungedrueckt aus")
 
@@ -1008,18 +1008,18 @@ func _second_finger() -> void:
 	button._gui_input(_touch(2, true, Vector2(33.0, 33.0)))
 	button._gui_input(_drag(2, Vector2(300.0, 300.0)))
 	button._gui_input(_touch(2, false, Vector2(300.0, 300.0)))
-	t.equal(fired, 1, "Ein Finger, der wegrutscht, drueckt nicht")
+	t.equal(int(seen["pressed"]), 1, "Ein Finger, der wegrutscht, drueckt nicht")
 
 	# A second finger on a button that is already held must not take it over:
 	# the player may be sliding a thumb off it, or resting a second one on it.
 	button._gui_input(_touch(2, true, Vector2(33.0, 33.0)))
 	button._gui_input(_touch(3, true, Vector2(10.0, 10.0)))
 	button._gui_input(_touch(3, false, Vector2(10.0, 10.0)))
-	t.equal(held, 3, "Der zweite Finger nimmt den Knopf nicht dem ersten weg")
-	t.equal(fired, 1, "Und loest keinen weiteren Tipp aus")
+	t.equal(int(seen["held"]), 3, "Der zweite Finger nimmt den Knopf nicht dem ersten weg")
+	t.equal(int(seen["pressed"]), 1, "Und loest keinen weiteren Tipp aus")
 	button._gui_input(_touch(2, false, Vector2(33.0, 33.0)))
-	t.equal(fired, 2, "Erst der Finger, der den Knopf haelt, zaehlt")
-	t.equal(released, 3, "Jeder haelt nur seinen eigenen Druck")
+	t.equal(int(seen["pressed"]), 2, "Erst der Finger, der den Knopf haelt, zaehlt")
+	t.equal(int(seen["up"]), 3, "Jeder haelt nur seinen eigenen Druck")
 
 	# The emulated mouse event for the same click must not press a second time:
 	# `emulate_touch_from_mouse` sends the touch event first, and horse runner's
@@ -1030,14 +1030,14 @@ func _second_finger() -> void:
 	mouse.device = InputEvent.DEVICE_ID_EMULATION
 	mouse.position = Vector2(33.0, 33.0)
 	button._gui_input(mouse)
-	t.equal(held, 3, "Die nachgeahmte Maus zaehlt nicht noch einmal")
+	t.equal(int(seen["held"]), 3, "Die nachgeahmte Maus zaehlt nicht noch einmal")
 
 	# A disabled button stays dead for every finger.
 	button.disabled = true
 	button._gui_input(_touch(4, true, Vector2(33.0, 33.0)))
 	button._gui_input(_touch(4, false, Vector2(33.0, 33.0)))
-	t.equal(held, 3, "Ein gesperrter Knopf antwortet keinem Finger")
-	t.equal(fired, 2, "und loest auch nichts aus")
+	t.equal(int(seen["held"]), 3, "Ein gesperrter Knopf antwortet keinem Finger")
+	t.equal(int(seen["pressed"]), 2, "und loest auch nichts aus")
 	button.disabled = false
 
 	# It has to stay a `Button` for the callers: the dragon RPG holds its dash
