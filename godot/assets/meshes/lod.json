@@ -245,9 +245,9 @@
     "med": 2678
   },
   "metro/house": {
-    "high": 11442,
-    "low": 255,
-    "med": 1020
+    "high": 10202,
+    "low": 416,
+    "med": 1184
   },
   "metro/interchange": {
     "high": 17750,

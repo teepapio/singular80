@@ -468,6 +468,160 @@ def _star_prism(
     return obj
 
 
+#: Thickness of the plate that closes each gable end of a `gable_roof`.
+GABLE_END_THICKNESS = 0.06
+
+#: How far that plate is pulled into the roof's own cross-section. Its sloped
+#: edges would otherwise lie exactly on the underside of the two slabs, and two
+#: coincident faces show up as a hairline seam in the render.
+GABLE_INSIDE = 0.99
+
+
+def _triangle_prism(
+    name: str,
+    triangle: list[tuple[float, float]],
+    thickness: float,
+    location: tuple[float, float, float],
+    color: tuple[float, float, float, float],
+    emission: float,
+    roughness: float = 0.6,
+    metallic: float = 0.05,
+) -> bpy.types.Object:
+    """A prism with `triangle` (X, Z pairs) as its cross-section, extruded in Y.
+
+    Built with ``from_pydata`` like `_star_prism`, because a gable end is a
+    triangle and no Blender primitive is one.
+    """
+    half = thickness * 0.5
+    ox, oy, oz = location
+    vertices: list[tuple[float, float, float]] = [
+        (x + ox, oy - half, z + oz) for x, z in triangle
+    ]
+    vertices += [(x + ox, oy + half, z + oz) for x, z in triangle]
+    faces: list[list[int]] = [
+        [0, 1, 2],  # near cap (-Y)
+        [5, 4, 3],  # far cap (+Y)
+        [0, 3, 4, 1],
+        [1, 4, 5, 2],
+        [2, 5, 3, 0],
+    ]
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(vertices, [], faces)
+    mesh.validate()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.normals_make_consistent(inside=False)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    bpy.ops.object.shade_flat()
+    _apply_material(obj, color, emission, roughness, metallic)
+    return obj
+
+
+def gable_roof(
+    name: str,
+    width: float,
+    depth: float,
+    rise: float,
+    location: tuple[float, float, float],
+    color: tuple[float, float, float, float],
+    emission: float = 0.0,
+    roughness: float = 0.7,
+    metallic: float = 0.05,
+    eave: float = 0.08,
+    slab: float = 0.07,
+    ends: bool = True,
+) -> list[bpy.types.Object]:
+    """A two-slope roof whose ridge runs along Y, closed at both gable ends.
+
+    `location` is the middle of the eave line — the top of the wall it stands on
+    — and `rise` the height of the ridge above it, so the roof sits flush on the
+    wall. `width` is the full span across the slopes, which is what sets the
+    eave overhang: a builder passes a little more than the wall is wide.
+
+    Do not reach for a four-sided cone instead. Blender puts the base vertices
+    of `primitive_cone_add` on the axes, so `vertices=4` is already a diamond
+    with half-diagonal `radius1`, and its corners point along X and Y instead of
+    matching a rectangular wall — on a 1.1 x 1.0 wall, `radius1=0.86` left all
+    four wall corners (|x|+|y| = 1.05) outside the roof faces.
+    """
+    half = width * 0.5
+    slope = math.atan2(rise, half)
+    slab_len = math.hypot(half, rise)
+    parts = [
+        _box(
+            name,
+            (width, depth, eave),
+            (location[0], location[1], location[2] + eave * 0.5),
+            color,
+            emission,
+            roughness,
+            metallic,
+        ),
+        # A +Y rotation lifts the **-X** end (measured in Blender 4.5, not
+        # assumed), so the -X slab takes -slope to put its high end at the
+        # middle. `generate_siedler_meshes._gabled_roof` has these two signs the
+        # other way round, measured 2026-10-02 on its KeepRoof: its left slab
+        # runs from z=2.809 down to z=2.271 towards the middle, so the two
+        # slabs meet in a valley instead of a ridge.
+        _box(
+            f"{name}SlabL",
+            (slab_len, depth, slab),
+            (location[0] - half * 0.5, location[1], location[2] + rise * 0.5),
+            color,
+            emission,
+            roughness,
+            metallic,
+            (0.0, -slope, 0.0),
+        ),
+        _box(
+            f"{name}SlabR",
+            (slab_len, depth, slab),
+            (location[0] + half * 0.5, location[1], location[2] + rise * 0.5),
+            color,
+            emission,
+            roughness,
+            metallic,
+            (0.0, slope, 0.0),
+        ),
+    ]
+    if not ends:
+        return parts
+
+    # The closing plate follows the underside of the slabs: the slab centre line
+    # runs from the eave to the ridge, and its underside sits `drop` lower, with
+    # `drop` the half thickness measured vertically. Clip that line where it
+    # meets the wall top, so the plate is buried in the eave board at its base
+    # and under the slabs along its sloped edges.
+    drop = (slab * 0.5) / math.cos(slope)
+    base_half = max(0.0, half * (1.0 - drop / max(rise, 1e-6)))
+    triangle = [(-base_half, 0.0), (base_half, 0.0), (0.0, rise - drop)]
+    cx = sum(point[0] for point in triangle) / 3.0
+    cz = sum(point[1] for point in triangle) / 3.0
+    triangle = [
+        (cx + (x - cx) * GABLE_INSIDE, cz + (z - cz) * GABLE_INSIDE) for x, z in triangle
+    ]
+    thickness = min(GABLE_END_THICKNESS, depth * 0.5)
+    for end, tag in ((-1.0, "A"), (1.0, "B")):
+        parts.append(
+            _triangle_prism(
+                f"{name}End{tag}",
+                triangle,
+                thickness,
+                (location[0], location[1] + end * (depth * 0.5 - thickness * 0.5), location[2]),
+                color,
+                emission,
+                roughness,
+                metallic,
+            )
+        )
+    return parts
+
+
 def _jack_o_lantern_face(name: str, size: float) -> None:
     """Triangular eyes and a jagged mouth on the front (-Y) of a pumpkin."""
     dark = (0.11, 0.07, 0.03, 1.0)

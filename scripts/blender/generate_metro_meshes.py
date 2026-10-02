@@ -57,6 +57,7 @@ _torus = mm._torus
 _ico = mm._ico
 _join_all = mm._join_all
 _bevel = mm._bevel
+gable_roof = mm.gable_roof
 
 
 # --- shared parts -----------------------------------------------------------
@@ -196,12 +197,21 @@ def build_tunnel_portal() -> bpy.types.Object:
 def build_house() -> bpy.types.Object:
     """A low townhouse that fills the empty blocks between the stations."""
     _box("HouseBody", (1.1, 1.0, 1.0), (0.0, 0.0, 0.5), PLASTER, 0.0, 0.9, 0.0)
-    # A four-sided cone rotated 45 degrees reads as a hip roof.
-    _cone("HouseRoof", 4, 0.86, 0.0, 0.5, (0.0, 0.0, 1.24), BRICK, 0.0, 0.85, 0.0)
+    # A gabled roof, not a cone. Blender places the base vertices of
+    # `primitive_cone_add` on the axes, so `vertices=4` is already a diamond
+    # with half-diagonal radius1 — its corners point along X and Y and never
+    # match a rectangular wall. Measured: radius1=0.86 over this 1.1 x 1.0 wall
+    # left all four wall corners (|x|+|y| = 1.05) outside the roof faces.
+    # The ridge runs along Y, so the -Y facade that carries the door and the
+    # windows is the gable end and shows the triangle; the 1.24 width overhangs
+    # the 1.10 wall by 0.07 a side and the 1.16 depth overhangs it by 0.08.
+    gable_roof("HouseRoof", 1.24, 1.16, 0.5, (0.0, 0.0, 1.0), BRICK, 0.0, 0.85, 0.0)
     _box("HouseDoor", (0.2, 0.06, 0.34), (0.0, -0.51, 0.17), WOOD, 0.0, 0.8, 0.0)
     for side in (-1, 1):
         _box(f"HouseWindow{side}", (0.2, 0.06, 0.22), (side * 0.3, -0.51, 0.6), GLASS_LIT, 1.4, 0.3, 0.0)
-    _box("HouseChimney", (0.14, 0.14, 0.3), (0.28, 0.2, 1.5), BRICK, 0.0, 0.9, 0.0)
+    # On the ridge, not beside it: the foot at z=1.30 is buried in the roof, so
+    # the chimney comes out of the roof instead of floating in mid air.
+    _box("HouseChimney", (0.16, 0.16, 0.5), (0.0, 0.22, 1.55), BRICK, 0.0, 0.9, 0.0)
     return _join_all("MetroHouse")
 
 
