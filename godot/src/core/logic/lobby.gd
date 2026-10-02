@@ -113,7 +113,7 @@ static func unknown_totems() -> Array[String]:
 ## Scenery keys that reach into the crossing or onto a plaza, `[]` while the
 ## middle stays empty.
 ##
-## The bound is the inner edge of the plaza ring: `minR` below it puts an object
+## The bound is the outer edge of the plaza ring: `minR` below it puts an object
 ## in the open ground the player walks across on the way in, which is what made
 ## the middle look like an area with things in it rather than a way through.
 static func scenery_in_the_middle() -> Array[String]:
