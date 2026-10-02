@@ -1159,13 +1159,17 @@ func _second_finger() -> void:
 ## A fire that lights nothing is a cone.
 ##
 ## "Mesh-Galerie · Campfire: has to be more beautiful" was written standing in
-## front of that pedestal, and both causes are in core code rather than in the
-## mesh. The gallery tints every mesh to its standard colour, and
-## `material_override` threw away all three surfaces the Blender script builds —
-## measured on the imported `rpg/campfire`: brown logs, an orange flame and a
-## gold core, the last two with an emission around 2.5. After the tint: one flat
-## `f97316`, nothing glowing. And a mesh that is only geometry gives off no
-## light at all, which is the one thing a campfire exists to do.
+## front of that pedestal, and both causes are in the numbers of the mesh rather
+## than in its shape. Rendered in a hall as cold as the gallery's own lamp, the
+## campfire came out as a pale cream traffic cone: the flame cone carries an
+## emission strength of 2.6, and emission is *added* to the surface colour, so
+## its orange albedo (0.98, 0.70, 0.35) is clipped to white by the renderer. And
+## a mesh is geometry only — it throws no light at all, which is the one thing a
+## campfire exists to do.
+##
+## So the fire keeps its own materials, its emission is held to the point where
+## the colour survives, and it gets a light, embers and a pool. Both halves are
+## below: the clamp, and the light that throws.
 func _fire() -> void:
 	t.suite("Feuer — Licht und Glut")
 
@@ -1180,15 +1184,34 @@ func _fire() -> void:
 	t.check(not bool(FireGlowClass.burns("candy/lolly")), "Ein Bonbon nicht")
 
 	# The funnel itself: loaded through the one function every 3D screen uses.
+	# The colour is what the dragon RPG hands its brazier, and it is the reason
+	# a fire cannot be tinted: `material_override` lands on every surface, so the
+	# logs, the flame and the core would all become that one hue.
 	var campfire: Node3D = WorldScreenClass.mesh("rpg/campfire", AssetRegistry.color_of("rpg/campfire"))
 	t.check(campfire != null, "Das Lagerfeuer laesst sich laden")
 	t.check(_fire_glow_of(campfire) != null, "Und bringt sein eigenes Feuer mit")
-	# The material override is what flattened it: the gallery's colour sits on
-	# every surface of the mesh, so an empty list is the wood and the flame again.
 	t.check(_material_overrides(campfire).is_empty(), "Es traegt nicht mehr die Farbe des Sockels ueber sich")
 	var lolly: Node3D = WorldScreenClass.mesh("candy/lolly", AssetRegistry.color_of("candy/lolly"))
 	t.check(_fire_glow_of(lolly) == null, "Ein Bonbon bekommt kein Feuer")
 	t.check(not _material_overrides(lolly).is_empty(), "Und behaelt seine Farbe des Sockels")
+
+	# The emission. Two surfaces glow on the imported mesh, and both carry more
+	# than `EMISSION_MAX`, which is where the albedo stops being clipped to
+	# white. What matters is that a *cloned* material gets the new value: the
+	# glTF's own materials are shared with every other instance of the file.
+	var flaming := _emissive_surfaces(campfire)
+	t.check(flaming.size() >= 2, "Das Lagerfeuer hat mindestens dieFlaeche und ihren Kern")
+	for surface in flaming:
+		t.check(float(surface.emission_energy_multiplier) <= float(FireGlowClass.EMISSION_MAX) + 0.001,
+			"Kein gluehendes Stueck laesst sich weiss ausbrennen")
+		t.check(surface.emission_enabled, "Und es glueht ueberhaupt noch")
+	# The colour that has to survive: without it the clamp would have turned the
+	# fire into a dark orange rock.
+	var albedo := Color(0.0, 0.0, 0.0, 0.0)
+	for surface in flaming:
+		if surface.emission.get_luminance() > albedo.get_luminance():
+			albedo = surface.emission
+	t.check(albedo.r > albedo.b, "Die Flamme bleibt orange und nicht weiss")
 
 	# The same, one detail level down: the gallery's default is the low tier, but
 	# the tiers are paths, and a fire that only burns on one of them is a bug.
@@ -1216,6 +1239,16 @@ func _fire() -> void:
 	t.check(pool != null, "Und legt einen Schein auf den Boden")
 	t.check(light != null and not light.shadow_enabled,
 		"Der Schein wirft keinen Schatten — der Compatibility-Renderer kann das nicht")
+	t.check(light != null and light.light_color == FireGlowClass.FIRE_COLOR,
+		"Und er hat die Farbe des Feuers")
+	# The light belongs *in* the flame, not under it and not in the sky. The
+	# campfire is 1.05 units tall and its flame runs from 0.15 to 1.05, measured
+	# on the import; 0.62 is the middle of that, and the one height at which the
+	# logs themselves go warm instead of only the ground.
+	var seat := float(FireGlowClass.FIRES["rpg/campfire"]["light"])
+	t.check(seat > 0.15 and seat < 1.05, "Das Licht sitzt in der Flamme")
+	t.check(light != null and is_equal_approx(light.position.y, seat),
+		"Und genau so hoch, wie es hingesetzt wurde")
 	t.check(embers != null and int(embers.amount) == int(FireGlowClass.EMBER_COUNT),
 		"So viele Funken, wie festgelegt")
 	t.check(embers != null and not bool(embers.local_coords),
@@ -1243,6 +1276,26 @@ func _fire_glow_of(node: Node) -> FireGlow:
 		if child is FireGlow:
 			return child
 	return null
+
+
+## Every material in the subtree that glows, as the renderer sees it: a surface
+## override where there is one, otherwise the material the surface carries.
+func _emissive_surfaces(node: Node) -> Array[StandardMaterial3D]:
+	var out: Array[StandardMaterial3D] = []
+	var stack: Array[Node] = [node]
+	while not stack.is_empty():
+		var current: Node = stack.pop_back()
+		if current is MeshInstance3D and (current as MeshInstance3D).mesh != null:
+			var instance := current as MeshInstance3D
+			for i in instance.mesh.get_surface_count():
+				var material := instance.get_surface_override_material(i)
+				if material == null:
+					material = instance.get_active_material(i)
+				if material is StandardMaterial3D and (material as StandardMaterial3D).emission_enabled:
+					out.append(material as StandardMaterial3D)
+		for child in current.get_children():
+			stack.append(child)
+	return out
 
 
 ## Every `material_override` in the subtree: what `tint()` puts on a mesh.

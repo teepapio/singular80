@@ -156,10 +156,14 @@ static func _clamp_emission(root: Node) -> void:
 		var node: Node = stack.pop_back()
 		if node is MeshInstance3D:
 			var instance := node as MeshInstance3D
-			for i in instance.get_surface_count():
-				var material := instance.get_active_material(i)
-				if material is StandardMaterial3D:
-					_damp(material as StandardMaterial3D, instance, i)
+			# The count belongs to the `Mesh`, not to the node — measured on
+			# Godot 4.5.1, `MeshInstance3D` has `get_active_material()` and
+			# `set_surface_override_material()` but no `get_surface_count()`.
+			if instance.mesh != null:
+				for i in instance.mesh.get_surface_count():
+					var material := instance.get_active_material(i)
+					if material is StandardMaterial3D:
+						_damp(material as StandardMaterial3D, instance, i)
 		for child in node.get_children():
 			stack.append(child)
 

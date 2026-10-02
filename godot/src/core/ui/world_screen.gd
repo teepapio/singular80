@@ -373,10 +373,12 @@ static func mesh(key: String, color: Color = Color.WHITE, scale: float = 1.0, em
 		return null
 	var instance := packed.instantiate()
 	instance.scale = Vector3.ONE * scale
-	# A fire is the one mesh whose look is its own materials *and* its own light.
-	# Tinting it is what turned the campfire's brown logs, orange flame and gold
-	# core into one flat cone, so it keeps what Blender gave it and gets a
-	# `FireGlow` instead — see `fire_glow.gd`. Every other mesh takes the tint.
+	# A fire is the one mesh whose look is its own materials *and* its own light,
+	# so it takes neither the tint nor `FireGlow`'s absence: `tint()` writes a
+	# `material_override` on every surface in the subtree, which flattens the
+	# campfire's brown logs, orange flame and gold core into the single hue the
+	# caller happened to ask for — the dragon RPG's brazier passes `ff9a4d` and
+	# got one orange blob. Every other mesh takes the tint.
 	var fire_key := FireGlow.mesh_key(key)
 	if FireGlow.burns(fire_key):
 		FireGlow.attach(instance, fire_key)
