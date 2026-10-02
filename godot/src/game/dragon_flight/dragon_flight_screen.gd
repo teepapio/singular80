@@ -346,13 +346,11 @@ func _update_world(delta: float) -> void:
 		return
 
 	var level_scroll: float = float(level_def["scroll"])
-	var move: Vector2 = VirtualStick.combined(_stick.value, &"move_left", &"move_right")
-	if absf(move.x) > 0.12:
-		vel.x = move.x
-	elif absf(move.y) > 0.12:
-		vel.y = move.y
-	else:
-		vel = vel.lerp(Vector2.ZERO, clampf(dt * 6.0, 0.0, 1.0))
+	# The stick, the keyboard and the gamepad all speak screen axes, and the
+	# screen's up is the world up here — `flight_velocity` owns that mapping and
+	# the per-axis glide, so nothing below has to know about it.
+	vel = DragonFlight.flight_velocity(
+		VirtualStick.combined(_stick.value, &"move_left", &"move_right"), vel, dt)
 
 	_move_player(dt)
 	_update_fire(dt)
@@ -379,7 +377,9 @@ func _move_player(dt: float) -> void:
 	pos.y += vel.y * speed * dt
 	pos.x = clampf(pos.x, -DragonFlight.ARENA_HALF_WIDTH, DragonFlight.ARENA_HALF_WIDTH)
 	pos.y = clampf(pos.y, DragonFlight.FLOOR, DragonFlight.CEILING)
-	# Banking: the dragon leans into the turn, which reads as flight.
+	# Banking: the dragon leans into the turn, which reads as flight. A positive
+	# rotation on x points the nose up, so a climb pitches up and a dive pitches
+	# down — the hull follows the altitude the player asked for.
 	var bank: float = clampf(-vel.x * 0.34, -0.55, 0.55)
 	var pitch: float = clampf(vel.y * 0.22, -0.32, 0.32)
 	dragon_node.position = pos

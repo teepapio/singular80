@@ -38,6 +38,51 @@ const MAX_PICKUPS := 40
 ## A run is scored on distance, kills and the gold left in the air.
 const GOLD_PER_KILL_BASE := 2
 
+## Flight control. The dragon does not accelerate: a held direction sets the
+## speed at once, a released one coasts out over `1 / GLIDE_DECAY` seconds.
+const GLIDE_DECAY := 6.0
+## Below this the stick counts as centred, so a thumb resting on the knob does
+## not make the dragon drift.
+const STICK_DEADZONE := 0.12
+
+
+## Turns a merged stick/keyboard vector into a direction in world axes.
+##
+## Both inputs arrive in *screen* axes, and screen +Y points down: the stick
+## reports +1 when the finger moves down, and `Input.get_axis(&"move_up",
+## &"move_down")` is `strength(move_down) - strength(move_up)` (Godot 4.5
+## `Input.get_axis`), so the keyboard and the gamepad agree with the finger.
+## The camera follows from behind and looks down the corridor towards -Z, so
+## world +Y is up on the screen. Handing that vector straight to the altitude
+## flew the dragon upside down: stick up and W dived. Only the altitude flips
+## — the roll axis already matches the screen, and the corridor is symmetric.
+static func flight_direction(input_vector: Vector2) -> Vector2:
+	return Vector2(input_vector.x, -input_vector.y)
+
+
+## The flight velocity for this frame's input, given the current one.
+##
+## Both axes are read every frame instead of one after the other. The `elif`
+## this replaces picked a single axis per frame, which had two consequences
+## that made the vertical one feel arbitrary: a diagonal push moved the dragon
+## sideways only, and a climb rate that had been built up stayed latched while
+## the stick was held sideways, so the dragon kept rising with no input. An
+## axis that is not held coasts back to level flight on its own, which is both
+## the dragon's behaviour and what keeps the corridor readable.
+static func flight_velocity(input_vector: Vector2, current: Vector2, dt: float) -> Vector2:
+	var move := flight_direction(input_vector)
+	var out := current
+	var decay := clampf(dt * GLIDE_DECAY, 0.0, 1.0)
+	if absf(move.x) > STICK_DEADZONE:
+		out.x = move.x
+	else:
+		out.x = lerpf(out.x, 0.0, decay)
+	if absf(move.y) > STICK_DEADZONE:
+		out.y = move.y
+	else:
+		out.y = lerpf(out.y, 0.0, decay)
+	return out
+
 
 # --- biomes -----------------------------------------------------------------
 ## One entry per block of three levels. The screen reads the colours from here so

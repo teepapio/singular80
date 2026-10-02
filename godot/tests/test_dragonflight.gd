@@ -21,6 +21,8 @@ func run(kit: TestKit) -> void:
 	t.close_suite()
 	_states()
 	t.close_suite()
+	_flight_input()
+	t.close_suite()
 	_candidates()
 	t.close_suite()
 	_best_pair()
@@ -118,6 +120,55 @@ func _states() -> void:
 	t.equal(DragonFlight.carried_traits({"riesenwuchs": "rr", "nachtfuchs": "NN"}).size(), 0,
 		"Ein gezeigtes Merkmal ist kein verdeckter Träger")
 	t.equal(DragonFlight.carried_traits({}).size(), 0, "Ohne Allele gibt es keine Träger")
+	t.suite_done()
+
+
+# --- flight control ----------------------------------------------------------
+
+## Up has to mean up. The screen's +Y points down and the corridor's +Y points
+## up, so the raw vector has to be flipped once — in one named place, or the
+## next screen guesses again.
+func _flight_input() -> void:
+	t.suite("Drachenflug — Flugsteuerung")
+	# A finger dragged up is screen (0, -1) and has to become a climb.
+	t.check(DragonFlight.flight_direction(Vector2(0.0, -1.0)) == Vector2(0.0, 1.0),
+		"Stick nach oben steigt")
+	t.check(DragonFlight.flight_direction(Vector2(0.0, 1.0)) == Vector2(0.0, -1.0),
+		"Stick nach unten stürzt ab")
+	# Roll is already right and must stay untouched: the corridor is symmetric.
+	t.check(DragonFlight.flight_direction(Vector2(1.0, 0.0)) == Vector2(1.0, 0.0),
+		"Rechts bleibt rechts")
+	t.check(DragonFlight.flight_direction(Vector2(-1.0, 0.0)) == Vector2(-1.0, 0.0),
+		"Links bleibt links")
+	t.check(DragonFlight.flight_direction(Vector2.ZERO) == Vector2.ZERO,
+		"Ein ruhender Daumen steuert nicht")
+
+	# A held direction sets the speed at once, and a diagonal really is
+	# diagonal — the `elif` this replaces moved the dragon sideways only.
+	var diagonal := DragonFlight.flight_velocity(Vector2(0.6, -0.8), Vector2.ZERO, 1.0 / 60.0)
+	t.check(diagonal.x > 0.0 and diagonal.y > 0.0, "Diagonal fliegt nach schräg oben")
+	t.check(is_equal_approx(diagonal.x, 0.6) and is_equal_approx(diagonal.y, 0.8),
+		"Und behält die Stärke des Sticks")
+
+	# Strafing must not keep a climb latched: the axis that is not held levels
+	# off, which is what made the old vertical feel arbitrary.
+	var pull := DragonFlight.flight_velocity(Vector2(0.0, 1.0), Vector2(0.8, 0.0), 1.0 / 60.0)
+	t.check(pull.x < 0.8 and pull.x > 0.0, "Ohne Quersteuerung zieht die Seite ab")
+	t.check(is_equal_approx(pull.y, -1.0), "Und ein Sturzflug kommt sofort")
+	var after := Vector2.ZERO
+	for i in 120:
+		after = DragonFlight.flight_velocity(Vector2(1.0, 0.0), after, 1.0 / 60.0)
+	t.check(is_equal_approx(after.y, 0.0), "Zwei Sekunden Rechtsflug enden im Horizontalflug")
+	t.check(after.x > 0.9, "Und die Seitwärtsgeschwindigkeit bleibt")
+
+	# Releasing the stick coasts out instead of stopping dead, and a thumb on the
+	# knob below the deadzone is the same as no thumb.
+	var coast := DragonFlight.flight_velocity(Vector2.ZERO, Vector2(0.0, 1.0), 1.0 / 60.0)
+	t.check(coast.y > 0.0 and coast.y < 1.0, "Der Drache gleitet aus")
+	var idle := Vector2(0.0, 1.0)
+	for i in 120:
+		idle = DragonFlight.flight_velocity(Vector2(0.5, 0.02), idle, 1.0 / 60.0)
+	t.check(is_equal_approx(idle.y, 0.0), "Ein Knopf unter der Totzone ist kein Befehl")
 	t.suite_done()
 
 
