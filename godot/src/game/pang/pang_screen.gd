@@ -256,8 +256,14 @@ func _arena_box(node_name: String, size: Vector3, position: Vector3, color: Colo
 
 
 func _build_scenery() -> void:
+	# The bare opening level puts nothing down at all: props between the knight
+	# and the ball are the clutter a first level cannot carry. The ratio is a
+	# rule, so the level card, the budget and the stage agree.
+	var ratio := Pang.scenery_ratio(level)
+	if ratio <= 0.0:
+		return
 	for entry in SCENERY:
-		for i in int(entry["count"]):
+		for i in int(round(float(entry["count"]) * ratio)):
 			var node := WorldScreen.mesh(str(entry["key"]), Color(str(entry["tint"])), randf_range(float(entry["min"]), float(entry["max"])))
 			if node == null:
 				continue
@@ -301,7 +307,7 @@ func _build_pools() -> void:
 	for i in HARPOON_LIMIT:
 		harpoons.append({
 			"node": _harpoon_node(), "rope": _rope_node(), "active": false,
-			"x": 0.0, "y": 0.0, "extending": true, "hold": 0.0, "obstacle": "", "target": null,
+			"x": 0.0, "y": 0.0, "y0": 0.0, "extending": true, "hold": 0.0, "obstacle": "", "target": null,
 		})
 	for i in OBSTACLE_LIMIT:
 		obstacles.append({"node": null, "active": false, "x": 0.0, "y": 0.0, "kind": "", "hp": 0, "flash": 0.0})
@@ -635,7 +641,10 @@ func _spawn_ball(x: float, y: float, size: int) -> Dictionary:
 	slot["arm"] = 0.0
 	slot["blink"] = false
 	slot["vx"] = (1.0 if randf() < 0.5 else -1.0) * Pang.speed_of(size) * speed_mult
-	slot["vy"] = -Pang.jump_velocity(size) * 0.8
+	# A downwards nudge (`Pang` works with +y up), so a ball that enters the
+	# arena — the opening layout, a reinforcement, or one half of a fresh split —
+	# arrives with pace instead of drifting into the first bounce.
+	slot["vy"] = -Pang.jump_velocity(size) * 0.35
 	# One mesh serves all four sizes, so the colour has to follow the level.
 	WorldScreen.tint(node, Pang.size_spec(size)["color"])
 	node.visible = true
@@ -921,28 +930,10 @@ func _tick_balls(dt: float) -> void:
 			continue
 		var radius := Pang.radius_of(int(orb["size"]))
 		if not frozen:
-			# Horizontal speed is re-imposed every frame: a ricochet off an
-			# obstacle or another ball must never slow a ball down.
-			orb["vy"] = float(orb["vy"]) + Pang.GRAVITY * dt
-			orb["vx"] = signf(float(orb["vx"])) * absf(float(orb["vx"]))
-			orb["x"] = float(orb["x"]) + float(orb["vx"]) * dt
-			orb["y"] = float(orb["y"]) + float(orb["vy"]) * dt
-
-			if float(orb["x"]) - radius < -Pang.ARENA_HALF_WIDTH:
-				orb["x"] = -Pang.ARENA_HALF_WIDTH + radius
-				orb["vx"] = absf(float(orb["vx"]))
-			elif float(orb["x"]) + radius > Pang.ARENA_HALF_WIDTH:
-				orb["x"] = Pang.ARENA_HALF_WIDTH - radius
-				orb["vx"] = -absf(float(orb["vx"]))
-
-			var floor_y: float = Pang.FLOOR_Y + radius
-			if float(orb["y"]) >= floor_y:
-				orb["y"] = floor_y
-				orb["vy"] = -Pang.jump_velocity(int(orb["size"]))
-			elif float(orb["y"]) - radius <= Pang.CEILING_Y:
-				orb["y"] = Pang.CEILING_Y + radius
-				orb["vy"] = absf(float(orb["vy"]))
-
+			# Gravity, the floor, the ceiling and the two walls: one call, in the
+			# rules, so the bouncing is the same rule the tests measure. This file
+			# only adds the parts that are about the stage furniture.
+			Pang.step_ball(orb, dt)
 			_bounce_off_obstacles(orb, radius)
 
 		# An armed ball recovers on its own once the window is over: the bonus
@@ -1078,6 +1069,7 @@ func _fire_harpoon(offset_x: float) -> void:
 	slot["active"] = true
 	slot["x"] = x
 	slot["y"] = Pang.PLAYER_TOP_Y
+	slot["y0"] = Pang.PLAYER_TOP_Y
 	slot["extending"] = true
 	slot["hold"] = 0.0
 	slot["obstacle"] = ""
@@ -1095,6 +1087,10 @@ func _tick_harpoons(dt: float) -> void:
 		var node: Node3D = slot["node"]
 		var rope: MeshInstance3D = slot["rope"]
 		if bool(slot["extending"]):
+			# Where the tip was before this frame's step: a ball falling towards it
+			# closes faster than one frame covers, and the hit test below reads the
+			# whole segment rather than the tip's new position alone.
+			slot["y0"] = float(slot["y"])
 			slot["y"] = float(slot["y"]) + Pang.HARPOON_SPEED * dt
 			if _harpoon_hits_ball(slot):
 				_pop_ball(slot)
@@ -1149,10 +1145,15 @@ func _harpoon_hits_ball(slot: Dictionary) -> bool:
 		var radius := Pang.radius_of(int(orb["size"]))
 		if absf(float(orb["x"]) - float(slot["x"])) > radius + Pang.HARPOON_HALF_WIDTH:
 			continue
-		# The ball has to straddle the tip, not merely be somewhere above it.
-		if absf(float(orb["y"]) - float(slot["y"])) <= radius + 0.25:
-			slot["target"] = orb
-			return true
+		# The ball has to straddle the part of the tip's path this frame covered,
+		# not merely be somewhere on it. A ball dropped from the ceiling travels
+		# up to 0.35 units per frame and the tip 0.28, so a test on the new
+		# position alone loses hits on a phone that drops below 60 fps — the shot
+		# visibly passes through the ball and nothing happens.
+		if not Pang.swept_tip_hits(float(slot["y0"]), float(slot["y"]), float(orb["y"]), radius + 0.25):
+			continue
+		slot["target"] = orb
+		return true
 	return false
 
 

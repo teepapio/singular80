@@ -160,6 +160,33 @@ const TIME_END := 92.0
 const BALLS_START := 4
 const BALLS_END := 10
 
+# --- the opening level -------------------------------------------------------
+# The first level is the tutorial, and it is deliberately the emptiest stage in
+# the campaign: one ball, no stage decoration, no crates, no platforms, no
+# reinforcements. Everything the rest of the campaign builds up arrives one level
+# later, so the first thing a player sees is the rule the whole game is made of
+# — a ball falls, it bounces, one hook splits it — and nothing competes with it
+# for the eye. The arcade original opened the same way.
+#
+# This came from a player: level 1 looked cluttered. Measured, that was two
+# separate things and only one of them was decoration — the level also opened
+# with four balls rolling along the floor (see `step_ball`), and the props stood
+# between the knight and the balls. The count and the props are therefore rules
+# here, where the level card, the budget and the screen all read the same
+# numbers.
+#
+# The *size* ramp is untouched: level 1 still starts with a small ball, because
+# the campaign deliberately runs from small and twitchy to big and heavy, and
+# that curve is not this suggestion's to invert.
+
+## The levels that ship as a bare stage. One today; a name, not a literal, so a
+## second bare level is a number rather than a rewrite.
+const BARE_FIRST_LEVEL := 1
+## Balls the bare level puts on the stage. One: the player should be able to see
+## every ball of the level at the same time, which is the whole promise of a
+## tutorial.
+const BARE_BALLS := 1
+
 # --- more balls -------------------------------------------------------------
 # A level that dumps every ball in its first second is over before the screen
 # has warmed up, and the request every player makes after the third level is
@@ -300,6 +327,88 @@ static func is_blinking(clock: float) -> bool:
 ## Vertical speed that makes a ball reach `bounce_of(size)` after a floor hit.
 static func jump_velocity(size_level: int) -> float:
 	return sqrt(2.0 * GRAVITY * bounce_of(size_level))
+
+
+# --- the arena ---------------------------------------------------------------
+# The ball's own motion lives here rather than in the screen, because it is the
+# thing the whole game is made of and the thing that has to be checkable without
+# a renderer: the arena is a box, the ball is a circle, and a frame is gravity
+# plus four walls.
+
+## One frame of a ball's motion: gravity, the floor, the ceiling and the two
+## side walls. `ball` is one of the screen's pooled dictionaries (`x`, `y`, `vx`,
+## `vy`, `size`) and is updated in place, so the frame loop never allocates.
+##
+## The sign convention is the one the arena is built in: **+y is up**, the floor
+## is at `FLOOR_Y` and the ceiling at `CEILING_Y`. Gravity therefore *lowers*
+## `vy`, a floor bounce sends it *up* by `jump_velocity`, and a ball that only
+## exists in a layout simply falls.
+##
+## It is written out because the two halves used to disagree, and the result
+## looked like a design decision rather than the bug it was. Measured on this
+## file before the fix: gravity was added as if y pointed down, the floor test
+## read `y >= floor_y` — true for every ball anywhere in the arena — and the
+## bounce was applied downwards. Every ball was therefore clamped onto the floor
+## on its first frame and slid along it for the rest of the level, in the
+## player's own strip: four balls rolling past the knight where the original
+## shows one bouncing. That is what a player reports as "the balls don't
+## bounce", and it is why the opening level looked cluttered.
+static func step_ball(ball: Dictionary, dt: float) -> void:
+	var size := int(ball.get("size", SIZE_LARGEST))
+	var radius := radius_of(size)
+	# The horizontal pace is re-imposed rather than integrated: a ricochet off an
+	# obstacle or another ball must never slow a ball down, and a reflection
+	# already preserves the speed, so this only ever repairs a hand-written entry.
+	var vx := signf(float(ball.get("vx", 0.0))) * absf(float(ball.get("vx", 0.0)))
+	var vy := float(ball.get("vy", 0.0)) - GRAVITY * dt
+	var x := float(ball.get("x", 0.0)) + vx * dt
+	var y := float(ball.get("y", 0.0)) + vy * dt
+
+	# The side walls. A ball never leaves the arena, whatever it hit on the way.
+	if x - radius < -ARENA_HALF_WIDTH:
+		x = -ARENA_HALF_WIDTH + radius
+		vx = absf(vx)
+	elif x + radius > ARENA_HALF_WIDTH:
+		x = ARENA_HALF_WIDTH - radius
+		vx = -absf(vx)
+
+	var floor_y: float = FLOOR_Y + radius
+	var ceiling_y: float = CEILING_Y - radius
+	if y <= floor_y:
+		# The bounce proper. `vy` is set rather than added, so the apex this
+		# reaches is `bounce_of(size)` above the floor whatever the speed the
+		# ball happened to arrive with — which is what makes big ones feel heavy
+		# and small ones twitchy.
+		y = floor_y
+		vy = jump_velocity(size)
+	elif y >= ceiling_y:
+		# Nothing in the campaign reaches the ceiling on its own — the biggest
+		# bounce peaks well under it — but a ball shoved there by a neighbour has
+		# to come back down instead of climbing out of the stage.
+		y = ceiling_y
+		vy = -absf(vy)
+
+	ball["x"] = x
+	ball["y"] = y
+	ball["vx"] = vx
+	ball["vy"] = vy
+
+
+## Does the harpoon's tip reach `y` while it sweeps from `from_y` to `to_y`?
+##
+## The tip covers `HARPOON_SPEED * dt` per frame and a ball falling towards it
+## covers `GRAVITY` worth of speed on top, so a hit test on the new position
+## alone can step clean over a ball: the shot passes *through* it and the player
+## sees a miss on a ball that was right there. Testing the whole segment the tip
+## travelled closes the gap. `half` is the tip's own reach plus the ball's
+## radius.
+##
+## The gap is not hypothetical. At 60 fps the two move towards each other by
+## about 0.63 units per frame, the smallest ball's window is 0.67, and a phone
+## that drops to 20 fps doubles the step to 1.9 — past the window, and the hit
+## was lost.
+static func swept_tip_hits(from_y: float, to_y: float, y: float, half: float) -> bool:
+	return y >= minf(from_y, to_y) - half and y <= maxf(from_y, to_y) + half
 
 
 static func bonus_by_id(id: String) -> Dictionary:
@@ -496,10 +605,14 @@ static func par_time(level: int) -> float:
 static func level_config(level: int) -> Dictionary:
 	var n: int = clampi(level, 1, TOTAL_LEVELS)
 	var t: float = level_progress(n)
+	# The bare level sits before the ramp instead of on it: it is one ball, and
+	# the ramp below is sized against the time limit the rest of the campaign
+	# plays with.
+	var bare := is_bare_level(n)
 	return {
 		"level": n,
 		"timeLimit": lerpf(TIME_START, TIME_END, t),
-		"ballCount": clampi(int(round(lerpf(float(BALLS_START), float(BALLS_END), t))), BALLS_START, BALLS_END),
+		"ballCount": BARE_BALLS if bare else clampi(int(round(lerpf(float(BALLS_START), float(BALLS_END), t))), BALLS_START, BALLS_END),
 		"riffleCount": riffle_count(n),
 		"waves": wave_count(n),
 		"baseSize": 1 if n > 12 else (2 if n > 4 else 3),
@@ -508,6 +621,19 @@ static func level_config(level: int) -> Dictionary:
 		"platforms": 0 if n < 7 else clampi(int(floor(float(n - 6) * 0.28)), 0, 3),
 		"background": (n - 1) % 3,
 	}
+
+
+## Is this one of the bare opening levels?
+static func is_bare_level(level: int) -> bool:
+	return clampi(level, 1, TOTAL_LEVELS) <= BARE_FIRST_LEVEL
+
+
+## How much of the stage decoration a level puts down, in [0, 1]. The bare
+## opening level gets none: its props stood between the knight and the ball, and
+## next to a single ball they were the clutter rather than the room. Every other
+## level keeps the full set — by then the props are the stage, not noise.
+static func scenery_ratio(level: int) -> float:
+	return 0.0 if is_bare_level(level) else 1.0
 
 
 ## Full, deterministic layout for a level: ball positions, the reinforcement
@@ -573,12 +699,19 @@ static func level_data(level: int) -> Dictionary:
 ## keeps the gaps wide enough to shoot through even once every ball has dropped
 ## and bounced around. It widens to five columns as soon as a level opens with
 ## more than eight balls, so two of the big ones never share a cell.
+##
+## A level that opens with a single ball — the bare tutorial level — puts that
+## ball in the middle of the stage instead of in the leftmost cell of a
+## four-column grid. The centre of the floor is where the player's eye starts and
+## where the knight stands at the start of a level, so it is also where the one
+## ball of the tutorial belongs.
 static func _place_chain(rng: RandomNumberGenerator, count: int, base_size: int, level: int) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var columns: int = 5 if count > 8 else 4
 	var rows: int = maxi(1, int(ceil(float(count) / float(columns))))
 	var cell_w: float = (ARENA_HALF_WIDTH * 2.0 - 4.0) / float(columns)
 	var cell_h: float = (CEILING_Y - FLOOR_BAND_TOP - 3.0) / float(maxi(1, rows))
+	var centred := count == 1
 	for i in count:
 		var column: int = i % columns
 		var row: int = i / columns
@@ -586,8 +719,10 @@ static func _place_chain(rng: RandomNumberGenerator, count: int, base_size: int,
 		var ball_size: int = base_size
 		if i > 0 and rng.randf() < 0.15 + level_progress(level) * 0.25:
 			ball_size = mini(SIZE_SMALLEST, base_size + 1)
+		var x := rng.randf_range(-0.35, 0.35) * cell_w if centred \
+			else -ARENA_HALF_WIDTH + 2.0 + (float(column) + 0.5) * cell_w + rng.randf_range(-0.35, 0.35) * cell_w
 		var spot := _ball_spot(
-			-ARENA_HALF_WIDTH + 2.0 + (float(column) + 0.5) * cell_w + rng.randf_range(-0.35, 0.35) * cell_w,
+			x,
 			FLOOR_BAND_TOP + 2.0 + (float(row) + 0.5) * cell_h + rng.randf_range(-0.3, 0.3) * cell_h,
 			ball_size
 		)

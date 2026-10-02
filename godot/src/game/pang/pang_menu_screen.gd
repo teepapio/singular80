@@ -160,9 +160,11 @@ func _level_card(level: int) -> Control:
 
 	var config := Pang.level_config(level)
 	# The card counts every ball the level ships, reinforcements included, so it
-	# never promises a nearly empty arena.
+	# never promises a nearly empty arena. Through the catalogue, because the
+	# number is 1 on the tutorial level and a card that says "1 balls" is worse
+	# than no card at all.
 	var waves := int(config["waves"])
-	var count_text := "%d balls" % Pang.level_ball_total(level)
+	var count_text := Loc.f("Balls: %d", [Pang.level_ball_total(level)])
 	if waves > 0:
 		count_text += "  ·  " + Pang.wave_label(waves)
 	var count := Ui.label(count_text, 13, UiTheme.TEXT_DIM)

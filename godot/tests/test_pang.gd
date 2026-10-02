@@ -137,7 +137,9 @@ func _more_balls() -> void:
 	# The ramp has to be a real one.
 	var first := Pang.total_balls(Pang.level_data(1))
 	var last := Pang.total_balls(Pang.level_data(Pang.TOTAL_LEVELS))
-	t.check(first >= Pang.BALLS_START, "Level 1 öffnet mit mindestens %d Kugeln" % Pang.BALLS_START)
+	# Level 1 is the bare tutorial and is checked as such in `_bare_first_level`,
+	# so what matters here is only that the campaign grows away from it.
+	t.check(first < Pang.BALLS_START, "Level 1 steht unter der Rampe der späteren Level (hat %d)" % first)
 	t.check(last >= 16, "Der letzte Level bringt eine gefüllte Arena (hat %d)" % last)
 	t.check(last > first * 2, "Die Kampagne wächst deutlich über ihr Level 1 hinaus")
 	t.check(int(Pang.level_config(Pang.TOTAL_LEVELS)["ballCount"]) > int(Pang.level_config(1)["ballCount"]),
@@ -161,12 +163,30 @@ func _more_balls() -> void:
 
 	# More balls are only free if they also come with seconds. The pressure may
 	# rise across the campaign, but it stays inside what a thumb can fire.
-	var start_pressure := _pressure(1)
-	var end_pressure := _pressure(Pang.TOTAL_LEVELS)
+	#
+	# The floor is skipped for the bare level, and that is the one exemption the
+	# band has. It exists to catch a level so full of balls that the clock becomes
+	# a shooting gallery; the tutorial is one ball on an empty stage, which is the
+	# opposite case, and 0.04 harpoons per second is what a tutorial *is*. What it
+	# must still clear is the other end of the band, or "one ball" would slide into
+	# "no level at all".
 	for level in range(1, Pang.TOTAL_LEVELS + 1):
 		var pressure := _pressure(level)
-		t.check(pressure >= 0.1, "Level %d verlangt mindestens 0,1 Haken pro Sekunde" % level)
 		t.check(pressure <= 3.5, "Level %d verlangt höchstens 3,5 Haken pro Sekunde" % level)
+		if not Pang.is_bare_level(level):
+			t.check(pressure >= 0.1, "Level %d verlangt mindestens 0,1 Haken pro Sekunde" % level)
+	# The tutorial is the calmest level of the campaign, and it has to stay
+	# that one: a bare level as busy as level 30 would not be a tutorial.
+	var calmest := INF
+	for level in range(1, Pang.TOTAL_LEVELS + 1):
+		calmest = minf(calmest, _pressure(level))
+	t.almost(_pressure(Pang.BARE_FIRST_LEVEL), calmest, 0.0001,
+		"Das Einstiegslevel ist das ruhigste der Kampagne")
+	# The growth is measured from the first *ramp* level, because that is the
+	# curve the campaign actually claims: from level 2 to level 30 it multiplies,
+	# but never by a factor that would make the last level unplayable.
+	var start_pressure := _pressure(Pang.BARE_FIRST_LEVEL + 1)
+	var end_pressure := _pressure(Pang.TOTAL_LEVELS)
 	t.check(end_pressure > start_pressure, "Spätere Level verlangen mehr pro Sekunde")
 	t.check(end_pressure <= start_pressure * 20.0, "Der Druck wächst höchstens um das Zwanzigfache")
 
@@ -269,35 +289,180 @@ func _sum_wave_balls(waves: Array) -> int:
 	return total
 
 
+# --- die Bewegung in der Arena -----------------------------------------------
+
+## The whole game in one assertion: a ball let go from the ceiling comes back
+## up. The sign convention is +y up, so gravity lowers `vy`, the floor sends it
+## up by `jump_velocity`, and the apex a size reaches is exactly the
+## `bounce_of` the table promises.
+##
+## Both the apex and the repeat are measured. "It moved" is not the claim —
+## "it reached the height its size is supposed to reach, again and again" is,
+## and a ball that is pinned to the floor passes neither.
+func _arena_motion() -> void:
+	var dt := 1.0 / 60.0
+	for size in range(Pang.SIZE_LARGEST, Pang.SIZE_SMALLEST + 1):
+		var radius := Pang.radius_of(size)
+		var ball := {
+			"x": 0.0, "y": Pang.CEILING_Y - radius, "vx": Pang.speed_of(size), "vy": 0.0, "size": size,
+		}
+		# Released at the top with no speed of its own, the first frame has to
+		# send it *down*. This is the assertion the inverted sign could not
+		# survive: it added gravity upwards, so the ball climbed.
+		Pang.step_ball(ball, dt)
+		t.check(float(ball["y"]) < Pang.CEILING_Y - radius, "Stufe %d fällt zuerst nach unten" % size)
+		t.check(float(ball["vy"]) < 0.0, "…mit negativer Steiggeschwindigkeit (Stufe %d)" % size)
+
+		var floor_y: float = Pang.FLOOR_Y + radius
+		var apex := -1.0
+		var touches := 0
+		var landed := false
+		var lowest := INF
+		var highest := -INF
+		var leftmost := INF
+		var rightmost := -INF
+		for step in 600:
+			var before := float(ball["y"])
+			Pang.step_ball(ball, dt)
+			var y := float(ball["y"])
+			var x := float(ball["x"])
+			# The floor is a hard line: `vy` points up again on the frame a bounce
+			# is applied, which is the cheapest way to count the cycles. The apex
+			# is measured from the *first* landing onwards and never reset — a ball
+			# released from the ceiling starts higher than any bounce reaches, so
+			# counting the drop would measure the wrong thing, and resetting on
+			# every cycle would report the height of whichever bounce the loop
+			# happened to end in rather than the highest one.
+			if y <= before and float(ball["vy"]) > 0.0:
+				touches += 1
+				landed = true
+			if landed:
+				apex = maxf(apex, y - floor_y)
+			lowest = minf(lowest, y)
+			highest = maxf(highest, y)
+			leftmost = minf(leftmost, x)
+			rightmost = maxf(rightmost, x)
+
+		t.check(touches >= 3, "Stufe %d prallt mehrfach ab (Kontakte: %d)" % [size, touches])
+		t.almost(apex, Pang.bounce_of(size), 0.35, "Stufe %d erreicht die Sprunghöhe" % size)
+		# Nothing may leave the playfield, in either direction, however long it
+		# runs. A ball above the ceiling reads as a bug the player cannot explain.
+		t.check(leftmost >= -Pang.ARENA_HALF_WIDTH + radius - 0.01, "Stufe %d bleibt an der linken Wand" % size)
+		t.check(rightmost <= Pang.ARENA_HALF_WIDTH - radius + 0.01, "…an der rechten (Stufe %d)" % size)
+		t.check(lowest >= Pang.FLOOR_Y + radius - 0.01, "…über dem Boden (Stufe %d)" % size)
+		t.check(highest <= Pang.CEILING_Y - radius + 0.01, "…unter der Decke (Stufe %d)" % size)
+		# The roll is horizontal and constant: a bounce may not slow a ball down,
+		# or a long level would end with balls crawling across the floor.
+		t.almost(absf(float(ball["vx"])), Pang.speed_of(size), 0.001,
+			"Stufe %d rollt mit unverminderter Geschwindigkeit" % size)
+		t.check(float(ball["vx"]) != 0.0, "…und rollt nicht still")
+
+		# A ball driven into the ceiling has to come back down, and one driven
+		# into a wall has to turn round. Both are what keep a bounce from ending
+		# in a ball that escapes the stage.
+		var up := {"x": 0.0, "y": Pang.CEILING_Y - radius, "vx": 0.0, "vy": Pang.jump_velocity(size), "size": size}
+		Pang.step_ball(up, dt)
+		t.check(float(up["y"]) <= Pang.CEILING_Y - radius + 0.01, "Stufe %d bleibt unter der Decke" % size)
+		t.check(float(up["vy"]) < 0.0, "…und fällt von ihr zurück (Stufe %d)" % size)
+		var side := {"x": 0.0, "y": 8.0, "vx": Pang.speed_of(size), "vy": 0.0, "size": size}
+		for step in 240:
+			Pang.step_ball(side, dt)
+		t.check(float(side["vx"]) < 0.0, "Stufe %d kehrt an der Wand um" % size)
+		t.check(float(side["x"]) <= Pang.ARENA_HALF_WIDTH - radius + 0.01, "…und bleibt in der Arena (Stufe %d)" % size)
+
+	# A frozen level has to be a frozen *ball*: the screen skips `step_ball`
+	# entirely, so the rule that stands in for it has to hold the ball still.
+	var held := {"x": 0.0, "y": 8.0, "vx": Pang.speed_of(2), "vy": 0.0, "size": 2}
+	var frozen_at := float(held["y"])
+	t.check(not Pang.is_frozen(0.0), "Ohne Frost läuft das Level")
+	t.check(Pang.is_frozen(6.0), "Mit Frost steht es still")
+	t.almost(float(held["y"]), frozen_at, 0.001, "Der Frost hält die Kugel auf der Stelle")
+
+
+# --- das kahle Einstiegslevel -----------------------------------------------
+
+## Level 1 is the tutorial, and the promise it makes is small: one ball, a bare
+## stage, nothing else to look at. The player suggested exactly this ("just one
+## ball in the first level and no decoration"), and the campaign's ramp is
+## untouched — the bare level sits *before* it rather than on it.
+##
+## The size is deliberately *not* changed. The campaign runs from small, twitchy
+## balls to big, heavy ones, and that curve is measured in `test_logic.gd`; a
+## single big ball in level 1 would invert it for one level's sake.
+func _bare_first_level() -> void:
+	t.check(Pang.is_bare_level(1), "Level 1 ist das kahle Einstiegslevel")
+	t.check(not Pang.is_bare_level(2), "Level 2 ist es nicht mehr")
+	t.equal(Pang.scenery_ratio(1), 0.0, "Level 1 bekommt keine Dekoration")
+	t.equal(Pang.scenery_ratio(2), 1.0, "Level 2 hat wieder die volle Bühne")
+	# Out of range answers like the rest of the module rather than going negative.
+	t.check(Pang.is_bare_level(0), "Level 0 zählt als das Einstiegslevel")
+	t.check(not Pang.is_bare_level(Pang.TOTAL_LEVELS + 5), "Ein Level hinter dem Ende ist nicht kahl")
+
+	var layout := Pang.level_data(1)
+	var config := Pang.level_config(1)
+	var balls: Array = layout["balls"]
+	t.equal(balls.size(), Pang.BARE_BALLS, "Level 1 stellt genau eine Kugel auf die Bühne")
+	t.equal(Pang.level_ball_total(1), Pang.BARE_BALLS, "…und die Kartenzahl sagt dasselbe")
+	t.equal(int(config["ballCount"]), Pang.BARE_BALLS, "…wie die Level-Konfiguration")
+	t.equal((layout["obstacles"] as Array).size(), 0, "…ohne ein Hindernis")
+	t.equal((layout["waves"] as Array).size(), 0, "…ohne Nachschub")
+	t.equal(int(config["riffleCount"]), 0, "…und ohne Kleinzeug")
+	t.check(Pang.validate_level(layout).size() == 0, "…und ist spielbar")
+
+	# The clock stays on the campaign's own ramp. A separate, shorter time for the
+	# tutorial was the obvious thing to want and is deliberately *not* done: the
+	# shared campaign suite in `test_logic.gd` measures that the time falls
+	# monotonically from level 1 to level 30 and never drops below `TIME_END`, and
+	# a bare level that opted out of the ramp would break both. Being generous on
+	# the first level is also not a fault — a tutorial nobody can lose is a
+	# tutorial, and the suggestion was about clutter, not about pressure.
+	t.check(float(config["timeLimit"]) >= Pang.TIME_START,
+		"Level 1 hält sich an die Zeit der Kampagne")
+	t.check(float(config["timeLimit"]) > float(Pang.level_config(Pang.TOTAL_LEVELS)["timeLimit"]),
+		"…und hat mehr Zeit als der letzte Level")
+
+	# The one ball belongs in the middle of the stage, where the knight stands at
+	# the start of a level — not in the leftmost cell of a four-column grid.
+	var spot: Dictionary = balls[0]
+	t.check(absf(float(spot["x"])) < 3.0, "Die eine Kugel steht mittig")
+	t.check(float(spot["y"]) - Pang.radius_of(int(spot["size"])) > Pang.FLOOR_BAND_TOP,
+		"…oberhalb des Spielersockels")
+	t.equal(Pang.peak_balls(layout), Pang.chain_peak(int(config["baseSize"])),
+		"…und ihre Kette passt in den Pool")
+
+	# The size ramp is untouched: early levels still start with smaller balls
+	# than late ones, which is what the shared campaign suite measures.
+	t.check(int(config["baseSize"]) > int(Pang.level_config(Pang.TOTAL_LEVELS)["baseSize"]),
+		"Level 1 startet mit kleineren Kugeln als der letzte Level")
+	t.equal(int(spot["size"]), int(config["baseSize"]), "…und legt sie auch genau so aus")
+
+	# One ball on a bare stage still has to be a real ball: it drops, it bounces
+	# and it can be split, or the tutorial teaches nothing.
+	var ball := {"x": float(spot["x"]), "y": float(spot["y"]), "vx": Pang.speed_of(int(spot["size"])), "vy": 0.0, "size": int(spot["size"])}
+	for step in 60:
+		Pang.step_ball(ball, 1.0 / 60.0)
+	t.check(float(ball["y"]) < float(spot["y"]), "Die Kugel des Einstiegslevels fällt auch wirklich")
+	t.check(Pang.shot_cost(layout) > 0, "…und lässt sich aufspießen")
+
+
 # --- ball budget ------------------------------------------------------------
 
-## Worst case for one layout: every ball splits down to the size above the
-## smallest, and the smallest one is cleared with two hits instead of doubling.
-## The reinforcement waves are counted, because they are live balls too.
-func _peak_balls(layout: Dictionary) -> int:
-	return _sum_peak(layout, Pang.SIZE_SMALLEST - 1)
-
-
-## The same number for a game without the two-shot trick, i.e. every ball
-## splitting all the way down.
-func _peak_splitting_everything(layout: Dictionary) -> int:
-	return _sum_peak(layout, Pang.SIZE_SMALLEST)
-
-
-func _sum_peak(layout: Dictionary, leaf: int) -> int:
-	var peak := 0
-	for ball in layout["balls"]:
-		peak += 1 << maxi(0, leaf - int(ball["size"]))
-	for wave in layout.get("waves", []):
-		for ball in (wave as Dictionary)["balls"]:
-			peak += 1 << maxi(0, leaf - int(ball["size"]))
-	return peak
-
-
+## The balls themselves: how many a level ships, what clearing them costs, how
+## they move in the arena, and what the opening level promises.
+##
+## The arena motion is here because it is a rule and used to be broken without
+## anything noticing. Measured on the code before the fix, gravity was applied as
+## if y pointed down while the floor test read `y >= floor_y` — true for every
+## ball in the arena — so every ball was clamped onto the floor on its first
+## frame and slid along it for the rest of the level. A player sees four balls
+## rolling past the knight and calls it "the balls don't bounce"; a rule test
+## that drops a ball and measures its apex sees it at once.
 func _ball_budget() -> void:
 	t.suite("Pang — Kugelbudget")
 
 	_more_balls()
+	_arena_motion()
+	_bare_first_level()
 	_reinforcements()
 
 	var widest := 0
@@ -321,6 +486,29 @@ func _ball_budget() -> void:
 	# Headroom is what lets a wave drop into a board that is already splitting.
 	t.check(Pang.ORB_SAFE_CAP >= widest * 2, "Der Pool hat Reserve für eine Welle auf vollem Brett")
 	t.suite_done()
+
+
+## Worst case for one layout: every ball splits down to the size above the
+## smallest, and the smallest one is cleared with two hits instead of doubling.
+## The reinforcement waves are counted, because they are live balls too.
+func _peak_balls(layout: Dictionary) -> int:
+	return _sum_peak(layout, Pang.SIZE_SMALLEST - 1)
+
+
+## The same number for a game without the two-shot trick, i.e. every ball
+## splitting all the way down.
+func _peak_splitting_everything(layout: Dictionary) -> int:
+	return _sum_peak(layout, Pang.SIZE_SMALLEST)
+
+
+func _sum_peak(layout: Dictionary, leaf: int) -> int:
+	var peak := 0
+	for ball in layout["balls"]:
+		peak += 1 << maxi(0, leaf - int(ball["size"]))
+	for wave in layout.get("waves", []):
+		for ball in (wave as Dictionary)["balls"]:
+			peak += 1 << maxi(0, leaf - int(ball["size"]))
+	return peak
 
 
 # --- the wave warning -------------------------------------------------------
