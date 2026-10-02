@@ -9,6 +9,31 @@ extends WorldScreen
 const PEDESTALS := 6
 const NEST_SPOTS := 4
 const PEDESTAL_RADIUS := 7.5
+## How high above a plinth a tap may hit to count as the dragon standing on it.
+const DRAGON_HEIGHT := 1.5
+## How close to the dragon's centre a tap has to land. Scaled with the zoom by
+## `PedestalCamera.pick()`, so a tap is the same size on the screen at every
+## distance — the old fixed 3.4 was unreachable once the valley was zoomed out.
+const PICK_RADIUS := 3.4
+## The framing the valley was drawn at, kept as the rig's home so `reset()` and
+## the pick radius have one number to refer to. The camera sat 24.01 units from
+## (3, 1.5, -2) at a 23.3° pitch and 3.9° of yaw; the rig rebuilds all three.
+const CAM_HOME := Vector3(3.0, 1.5, -2.0)
+const CAM_DISTANCE := 24.0104
+const CAM_PITCH := 0.406788
+const CAM_YAW := 0.068076
+## How close in and how far out the camera may go. Twelve is one pedestal plus
+## room to read a dragon, forty is the whole valley with its trees.
+const CAM_NEAR := 12.0
+const CAM_FAR := 40.0
+## The box the focus may reach, world x/z, and the left limit is the one that
+## matters. Measured on this layout, not estimated: the panel sits at x = 20 and
+## is 430 wide, so it ends at 450 px and swallows every tap left of it — and in
+## the framing below the left plinth (x = -7.5) lands on 66 px, far behind it.
+## Without a pan the dragon standing there cannot be selected at all, which is
+## what #21 was about; dragged to x = -18 it stands clear. `Drachenflug — Kamera`
+## measures both numbers.
+const CAM_BOUNDS := Rect2(-18.0, -14.0, 32.0, 34.0)
 
 var profile: Dictionary = {}
 var parent_a := 0
@@ -21,6 +46,14 @@ var dragons: Array = []
 var nests: Array = []
 var pedestals: Array[Dictionary] = []
 var hover_uid := 0
+
+## The pan / zoom / tap rig, `core/logic/mechanics/pedestal_camera.gd`. It owns
+## the gesture and the camera goal; this screen owns the valley it looks at.
+var cam: PedestalCamera
+## The world point a tap may select on each pedestal: the dragon, not the plinth.
+## Built once in `_build_pedestals()` and never touched again, so a tap costs one
+## ray and no allocation.
+var _aim := PackedVector3Array()
 
 var dragon_nodes: Array[Dictionary] = []
 var _label_title: Label
@@ -64,10 +97,18 @@ func _setup_theme() -> void:
 	fill.light_energy = 0.45
 	camera.fov = 52.0
 	camera.far = 320.0
-	# Shifted right, because the hatchery panel covers the left third of the
-	# screen and the pedestals have to stay visible next to it.
-	camera.position = Vector3(4.5, 11.0, 20.0)
-	camera.look_at(Vector3(3.0, 1.5, -2.0), Vector3.UP)
+	# The framing the valley was drawn at, handed to the rig as its home. The
+	# view is shifted right of the ring (home x = 3, ring centre x = 0) because
+	# the panel covers the left third of the screen; panning is what gets the
+	# pedestals that are still behind it into reach.
+	cam = MechanicsIndex.by_id("pedestal_camera") as PedestalCamera
+	cam.pitch = CAM_PITCH
+	cam.yaw = CAM_YAW
+	cam.min_distance = CAM_NEAR
+	cam.max_distance = CAM_FAR
+	cam.bounds = CAM_BOUNDS
+	cam.remember_home(CAM_HOME, CAM_DISTANCE)
+	cam.snap(camera)
 
 
 func _build_valley() -> void:
@@ -114,6 +155,9 @@ func _build_pedestals() -> void:
 	for i in PEDESTALS:
 		var angle := TAU * float(i) / float(PEDESTALS)
 		var spot := Vector3(cos(angle) * PEDESTAL_RADIUS, 0.0, sin(angle) * PEDESTAL_RADIUS * 0.75 - 2.0)
+		# Where a tap has to land to mean "this dragon": its chest, not the
+		# plinth. Filling this once is what keeps `_pick_at` allocation-free.
+		_aim.append(spot + Vector3(0.0, DRAGON_HEIGHT, 0.0))
 		var mesh := WorldScreen.mesh("flight/pedestal", Color("94a3b8"), 1.0)
 		if mesh == null:
 			var box := MeshInstance3D.new()
@@ -243,6 +287,41 @@ func _build_ui() -> void:
 	back.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
 	back.position = Vector2(-184, -96)
 	hud_root.add_child(back)
+
+	# Zoom on three buttons, next to the panel. A pinch is the obvious gesture
+	# and it works — but it needs two hands on a phone, one finger while the
+	# other thumb is on the stick is not a luxury a single-screen game has, and
+	# the two fingers have to land on the dragons themselves or the pan steals
+	# the first one. The buttons are the gesture that always works. Plain `+`,
+	# `−` and a house: symbols, not sentences, so they need no translation and
+	# read in any of the three languages.
+	var zoom := Ui.vbox(8)
+	zoom.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	zoom.offset_left = -78.0
+	zoom.offset_right = -20.0
+	zoom.offset_top = 74.0
+	zoom.offset_bottom = 74.0
+	hud_root.add_child(zoom)
+	zoom.add_child(Ui.button("+", Vector2(58, 58), UiTheme.PANEL_LIGHT, func() -> void:
+		_on_zoom(0.8)
+	))
+	zoom.add_child(Ui.button("−", Vector2(58, 58), UiTheme.PANEL_LIGHT, func() -> void:
+		_on_zoom(1.25)
+	))
+	zoom.add_child(Ui.button("⌂", Vector2(58, 58), UiTheme.PANEL_LIGHT, func() -> void:
+		Sfx.select()
+		cam.reset()
+		cam.snap(camera)
+	))
+
+	# Two hint lines, because the screen now asks for two different things: what
+	# a tap does and what a drag does. Both sit below the 3D view, out of the
+	# panel's way.
+	var gestures := Ui.label(Loc.t("ui.camera_gestures"), 13, UiTheme.TEXT_MUTED)
+	gestures.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	gestures.position = Vector2(0, -128)
+	gestures.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hud_root.add_child(gestures)
 
 	var hint := Ui.label("Tap a pedestal to pick it as a parent", 15, UiTheme.TEXT_DIM)
 	hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
@@ -736,6 +815,10 @@ func _egg_readout_line(row: VBoxContainer, readout: Dictionary) -> void:
 
 func _process(delta: float) -> void:
 	super._process(delta)
+	# The camera follows the rig's goal, so a drag, a pinch and a zoom button all
+	# end up in the same place. One lerp, no allocations, nothing but a Vector3.
+	if cam != null:
+		cam.apply(camera, delta)
 	# The egg list counts down in real time, so refresh it about once a second.
 	_timer -= delta
 	if _timer > 0.0:
@@ -747,34 +830,66 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventScreenTouch and (event as InputEventScreenTouch).pressed:
-		_pick_at((event as InputEventScreenTouch).position)
-	elif event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
-		_pick_at((event as InputEventMouseButton).position)
+	# Godot manufactures a second event for every finger and for every click:
+	# `emulate_mouse_from_touch` and `emulate_touch_from_mouse` are both on in
+	# `project.godot`, and its own copies carry `DEVICE_ID_EMULATION`. They are
+	# not harmless here. `core/input/input.cpp` translates only the touch that
+	# holds `mouse_from_touch_index`, and that index is not necessarily 0 — so
+	# filing the emulated mouse press under a fixed 0 opens a phantom second
+	# pointer, and the valley starts panning by itself. Keep the real event.
+	if cam == null or event.device == InputEvent.DEVICE_ID_EMULATION:
+		return
+	if event is InputEventScreenTouch:
+		var touch := event as InputEventScreenTouch
+		if touch.pressed:
+			cam.pointer_down(touch.index, touch.position)
+		elif touch.canceled:
+			cam.cancel(touch.index)
+		elif cam.pointer_up(touch.index):
+			# A release, not a press: a drag that starts over a dragon pans the
+			# valley and must not select anything.
+			_pick_at(cam.last_tap)
+		return
+	if event is InputEventScreenDrag:
+		var drag := event as InputEventScreenDrag
+		cam.pointer_move(drag.index, drag.position)
+		return
+	if event is InputEventMouseButton:
+		var button := event as InputEventMouseButton
+		if button.button_index == MOUSE_BUTTON_LEFT:
+			if button.pressed:
+				cam.pointer_down(0, button.position)
+			elif cam.pointer_up(0):
+				_pick_at(cam.last_tap)
+			return
+		if button.button_index == MOUSE_BUTTON_WHEEL_UP and button.pressed:
+			_on_zoom(0.9)
+			return
+		if button.button_index == MOUSE_BUTTON_WHEEL_DOWN and button.pressed:
+			_on_zoom(1.1)
+		return
+	if event is InputEventMouseMotion and cam.has_pointer(0):
+		var motion := event as InputEventMouseMotion
+		cam.pointer_move(0, motion.position)
+
+
+## A zoom step from a button or the wheel. The camera eases into it, so the
+## limit is reached without a jump.
+func _on_zoom(factor: float) -> void:
+	Sfx.select()
+	cam.zoom(factor)
 
 
 ## Screen position → the nearest pedestal within a generous radius.
 func _pick_at(screen_point: Vector2) -> void:
-	var from := camera.project_ray_origin(screen_point)
-	var dir := camera.project_ray_normal(screen_point)
-	var best := -1
-	var best_distance := 3.4
-	for i in pedestals.size():
-		var spot: Vector3 = pedestals[i]["spot"]
-		var target := spot + Vector3(0.0, 1.5, 0.0)
-		var to := target - from
-		var along := to.dot(dir)
-		if along <= 0.0:
-			continue
-		var closest := from + dir * along
-		var distance := closest.distance_to(target)
-		if distance < best_distance:
-			best_distance = distance
-			best = i
+	var best := cam.pick(camera, screen_point, _aim, PICK_RADIUS)
 	if best < 0:
 		return
 	var uid := int(pedestals[best]["uid"])
 	if uid == 0:
+		# A plinth with nothing on it. Saying so is the difference between a
+		# tap that did nothing and a tap that answered.
+		notify("No dragon yet")
 		return
 	_assign_parent(uid)
 	_refresh_panel()

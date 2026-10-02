@@ -57,10 +57,156 @@ func run(kit: TestKit, scene_tree: SceneTree, screens: String = "") -> void:
 	t.close_suite()
 	await _suggest_dialog_closes()
 	t.close_suite()
+	await _hatchery_camera()
+	t.close_suite()
 	_content_values()
 	t.close_suite()
 	_content_is_in_sync()
 	t.close_suite()
+
+
+## suggestion #21: "make the areas with the pedestals scrollable, zoomable,
+## draggable, when i click on a Dragon IT shall be selected".
+##
+## Three of the six pedestals used to stand behind the 430 px panel on the left
+## and could not be reached at all, because the camera was nailed to one spot.
+## So the suite does what a player does: opens the hatchery, drags the valley,
+## taps a dragon, zooms with the buttons, and puts the ring back where it was.
+func _hatchery_camera() -> void:
+	if not _gated("Drachenflug — Kamera"):
+		return
+	t.suite("Drachenflug — Kamera")
+	await _goto("dragonflight_hatchery")
+	var screen = router.current_screen
+	if screen == null:
+		t.check(false, "Bruterei geöffnet")
+		return
+	t.check(screen.cam != null, "Die Bruterei hat eine Kamera-Rig")
+	t.check(screen.cam is PedestalCamera, "Und es ist die aus den Mechaniken")
+	t.check(screen._aim.size() == screen.pedestals.size(),
+		"Jeder Sockel hat einen Zielpunkt, auf den ein Tipp zielen kann")
+	var cam: PedestalCamera = screen.cam
+	var home: Vector3 = cam.focus
+
+	# The rig is configured for this valley, not for a default: the zoom has to
+	# bracket the framing the screen was drawn at, and the pan box has to reach
+	# the whole ring. Before the rig the camera was nailed to one spot, and the
+	# panel over the left third of the screen put the pedestals behind it out of
+	# reach for good.
+	#
+	# 24.01 is the distance the old fixed camera stood at; the screen's own
+	# constants are not read here, and that is deliberate. Naming a game screen
+	# (`DragonFlightHatcheryScreen.CAM_NEAR`) makes it a compile-time dependency
+	# of this file, this file is loaded before the autoloads are registered, and
+	# the screen then fails on its first `Sfx` and stays failed — the router
+	# cannot instantiate it for the rest of the run. The rig's own numbers say
+	# the same thing without the dependency.
+	t.check(cam.min_distance < 24.01 and 24.01 < cam.max_distance,
+		"Die Zoomgrenzen liegen um die alte Einstellung herum")
+	t.check(cam.pitch > 0.0 and cam.pitch < PI * 0.25, "Und die Kamera schaut von oben auf das Tal")
+	for i in screen.pedestals.size():
+		var spot: Vector3 = screen.pedestals[i]["spot"]
+		t.check(spot.x > cam.bounds.position.x and spot.x < cam.bounds.end.x,
+			"Sockel %d liegt im Schieberahmen" % i)
+		t.check(spot.z > cam.bounds.position.y and spot.z < cam.bounds.end.y,
+			"und der auch in der Tiefe hineinpasst")
+
+	# The framing has to be the one the valley was drawn at, or the first frame
+	# after this commit would have moved the whole scene. The constant is read
+	# off the open screen, not off the class: `screen` is an untyped Variant, so
+	# this is a lookup at runtime and the file keeps no compile-time edge into
+	# the game scripts.
+	t.almost(cam.focus.distance_to(screen.CAM_HOME), 0.0, 0.001,
+		"Die Bruterei startet in ihrer alten Einstellung")
+
+	# A drag pans. Nothing is selected, however the drag ends — that is the
+	# difference between a draggable area and one that fights the player.
+	t.check(screen.parent_a == 0 and screen.parent_b == 0, "Vorher ist kein Drache gewählt")
+	# The valley follows the finger, so a finger to the right walks the focus to
+	# the left — which is how a pedestal hidden behind the panel is brought out
+	# from under it.
+	var from := Vector2(400.0, 400.0)
+	screen.cam.pointer_down(0, from)
+	for step in 12:
+		screen.cam.pointer_move(0, from + Vector2(float(step) * 20.0, 0.0))
+	t.check(cam.focus.x < home.x - 0.5, "Ein Fingerzug nach rechts schiebt das Tal nach links")
+	t.check(not screen.cam.pointer_up(0), "Und der Abschluss ist kein Tipp")
+	t.check(screen.parent_a == 0 and screen.parent_b == 0, "Ein Zug wählt keinen Drachen aus")
+
+	# Panned all the way left, the pedestal the panel used to hide is in the open
+	# part of the screen — which is the complaint, measured.
+	#
+	# A fresh profile has two dragons, so the two pedestals on the left stand
+	# empty and there is nothing to reach for. The ring is filled the way the
+	# game fills it — one more dragon per free plinth, then the screen's own
+	# `_place_dragons()` — because a test that only ever looks at the default
+	# save would pass while the complaint stands.
+	for i in screen.pedestals.size():
+		if int(screen.pedestals[i]["uid"]) == 0:
+			screen.dragons.append(DragonFlight.random_dragon(900 + i, ["ember"]))
+	screen._place_dragons()
+	screen.cam.pointer_down(0, from)
+	for step in 60:
+		screen.cam.pointer_move(0, from + Vector2(float(step) * 20.0, 0.0))
+	screen.cam.pointer_up(0)
+	var left: int = -1
+	for i in screen.pedestals.size():
+		var spot: Vector3 = screen.pedestals[i]["spot"]
+		if spot.x < -7.0 and screen.pedestals[i]["uid"] != 0:
+			left = i
+			break
+	t.check(left >= 0, "Der Stable hat einen Drachen ganz links")
+	if left >= 0:
+		var spot: Vector3 = screen.pedestals[left]["spot"]
+		screen.cam.apply(screen.camera, 1.0)
+		var seen: Vector2 = screen.camera.unproject_position(spot + Vector3(0.0, 1.5, 0.0))
+		# The panel ends at 430 px, so anything right of it can be tapped.
+		t.check(seen.x > 440.0, "Linksher geschoben steht der linke Drachen rechts vom Panel")
+		# And a tap there really is that dragon.
+		# 3.4 is the hatchery's own pick radius, in the framing it was drawn at.
+		var picked: int = screen.cam.pick(screen.camera, seen, screen._aim, 3.4)
+		t.equal(picked, left, "Ein Tipp auf ihn trifft diesen Drachen")
+		if picked == left:
+			screen._pick_at(seen)
+			t.check(screen.parent_a == int(screen.pedestals[left]["uid"]) or screen.parent_b == int(screen.pedestals[left]["uid"]),
+				"Und er wird als Elternteil gewählt")
+
+	# Zoom: the buttons, and the limits behind them.
+	screen.cam.reset()
+	t.almost(cam.focus.distance_to(home), 0.0, 0.001, "Zurücksetzen bringt das Tal an seinen Platz")
+	var out: float = cam.distance
+	screen._on_zoom(1.25)
+	t.check(cam.distance > out, "Der −-Knopf geht weiter weg")
+	screen._on_zoom(0.8)
+	screen._on_zoom(0.8)
+	t.check(cam.distance < out, "Der +-Knopf geht näher heran")
+	for i in 40:
+		screen._on_zoom(0.5)
+	t.check(cam.distance >= cam.min_distance - 0.001, "Der Zoom bleibt über der Untergrenze")
+	for i in 40:
+		screen._on_zoom(2.0)
+	t.check(cam.distance <= cam.max_distance + 0.001, "und unter der Obergrenze")
+
+	# Two separate facts about the camera, and the second one is about the screen
+	# rather than about the rig. `apply()` walks a camera that was put somewhere
+	# wrong back onto the goal …
+	screen.cam.reset()
+	screen.camera.position = screen.cam.goal() + Vector3(0.0, 6.0, 0.0)
+	for i in 60:
+		screen.cam.apply(screen.camera, 1.0 / 60.0)
+	t.check(screen.camera.position.distance_to(cam.goal()) < 0.01,
+		"Die Rig holt die Zielposition in einer Sekunde Frames ein")
+	# … and the screen really calls it, every frame. Frames and not seconds here:
+	# a headless tree draws as many frames as it can, so a wall-clock wait would
+	# be a measurement of the machine instead of of the screen.
+	screen.camera.position = screen.cam.goal() + Vector3(0.0, 6.0, 0.0)
+	var away: float = screen.camera.position.distance_to(cam.goal())
+	for i in 5:
+		await tree.process_frame
+	var nearer: float = screen.camera.position.distance_to(cam.goal())
+	t.check(nearer < away - 0.001, "Und der Bildschirm zieht die Kamera in jedem Frame nach")
+	t.check(nearer > 0.0, "wobei ein Frame nicht die ganze Strecke überspringt")
+	t.suite_done()
 
 
 func _autoload(name: String) -> Node:

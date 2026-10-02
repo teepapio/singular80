@@ -948,6 +948,7 @@ func _mechanics() -> void:
 		t.check(dash.movement_override(null, 0.016) == null, "Ohne Dash keine Bewegungsänderung")
 	t.check(MechanicsIndex.by_id("nope") == null, "Unbekannte Mechanik liefert null")
 	_merge_drag()
+	_pedestal_camera()
 	t.suite_done()
 
 
@@ -1152,6 +1153,165 @@ func _drag_board(cells: Array) -> PackedInt32Array:
 	for i in cells.size():
 		board[i] = int(cells[i])
 	return board
+
+
+# --- pedestal camera ---------------------------------------------------------
+
+## The pan / zoom / tap rig behind suggestion #21, which asked for the Drachenflug
+## hatchery's pedestals to be "scrollable, zoomable, draggable" and for a click on
+## a dragon to select it. The suite pins the three rules the hatchery depends on —
+## a tap is a release, a drag pans, two fingers zoom — and the arithmetic that
+## connects the rig to the screen's own numbers.
+func _pedestal_camera() -> void:
+	t.check(MechanicsIndex.FACTORIES.has("pedestal_camera"), "Sockel-Kamera ist in der Mechanik-Liste")
+	var cam := MechanicsIndex.by_id("pedestal_camera") as PedestalCamera
+	t.check(cam != null, "Sockel-Kamera-Mechanik ist registriert")
+	if cam == null:
+		return
+	t.equal(cam.id, "pedestal_camera", "ID stimmt")
+	t.check(cam.hud(null) == "", "Sie schreibt dem HUD nichts")
+
+	# --- the framing is the one the screen was drawn at ----------------------
+	# The rig has no idea where a screen puts its camera, so it is told — and the
+	# first frame has to come out identical, or entering the screen visibly moves
+	# the view. The numbers here are the hatchery's own; `TestScreens` compares
+	# them against `DragonFlightHatcheryScreen` in a place where the autoloads
+	# exist, because naming a game screen from this file drags `WorldScreen` and
+	# with it `Ui` into the compile that runs before the autoloads are
+	# registered, and every `Sfx` in there fails with it.
+	cam.remember_home(Vector3(3.0, 1.5, -2.0), 24.01)
+	t.almost(cam.focus.x, 3.0, 0.001, "Der Brennpunkt ist der, den die Kamera ansah")
+	t.almost(cam.focus.y, 1.5, 0.001, "auf Augenhöhe der Drachen")
+	t.almost(cam.distance, 24.01, 0.01, "und der Abstand ist der alte Abstand")
+
+	# --- a tap is a release ---------------------------------------------------
+	# This is the whole of "when i click on a Dragon IT shall be selected": the
+	# release is the tap. Selecting on the press is what made a drag over a
+	# dragon select it, because `_assign_parent()` toggles.
+	cam.pointer_down(0, Vector2(600.0, 400.0))
+	t.equal(cam.tracking(), 1, "Ein Finger ist unten")
+	t.check(not cam.pointer_move(0, Vector2(600.0, 400.0)), "Ein Finger, der sich nicht bewegt, schiebt nichts")
+	t.check(cam.pointer_up(0), "Ein Aufsetzen und sofortiges Loslassen ist ein Tipp")
+	t.equal(cam.last_tap, Vector2(600.0, 400.0), "Der Tipp merkt sich, wo er passiert ist")
+	t.check(not cam.pointer_up(0), "Ein zweites Loslassen desselben Fingers ist keiner mehr")
+
+	# --- a drag pans and selects nothing --------------------------------------
+	var before: Vector3 = cam.focus
+	cam.pointer_down(0, Vector2(400.0, 400.0))
+	var panned := false
+	for i in 20:
+		panned = cam.pointer_move(0, Vector2(400.0 + float(i) * 20.0, 400.0)) or panned
+	t.check(panned, "Ein Finger über die Slop-Distanz schiebt das Tal")
+	# The valley follows the finger, so a finger to the right carries the focus
+	# to the left. Getting this backwards would make the pan feel broken: the
+	# world would slide against the hand.
+	t.check(cam.focus.x < before.x - 0.5, "Und ein Finger nach rechts schiebt den Brennpunkt nach links")
+	t.check(not cam.pointer_up(0), "Ein Loslassen nach dem Schieben ist kein Tipp — es wählt nichts aus")
+	t.equal(cam.tracking(), 0, "Und danach ist kein Finger mehr unten")
+
+	# A shaky thumb inside the slop radius must still count as a tap, or the
+	# ring cannot be selected at all on a phone.
+	cam.pointer_down(0, Vector2(600.0, 400.0))
+	cam.pointer_move(0, Vector2(600.0 + PedestalCamera.TAP_SLOP - 1.0, 400.0))
+	t.check(cam.pointer_up(0), "Ein Finger innerhalb der Slop-Distanz ist noch ein Tipp")
+
+	# --- the focus stays where the screen put it ------------------------------
+	# From the home framing again, so the drag has the whole box to cross.
+	cam.reset()
+	var edge: Vector3 = cam.focus
+	cam.pointer_down(0, Vector2(400.0, 400.0))
+	for i in 200:
+		cam.pointer_move(0, Vector2(400.0 + float(i) * 20.0, 400.0))
+	t.check(cam.focus.x <= cam.bounds.position.x + 0.001, "Das Tal lässt sich nicht weiter nach links schieben")
+	t.check(cam.focus.x < edge.x - 1.0, "Bis an die linke Grenze geht es aber sehr wohl")
+	t.almost(cam.focus.y, edge.y, 0.001, "Seitwärts schieben hebt das Tal nicht an")
+	t.check(cam.focus.z >= cam.bounds.position.y, "Und die Tiefe bleibt im Rahmen")
+	cam.cancel(0)
+	t.equal(cam.tracking(), 0, "Ein abgebrochener Finger lässt nichts hängen")
+
+	# Two fingers zoom, and letting go of one of them is not a tap on whatever it
+	# happened to be over.
+	var wide: float = cam.distance
+	cam.pointer_down(0, Vector2(500.0, 400.0))
+	cam.pointer_down(1, Vector2(700.0, 400.0))
+	t.equal(cam.tracking(), 2, "Zwei Finger sind unten")
+	t.check(not cam.pointer_up(1), "Und das Loslassen eines von ihnen ist kein Tipp")
+	t.equal(cam.tracking(), 1, "Danach ist nur noch ein Finger unten")
+	t.check(not cam.pointer_up(1), "Und ein zweites Loslassen desselben Fingers auch nicht")
+	cam.pointer_down(1, Vector2(700.0, 400.0))
+	cam.pointer_move(0, Vector2(300.0, 400.0))
+	cam.pointer_move(1, Vector2(900.0, 400.0))
+	t.check(cam.distance < wide, "Die Finger auseinander gehen näher heran")
+	var close_in: float = cam.distance
+	cam.pointer_move(0, Vector2(560.0, 400.0))
+	cam.pointer_move(1, Vector2(640.0, 400.0))
+	t.check(cam.distance > close_in, "Und wieder zusammen weiter weg")
+	t.check(not cam.pointer_up(0), "Das Loslassen nach dem Zoomen ist kein Tipp")
+	t.check(not cam.pointer_up(1), "Beim zweiten auch nicht")
+	t.equal(cam.tracking(), 0, "Und danach ist kein Finger mehr unten")
+
+	# The drag flag has to die with the last finger. While it is still set, every
+	# following tap reads as a drag and nothing in the valley can be selected —
+	# one pinch and the screen is dead.
+	cam.reset()
+	t.almost(cam.distance, wide, 0.001, "Nach dem Zoomen bringt Zurücksetzen den Abstand zurück")
+	cam.pointer_down(0, Vector2(600.0, 400.0))
+	t.check(cam.pointer_up(0), "Und danach ist ein Finger wieder ein Tipp")
+
+	# Both limits, and not one step past them: a gesture that runs away must not
+	# put the camera inside the ground.
+	cam.zoom(0.01)
+	t.almost(cam.distance, cam.min_distance, 0.001, "Der Zoom geht nicht näher als erlaubt")
+	cam.zoom(100.0)
+	t.almost(cam.distance, cam.max_distance, 0.001, "Und nicht weiter weg")
+	cam.reset()
+	t.almost(cam.focus.x, cam.home.x, 0.001, "Zurücksetzen bringt den Brennpunkt zurück")
+	t.almost(cam.distance, 24.01, 0.01, "und den Abstand dazu")
+
+	# --- picking -------------------------------------------------------------
+	# The nearest point *along the ray*, not the nearest one in the world: a
+	# dragon behind the camera projects onto the same line and would win on
+	# distance alone.
+	# Looking from (0, 0, -5) towards +z. The dragon ahead sits at z = 0, the one
+	# behind the camera at z = -6 — nearer in world space, so only the sign of
+	# `along` can tell the two apart.
+	var eye := Vector3(0.0, 0.0, -5.0)
+	var ahead := Vector3(0.0, 1.5, 0.0)
+	var behind := Vector3(0.0, 1.5, -6.0)
+	t.equal(PedestalCamera.new().pick_ray(eye, Vector3.BACK, PackedVector3Array([ahead]), 3.4), 0,
+		"Der Strahl findet den Drachen davor")
+	t.equal(PedestalCamera.new().pick_ray(eye, Vector3.BACK, PackedVector3Array([behind]), 3.4), -1,
+		"Nicht einen hinter der Kamera")
+	t.equal(PedestalCamera.new().pick_ray(eye, Vector3.BACK,
+		PackedVector3Array([behind, ahead]), 3.4), 1,
+		"Und ein Drachen hinter der Kamera verdeckt den davor nicht, auch wenn er näher liegt")
+	t.equal(PedestalCamera.new().pick_ray(eye, Vector3.FORWARD, PackedVector3Array([ahead]), 3.4), -1,
+		"Derselbe Drache, mit der Kamera in die andere Richtung, nicht")
+	t.equal(PedestalCamera.new().pick_ray(eye, Vector3.BACK, PackedVector3Array([ahead]), 0.5), -1,
+		"Ein zu kleiner Radius findet nichts")
+	t.equal(PedestalCamera.new().pick_ray(eye + Vector3(0.0, 9.0, 0.0), Vector3.BACK,
+		PackedVector3Array([ahead]), 3.4), -1, "Und ein Strahl daneben auch nicht")
+	# Two dragons, the ray between them: the radius decides, and the nearer one
+	# along the ray wins.
+	var pair := PackedVector3Array([Vector3(-2.0, 1.5, 0.0), Vector3(2.0, 1.5, 0.0)])
+	var between := Vector3(0.0, 1.5, -5.0)
+	t.equal(PedestalCamera.new().pick_ray(between, Vector3.BACK, pair, 1.9), -1,
+		"Ein Strahl mitten dazwischen greift ins Leere, solange der Radius passt")
+	t.equal(PedestalCamera.new().pick_ray(between, Vector3.BACK, pair, 2.1), 0,
+		"Und ein größerer Radius nimmt den ersten von beiden")
+	t.equal(PedestalCamera.new().pick(null, Vector2.ZERO, PackedVector3Array([ahead]), 3.4), -1,
+		"Ohne Kamera greift nichts")
+
+	# The pick radius has to grow with the zoom: a fixed radius is a different
+	# size on the screen at every distance, and unreachable once the valley is
+	# zoomed out — which is exactly the complaint behind #21.
+	var zoomed := PedestalCamera.new()
+	zoomed.remember_home(Vector3(3.0, 1.5, -2.0), 24.01)
+	t.almost(zoomed.pick_radius(3.4), 3.4, 0.01, "In der Ausgangseinstellung ist der Radius der alte")
+	zoomed.distance = zoomed.max_distance
+	t.check(zoomed.pick_radius(3.4) > 3.4, "Weit weg fasst der Radius mehr Welt")
+	zoomed.distance = zoomed.min_distance
+	t.check(zoomed.pick_radius(3.4) < 3.4, "Und nah ist er kleiner, obwohl auf dem Schirm gleich groß")
 
 
 # --- dragon flight ----------------------------------------------------------

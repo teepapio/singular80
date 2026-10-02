@@ -9,6 +9,11 @@ const FACTORIES := {
 	## Dragons. It is a mechanic like the dash: a rule set that owns a decision
 	## a screen would otherwise have to make twice.
 	"merge_drag": "res://src/core/logic/mechanics/merge_drag.gd",
+	## A 3D area the player can drag, pinch and tap: suggestion #21 asked for it
+	## in the Drachenflug hatchery, where the six pedestals stood behind a panel
+	## and out of reach. The gesture and the camera goal it owns are the same for
+	## every screen with pedestals in it.
+	"pedestal_camera": "res://src/core/logic/mechanics/pedestal_camera.gd",
 }
 
 

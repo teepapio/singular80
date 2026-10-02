@@ -181,6 +181,7 @@
     "tetris.stat_points": "Points",
     "ui.anonymous": "Anonyme",
     "ui.back_to_lobby": "◀ Lobby",
+    "ui.camera_gestures": "Fais glisser la vallée pour regarder autour · Deux doigts pour zoomer",
     "ui.close": "Fermer",
     "ui.highscore_of": "Meilleur score : {score}",
     "ui.language": "Langue",
