@@ -19,6 +19,8 @@ func run(kit: TestKit, tree: SceneTree) -> void:
 	t.close_suite()
 	await _screen_hint(tree)
 	t.close_suite()
+	await _board_heights(tree)
+	t.close_suite()
 
 
 # --- logic -------------------------------------------------------------------
@@ -209,6 +211,161 @@ func _screen_hint(tree: SceneTree) -> void:
 	screen.since_merge = 99.0
 	screen._update_world(0.016)
 	t.check(screen.hint_cells.is_empty(), "Auf einem leeren Brett bietet sich der Tipp nicht an")
+	await tree.create_timer(0.2).timeout
+	_router.go_to("lobby")
+	t.suite_done()
+
+
+# --- board heights -----------------------------------------------------------
+
+## The world-space box of everything a `Node3D` draws, scale included.
+##
+## Not `WorldScreen.bounds_of`: that measures every mesh in the space of the
+## mesh's *own parent*, which is the node's space for its children and one
+## level too high when the node **is** the MeshInstance3D — which is exactly
+## what the ground, the plate and the tiles are. Their position would then be
+## counted twice and every height measured here would be wrong by that much.
+func _world_box(node: Node3D) -> AABB:
+	var found := false
+	var out := AABB()
+	if node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
+		out = node.global_transform * (node as MeshInstance3D).mesh.get_aabb()
+		found = true
+	for child in node.get_children():
+		if child is Node3D:
+			var box := _world_box(child as Node3D)
+			if box.has_surface():
+				out = box if not found else out.merge(box)
+				found = true
+	return out
+
+
+## The board's horizontal surfaces, measured on the real screen instead of read
+## from the constants that build it: two faces in the same plane fight over the
+## depth buffer and flicker (Godot docs, "Depth buffer precision"), and this
+## screen moves its camera every frame, so the fight never settles. The plate
+## used to end flush with the ground — both tops at y = 0.0.
+##
+## The items are measured too. Every tier mesh is centred on its own origin and
+## the five differ in height by a factor of five, so a single base height for
+## all of them left the flat gingerbread star hovering in mid-air and let a
+## selected item sink a third of itself into its tile.
+func _board_heights(tree: SceneTree) -> void:
+	t.suite("Merge 3D — Boardhöhen")
+	if not await t.goto(_router, tree, "merge3d_christmas"):
+		t.check(false, "Der Weihnachts-Screen öffnet")
+		t.suite_done()
+		return
+	var screen = _router.current_screen
+	t.check(screen != null, "Der Weihnachts-Screen steht")
+	if screen == null:
+		t.suite_done()
+		return
+
+	# One item of every tier, so the flat and the tall one are both measured.
+	# No spawns while the frame loop is wound on: the board under test is the
+	# one this suite laid out.
+	screen.spawn_timer = 999.0
+	_lay_out(screen, {7: 1, 8: 2, 9: 3, 15: 4, 21: 5})
+
+	# The board itself: the ground, the plate under the grid and the tiles.
+	# Only the meshes the screen hangs on itself — an item's geometry hangs on
+	# the item node, so the two never get mixed up. The three are told apart by
+	# the size the screen builds them with; the scene names none of them.
+	var ground_top := -INF
+	var plate_top := -INF
+	var plate_bottom := INF
+	var tile_top := -INF
+	var tile_bottom := INF
+	var tiles := 0
+	var stack: Array[Node] = [screen]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		if node is MeshInstance3D and node.get_parent() == screen:
+			var size: Vector3 = (node as MeshInstance3D).mesh.get_aabb().size
+			var box := _world_box(node as Node3D)
+			if is_equal_approx(size.x, float(screen.GRID) * float(screen.CELL) + 1.2):
+				plate_top = maxf(plate_top, box.end.y)
+				plate_bottom = minf(plate_bottom, box.position.y)
+			elif is_equal_approx(size.x, float(screen.CELL) * 0.9):
+				tiles += 1
+				tile_top = maxf(tile_top, box.end.y)
+				tile_bottom = minf(tile_bottom, box.position.y)
+			elif size.x > size.y:
+				ground_top = maxf(ground_top, box.end.y)
+		for child in node.get_children():
+			stack.append(child)
+	t.equal(tiles, screen.GRID * screen.GRID, "Alle Kacheln des Bretts sind gebaut")
+	# The measure of the whole suite: three surfaces, three heights. A pair at
+	# the same height is the flicker the player reported. The numbers travel
+	# with the claim — a failure without them is a riddle.
+	t.check(absf(ground_top - plate_top) > 0.005,
+		"Boden und Brettplatte liegen nicht in derselben Ebene (%.3f / %.3f)"
+			% [ground_top, plate_top])
+	t.check(absf(plate_top - tile_top) > 0.005,
+		"Brettplatte und Kacheln liegen nicht in derselben Ebene (%.3f / %.3f)"
+			% [plate_top, tile_top])
+	t.check(tile_bottom > plate_top,
+		"Die Kacheln liegen auf der Platte statt darüber zu schweben (%.3f / %.3f)"
+			% [tile_bottom, plate_top])
+	t.check(plate_bottom < ground_top,
+		"Die Brettplatte steckt in den Boden statt mit ihm zu verschmelzen (%.3f / %.3f)"
+			% [plate_bottom, ground_top])
+
+	# Every item stands on its tile. The rest height carries one bob of headroom
+	# on top of the clearance, so the *lowest* point of the bob — not its middle
+	# — is what rests on the tile. And all five rest at the same height, because
+	# that height is read from each mesh instead of shared by all of them: a flat
+	# gingerbread star used to hang at the height of a bauble, in mid-air, a
+	# unit above its own tile.
+	var resting := -INF
+	var resting_low := INF
+	for cell in screen.items:
+		var box := _world_box((screen.items[cell] as Dictionary)["node"])
+		resting_low = minf(resting_low, box.position.y)
+		resting = maxf(resting, box.position.y)
+	t.check(resting - tile_top <= 2.0 * screen.ITEM_BOB + 0.005,
+		"Die Items ruhen auf ihrer Kachel statt darüber zu schweben (%.3f / %.3f)"
+			% [resting - tile_top, 2.0 * screen.ITEM_BOB])
+	t.almost(resting_low, resting, 0.005,
+		"Alle Items liegen gleich hoch — auch das flachste")
+
+	# The bob may lift an item; it may not sink one into its tile, and it is the
+	# only thing that moves them.
+	var lowest := INF
+	var highest := -INF
+	for i in 8:
+		screen._update_world(0.05)
+		for cell in screen.items:
+			var y: float = _world_box((screen.items[cell] as Dictionary)["node"]).position.y
+			lowest = minf(lowest, y)
+			highest = maxf(highest, y)
+	t.check(lowest >= tile_top,
+		"Kein Item taucht beim Wippen in seine Kachel hinein (%.3f / %.3f)"
+			% [lowest, tile_top])
+	t.check(highest - lowest <= 2.0 * screen.ITEM_BOB + 0.005,
+		"Der Wipper bewegt die Items um nichts als um sich selbst (%.3f / %.3f)"
+			% [highest - lowest, 2.0 * screen.ITEM_BOB])
+
+	# The selected item grows upwards out of the board instead of into it.
+	screen.selected = PackedInt32Array([15, 21])
+	screen._clear_hint()
+	for i in 40:
+		screen._update_world(0.05)
+	var selected_node: Node3D = (screen.items[15] as Dictionary)["node"]
+	t.check(selected_node.scale.x > screen.ITEM_SCALE, "Das ausgewählte Item ist gewachsen")
+	t.check(_world_box(selected_node).position.y >= tile_top,
+		"Ein ausgewähltes Item sinkt nicht in die Kachel hinein (%.3f / %.3f)"
+			% [_world_box(selected_node).position.y, tile_top])
+	# And the pool hands the node back with the height that goes with the scale:
+	# a reused node starts on the tile, not where the selected one stood.
+	screen._remove_item_node(15)
+	screen.board[35] = 4
+	screen._add_item_node(35, 4, false)
+	var reused: Node3D = (screen.items[35] as Dictionary)["node"]
+	t.check(_world_box(reused).position.y >= tile_top,
+		"Ein aus dem Pool genommener Knoten startet wieder auf der Kachel (%.3f / %.3f)"
+			% [_world_box(reused).position.y, tile_top])
 	await tree.create_timer(0.2).timeout
 	_router.go_to("lobby")
 	t.suite_done()

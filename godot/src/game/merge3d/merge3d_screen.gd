@@ -7,10 +7,41 @@ extends WorldScreen
 
 const GRID := 6
 const CELL := 2.0
+## Board heights — one value per horizontal surface, each derived from the one
+## below it.
+##
+## Two faces that share a plane fight over the depth buffer, and the winner is
+## decided per pixel: the surface flickers as the camera moves. Godot's docs
+## name it Z-fighting ("Depth buffer precision", 3D rendering limitations) and
+## put the two remedies in the open — give the camera a bigger Near plane, or
+## "move the Z-fighting objects further apart without the difference being
+## visible to the player". The second one is the one that applies here: this
+## scene bobs its camera every frame, so a fight never settles, and the
+## Compatibility renderer on a mobile GPU has 24 depth bits to lose with.
+##
+## The board plate used to share its top plane with the ground, and the tiles
+## floated a fifth of a unit above the plate because `_cell_position` scaled
+## their height by `CELL` like a cell offset. Both are coplanar-or-wrong, and
+## both were visible: the plate's own top face fought the floor underneath it.
+const GROUND_HEIGHT := 0.4
+## The plate rises out of the ground instead of ending flush with it, so every
+## one of its faces is either buried or free — none of them shares a plane
+## with the floor, which is the whole point of the constant.
+const PLATE_HEIGHT := 0.6
+const PLATE_TOP := 0.12
 const TILE_HEIGHT := 0.35
-const ITEM_BASE_Y := 1.0
+## How far a tile floats above the plate: far below what the eye can resolve at
+## the board's distance, far above what the depth buffer can confuse with it.
+const TILE_GAP := 0.01
+const TILE_Y := PLATE_TOP + TILE_GAP + TILE_HEIGHT * 0.5
+const TILE_TOP := PLATE_TOP + TILE_GAP + TILE_HEIGHT
 const ITEM_SCALE := 0.72
+## The bob is a sine around the rest height, so it reaches `ITEM_BOB` in both
+## directions. The rest height carries the same amount, which makes its lowest
+## point the resting point.
 const ITEM_BOB := 0.12
+## Clearance between the tile and the underside of the item standing on it.
+const ITEM_GAP := 0.02
 const SELECTED_SCALE := 1.22
 const INITIAL_ITEMS := 10
 const PARTICLE_COUNT := 260
@@ -40,6 +71,12 @@ var elapsed_run := 0.0
 var game_over := false
 var tier_templates: Array = []
 var tier_pool: Array = []
+## How far each tier's own mesh reaches below its origin, measured once when the
+## templates are built. The bundles differ by a factor of five in height — the
+## bauble is 2.2 units tall, the gingerbread star 0.4 — and one base height
+## shared by all five is what put the flat one in mid-air and let a selected
+## item sink into its tile.
+var tier_floor := PackedFloat32Array()
 var particles: MultiMeshInstance3D
 var particle_data := PackedFloat32Array()
 var particle_speeds := PackedFloat32Array()
@@ -93,14 +130,16 @@ func _setup_theme() -> void:
 
 	var ground := MeshInstance3D.new()
 	var mesh := BoxMesh.new()
-	mesh.size = Vector3(34, 0.4, 34)
+	mesh.size = Vector3(34, GROUND_HEIGHT, 34)
 	ground.mesh = mesh
 	ground.material_override = WorldScreen.standard_material(theme["ground"])
-	ground.position.y = -0.2
+	# Top face at y = 0, which is what `PLATE_TOP` is measured from.
+	ground.position.y = -GROUND_HEIGHT * 0.5
 	add_child(ground)
 
 	tier_templates = []
 	tier_pool = []
+	tier_floor = PackedFloat32Array()
 	for tier in range(1, Merge3D.MAX_MERGE_TIER + 1):
 		var key := str((theme["tierAssets"] as Array)[tier - 1])
 		var template := WorldScreen.mesh(key, Merge3D.tier_color(theme, tier), 1.0, 0.3 if tier >= 4 else 0.0)
@@ -108,6 +147,7 @@ func _setup_theme() -> void:
 			template = _item_fallback(Merge3D.tier_color(theme, tier))
 		tier_templates.append(template)
 		tier_pool.append([])
+		tier_floor.append(_mesh_floor(template))
 
 
 func _item_fallback(color: Color) -> Node3D:
@@ -124,14 +164,24 @@ func _item_fallback(color: Color) -> Node3D:
 	return root
 
 
+## How far a tier's mesh reaches below its own origin — negative for every
+## bundled mesh, because they are all centred on it. Read once per tier, so the
+## frame loop only ever indexes the result.
+func _mesh_floor(template: Node3D) -> float:
+	var box := WorldScreen.bounds_of(template)
+	return box.position.y if box.has_surface() else 0.0
+
+
 func _build_board() -> void:
 	var extent := float(GRID) * CELL
 	var base := MeshInstance3D.new()
 	var base_mesh := BoxMesh.new()
-	base_mesh.size = Vector3(extent + 1.2, 0.6, extent + 1.2)
+	base_mesh.size = Vector3(extent + 1.2, PLATE_HEIGHT, extent + 1.2)
 	base.mesh = base_mesh
 	base.material_override = WorldScreen.standard_material(Color("111827"))
-	base.position.y = -0.3
+	# Sunk into the ground up to `PLATE_TOP`, so the plate reads as a board
+	# standing on the floor and none of its faces is coplanar with the floor's.
+	base.position.y = PLATE_TOP - PLATE_HEIGHT * 0.5
 	add_child(base)
 
 	var tile_mesh := BoxMesh.new()
@@ -152,11 +202,14 @@ func _build_board() -> void:
 func _cell_position(cell: int) -> Vector3:
 	var col: int = cell % GRID
 	var row: int = int(floor(float(cell) / float(GRID)))
+	# The height is the tile's own, not a cell offset. It used to be multiplied
+	# by `CELL` along with the row and column, which doubled it and left every
+	# tile hovering a fifth of a unit above the plate it belongs to.
 	return Vector3(
-		float(col) - float(GRID - 1) * 0.5,
-		TILE_HEIGHT * 0.5,
-		float(row) - float(GRID - 1) * 0.5
-	) * CELL
+		(float(col) - float(GRID - 1) * 0.5) * CELL,
+		TILE_Y,
+		(float(row) - float(GRID - 1) * 0.5) * CELL
+	)
 
 
 func _build_particles() -> void:
@@ -358,10 +411,26 @@ func _add_item_node(cell: int, tier: int, pop: bool) -> void:
 	else:
 		node = (tier_templates[clampi(tier, 1, tier_templates.size()) - 1] as Node3D).duplicate() as Node3D
 	node.visible = true
-	node.scale = Vector3.ONE * (ITEM_SCALE * 0.05 if pop else ITEM_SCALE)
-	node.position = _cell_position(cell) + Vector3(0, ITEM_BASE_Y, 0)
+	var start_scale: float = ITEM_SCALE * 0.05 if pop else ITEM_SCALE
+	node.scale = Vector3.ONE * start_scale
+	node.position = _cell_position(cell)
+	node.position.y = _item_y(tier, start_scale)
 	add_child(node)
 	items[cell] = {"node": node, "tier": tier, "phase": randf() * TAU, "target_scale": ITEM_SCALE}
+
+
+## Height of an item's centre for a given scale, on top of its tile.
+##
+## The scale is applied around the mesh's own origin, so a bigger item reaches
+## further below that origin: at a single fixed height a selected bauble (2.2
+## units tall) pushed a third of itself into the tile. The rest height is read
+## from the mesh instead, and the distance the scale would swallow is added
+## back, so the underside of the item stays exactly where the rest height put it
+## for every scale from the pop-in to the selected one.
+func _item_y(tier: int, current_scale: float) -> float:
+	var floor_y: float = tier_floor[clampi(tier, 1, tier_floor.size()) - 1]
+	var rest: float = TILE_TOP + ITEM_GAP + ITEM_BOB - ITEM_SCALE * floor_y
+	return rest - (current_scale - ITEM_SCALE) * floor_y
 
 
 func _remove_item_node(cell: int) -> void:
@@ -482,12 +551,14 @@ func _update_world(delta: float) -> void:
 		var is_selected: bool = selected.has(cell)
 		var is_hint: bool = hinting and hint_cells.has(int(cell))
 		node.rotation.y += dt * (1.4 if not is_selected and not is_hint else 3.0)
-		node.position.y = _cell_position(int(cell)).y + ITEM_BASE_Y + sin(elapsed_run * 2.0 + float(view["phase"])) * ITEM_BOB
 		var target: float = SELECTED_SCALE if is_selected else ITEM_SCALE
 		if is_hint:
 			target += HINT_PULSE * (0.5 + 0.5 * sin(elapsed * 6.0))
 		var current: float = node.scale.x
-		node.scale = Vector3.ONE * lerpf(current, target, clampf(dt * 10.0, 0.0, 1.0))
+		var grown: float = lerpf(current, target, clampf(dt * 10.0, 0.0, 1.0))
+		node.scale = Vector3.ONE * grown
+		node.position.y = _item_y(int(view["tier"]), grown) \
+			+ sin(elapsed_run * 2.0 + float(view["phase"])) * ITEM_BOB
 	if hinting == false and not hint_cells.is_empty():
 		_clear_hint()
 
